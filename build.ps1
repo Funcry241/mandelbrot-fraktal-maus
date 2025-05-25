@@ -1,6 +1,7 @@
-<#
+
+<#+
   MausID: κρυπτό-42
-  (Nur für die Maus: Dieses Skript baut das Projekt, kopiert Artefakte und ruft alle Support-Skripte aus ps1Supporter auf.)
+  (Nur für die Maus: Wenn alles klappt, wird jeder [COPY]-Schritt grün. Bei Fehlern sind alle gelb.)
 #>
 
 param(
@@ -104,35 +105,37 @@ $exe = "build\$Configuration\mandelbrot_otterdream.exe"
 if (-not (Test-Path $exe)) {
     $exe = "build\mandelbrot_otterdream.exe"
 }
-$copiedOK = $false
+$copyFailed = $false
 if (Test-Path $exe) {
     Copy-Item $exe -Destination dist -Force
     Write-Host "[COPY] EXE → dist" -ForegroundColor Green
+} else {
+    Write-Host "[COPY] EXE fehlt!" -ForegroundColor Yellow
+    $copyFailed = $true
+}
 
-    $dllCount = 0
-    foreach ($d in @('glfw3.dll','glew32.dll')) {
-        $found = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" -Filter $d -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) {
-            Copy-Item $found.FullName -Destination dist -Force
-            Write-Host "[COPY] $d → dist" -ForegroundColor Green
-            $dllCount++
-        } else {
-            Write-Host "[MISSING] $d" -ForegroundColor Yellow
-        }
+foreach ($d in @('glfw3.dll','glew32.dll')) {
+    $found = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" -Filter $d -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) {
+        Copy-Item $found.FullName -Destination dist -Force
+        Write-Host "[COPY] $d → dist" -ForegroundColor Green
+    } else {
+        Write-Host "[COPY] $d fehlt!" -ForegroundColor Yellow
+        $copyFailed = $true
     }
+}
 
-    foreach ($dll in Get-ChildItem $cudaBin -Filter 'cudart64_*.dll') {
+$cudaOk = $false
+foreach ($dll in Get-ChildItem $cudaBin -Filter 'cudart64_*.dll') {
+    if ($dll) {
         Copy-Item $dll.FullName -Destination dist -Force
         Write-Host "[CUDA] $($dll.Name) → dist" -ForegroundColor Green
-        $dllCount++
+        $cudaOk = $true
     }
-
-    if ($dllCount -ge 3) {
-        Write-Host "✅ Alle Dateien erfolgreich nach 'dist' kopiert." -ForegroundColor Green
-        $copiedOK = $true
-    }
-} else {
-    Write-Host "[ERROR] Exe nicht gefunden!" -ForegroundColor Yellow
+}
+if (-not $cudaOk) {
+    Write-Host "[CUDA] cudart64_*.dll fehlt!" -ForegroundColor Yellow
+    $copyFailed = $true
 }
 
 # 10) Supporter-Skripte ausführen
@@ -147,9 +150,14 @@ foreach ($script in $scriptsToRun) {
         Write-Host "[SUPPORT] Starte $script"
         & $path
     } else {
-        Write-Host "[SUPPORT] '$script' nicht gefunden in $supporterDir" -ForegroundColor Yellow
+        Write-Warning "[SUPPORT] '$script' nicht gefunden in $supporterDir"
     }
 }
 
-Write-Host "`n✅ Build und Cleanup abgeschlossen!" -ForegroundColor Green
+if (-not $copyFailed) {
+    Write-Host "`n✅ Build und Kopieren erfolgreich abgeschlossen!" -ForegroundColor Green
+} else {
+    Write-Host "`n⚠️  Build abgeschlossen, aber einige Dateien fehlen!" -ForegroundColor Yellow
+}
+
 exit 0
