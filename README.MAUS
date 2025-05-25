@@ -1,0 +1,12 @@
+☍manifest:
+   ⸘zoom⇝active∵BigFloat[softblend]✓
+   ⸘autoζη⇝true∵∇gradientGPU::fallback✧
+   ⸘de⇝double::logZ/logDZ⊂CUDA✓
+   ⸘μcolor⇝sin∴(𝜋·x+t)∧⊗smooth
+   ⸘gui⇝ImGui/autoZoom⊞
+   ⸘drag⇝null⧧  # ⊘pending
+   ⸘debug⇝-d∵log->mandelbrot_otterdream_log.txt✓
+   ⸘recompute⇝threadSafe∧domainCheck✓
+   ⸘zoom_stability⇝clamp≤1e3∧noCrash✓
+   ⸘performance⇝real(>30fps)↯gpu_only
+   ⸘🧩build⇝cmake+ninja⊂vcpkg

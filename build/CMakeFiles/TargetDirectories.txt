@@ -1,0 +1,3 @@
+C:/Users/wmair/mandelbrot_cuda_project/20250525_01/build/CMakeFiles/mandelbrot_otterdream.dir
+C:/Users/wmair/mandelbrot_cuda_project/20250525_01/build/CMakeFiles/edit_cache.dir
+C:/Users/wmair/mandelbrot_cuda_project/20250525_01/build/CMakeFiles/rebuild_cache.dir

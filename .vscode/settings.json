@@ -1,0 +1,12 @@
+{
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.configureOnOpen": true,
+    "cmake.preferredGenerators": ["Ninja"],
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "files.associations": {
+      "cmath": "cpp",
+      "fstream": "cpp",
+      "vector": "cpp"
+    }
+  }
+  
