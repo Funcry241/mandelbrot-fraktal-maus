@@ -104,15 +104,18 @@ $exe = "build\$Configuration\mandelbrot_otterdream.exe"
 if (-not (Test-Path $exe)) {
     $exe = "build\mandelbrot_otterdream.exe"
 }
+$copiedOK = $false
 if (Test-Path $exe) {
     Copy-Item $exe -Destination dist -Force
     Write-Host "[COPY] EXE → dist"
 
+    $dllCount = 0
     foreach ($d in @('glfw3.dll','glew32.dll')) {
         $found = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" -Filter $d -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) {
             Copy-Item $found.FullName -Destination dist -Force
             Write-Host "[COPY] $d → dist"
+            $dllCount++
         } else {
             Write-Warning "[MISSING] $d"
         }
@@ -121,6 +124,12 @@ if (Test-Path $exe) {
     foreach ($dll in Get-ChildItem $cudaBin -Filter 'cudart64_*.dll') {
         Copy-Item $dll.FullName -Destination dist -Force
         Write-Host "[CUDA] $($dll.Name) → dist"
+        $dllCount++
+    }
+
+    if ($dllCount -ge 3) {
+        Write-Host "✅ Alle Dateien erfolgreich nach 'dist' kopiert." -ForegroundColor Green
+        $copiedOK = $true
     }
 } else {
     Write-Warning "[ERROR] Exe nicht gefunden!"
