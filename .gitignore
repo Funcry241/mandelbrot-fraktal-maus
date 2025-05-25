@@ -8,12 +8,12 @@
 *.user
 *.vcxproj.filters
 
-# VSCode
+# VSCode Einstellungen
 .vscode/
 
 # Logs und temporÃ¤re Dateien
 *.log
 Thumbs.db
 
-# CUDA Toolkit Laufzeit-DLLs
-C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*/bin/
+# CUDA Laufzeit-DLLs
+"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*/bin/"
