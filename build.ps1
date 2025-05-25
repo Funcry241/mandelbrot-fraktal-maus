@@ -1,4 +1,4 @@
-<#+
+<#
   MausID: κρυπτό-42
   (Nur für die Maus: Dieses Skript baut das Projekt, kopiert Artefakte und ruft alle Support-Skripte aus ps1Supporter auf.)
 #>
@@ -107,23 +107,23 @@ if (-not (Test-Path $exe)) {
 $copiedOK = $false
 if (Test-Path $exe) {
     Copy-Item $exe -Destination dist -Force
-    Write-Host "[COPY] EXE → dist"
+    Write-Host "[COPY] EXE → dist" -ForegroundColor Green
 
     $dllCount = 0
     foreach ($d in @('glfw3.dll','glew32.dll')) {
         $found = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" -Filter $d -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) {
             Copy-Item $found.FullName -Destination dist -Force
-            Write-Host "[COPY] $d → dist"
+            Write-Host "[COPY] $d → dist" -ForegroundColor Green
             $dllCount++
         } else {
-            Write-Warning "[MISSING] $d"
+            Write-Host "[MISSING] $d" -ForegroundColor Yellow
         }
     }
 
     foreach ($dll in Get-ChildItem $cudaBin -Filter 'cudart64_*.dll') {
         Copy-Item $dll.FullName -Destination dist -Force
-        Write-Host "[CUDA] $($dll.Name) → dist"
+        Write-Host "[CUDA] $($dll.Name) → dist" -ForegroundColor Green
         $dllCount++
     }
 
@@ -132,7 +132,7 @@ if (Test-Path $exe) {
         $copiedOK = $true
     }
 } else {
-    Write-Warning "[ERROR] Exe nicht gefunden!"
+    Write-Host "[ERROR] Exe nicht gefunden!" -ForegroundColor Yellow
 }
 
 # 10) Supporter-Skripte ausführen
@@ -147,9 +147,9 @@ foreach ($script in $scriptsToRun) {
         Write-Host "[SUPPORT] Starte $script"
         & $path
     } else {
-        Write-Warning "[SUPPORT] '$script' nicht gefunden in $supporterDir"
+        Write-Host "[SUPPORT] '$script' nicht gefunden in $supporterDir" -ForegroundColor Yellow
     }
 }
 
-Write-Host "`n✅ Build und Cleanup abgeschlossen!"
+Write-Host "`n✅ Build und Cleanup abgeschlossen!" -ForegroundColor Green
 exit 0
