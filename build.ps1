@@ -1,120 +1,134 @@
-# build.ps1 – Automatisierter Build für OtterDream Mandelbrot Renderer
+<#+
+  MausID: κρυπτό-42
+  (Nur für die Maus: Dieses Skript baut das Projekt, kopiert die Artefakte inklusive CUDA-Laufzeitbibliotheken und ruft anschließend MausDelete.ps1 auf.)
+#>
 
-# Stoppe Skript bei jedem Fehler
+param(
+    [string]$Configuration = "RelWithDebInfo"
+)
+
 $ErrorActionPreference = 'Stop'
+Write-Host "=== Starte Build $(Get-Date -Format o) ==="
 
-Write-Host "Starte Build..."
-
-# --- 1) Clean alte Verzeichnisse und Logfile ---
-$pathsToClean = @("build", "dist", "mandelbrot_otterdream_log.txt")
-foreach ($path in $pathsToClean) {
-    if (Test-Path $path) {
-        Remove-Item -Recurse -Force $path
-        Write-Host "Entfernt: $path"
+# 1) Clean
+$toClean = @("build","dist","mandelbrot_otterdream_log.txt")
+foreach ($p in $toClean) {
+    if (Test-Path $p) {
+        Remove-Item -Recurse -Force $p
+        Write-Host "[CLEAN] Entfernt: $p"
     }
 }
 
-# --- 2) MSVC-Umgebung laden via vswhere ---
-# Finde vswhere.exe
+# 2) Detect nvcc via PATH
+try {
+    $nvcc = (Get-Command nvcc.exe -ErrorAction Stop).Source
+    $cudaBin = Split-Path $nvcc -Parent
+    Write-Host "[CUDA] nvcc gefunden: $nvcc"
+} catch {
+    Write-Error "nvcc.exe nicht im PATH gefunden. Bitte füge das CUDA Toolkit `bin`-Verzeichnis zum PATH hinzu oder installiere das CUDA Toolkit."
+    exit 1
+}
+
+# 3) MSVC-Umgebung laden via vswhere
 $vswhere = Join-Path ${Env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path $vswhere)) {
-    Write-Error "vswhere.exe nicht gefunden unter $vswhere. Bitte installieren Sie Visual Studio Installer."
+    Write-Error "vswhere.exe nicht gefunden!"
     exit 1
 }
-
-# Suche neueste VS-Installation mit C++-Tools
-$vsInstallPath = & "$vswhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (-not $vsInstallPath) {
-    Write-Error "Keine VS-Installation mit C++-Tools gefunden."
+$vsInstall = & "$vswhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+if (-not $vsInstall) {
+    Write-Error "Keine VS-Installation gefunden!"
     exit 1
 }
-
-# Pfad zu vcvars64.bat
-$vcvars = Join-Path $vsInstallPath 'VC\Auxiliary\Build\vcvars64.bat'
+$vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
 if (-not (Test-Path $vcvars)) {
-    Write-Error "vcvars64.bat nicht gefunden unter $vcvars"
+    Write-Error "vcvars64.bat nicht gefunden!"
     exit 1
 }
-Write-Host "Verwende VS-Installation: $vsInstallPath"
-Write-Host "Lade MSVC-Umgebung: $vcvars"
-
-# Lade Umgebungsvariablen
+Write-Host "[ENV] Lade MSVC-Umgebung von $vcvars"
 & cmd /c "`"$vcvars`" && set" | ForEach-Object {
     if ($_ -match '^(.*?)=(.*)$') {
         [Environment]::SetEnvironmentVariable($matches[1], $matches[2])
     }
 }
-Write-Host "MSVC-Umgebung geladen."
 
-# --- 3) vcpkg-Toolchain ermitteln ---
+# 4) Load .env (optional)
+if (Test-Path .env) {
+    Write-Host "[ENV] Lade Umgebungsvariablen aus .env"
+    Get-Content .env | ForEach-Object {
+        if ($_ -match '^(.*?)=(.*)$') {
+            [Environment]::SetEnvironmentVariable($matches[1], $matches[2])
+            Write-Host "[ENV] $($matches[1]) gesetzt"
+        }
+    }
+}
+
+# 5) vcpkg-Toolchain
 try {
-    $vcpkgExe = (Get-Command vcpkg.exe -ErrorAction Stop).Source
-    $vcpkgRoot = Split-Path $vcpkgExe -Parent
+    $vcpkg = (Get-Command vcpkg.exe -ErrorAction Stop).Source
 } catch {
-    Write-Error "vcpkg.exe nicht im PATH gefunden."
+    Write-Error "vcpkg.exe nicht im PATH!"
     exit 1
 }
-$toolchainFile = Join-Path $vcpkgRoot 'scripts\buildsystems\vcpkg.cmake'
-if (-not (Test-Path $toolchainFile)) {
-    Write-Error "vcpkg-Toolchain-File nicht gefunden unter $toolchainFile"
+$vcpkgRoot = Split-Path $vcpkg -Parent
+$toolchain = Join-Path $vcpkgRoot 'scripts\buildsystems\vcpkg.cmake'
+if (-not (Test-Path $toolchain)) {
+    Write-Error "vcpkg-Toolchain fehlt!"
     exit 1
 }
-Write-Host "Verwende vcpkg-Toolchain: $toolchainFile"
+Write-Host "[ENV] vcpkg-Toolchain: $toolchain"
 
-# --- 4) Build-Verzeichnis anlegen ---
-New-Item -ItemType Directory -Path build | Out-Null
+# 6) Build & Dist anlegen
+New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
-# --- 5) CMake-Konfiguration & Build ---
-# Zwingend Ninja als Generator nutzen
-$generator = 'Ninja'
-Write-Host "Verwende CMake-Generator: $generator"
+# 7) CMake konfigurieren und bauen
+Write-Host "[BUILD] Konfiguriere mit CMake"
+cmake `
+    -B build -S . `
+    -G Ninja `
+    -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
+    -DCMAKE_BUILD_TYPE="$Configuration" `
+    -DCMAKE_CUDA_COMPILER="$nvcc" `
+    -DCMAKE_CUDA_TOOLKIT_ROOT_DIR="$cudaBin\.."
+Write-Host "[BUILD] Baue Projekt"
+cmake --build build --config $Configuration --parallel
 
-cmake -S . -B build -G "$generator" `
-      -DCMAKE_TOOLCHAIN_FILE="$toolchainFile" `
-      -DVCPKG_TARGET_TRIPLET="x64-windows" `
-      -DCMAKE_BUILD_TYPE="RelWithDebInfo"
+# 8) EXE und DLLs kopieren
+$exe = "build\$Configuration\mandelbrot_otterdream.exe"
+if (-not (Test-Path $exe)) {
+    $exe = "build\mandelbrot_otterdream.exe"
+}
+if (Test-Path $exe) {
+    Copy-Item $exe -Destination dist -Force
+    Write-Host "[COPY] EXE → dist"
 
-cmake --build build --config RelWithDebInfo --parallel
-
-# --- 6) Dist-Verzeichnis frisch anlegen ---
-Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Path dist | Out-Null
-
-# --- 7) EXE und DLLs nach dist kopieren ---
-$exePath = "build\Release\mandelbrot_otterdream.exe"
-if (-not (Test-Path $exePath)) { $exePath = "build\mandelbrot_otterdream.exe" }
-if (Test-Path $exePath) {
-    Copy-Item $exePath -Destination dist -Force
-    Write-Host "EXE wurde nach dist\ kopiert."
-
-    # vcpkg-DLLs
-    $dlls = @('glfw3.dll','glew32.dll')
-    foreach ($dll in $dlls) {
-        $found = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" -Filter $dll -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Kopiere Abhängige DLLs
+    foreach ($d in @('glfw3.dll','glew32.dll')) {
+        $found = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" -Filter $d -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) {
             Copy-Item $found.FullName -Destination dist -Force
-            Write-Host "$dll kopiert."
+            Write-Host "[COPY] $d → dist"
         } else {
-            Write-Warning "$dll nicht gefunden im vcpkg bin-Verzeichnis."
+            Write-Warning "[MISSING] $d"
         }
     }
 
-    # CUDA Runtime DLLs
-    try {
-        $nvcc = (Get-Command nvcc.exe -ErrorAction Stop).Source
-        $cudaBin = Join-Path (Split-Path $nvcc -Parent) 'bin'
-        Get-ChildItem -Path $cudaBin -Filter 'cudart64_*.dll' -ErrorAction SilentlyContinue |
-          ForEach-Object {
-            Copy-Item $_.FullName -Destination dist -Force
-            Write-Host "$_ kopiert."
-          }
-    } catch {
-        Write-Warning "nvcc.exe nicht gefunden: CUDA-DLLs nicht kopiert."
+    # Kopiere CUDA Runtime-DLLs
+    foreach ($dll in Get-ChildItem $cudaBin -Filter 'cudart64_*.dll') {
+        Copy-Item $dll.FullName -Destination dist -Force
+        Write-Host "[CUDA] $($dll.Name) → dist"
     }
-
 } else {
-    Write-Warning "Kein Executable in build\ gefunden."
+    Write-Warning "[ERROR] Exe nicht gefunden!"
 }
 
-Write-Host "Build abgeschlossen."
+# 9) MausDelete
+if (Test-Path .\MausDelete.ps1) {
+    Write-Host "[MAUSDELETE] Starte MausDelete.ps1..."
+    & .\MausDelete.ps1
+} else {
+    Write-Warning "[MAUSDELETE] Skript fehlt"
+}
+
+Write-Host "`n✅ Build und Cleanup abgeschlossen!"
 exit 0

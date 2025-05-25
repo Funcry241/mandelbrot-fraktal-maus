@@ -1,4 +1,4 @@
-// src/gui.cpp
+// Mausκωδικών: HUD_Simplify – entferne Iterations- und Prozent-Anzeigen, nutze ImGuiIO für FPS
 
 #include <GL/glew.h>              // Muss vor glfw/gl.h kommen
 #include <GLFW/glfw3.h>
@@ -74,9 +74,7 @@ void render_gui(const Settings& S, const Metrics& M) {
         ImGui::Text("%s", ss.str().c_str());
     }
 
-    // 3) Normierte Iterationen & Prozent bei maxIter
-    ImGui::Text("Durchschn. Iter: %.2f", M.avgNormIter * S.maxIter);
-    ImGui::Text("%% @ maxIter: %.1f%%", M.pctAtMaxIter * 100.0f);
+    // (Iteration und %@maxIter entfernt)
 
     ImGui::End();
 

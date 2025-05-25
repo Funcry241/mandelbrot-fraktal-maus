@@ -1,0 +1,19 @@
+﻿# Build-Ordner und Distribution
+/build/
+/dist/
+
+# Visual Studio Dateien
+*.vcxproj*
+*.suo
+*.user
+*.vcxproj.filters
+
+# VSCode
+.vscode/
+
+# Logs und temporÃ¤re Dateien
+*.log
+Thumbs.db
+
+# CUDA Toolkit Laufzeit-DLLs
+C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*/bin/
