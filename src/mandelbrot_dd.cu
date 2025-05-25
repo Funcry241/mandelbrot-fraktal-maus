@@ -45,9 +45,13 @@ __global__ void mandelbrotKernelDD(
         iter++;
     }
 
-    // B) Smooth Coloring
-    float log_zn = logf((zx.value() * zx.value() + zy.value() * zy.value()) + 1e-20f) / 2.0f;
-    float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
+    // B) Smooth Coloring – logarithmisch & stabil
+    float zx2 = float(zx.value() * zx.value());
+    float zy2 = float(zy.value() * zy.value());
+    float mag2 = zx2 + zy2 + 1e-20f;
+
+    float log_zn = logf(mag2) / 2.0f;
+    float nu = log2f(log_zn);
     float t = (iter + 1 - nu) / maxIter;
     t = fminf(fmaxf(t, 0.0f), 1.0f);  // Clamp
 
