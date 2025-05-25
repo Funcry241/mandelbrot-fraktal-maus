@@ -26,9 +26,9 @@ __global__ void mandelbrotKernelDD(
     dd_real cy = (dd_real(y) - dd_real(height) / 2.0) * scale + centerY;
 
     int iter = 0;
-    while ((zx * zx + zy * zy).hi() < 4.0 && iter < maxIter) {
+    while ((zx * zx + zy * zy).value() < 4.0 && iter < maxIter) {
         dd_real xtemp = zx * zx - zy * zy + cx;
-        zy = 2.0 * zx * zy + cy;
+        zy = zx * zy * 2.0 + cy;
         zx = xtemp;
         iter++;
     }
