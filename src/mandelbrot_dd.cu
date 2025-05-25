@@ -45,14 +45,14 @@ __global__ void mandelbrotKernelDD(
         iter++;
     }
 
-    // B) Smooth Coloring – logarithmisch & stabil
-    float zx2 = float(zx.value() * zx.value());
-    float zy2 = float(zy.value() * zy.value());
-    float mag2 = zx2 + zy2 + 1e-20f;
-
-    float log_zn = logf(mag2) / 2.0f;
-    float nu = log2f(log_zn);
-    float t = (iter + 1 - nu) / maxIter;
+    // B) Smooth Coloring mit Fehlervermeidung
+    float t = 0.0f;
+    float mag2 = zx.value() * zx.value() + zy.value() * zy.value();
+    if (mag2 > 1e-8f) {
+        float log_zn = logf(mag2) / 2.0f;
+        float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
+        t = (iter + 1 - nu) / maxIter;
+    }
     t = fminf(fmaxf(t, 0.0f), 1.0f);  // Clamp
 
     output[y * width + x] = elegantColor(t);
