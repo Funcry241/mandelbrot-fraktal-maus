@@ -3,9 +3,9 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include "settings.hpp"
-#include "dd_real.cuh" // Annahme: dd_real für Double-Double ist vorhanden
+#include "dd_real.cuh" // CUDA-kompatibler Double-Double-Typ
 
-__device__ uchar4 elegantColor(float t) {
+__device__ __forceinline__ uchar4 elegantColor(float t) {
     float r = 0.5f + 0.5f * sinf(6.2831f * t);
     float g = 0.5f + 0.5f * sinf(6.2831f * t + 2.094f);
     float b = 0.5f + 0.5f * sinf(6.2831f * t + 4.188f);

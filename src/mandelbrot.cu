@@ -7,7 +7,7 @@
 #include "mandelbrot.hpp"
 
 // Sanfte Farbpalette mittels Sinusverlauf
-__device__ uchar4 elegantColor(float t) {
+__device__ __forceinline__ uchar4 elegantColor(float t) {
     float r = 0.5f + 0.5f * sinf(6.2831f * t);
     float g = 0.5f + 0.5f * sinf(6.2831f * t + 2.094f);  // +120°
     float b = 0.5f + 0.5f * sinf(6.2831f * t + 4.188f);  // +240°
