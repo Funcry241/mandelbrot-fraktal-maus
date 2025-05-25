@@ -1,9 +1,13 @@
 #pragma once
 
-#include <boost/multiprecision/cpp_dec_float.hpp>
-#include <iostream>
+#ifndef __CUDACC__
+    #include <boost/multiprecision/cpp_dec_float.hpp>
+    using BigFloat = boost::multiprecision::cpp_dec_float_50;
+#else
+    using BigFloat = double; // Fallback für CUDA (z. B. im mandelbrot.cu)
+#endif
 
-using BigFloat = boost::multiprecision::cpp_dec_float_50;
+#include <iostream>
 
 // -----------------------------------------------------------------------------
 // Settings für Fraktal-Rendering
@@ -25,11 +29,6 @@ struct Settings {
 // CLI-Parsing & Logging
 // -----------------------------------------------------------------------------
 
-// Lese Kommandozeilenoptionen (z.B. -d für Debug)
 void init_cli(int argc, char** argv);
-
-// Initialisiere Logging (öffne Datei, setze Flags)
 void init_logging();
-
-// Beende Logging (schließe Logdatei)
 void cleanup_logging();
