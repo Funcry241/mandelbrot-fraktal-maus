@@ -38,6 +38,7 @@ set(SOURCE_FILES
     src/gui.cpp
     src/settings.cpp
     src/mandelbrot.cu
+    src/mandelbrot_dd.cu       # <– NEU!
     src/rendering/renderer.cpp
     src/compute/boundary.cpp
     src/compute/boundary_gpu.cpp
