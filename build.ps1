@@ -1,6 +1,6 @@
 <#+
   MausID: κρυπτό-42
-  (Nur für die Maus: Dieses Skript baut das Projekt, kopiert die Artefakte inklusive CUDA-Laufzeitbibliotheken und ruft anschließend MausDelete.ps1 auf.)
+  (Nur für die Maus: Dieses Skript baut das Projekt, kopiert Artefakte und ruft alle Support-Skripte aus ps1Supporter auf.)
 #>
 
 param(
@@ -19,17 +19,23 @@ foreach ($p in $toClean) {
     }
 }
 
-# 2) Detect nvcc via PATH
+# 2) Supporter-Directory festlegen
+$supporterDir = "ps1Supporter"
+if (-not (Test-Path $supporterDir)) {
+    Write-Warning "[SUPPORT] Verzeichnis '$supporterDir' nicht gefunden. Stelle sicher, dass alle Support-Skripte darin liegen."
+}
+
+# 3) Detect nvcc via PATH
 try {
     $nvcc = (Get-Command nvcc.exe -ErrorAction Stop).Source
     $cudaBin = Split-Path $nvcc -Parent
     Write-Host "[CUDA] nvcc gefunden: $nvcc"
 } catch {
-    Write-Error "nvcc.exe nicht im PATH gefunden. Bitte füge das CUDA Toolkit `bin`-Verzeichnis zum PATH hinzu oder installiere das CUDA Toolkit."
+    Write-Error "nvcc.exe nicht im PATH gefunden. Bitte installiere das CUDA Toolkit oder füge das `bin`-Verzeichnis zum PATH hinzu."
     exit 1
 }
 
-# 3) MSVC-Umgebung laden via vswhere
+# 4) MSVC-Umgebung laden via vswhere
 $vswhere = Join-Path ${Env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path $vswhere)) {
     Write-Error "vswhere.exe nicht gefunden!"
@@ -52,7 +58,7 @@ Write-Host "[ENV] Lade MSVC-Umgebung von $vcvars"
     }
 }
 
-# 4) Load .env (optional)
+# 5) Load .env (optional)
 if (Test-Path .env) {
     Write-Host "[ENV] Lade Umgebungsvariablen aus .env"
     Get-Content .env | ForEach-Object {
@@ -63,7 +69,7 @@ if (Test-Path .env) {
     }
 }
 
-# 5) vcpkg-Toolchain
+# 6) vcpkg-Toolchain
 try {
     $vcpkg = (Get-Command vcpkg.exe -ErrorAction Stop).Source
 } catch {
@@ -78,10 +84,10 @@ if (-not (Test-Path $toolchain)) {
 }
 Write-Host "[ENV] vcpkg-Toolchain: $toolchain"
 
-# 6) Build & Dist anlegen
+# 7) Build & Dist anlegen
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
-# 7) CMake konfigurieren und bauen
+# 8) CMake konfigurieren und bauen
 Write-Host "[BUILD] Konfiguriere mit CMake"
 cmake `
     -B build -S . `
@@ -93,7 +99,7 @@ cmake `
 Write-Host "[BUILD] Baue Projekt"
 cmake --build build --config $Configuration --parallel
 
-# 8) EXE und DLLs kopieren
+# 9) EXE und DLLs kopieren
 $exe = "build\$Configuration\mandelbrot_otterdream.exe"
 if (-not (Test-Path $exe)) {
     $exe = "build\mandelbrot_otterdream.exe"
@@ -102,7 +108,6 @@ if (Test-Path $exe) {
     Copy-Item $exe -Destination dist -Force
     Write-Host "[COPY] EXE → dist"
 
-    # Kopiere Abhängige DLLs
     foreach ($d in @('glfw3.dll','glew32.dll')) {
         $found = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" -Filter $d -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) {
@@ -113,7 +118,6 @@ if (Test-Path $exe) {
         }
     }
 
-    # Kopiere CUDA Runtime-DLLs
     foreach ($dll in Get-ChildItem $cudaBin -Filter 'cudart64_*.dll') {
         Copy-Item $dll.FullName -Destination dist -Force
         Write-Host "[CUDA] $($dll.Name) → dist"
@@ -122,12 +126,20 @@ if (Test-Path $exe) {
     Write-Warning "[ERROR] Exe nicht gefunden!"
 }
 
-# 9) MausDelete
-if (Test-Path .\MausDelete.ps1) {
-    Write-Host "[MAUSDELETE] Starte MausDelete.ps1..."
-    & .\MausDelete.ps1
-} else {
-    Write-Warning "[MAUSDELETE] Skript fehlt"
+# 10) Supporter-Skripte ausführen
+$scriptsToRun = @(
+    'run_build_inner.ps1',
+    'MausDelete.ps1',
+    'MausGit.ps1'
+)
+foreach ($script in $scriptsToRun) {
+    $path = Join-Path $supporterDir $script
+    if (Test-Path $path) {
+        Write-Host "[SUPPORT] Starte $script"
+        & $path
+    } else {
+        Write-Warning "[SUPPORT] '$script' nicht gefunden in $supporterDir"
+    }
 }
 
 Write-Host "`n✅ Build und Cleanup abgeschlossen!"
