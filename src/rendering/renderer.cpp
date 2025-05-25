@@ -1,4 +1,4 @@
-// src/rendering/renderer.cpp
+// src/rendering/renderer.cpp – korrigiert: hi/lo korrekt berechnet ohne dd_real
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -68,7 +68,6 @@ Renderer::~Renderer() {
 
 void Renderer::initGL() {
     glewInit();
-    // Schwarzer Hintergrund
     glClearColor(0.0f,0.0f,0.0f,1.0f);
     glViewport(0,0,S.width,S.height);
     glDisable(GL_DEPTH_TEST);
@@ -88,19 +87,14 @@ void Renderer::setupShaders() {
 void Renderer::setupBuffers() {
     glGenBuffers(1,&pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER,pbo);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER,S.width*S.height*sizeof(uchar4),
-                 nullptr,GL_DYNAMIC_DRAW);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER,S.width*S.height*sizeof(uchar4), nullptr,GL_DYNAMIC_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER,0);
 
-    checkCuda(cudaGraphicsGLRegisterBuffer(
-                &cuda_pbo_resource,pbo,
-                cudaGraphicsMapFlagsWriteDiscard),
-              "register PBO");
+    checkCuda(cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource,pbo,cudaGraphicsMapFlagsWriteDiscard),"register PBO");
 
     glGenTextures(1,&tex);
     glBindTexture(GL_TEXTURE_2D,tex);
-    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,S.width,S.height,0,
-                 GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,S.width,S.height,0,GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
 
@@ -127,27 +121,27 @@ void Renderer::pollEvents() {
 }
 
 void Renderer::renderFrame() {
-    // ImGui-Frame beginnen
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    // CUDA-Rendering
     uchar4* devPtr=nullptr; size_t sz=0;
     checkCuda(cudaGraphicsMapResources(1,&cuda_pbo_resource,0),"map");
-    checkCuda(cudaGraphicsResourceGetMappedPointer((void**)&devPtr,&sz,
-                                                   cuda_pbo_resource),"getptr");
+    checkCuda(cudaGraphicsResourceGetMappedPointer((void**)&devPtr,&sz,cuda_pbo_resource),"getptr");
 
-    launch_kernel_dd(devPtr,
-                     S.width,S.height,
+    double dx_hi = S.offsetX.convert_to<double>();
+    double dx_lo = (S.offsetX - dx_hi).convert_to<double>();
+    double dy_hi = S.offsetY.convert_to<double>();
+    double dy_lo = (S.offsetY - dy_hi).convert_to<double>();
+
+    launch_kernel_dd(devPtr, S.width, S.height,
                      S.zoom.convert_to<double>(),
-                     S.offsetX.convert_to<double>(),
-                     S.offsetY.convert_to<double>(),
+                     dx_hi, dx_lo,
+                     dy_hi, dy_lo,
                      S.maxIter);
 
     checkCuda(cudaGraphicsUnmapResources(1,&cuda_pbo_resource,0),"unmap");
 
-    // OpenGL-Rendering
     glClear(GL_COLOR_BUFFER_BIT);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER,pbo);
     glBindTexture(GL_TEXTURE_2D,tex);
@@ -156,7 +150,6 @@ void Renderer::renderFrame() {
     glBindVertexArray(quadVAO);
     glDrawArrays(GL_TRIANGLE_STRIP,0,4);
 
-    // HUD zeichnen
     render_gui(S,M);
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

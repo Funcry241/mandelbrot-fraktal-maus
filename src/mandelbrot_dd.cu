@@ -1,14 +1,20 @@
-// mandelbrot_dd.cu – Double-Double Mandelbrot-Kernel mit sanfter Farbgebung
+// mandelbrot_dd.cu – Double-Double Mandelbrot-Kernel mit sanfter Farbgebung, Smooth Coloring, Debugoptionen
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include <math.h>
 #include "settings.hpp"
-#include "dd_real.cuh" // CUDA-kompatibler Double-Double-Typ
+#include "dd_real.cuh"
+
+// Debug-Modus aktivieren (1 = aktiviert)
+#define DEBUG_PATTERN 0
 
 __device__ __forceinline__ uchar4 elegantColor(float t) {
-    float r = 0.5f + 0.5f * sinf(6.2831f * t);
-    float g = 0.5f + 0.5f * sinf(6.2831f * t + 2.094f);
-    float b = 0.5f + 0.5f * sinf(6.2831f * t + 4.188f);
+    // Sanfter Gold-Blau-Verlauf
+    float tSharp = powf(t, 0.5f);  // A) Sanftere Verläufe
+    float r = 1.0f - tSharp;
+    float g = 0.6f * tSharp;
+    float b = 0.4f + 0.5f * tSharp;
     return make_uchar4(r * 255, g * 255, b * 255, 255);
 }
 
@@ -20,6 +26,12 @@ __global__ void mandelbrotKernelDD(
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= width || y >= height) return;
+
+#if DEBUG_PATTERN
+    // D) Testmuster zur GPU-Verifikation
+    output[y * width + x] = make_uchar4((x * 5) % 256, (y * 3) % 256, 128, 255);
+    return;
+#endif
 
     dd_real zx(0.0), zy(0.0);
     dd_real cx = (dd_real(x) - dd_real(width) / 2.0) * scale + centerX;
@@ -33,7 +45,12 @@ __global__ void mandelbrotKernelDD(
         iter++;
     }
 
-    float t = (iter < maxIter) ? float(iter) / maxIter : 0.0f;
+    // B) Smooth Coloring
+    float log_zn = logf((zx.value() * zx.value() + zy.value() * zy.value())) / 2.0f;
+    float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
+    float t = (iter + 1 - nu) / maxIter;
+    t = fminf(fmaxf(t, 0.0f), 1.0f);  // Clamp
+
     output[y * width + x] = elegantColor(t);
 }
 
@@ -45,6 +62,10 @@ extern "C" void launch_kernel_dd(uchar4* devPtr, int w, int h,
     dim3 blockSize(16, 16);
     dim3 gridSize((w + blockSize.x - 1) / blockSize.x,
                   (h + blockSize.y - 1) / blockSize.y);
+
+    // E) Optional: Koordinaten fixieren für tiefe Zoomregionen (kommentierbar)
+    // dd_real offsetX(-0.743643887037158704752191506114774, 0.00000000000000000000000000000000001);
+    // dd_real offsetY( 0.131825904205311970493132056385139, 0.00000000000000000000000000000000001);
 
     dd_real offsetX(offX_hi, offX_lo);
     dd_real offsetY(offY_hi, offY_lo);
