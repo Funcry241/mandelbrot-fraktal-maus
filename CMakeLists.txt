@@ -4,10 +4,10 @@
 cmake_minimum_required(VERSION 3.18)
 project(CudaUnifiedCore LANGUAGES CXX CUDA)
 
-# CUDA Finden (älteres Find-Modul, definiert Import-Targets CUDA::cudart, CUDA::cufft)
+# CUDA finden (klassisches FindCUDA-Modul)
 find_package(CUDA REQUIRED)
 
-# Include-Verzeichnisse
+# Include-Verzeichnisse (globale Einstellung)
 include_directories(
     ${CUDA_TOOLKIT_ROOT_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
@@ -24,16 +24,16 @@ cuda_add_library(cuda_core STATIC
     src/core_kernel.cu
 )
 
-# Linke CUDA Runtime und cuFFT
-target_link_libraries(cuda_core PUBLIC
+# Linke CUDA Runtime und cuFFT (plain-Libs, um Konflikt mit FindCUDA zu vermeiden)
+target_link_libraries(cuda_core
     CUDA::cudart
     CUDA::cufft
 )
 
 # Erstelle ausführbares Programm
 cuda_add_executable(main_app src/main.cpp)
-# Include für main_app, um core_kernel.h zu finden
-target_include_directories(main_app PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
-# Linke die Core-Bibliothek
-target_link_libraries(main_app PRIVATE cuda_core)
+# Linke die Core-Bibliothek (plain-Libs)
+target_link_libraries(main_app
+    cuda_core
+)
