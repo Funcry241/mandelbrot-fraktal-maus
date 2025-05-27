@@ -7,7 +7,7 @@ project(CudaUnifiedCore LANGUAGES CXX CUDA)
 # CUDA finden (klassisches FindCUDA-Modul)
 find_package(CUDA REQUIRED)
 
-# Include-Verzeichnisse (globale Einstellung)
+# Include-Verzeichnisse (global)
 include_directories(
     ${CUDA_TOOLKIT_ROOT_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
@@ -19,21 +19,20 @@ set(CMAKE_CUDA_STANDARD 17)
 # Architekturen: SM_50 bis SM_80
 set(CMAKE_CUDA_ARCHITECTURES 50 52 60 61 70 75 80)
 
-# Erstelle statische Bibliothek aus dem CUDA-Kern
+# Statische Bibliothek aus dem CUDA-Kern
 cuda_add_library(cuda_core STATIC
     src/core_kernel.cu
 )
 
-# Linke CUDA Runtime und cuFFT (plain-Libs, um Konflikt mit FindCUDA zu vermeiden)
+# Linke cuFFT (cuda_add_library verlinkt CUDART automatisch)
 target_link_libraries(cuda_core
-    CUDA::cudart
-    CUDA::cufft
+    ${CUDA_CUFFT_LIBRARY}
 )
 
 # Erstelle ausführbares Programm
 cuda_add_executable(main_app src/main.cpp)
 
-# Linke die Core-Bibliothek (plain-Libs)
+# Linke die Core-Bibliothek
 target_link_libraries(main_app
     cuda_core
 )
