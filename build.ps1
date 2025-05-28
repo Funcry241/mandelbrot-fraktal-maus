@@ -1,7 +1,6 @@
-
 <#+
   MausID: κρυπτό-42
-  (Nur für die Maus: Wenn alles klappt, wird jeder [COPY]-Schritt grün. Bei Fehlern sind alle gelb.)
+  (Nur für die Maus: Wenn alles klappt, wird jeder [COPY]-Schritt grün. Bei Fehlern bricht das Skript mit Exit-Code 1 ab.)
 #>
 
 param(
@@ -24,6 +23,7 @@ foreach ($p in $toClean) {
 $supporterDir = "ps1Supporter"
 if (-not (Test-Path $supporterDir)) {
     Write-Warning "[SUPPORT] Verzeichnis '$supporterDir' nicht gefunden. Stelle sicher, dass alle Support-Skripte darin liegen."
+    exit 1
 }
 
 # 3) Detect nvcc via PATH
@@ -100,18 +100,18 @@ cmake `
 Write-Host "[BUILD] Baue Projekt"
 cmake --build build --config $Configuration --parallel
 
-# 9) EXE und DLLs kopieren
-$exe = "build\$Configuration\mandelbrot_otterdream.exe"
-if (-not (Test-Path $exe)) {
-    $exe = "build\mandelbrot_otterdream.exe"
+# 9) EXE und DLLs kopieren (automatische EXE-Erkennung)
+$exeCandidates = Get-ChildItem -Path "build\$Configuration" -Filter *.exe -File -ErrorAction SilentlyContinue
+if (-not $exeCandidates) {
+    $exeCandidates = Get-ChildItem -Path build -Filter *.exe -File -ErrorAction SilentlyContinue
 }
-$copyFailed = $false
-if (Test-Path $exe) {
-    Copy-Item $exe -Destination dist -Force
-    Write-Host "[COPY] EXE → dist" -ForegroundColor Green
+if ($exeCandidates) {
+    $exeFile = $exeCandidates | Select-Object -First 1
+    Copy-Item $exeFile.FullName -Destination dist -Force
+    Write-Host "[COPY] $($exeFile.Name) → dist" -ForegroundColor Green
 } else {
     Write-Host "[COPY] EXE fehlt!" -ForegroundColor Yellow
-    $copyFailed = $true
+    exit 1
 }
 
 foreach ($d in @('glfw3.dll','glew32.dll')) {
@@ -121,7 +121,7 @@ foreach ($d in @('glfw3.dll','glew32.dll')) {
         Write-Host "[COPY] $d → dist" -ForegroundColor Green
     } else {
         Write-Host "[COPY] $d fehlt!" -ForegroundColor Yellow
-        $copyFailed = $true
+        exit 1
     }
 }
 
@@ -135,7 +135,7 @@ foreach ($dll in Get-ChildItem $cudaBin -Filter 'cudart64_*.dll') {
 }
 if (-not $cudaOk) {
     Write-Host "[CUDA] cudart64_*.dll fehlt!" -ForegroundColor Yellow
-    $copyFailed = $true
+    exit 1
 }
 
 # 10) Supporter-Skripte ausführen
@@ -151,13 +151,10 @@ foreach ($script in $scriptsToRun) {
         & $path
     } else {
         Write-Warning "[SUPPORT] '$script' nicht gefunden in $supporterDir"
+        exit 1
     }
 }
 
-if (-not $copyFailed) {
-    Write-Host "`n✅ Build und Kopieren erfolgreich abgeschlossen!" -ForegroundColor Green
-} else {
-    Write-Host "`n⚠️  Build abgeschlossen, aber einige Dateien fehlen!" -ForegroundColor Yellow
-}
-
+# Abschluss und Exit
+Write-Host "`n✅ Build und Kopieren erfolgreich abgeschlossen!" -ForegroundColor Green
 exit 0
