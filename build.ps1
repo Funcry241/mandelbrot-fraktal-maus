@@ -100,17 +100,16 @@ cmake `
 Write-Host "[BUILD] Baue Projekt"
 cmake --build build --config $Configuration --parallel
 
-# 9) EXE und DLLs kopieren (automatische EXE-Erkennung)
-$exeCandidates = Get-ChildItem -Path "build\$Configuration" -Filter *.exe -File -ErrorAction SilentlyContinue
-if (-not $exeCandidates) {
-    $exeCandidates = Get-ChildItem -Path build -Filter *.exe -File -ErrorAction SilentlyContinue
+# 9) EXE und DLLs kopieren
+$exe = "build\$Configuration\mandelbrot_otterdream.exe"
+if (-not (Test-Path $exe)) {
+    $exe = "build\mandelbrot_otterdream.exe"
 }
-if ($exeCandidates) {
-    $exeFile = $exeCandidates | Select-Object -First 1
-    Copy-Item $exeFile.FullName -Destination dist -Force
-    Write-Host "[COPY] $($exeFile.Name) → dist" -ForegroundColor Green
+if (Test-Path $exe) {
+    Copy-Item $exe -Destination dist -Force
+    Write-Host "[COPY] mandelbrot_otterdream.exe → dist" -ForegroundColor Green
 } else {
-    Write-Host "[COPY] EXE fehlt!" -ForegroundColor Yellow
+    Write-Host "[COPY] mandelbrot_otterdream.exe fehlt!" -ForegroundColor Yellow
     exit 1
 }
 
