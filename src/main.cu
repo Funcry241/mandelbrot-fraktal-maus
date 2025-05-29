@@ -1,11 +1,27 @@
 // Datei: src/main.cu
-// Maus-Kommentar: Host-Code initialisiert Tasks, überträgt Daten zur GPU und startet den unifiedKernel; synchronisiert und bereinigt alles.
+// Maus-Kommentar: Host-Code initialisiert Bildpuffer, setzt den globalen Tile-Zähler zurück,
+// startet den mandelbrotPersistent-Kernel und rendert via CUDA-OpenGL-Interop das automatische Fly-Through.
 
 #include "core_kernel.h"
+
+#ifdef _WIN32
+#include <windows.h>           // für OpenGL unter Windows
+#endif
+
+// Wir verlinken gegen glew32.dll, daher kein GLEW_STATIC!
+// GLEW muss vor GLFW und anderen GL-Headern inkludiert werden:
+#include <GL/glew.h>            
+#include <GLFW/glfw3.h>
+
 #include <cuda_runtime.h>
-#include <cufft.h>
+#include <device_launch_parameters.h>
+#include <cuda_gl_interop.h>    // für CUDA-OpenGL Interop
+#include <vector_types.h>       // für uchar4, float2
+#include <vector_functions.h>   // für make_uchar4, make_float2
+
 #include <iostream>
 #include <vector>
+#include <limits>
 
 void checkCuda(cudaError_t err, const char* msg) {
     if (err != cudaSuccess) {
@@ -14,77 +30,134 @@ void checkCuda(cudaError_t err, const char* msg) {
     }
 }
 
+// Kernel: Zähle in jeder Kachel, wie viele Pixel nicht schwarz sind → Komplexität
+__global__ void computeComplexity(const uchar4* img,
+                                  int width, int height,
+                                  float* complexity);
+
 int main() {
-    const int numTasks = 4;
-    std::vector<Task> tasks(numTasks);
+    // Bildgrößen
+    const int width  = 1024;
+    const int height = 768;
+    size_t imgBytes = width * height * sizeof(uchar4);
 
-    // Beispiel-Größe für alle Tasks
-    int N = 1024;
+    // Fraktal-Parameter
+    float zoom    = 300.0f;
+    float2 offset = make_float2(0.0f, 0.0f);
+    int maxIter   = 500;
 
-    // Matrix-Multiplikation-Daten
-    float *h_A, *h_B, *h_C;
-    checkCuda(cudaMallocHost(&h_A, N*N*sizeof(float)), "HostAlloc A");
-    checkCuda(cudaMallocHost(&h_B, N*N*sizeof(float)), "HostAlloc B");
-    checkCuda(cudaMallocHost(&h_C, N*N*sizeof(float)), "HostAlloc C");
-    // (Initialisierung von h_A, h_B, h_C hier ...)
+    // GLFW + OpenGL init
+    if (!glfwInit()) exit(EXIT_FAILURE);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
+    GLFWwindow* window = glfwCreateWindow(width, height, "Auto-Zoom Mandelbrot", nullptr, nullptr);
+    glfwMakeContextCurrent(window);
 
-    tasks[0].id     = TASK_MATRIX_MUL;
-    tasks[0].input  = h_A;
-    tasks[0].output = h_C;
-    tasks[0].size   = N;
+    GLenum glewErr = glewInit();
+    if (glewErr != GLEW_OK) {
+        std::cerr << "GLEW init failed: " << glewGetErrorString(glewErr) << std::endl;
+        return EXIT_FAILURE;
+    }
 
-    // BFS-Daten
-    int *h_graph, *h_dist;
-    checkCuda(cudaMallocHost(&h_graph, N * sizeof(int)), "HostAlloc graph");
-    checkCuda(cudaMallocHost(&h_dist,  N * sizeof(int)), "HostAlloc dist");
-    // (Initialisierung von h_graph hier ...)
+    // PBO erstellen und mit CUDA registrieren
+    GLuint pbo;
+    glGenBuffers(1, &pbo);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, imgBytes, nullptr, GL_DYNAMIC_DRAW);
+    cudaGraphicsResource* cudaPbo;
+    checkCuda(cudaGraphicsGLRegisterBuffer(&cudaPbo, pbo, cudaGraphicsMapFlagsWriteDiscard),
+              "cudaGraphicsGLRegisterBuffer");
 
-    tasks[1].id     = TASK_BFS;
-    tasks[1].input  = h_graph;
-    tasks[1].output = h_dist;
-    tasks[1].size   = N;
+    // Texture für Anzeige
+    GLuint tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    // FFT-Daten
-    cufftComplex *h_data;
-    checkCuda(cudaMallocHost(&h_data, N * sizeof(cufftComplex)), "HostAlloc data");
-    // (Initialisierung von h_data hier ...)
+    // Komplexitätsbuffer
+    int tilesX = (width + TILE_W -1)/TILE_W;
+    int tilesY = (height + TILE_H -1)/TILE_H;
+    int totalTiles = tilesX * tilesY;
+    float* d_complexity = nullptr;
+    checkCuda(cudaMalloc(&d_complexity, totalTiles * sizeof(float)), "cudaMalloc complexity");
+    std::vector<float> h_complexity(totalTiles);
 
-    tasks[2].id     = TASK_FFT;
-    tasks[2].input  = h_data;
-    tasks[2].output = nullptr;
-    tasks[2].size   = N;
+    // Haupt-Loop
+    while (!glfwWindowShouldClose(window)) {
+        // Reset
+        checkCuda(cudaMemset(d_complexity, 0, totalTiles*sizeof(float)), "memset complexity");
+        checkCuda(cudaMemcpyToSymbol(tileIdxGlobal, 0, sizeof(int)),       "reset tileIdxGlobal");
 
-    // Custom-Task-Daten
-    char *h_in, *h_out;
-    checkCuda(cudaMallocHost(&h_in, N), "HostAlloc in");
-    checkCuda(cudaMallocHost(&h_out, N), "HostAlloc out");
-    // (Initialisierung von h_in hier ...)
+        // PBO zu CUDA mapen
+        uchar4* d_img = nullptr;
+        size_t   size = 0;
+        checkCuda(cudaGraphicsMapResources(1, &cudaPbo, 0), "MapResources");
+        checkCuda(cudaGraphicsResourceGetMappedPointer((void**)&d_img, &size, cudaPbo),
+                  "GetMappedPointer");
 
-    tasks[3].id     = TASK_CUSTOM;
-    tasks[3].input  = h_in;
-    tasks[3].output = h_out;
-    tasks[3].size   = N;
+        // Mandelbrot persistent Kernel
+        dim3 blockDim(TILE_W, TILE_H);
+        dim3 gridDim(1, 1);
+        mandelbrotPersistent<<<gridDim, blockDim>>>(d_img,
+                                                    width, height,
+                                                    zoom, offset,
+                                                    maxIter);
+        checkCuda(cudaDeviceSynchronize(), "Kernel execution");
 
-    // GPU-Speicher für Task-Array anlegen und kopieren
-    Task* d_tasks;
-    checkCuda(cudaMalloc(&d_tasks, numTasks * sizeof(Task)), "CudaMalloc tasks");
-    checkCuda(cudaMemcpy(d_tasks, tasks.data(),
-                        numTasks * sizeof(Task),
-                        cudaMemcpyHostToDevice),
-              "Memcpy tasks");
+        // Komplexitäts-Kernel
+        dim3 bc(TILE_W, TILE_H);
+        dim3 gc(tilesX, tilesY);
+        computeComplexity<<<gc, bc>>>(d_img, width, height, d_complexity);
+        checkCuda(cudaDeviceSynchronize(), "Complexity kernel");
 
-    // Kernel-Aufruf
-    unifiedKernel<<<(numTasks+255)/256, 256>>>(d_tasks, numTasks);
-    checkCuda(cudaDeviceSynchronize(), "Kernel launch");
+        // PBO unmapen
+        checkCuda(cudaGraphicsUnmapResources(1, &cudaPbo, 0), "UnmapResources");
 
-    std::cout << "Alle Tasks abgeschlossen." << std::endl;
+        // Komplexitätswerte auslesen und besten Tile finden
+        checkCuda(cudaMemcpy(h_complexity.data(), d_complexity,
+                             totalTiles*sizeof(float), cudaMemcpyDeviceToHost),
+                  "Memcpy complexity");
+        int bestIdx = 0;
+        float bestScore = -1.0f;
+        for (int i = 0; i < totalTiles; ++i) {
+            if (h_complexity[i] > bestScore) {
+                bestScore = h_complexity[i];
+                bestIdx = i;
+            }
+        }
+        int bestX = bestIdx % tilesX;
+        int bestY = bestIdx / tilesX;
+        // Zoom/Offset aktualisieren
+        offset.x += ((bestX + 0.5f)*TILE_W - width*0.5f)/zoom;
+        offset.y += ((bestY + 0.5f)*TILE_H - height*0.5f)/zoom;
+        zoom *= 1.2f;
+
+        // Rendern aus PBO
+        glClear(GL_COLOR_BUFFER_BIT);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
+                        GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glBegin(GL_QUADS);
+          glTexCoord2f(0,0); glVertex2f(-1,-1);
+          glTexCoord2f(1,0); glVertex2f( 1,-1);
+          glTexCoord2f(1,1); glVertex2f( 1, 1);
+          glTexCoord2f(0,1); glVertex2f(-1, 1);
+        glEnd();
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
 
     // Cleanup
-    cudaFree(d_tasks);
-    cudaFreeHost(h_A); cudaFreeHost(h_B); cudaFreeHost(h_C);
-    cudaFreeHost(h_graph); cudaFreeHost(h_dist);
-    cudaFreeHost(h_data);
-    cudaFreeHost(h_in); cudaFreeHost(h_out);
-
+    cudaFree(d_complexity);
+    cudaGraphicsUnregisterResource(cudaPbo);
+    glDeleteBuffers(1, &pbo);
+    glDeleteTextures(1, &tex);
+    glfwDestroyWindow(window);
+    glfwTerminate();
     return 0;
 }

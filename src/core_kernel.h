@@ -1,28 +1,32 @@
 // Datei: src/core_kernel.h
-// Maus-Kommentar: Header legt Task-Strukturen und Dispatcher fest; mappt Instruktions-Sets auf einen Kern für maximale Abdeckung.
+// Maus-Kommentar: High-Performance Mandelbrot mit Persistent Threads, Tile-Blocking und Dynamic Parallelism.
 
 #ifndef CORE_KERNEL_H
 #define CORE_KERNEL_H
 
 #include <cuda_runtime.h>
+#include <vector_types.h>     // für uchar4, float2
+#include <vector_functions.h> // für make_uchar4, make_float2
 
-// Task-IDs für verschiedene Berechnungen
-enum TaskID {
-    TASK_MATRIX_MUL = 0,
-    TASK_BFS         = 1,
-    TASK_FFT         = 2,
-    TASK_CUSTOM      = 3
-};
+// Globaler Zähler für Tiles (Persistent Kernel)
+extern __device__ int tileIdxGlobal;
 
-// Struktur zur Übergabe von Task-Daten an den Kernel
-struct Task {
-    int id;         // Identifiziert die Rechenaufgabe
-    void* input;    // Zeiger auf Eingabedaten
-    void* output;   // Zeiger auf Ausgabedaten
-    int   size;     // Größe bzw. Dimension der Aufgabe
-};
+// Kachelgrößen
+#define TILE_W 32
+#define TILE_H 32
 
-// Dispatcher-Kernel: ruft je nach TaskID die jeweilige Device-Funktion auf
-__global__ void unifiedKernel(Task* tasks, int numTasks);
+// Verfeinerungs-Kernel: führt bei "heißen" Kacheln doppelte Iterationszahl aus
+__global__ void refineTile(uchar4* img,
+                           int width, int height,
+                           float zoom, float2 offset,
+                           int startX, int startY,
+                           int tileW, int tileH,
+                           int maxIter);
+
+// Haupt-Mandelbrot-Kernel mit Persistent Threads und Tile-Dispatch
+__global__ void mandelbrotPersistent(uchar4* img,
+                                     int width, int height,
+                                     float zoom, float2 offset,
+                                     int maxIter);
 
 #endif // CORE_KERNEL_H

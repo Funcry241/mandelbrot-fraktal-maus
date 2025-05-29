@@ -4,7 +4,7 @@ includedir=${prefix}/../include
 
 Name: OpenGL
 Description: Windows OpenGL library
-Version: 10.0.19041
+Version: 10.0.26100
 Libs: "-L${libdir}" -lopengl32
 Cflags: "-I${includedir}"
 

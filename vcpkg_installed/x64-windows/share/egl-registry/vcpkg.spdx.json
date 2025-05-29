@@ -3,13 +3,13 @@
   "spdxVersion": "SPDX-2.2",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "documentNamespace": "https://spdx.org/spdxdocs/egl-registry-x64-windows-2024-01-25-1ebe1d1b-7780-45f2-87f7-3ba496498e2e",
-  "name": "egl-registry:x64-windows@2024-01-25 141404a50992923789796824577169097158cbd1ef4e073997147cf389e9ff91",
+  "documentNamespace": "https://spdx.org/spdxdocs/egl-registry-x64-windows-2024-01-25-c2fbf2cb-4e24-4748-be1a-0317dc7ffc7a",
+  "name": "egl-registry:x64-windows@2024-01-25 7b658125777f3e6f7bc79758b54930dfdc5a10bfdd91cf908906e00be674c502",
   "creationInfo": {
     "creators": [
-      "Tool: vcpkg-2025-04-07-b8b513ba8778c918cff49c3e837aae5999d5d2aa"
+      "Tool: vcpkg-2025-05-19-ece4c0f6b8fae9e94513d544c7aa753dd2c82337"
     ],
-    "created": "2025-04-15T17:55:21Z"
+    "created": "2025-05-29T08:29:41Z"
   },
   "relationships": [
     {
@@ -63,7 +63,7 @@
       "name": "egl-registry",
       "SPDXID": "SPDXRef-port",
       "versionInfo": "2024-01-25",
-      "downloadLocation": "git+https://github.com/Microsoft/vcpkg#ports/egl-registry",
+      "downloadLocation": "git+https://github.com/Microsoft/vcpkg@d883db43133dd223c4ffdbef4193943f6784d43a",
       "homepage": "https://github.com/KhronosGroup/EGL-Registry",
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
@@ -74,7 +74,7 @@
     {
       "name": "egl-registry:x64-windows",
       "SPDXID": "SPDXRef-binary",
-      "versionInfo": "141404a50992923789796824577169097158cbd1ef4e073997147cf389e9ff91",
+      "versionInfo": "7b658125777f3e6f7bc79758b54930dfdc5a10bfdd91cf908906e00be674c502",
       "downloadLocation": "NONE",
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
