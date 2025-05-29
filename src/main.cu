@@ -1,21 +1,22 @@
 // Datei: src/main.cu
-// Maus-Kommentar: Host-Code initialisiert Bildpuffer, setzt den globalen Tile-Zähler zurück,
-// startet den mandelbrotPersistent-Kernel und rendert via CUDA-OpenGL-Interop das automatische Fly-Through.
+// Maus-Kommentar: Host-Code erstellt Bildpuffer, startet für jede Tile einen Block und rechnet
+// das Fraktal hochparallel; anschließend wird kompaktes Complexity-Feedback gesammelt
+// und auf den nächsten Zoom-Schritt angewendet.
 
 #include "core_kernel.h"
 
 #ifdef _WIN32
-#include <windows.h>           // für OpenGL unter Windows
+#include <windows.h>
 #endif
 
-#include <GL/glew.h>            
+#include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <cuda_gl_interop.h>    // für CUDA-OpenGL Interop
-#include <vector_types.h>       // für uchar4, float2
-#include <vector_functions.h>   // für make_uchar4, make_float2
+#include <cuda_gl_interop.h>
+#include <vector_types.h>
+#include <vector_functions.h>
 
 #include <iostream>
 #include <vector>
@@ -28,46 +29,43 @@ void checkCuda(cudaError_t err, const char* msg) {
     }
 }
 
-// Kernel: Zähle in jeder Kachel, wie viele Pixel nicht schwarz sind → Komplexität
+// Komplexitäts-Kernel: zählt nicht-schwarze Pixel pro Tile
 __global__ void computeComplexity(const uchar4* img,
                                   int width, int height,
                                   float* complexity);
 
 int main() {
-    // Bildgrößen
     const int width  = 1024;
     const int height = 768;
-    size_t imgBytes = width * height * sizeof(uchar4);
+    size_t imgBytes  = width * height * sizeof(uchar4);
 
-    // Fraktal-Parameter
     float zoom    = 300.0f;
     float2 offset = make_float2(0.0f, 0.0f);
-    int maxIter   = 500;
+    int   maxIter = 500;
 
     // GLFW + OpenGL init
     if (!glfwInit()) exit(EXIT_FAILURE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
     GLFWwindow* window = glfwCreateWindow(width, height, "Auto-Zoom Mandelbrot", nullptr, nullptr);
     glfwMakeContextCurrent(window);
 
-    GLenum glewErr = glewInit();
-    if (glewErr != GLEW_OK) {
-        std::cerr << "GLEW init failed: " << glewGetErrorString(glewErr) << std::endl;
+    if (glewInit() != GLEW_OK) {
+        std::cerr << "GLEW init failed\n";
         return EXIT_FAILURE;
     }
 
-    // PBO erstellen und mit CUDA registrieren
+    // PBO + CUDA-GL Interop
     GLuint pbo;
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, imgBytes, nullptr, GL_DYNAMIC_DRAW);
+
     cudaGraphicsResource* cudaPbo;
     checkCuda(cudaGraphicsGLRegisterBuffer(&cudaPbo, pbo, cudaGraphicsMapFlagsWriteDiscard),
               "cudaGraphicsGLRegisterBuffer");
 
-    // Texture für Anzeige
+    // Texture
     GLuint tex;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
@@ -75,78 +73,71 @@ int main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    // Komplexitätsbuffer
-    int tilesX = (width + TILE_W -1)/TILE_W;
-    int tilesY = (height + TILE_H -1)/TILE_H;
+    // Complexity-Buffer
+    int tilesX     = (width  + TILE_W - 1) / TILE_W;
+    int tilesY     = (height + TILE_H - 1) / TILE_H;
     int totalTiles = tilesX * tilesY;
+
     float* d_complexity = nullptr;
     checkCuda(cudaMalloc(&d_complexity, totalTiles * sizeof(float)), "cudaMalloc complexity");
     std::vector<float> h_complexity(totalTiles);
 
     // Haupt-Loop
     while (!glfwWindowShouldClose(window)) {
-        // Reset
+        // 1) Reset Complexity
         checkCuda(cudaMemset(d_complexity, 0, totalTiles * sizeof(float)), "memset complexity");
-        {
-            int zero = 0;
-            checkCuda(cudaMemcpyToSymbol(tileIdxGlobal,
-                                        &zero,
-                                        sizeof(int),
-                                        0,
-                                        cudaMemcpyHostToDevice),
-                      "reset tileIdxGlobal");
-        }
 
-        // PBO zu CUDA mapen
+        // 2) PBO → CUDA
         uchar4* d_img = nullptr;
-        size_t   size = 0;
+        size_t   sz   = 0;
         checkCuda(cudaGraphicsMapResources(1, &cudaPbo, 0), "MapResources");
-        checkCuda(cudaGraphicsResourceGetMappedPointer((void**)&d_img, &size, cudaPbo),
+        checkCuda(cudaGraphicsResourceGetMappedPointer((void**)&d_img, &sz, cudaPbo),
                   "GetMappedPointer");
 
-        // Mandelbrot persistent Kernel
+        // 3) Fraktal-Kernel tile-parallel: ein Block pro Tile
         dim3 blockDim(TILE_W, TILE_H);
-        dim3 gridDim(1, 1);
+        dim3 gridDim (tilesX,   tilesY);
         mandelbrotPersistent<<<gridDim, blockDim>>>(d_img,
                                                     width, height,
                                                     zoom, offset,
                                                     maxIter);
-        checkCuda(cudaDeviceSynchronize(), "Kernel execution");
+        checkCuda(cudaDeviceSynchronize(), "mandelbrotPersistent");
 
-        // Komplexitäts-Kernel
-        dim3 bc(TILE_W, TILE_H);
-        dim3 gc(tilesX, tilesY);
-        computeComplexity<<<gc, bc>>>(d_img, width, height, d_complexity);
-        checkCuda(cudaDeviceSynchronize(), "Complexity kernel");
+        // 4) Complexity-Kernel
+        computeComplexity<<<gridDim, blockDim>>>(d_img, width, height, d_complexity);
+        checkCuda(cudaDeviceSynchronize(), "computeComplexity");
 
-        // PBO unmapen
+        // 5) Unmap PBO
         checkCuda(cudaGraphicsUnmapResources(1, &cudaPbo, 0), "UnmapResources");
 
-        // Komplexitätswerte auslesen und besten Tile finden
+        // 6) Best Tile finden
         checkCuda(cudaMemcpy(h_complexity.data(), d_complexity,
-                             totalTiles * sizeof(float), cudaMemcpyDeviceToHost),
+                             totalTiles * sizeof(float),
+                             cudaMemcpyDeviceToHost),
                   "Memcpy complexity");
-        int bestIdx = 0;
+
+        int   bestIdx   = 0;
         float bestScore = -1.0f;
         for (int i = 0; i < totalTiles; ++i) {
             if (h_complexity[i] > bestScore) {
                 bestScore = h_complexity[i];
-                bestIdx = i;
+                bestIdx   = i;
             }
         }
+
         int bestX = bestIdx % tilesX;
         int bestY = bestIdx / tilesX;
-        // Zoom/Offset aktualisieren
-        offset.x += ((bestX + 0.5f)*TILE_W - width*0.5f)/zoom;
-        offset.y += ((bestY + 0.5f)*TILE_H - height*0.5f)/zoom;
+        offset.x += ((bestX + 0.5f) * TILE_W - width  * 0.5f) / zoom;
+        offset.y += ((bestY + 0.5f) * TILE_H - height * 0.5f) / zoom;
         zoom *= 1.2f;
 
-        // Rendern aus PBO
+        // 7) Rendern aus PBO
         glClear(GL_COLOR_BUFFER_BIT);
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
         glBindTexture(GL_TEXTURE_2D, tex);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
                         GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
         glBegin(GL_QUADS);
           glTexCoord2f(0,0); glVertex2f(-1,-1);
           glTexCoord2f(1,0); glVertex2f( 1,-1);
