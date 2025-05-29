@@ -8,8 +8,6 @@
 #include <windows.h>           // für OpenGL unter Windows
 #endif
 
-// Wir verlinken gegen glew32.dll, daher kein GLEW_STATIC!
-// GLEW muss vor GLFW und anderen GL-Headern inkludiert werden:
 #include <GL/glew.h>            
 #include <GLFW/glfw3.h>
 
@@ -88,8 +86,16 @@ int main() {
     // Haupt-Loop
     while (!glfwWindowShouldClose(window)) {
         // Reset
-        checkCuda(cudaMemset(d_complexity, 0, totalTiles*sizeof(float)), "memset complexity");
-        checkCuda(cudaMemcpyToSymbol(tileIdxGlobal, 0, sizeof(int)),       "reset tileIdxGlobal");
+        checkCuda(cudaMemset(d_complexity, 0, totalTiles * sizeof(float)), "memset complexity");
+        {
+            int zero = 0;
+            checkCuda(cudaMemcpyToSymbol(tileIdxGlobal,
+                                        &zero,
+                                        sizeof(int),
+                                        0,
+                                        cudaMemcpyHostToDevice),
+                      "reset tileIdxGlobal");
+        }
 
         // PBO zu CUDA mapen
         uchar4* d_img = nullptr;
@@ -118,7 +124,7 @@ int main() {
 
         // Komplexitätswerte auslesen und besten Tile finden
         checkCuda(cudaMemcpy(h_complexity.data(), d_complexity,
-                             totalTiles*sizeof(float), cudaMemcpyDeviceToHost),
+                             totalTiles * sizeof(float), cudaMemcpyDeviceToHost),
                   "Memcpy complexity");
         int bestIdx = 0;
         float bestScore = -1.0f;
