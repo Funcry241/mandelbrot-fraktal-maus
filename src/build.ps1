@@ -1,7 +1,19 @@
-<#  
-  MausID: κρυπτό-42  
-  (Nur für die Maus: Dieses Skript baut das Projekt, kopiert die Artefakte und ruft anschließend MausDelete.ps1 auf.)  
+<#
+  MausID: κρυπτό-42
+  # OSZILLATIONSSCHUTZ:
+  # Änderungen an Build-Parametern (Toolchain, Generator, CMake-Flags etc.)
+  # nur zwischen <START OSZILLATIONS­SCHUTZ> und <ENDE OSZILLATIONS­SCHUTZ> durchführen!
 #>
+
+if ($false) {
+  # <START OSZILLATIONS­SCHUTZ>
+  # Generator               = Ninja
+  # CMake-Toolchain-File    = vcpkg/scripts/buildsystems/vcpkg.cmake
+  # VCPKG_TARGET_TRIPLET    = x64-windows
+  # CMAKE_BUILD_TYPE        = RelWithDebInfo
+  # CUDA-Compiler           = nvcc.exe (aus PATH)
+  # <ENDE OSZILLATIONS­SCHUTZ>
+}
 
 param(
     [string]$Configuration = "RelWithDebInfo"
@@ -22,7 +34,9 @@ foreach ($p in $toClean) {
 # 2) MSVC-Umgebung laden via vswhere
 $vswhere = Join-Path ${Env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path $vswhere)) { Write-Error "vswhere.exe nicht gefunden!"; exit 1 }
-$vsInstall = & "$vswhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+$vsInstall = & "$vswhere" -latest -products * `
+               -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+               -property installationPath
 if (-not $vsInstall) { Write-Error "Keine VS-Installation gefunden!"; exit 1 }
 $vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
 if (-not (Test-Path $vcvars)) { Write-Error "vcvars64.bat nicht gefunden!"; exit 1 }
@@ -45,7 +59,7 @@ Write-Host "[ENV] vcpkg-Toolchain: $toolchain"
 # 4) Build & Dist anlegen
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
-# 5) CMake & Build
+# 5) CMake konfigurieren und bauen
 Write-Host "[CMAKE] Konfiguriere ($Configuration)"
 cmake -S . -B build -G Ninja `
       -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
@@ -60,17 +74,26 @@ if (-not (Test-Path $exe)) { $exe = "build\mandelbrot_otterdream.exe" }
 if (Test-Path $exe) {
     Copy-Item $exe -Destination dist -Force; Write-Host "[COPY] EXE → dist"
     foreach ($d in @('glfw3.dll','glew32.dll')) {
-        $found = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" -Filter $d -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) { Copy-Item $found.FullName -Destination dist -Force; Write-Host "[COPY] $d" }
-        else { Write-Warning "[MISSING] $d" }
+        $found = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" `
+                  -Filter $d -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+        if ($found) {
+            Copy-Item $found.FullName -Destination dist -Force
+            Write-Host "[COPY] $d → dist"
+        } else {
+            Write-Warning "[MISSING] $d"
+        }
     }
     try {
         $nvcc = (Get-Command nvcc.exe).Source
-        $cudaBin = Join-Path (Split-Path $nvcc -Parent) 'bin'
+        $cudaBin = Split-Path $nvcc -Parent
         Get-ChildItem $cudaBin -Filter 'cudart64_*.dll' | ForEach-Object {
-            Copy-Item $_.FullName -Destination dist -Force; Write-Host "[COPY] $($_.Name)"
+            Copy-Item $_.FullName -Destination dist -Force
+            Write-Host "[COPY] $($_.Name) → dist"
         }
-    } catch { Write-Warning "[CUDA] Runtime-DLLs nicht kopiert" }
+    } catch {
+        Write-Warning "[CUDA] Runtime-DLLs nicht kopiert"
+    }
 } else {
     Write-Warning "[ERROR] Exe nicht gefunden!"
 }

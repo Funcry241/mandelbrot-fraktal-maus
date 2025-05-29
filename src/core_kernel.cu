@@ -1,18 +1,27 @@
 // Datei: src/core_kernel.cu
-// Maus-Kommentar: High-Performance Mandelbrot mit Persistent Threads, Tile-Blocking und Dynamic Parallelism inklusive Komplexitäts-Kernel.
+// Maus-Kommentar: Hybrid-Mandelbrot-Kernel: Tile-basiert mit adaptiver Dynamic Parallelism
 
-#include "core_kernel.h"
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <vector_types.h>     // für uchar4, float2
-#include <vector_functions.h> // für make_uchar4, make_float2
+#include <vector_types.h>     // uchar4, float2
+#include <vector_functions.h> // make_uchar4, make_float2
+#include <algorithm>
 
-// Globaler Tile-Zähler
-__device__ int tileIdxGlobal;
+#define DYNAMIC_THRESHOLD 100.0f  // durchschnittliche Iterationen pro Pixel
+#define TILE_W 32
+#define TILE_H 32
 
-#define DYNAMIC_THRESHOLD 100.0f  // durchschnittliche Iterationen, ab der wir tiefer rechnen
+// Farb-Mapping
+__device__ __forceinline__ uchar4 colorMap(int iter, int maxIter) {
+    if (iter == maxIter) return make_uchar4(0, 0, 0, 255);
+    float t = float(iter) / maxIter;
+    unsigned char r = unsigned char(9*(1-t)*t*t*t*255);
+    unsigned char g = unsigned char(15*(1-t)*(1-t)*t*t*255);
+    unsigned char b = unsigned char(8.5*(1-t)*(1-t)*(1-t)*t*255);
+    return make_uchar4(r, g, b, 255);
+}
 
-// Nested Kernel: Verfeinerung eines einzelnen Tiles mit doppelter Iterationszahl
+// Nested Kernel: Verfeinerung einer Kachel mit doppelter Iterationszahl
 __global__ void refineTile(uchar4* img, int width, int height,
                            float zoom, float2 offset,
                            int startX, int startY,
@@ -22,7 +31,6 @@ __global__ void refineTile(uchar4* img, int width, int height,
     int tx = blockIdx.x * blockDim.x + threadIdx.x;
     int ty = blockIdx.y * blockDim.y + threadIdx.y;
     if (tx >= tileW || ty >= tileH) return;
-
     int x = startX + tx;
     int y = startY + ty;
     if (x >= width || y >= height) return;
@@ -37,97 +45,95 @@ __global__ void refineTile(uchar4* img, int width, int height,
         zx = xt;
         ++iter;
     }
-
-    uchar4 col = (iter == maxIter)
-        ? make_uchar4(0, 0, 0, 255)
-        : make_uchar4((iter * 5) % 256,
-                      (iter * 7) % 256,
-                      (iter * 11) % 256,
-                      255);
-    img[y * width + x] = col;
+    img[y * width + x] = colorMap(iter, maxIter);
 }
 
-// Haupt-Kernel mit Persistent Threads und Tile-Dispatch
-__global__ void mandelbrotPersistent(uchar4* img, int width, int height,
-                                     float zoom, float2 offset,
-                                     int maxIter)
-{
-    while (true) {
-        int t = atomicAdd(&tileIdxGlobal, 1);
-        int tilesX = (width  + TILE_W - 1) / TILE_W;
-        int tilesY = (height + TILE_H - 1) / TILE_H;
-        int totalTiles = tilesX * tilesY;
-        if (t >= totalTiles) break;
-
-        int tileX = t % tilesX;
-        int tileY = t / tilesX;
-        int startX = tileX * TILE_W;
-        int startY = tileY * TILE_H;
-        int endX   = min(startX + TILE_W, width);
-        int endY   = min(startY + TILE_H, height);
-
-        float sumIter = 0.0f;
-        int   cntPix  = 0;
-
-        for (int py = startY; py < endY; ++py) {
-            for (int px = startX; px < endX; ++px) {
-                float cx = (px - width * 0.5f) / zoom + offset.x;
-                float cy = (py - height * 0.5f) / zoom + offset.y;
-                float zx = 0.0f, zy = 0.0f;
-                int iter = 0;
-                while (zx*zx + zy*zy < 4.0f && iter < maxIter) {
-                    float xt = zx*zx - zy*zy + cx;
-                    zy = 2.0f*zx*zy + cy;
-                    zx = xt;
-                    ++iter;
-                }
-                sumIter += iter;
-                ++cntPix;
-                uchar4 col = (iter == maxIter)
-                    ? make_uchar4(0,0,0,255)
-                    : make_uchar4((iter*5)%256,(iter*7)%256,(iter*11)%256,255);
-                img[py * width + px] = col;
-            }
-        }
-
-        float avgIter = sumIter / cntPix;
-        if (avgIter > DYNAMIC_THRESHOLD) {
-            dim3 bsRef(TILE_W, TILE_H);
-            dim3 gsRef((endX - startX + TILE_W - 1) / TILE_W,
-                       (endY - startY + TILE_H - 1) / TILE_H);
-            refineTile<<<gsRef, bsRef>>>(
-                img, width, height, zoom, offset,
-                startX, startY,
-                endX - startX, endY - startY,
-                maxIter * 2
-            );
-        }
-    }
-}
-
-// Komplexitäts-Kernel: zählt nicht-schwarze Pixel pro Tile
-__global__ void computeComplexity(const uchar4* img,
-                                  int width, int height,
-                                  float* complexity)
+// Haupt-Kernel: Tile-parallel mit adaptiver Rekursion
+__global__ void mandelbrotHybrid(uchar4* img,
+                                 int width, int height,
+                                 float zoom, float2 offset,
+                                 int maxIter)
 {
     int tileX = blockIdx.x;
     int tileY = blockIdx.y;
-    int idx   = tileY * ((width + TILE_W -1)/TILE_W) + tileX;
-
     int startX = tileX * TILE_W;
     int startY = tileY * TILE_H;
-    int endX   = min(startX + TILE_W, width);
-    int endY   = min(startY + TILE_H, height);
+    int endX = min(startX + TILE_W, width);
+    int endY = min(startY + TILE_H, height);
 
-    int count = 0;
-    // Thread-strided Loop
+    float sumIter = 0.0f;
+    int cntPix = 0;
+
+    // Basis-Durchlauf
     for (int y = startY + threadIdx.y; y < endY; y += blockDim.y) {
         for (int x = startX + threadIdx.x; x < endX; x += blockDim.x) {
-            uchar4 c = img[y * width + x];
-            if (c.x || c.y || c.z) ++count;
+            float cx = (x - width * 0.5f) / zoom + offset.x;
+            float cy = (y - height * 0.5f) / zoom + offset.y;
+            float zx = 0.0f, zy = 0.0f;
+            int iter = 0;
+            while (zx*zx + zy*zy < 4.0f && iter < maxIter) {
+                float xt = zx*zx - zy*zy + cx;
+                zy = 2.0f*zx*zy + cy;
+                zx = xt;
+                ++iter;
+            }
+            sumIter += iter;
+            ++cntPix;
+            img[y * width + x] = colorMap(iter, maxIter);
         }
     }
 
-    // Direkte Addition in globalen Speicher
-    atomicAdd(&complexity[idx], count);
+    // Dynamische Verfeinerung
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        float avgIter = sumIter / cntPix;
+        if (avgIter > DYNAMIC_THRESHOLD) {
+            int tileW = endX - startX;
+            int tileH = endY - startY;
+            dim3 bs(min(tileW, TILE_W), min(tileH, TILE_H));
+            dim3 gs((tileW + bs.x - 1) / bs.x,
+                    (tileH + bs.y - 1) / bs.y);
+            refineTile<<<gs, bs>>>(img, width, height,
+                                   zoom, offset,
+                                   startX, startY,
+                                   tileW, tileH,
+                                   maxIter * 2);
+            // ** Kein cudaDeviceSynchronize() hier! **
+        }
+    }
 }
+
+// Host-Exports
+extern "C" {
+
+// Launcher für den Hybrid-Kernel
+__host__ void launch_mandelbrotHybrid(uchar4* img,
+                                      int w, int h,
+                                      float zoom, float2 offset,
+                                      int maxIter)
+{
+    dim3 blockDim(TILE_W, TILE_H);
+    dim3 gridDim((w + TILE_W - 1) / TILE_W,
+                 (h + TILE_H - 1) / TILE_H);
+    mandelbrotHybrid<<<gridDim, blockDim>>>(img, w, h, zoom, offset, maxIter);
+    cudaDeviceSynchronize();
+}
+
+// Legacy-Funktionen, falls benötigt
+__host__ void mandelbrotPersistent(uchar4* img, int width, int height,
+                                   float zoom, float2 center, int maxIter)
+{
+    dim3 block(16,16), grid((width+15)/16,(height+15)/16);
+    mandelbrotHybrid<<<grid, block>>>(img, width, height, zoom, center, maxIter);
+    cudaDeviceSynchronize();
+}
+
+__host__ void computeComplexity(const uchar4* img, int width, int height, float* out)
+{
+    int count = 0;
+    for (int i = 0; i < width * height; ++i) {
+        if (img[i].x || img[i].y || img[i].z) ++count;
+    }
+    *out = float(count) / (width * height);
+}
+
+} // extern "C"

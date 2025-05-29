@@ -1,6 +1,7 @@
 <#+
   MausID: κρυπτό-42
-  (Nur für die Maus: Wenn alles klappt, wird jeder [COPY]-Schritt grün. Bei Fehlern bricht das Skript mit Exit-Code 1 ab.)
+  # Meta-Ebene-Kommentar: Zentrale Fehler-Behandlung gegen Oszillationen.
+  # Wenn du Build-Parameter änderst, passe sie nur hier an!
 #>
 
 param(
@@ -22,7 +23,7 @@ foreach ($p in $toClean) {
 # 2) Supporter-Directory festlegen
 $supporterDir = "ps1Supporter"
 if (-not (Test-Path $supporterDir)) {
-    Write-Warning "[SUPPORT] Verzeichnis '$supporterDir' nicht gefunden. Stelle sicher, dass alle Support-Skripte darin liegen."
+    Write-Error "[SUPPORT] Verzeichnis '$supporterDir' nicht gefunden. Stelle sicher, dass alle Support-Skripte darin liegen."
     exit 1
 }
 
@@ -90,13 +91,14 @@ New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
 # 8) CMake konfigurieren und bauen
 Write-Host "[BUILD] Konfiguriere mit CMake"
+Write-Host "→ Toolchain-File: $PSScriptRoot/vcpkg/scripts/buildsystems/vcpkg.cmake"
 cmake `
     -B build -S . `
     -G Ninja `
-    -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
+    -DCMAKE_TOOLCHAIN_FILE="$PSScriptRoot/vcpkg/scripts/buildsystems/vcpkg.cmake" `
     -DCMAKE_BUILD_TYPE="$Configuration" `
     -DCMAKE_CUDA_COMPILER="$nvcc" `
-    -DCMAKE_CUDA_TOOLKIT_ROOT_DIR="$cudaBin\.."
+    -DCMAKE_CUDA_TOOLKIT_ROOT_DIR="$cudaBin\.." 
 Write-Host "[BUILD] Baue Projekt"
 cmake --build build --config $Configuration --parallel
 
