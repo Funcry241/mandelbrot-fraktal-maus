@@ -24,6 +24,11 @@ add_executable(mandelbrot_otterdream
     src/core_kernel.cu      # enthält mandelbrotPersistent + computeComplexity
 )
 
+if (WIN32)
+  # sorgt dafür, dass unser EXE automatisch mit einer Konsole startet
+  target_link_options(mandelbrot_otterdream PRIVATE "/SUBSYSTEM:CONSOLE")
+endif()
+
 # separable compilation flag setzen
 target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>
