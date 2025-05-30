@@ -35,31 +35,41 @@ __global__ void computeComplexity(const uchar4* img,
                                   float* complexity);
 
 int main() {
-    const int W = 1024;
-    const int H = 768;
-    size_t imgBytes = W * H * sizeof(uchar4);
+    // **––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––**
+    std::cout << "=== Programm gestartet ===" << std::endl;
+    // prüfe, ob sofort ausgegeben wird
+    std::cout.flush();
+    // **––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––**
+
+    const int width  = 1024;
+    const int height = 768;
+    size_t imgBytes  = width * height * sizeof(uchar4);
 
     float zoom    = 300.0f;
     float2 offset = make_float2(0.0f, 0.0f);
     int   maxIter = 500;
 
     // GLFW + OpenGL init
-    if (!glfwInit()) exit(EXIT_FAILURE);
+    if (!glfwInit()) {
+        std::cerr << "glfwInit() failed" << std::endl;
+        return EXIT_FAILURE;
+    }
+    std::cout << "GLFW initialisiert" << std::endl;
+
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    GLFWwindow* window = glfwCreateWindow(W, H, "Auto-Zoom Mandelbrot", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(width, height, "Auto-Zoom Mandelbrot", nullptr, nullptr);
+    if (!window) {
+        std::cerr << "glfwCreateWindow() failed" << std::endl;
+        return EXIT_FAILURE;
+    }
     glfwMakeContextCurrent(window);
-
-    // Viewport und Pixel-Alignment
-    int fbW, fbH;
-    glfwGetFramebufferSize(window, &fbW, &fbH);
-    glViewport(0, 0, fbW, fbH);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
     if (glewInit() != GLEW_OK) {
         std::cerr << "GLEW init failed" << std::endl;
         return EXIT_FAILURE;
     }
+    std::cout << "GLEW initialisiert, OpenGL-Kontext ready" << std::endl;
 
     // PBO + CUDA-GL Interop
     GLuint pbo;
@@ -75,18 +85,20 @@ int main() {
     GLuint tex;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     // Complexity-Buffer
-    int tilesX     = (W + TILE_W - 1) / TILE_W;
-    int tilesY     = (H + TILE_H - 1) / TILE_H;
+    int tilesX     = (width  + TILE_W - 1) / TILE_W;
+    int tilesY     = (height + TILE_H - 1) / TILE_H;
     int totalTiles = tilesX * tilesY;
 
     float* d_complexity = nullptr;
     checkCuda(cudaMalloc(&d_complexity, totalTiles * sizeof(float)), "cudaMalloc complexity");
     std::vector<float> h_complexity(totalTiles);
+
+    std::cout << "Setup abgeschlossen, betrete Haupt-Loop" << std::endl;
 
     // Haupt-Loop
     while (!glfwWindowShouldClose(window)) {
@@ -100,50 +112,29 @@ int main() {
         checkCuda(cudaGraphicsResourceGetMappedPointer((void**)&d_img, &sz, cudaPbo),
                   "GetMappedPointer");
 
-        // --- Debug: Test-Fill (mittleres Grau) ---
-        // cudaMemset(d_img, 128, imgBytes);
-
-        // 3) Fraktal-Kernel: ein Block pro Tile
-        dim3 bd(TILE_W, TILE_H);
-        dim3 gd(tilesX,   tilesY);
-        mandelbrotHybrid<<<gd, bd>>>(d_img, W, H, zoom, offset, maxIter);
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            std::cerr << "Kernel mandelbrotHybrid launch error: "
-                      << cudaGetErrorString(err) << std::endl;
-            exit(EXIT_FAILURE);
-        }
-
+        // 3) Fraktal-Kernel tile-parallel: ein Block pro Tile
+        dim3 blockDim(TILE_W, TILE_H);
+        dim3 gridDim (tilesX,   tilesY);
+        launch_mandelbrotHybrid(d_img,
+                                width, height,
+                                zoom, offset,
+                                maxIter);
         checkCuda(cudaDeviceSynchronize(), "mandelbrotHybrid");
 
         // 4) Complexity-Kernel
-        computeComplexity<<<gd, bd>>>(d_img, W, H, d_complexity);
-        err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            std::cerr << "Kernel computeComplexity launch error: "
-                      << cudaGetErrorString(err) << std::endl;
-            exit(EXIT_FAILURE);
-        }
+        computeComplexity<<<gridDim, blockDim>>>(d_img, width, height, d_complexity);
         checkCuda(cudaDeviceSynchronize(), "computeComplexity");
-
-        // --- Debug: Sample Pixel ---
-        /*
-        uchar4 sample;
-        cudaMemcpy(&sample, d_img, sizeof(uchar4), cudaMemcpyDeviceToHost);
-        std::cout << "Sample RGBA: (" << int(sample.x) << ","
-                  << int(sample.y) << "," << int(sample.z) << ")\n";
-        */
 
         // 5) Unmap PBO
         checkCuda(cudaGraphicsUnmapResources(1, &cudaPbo, 0), "UnmapResources");
 
-        // 6) Best Tile finden und Zoom anpassen
+        // 6) Best Tile finden
         checkCuda(cudaMemcpy(h_complexity.data(), d_complexity,
                              totalTiles * sizeof(float),
                              cudaMemcpyDeviceToHost),
                   "Memcpy complexity");
 
-        int bestIdx = 0;
+        int   bestIdx   = 0;
         float bestScore = -1.0f;
         for (int i = 0; i < totalTiles; ++i) {
             if (h_complexity[i] > bestScore) {
@@ -151,17 +142,18 @@ int main() {
                 bestIdx   = i;
             }
         }
+
         int bestX = bestIdx % tilesX;
         int bestY = bestIdx / tilesX;
-        offset.x += ((bestX + 0.5f) * TILE_W -  W * 0.5f) / zoom;
-        offset.y += ((bestY + 0.5f) * TILE_H -  H * 0.5f) / zoom;
+        offset.x += ((bestX + 0.5f) * TILE_W - width  * 0.5f) / zoom;
+        offset.y += ((bestY + 0.5f) * TILE_H - height * 0.5f) / zoom;
         zoom *= 1.2f;
 
         // 7) Rendern aus PBO
         glClear(GL_COLOR_BUFFER_BIT);
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
         glBindTexture(GL_TEXTURE_2D, tex);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
                         GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
         glBegin(GL_QUADS);
