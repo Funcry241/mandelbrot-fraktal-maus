@@ -1,15 +1,15 @@
-// Datei: src/core_kernel.cu
-// Maus-Kommentar: Hybrid-Mandelbrot-Kernel: Tile-basiert mit adaptiver Dynamic Parallelism
+#pragma once // ensure header inclusion guard if needed
 
+// Datei: src/core_kernel.cu
+// Maus-Kommentar: Hybrid-Mandelbrot-Kernel und Complexity-Zähler für adaptive Zoomsteuerung
+
+#include "core_kernel.h"
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <vector_types.h>     // uchar4, float2
-#include <vector_functions.h> // make_uchar4, make_float2
-#include <algorithm>
+#include <vector_types.h>     // uchar4, float2, …
+#include <vector_functions.h> // make_uchar4, make_float2, …
 
 #define DYNAMIC_THRESHOLD 100.0f  // durchschnittliche Iterationen pro Pixel
-#define TILE_W 32
-#define TILE_H 32
 
 // Farb-Mapping
 __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter) {
@@ -19,6 +19,29 @@ __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter) {
     unsigned char g = unsigned char(15*(1-t)*(1-t)*t*t*255);
     unsigned char b = unsigned char(8.5*(1-t)*(1-t)*(1-t)*t*255);
     return make_uchar4(r, g, b, 255);
+}
+
+// Complexity-Kernel: zählt nicht-schwarze Pixel pro Tile
+__global__ void computeComplexity(const uchar4* img,
+                                  int width, int height,
+                                  float* complexity)
+{
+    int tileX = blockIdx.x;
+    int tileY = blockIdx.y;
+    int tileId = tileY * gridDim.x + tileX;
+
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int x = tileX * blockDim.x + tx;
+    int y = tileY * blockDim.y + ty;
+    if (x >= width || y >= height) return;
+
+    int idx = y * width + x;
+    uchar4 pixel = img[idx];
+    // Schwarz (0,0,0) wird nicht gezählt
+    if (pixel.x || pixel.y || pixel.z) {
+        atomicAdd(&complexity[tileId], 1.0f);
+    }
 }
 
 // Nested Kernel: Verfeinerung einer Kachel mit doppelter Iterationszahl
@@ -61,10 +84,11 @@ __global__ void mandelbrotHybrid(uchar4* img,
     int endX = min(startX + TILE_W, width);
     int endY = min(startY + TILE_H, height);
 
+    // Lokale Summe und Zählung
     float sumIter = 0.0f;
     int cntPix = 0;
 
-    // Basis-Durchlauf
+    // Thread-strided Loop für Basiszeichnung
     for (int y = startY + threadIdx.y; y < endY; y += blockDim.y) {
         for (int x = startX + threadIdx.x; x < endX; x += blockDim.x) {
             float cx = (x - width * 0.5f) / zoom + offset.x;
@@ -83,7 +107,7 @@ __global__ void mandelbrotHybrid(uchar4* img,
         }
     }
 
-    // Dynamische Verfeinerung
+    // Nur ein Thread pro Block startet Nested Kernel
     if (threadIdx.x == 0 && threadIdx.y == 0) {
         float avgIter = sumIter / cntPix;
         if (avgIter > DYNAMIC_THRESHOLD) {
@@ -93,47 +117,21 @@ __global__ void mandelbrotHybrid(uchar4* img,
             dim3 gs((tileW + bs.x - 1) / bs.x,
                     (tileH + bs.y - 1) / bs.y);
             refineTile<<<gs, bs>>>(img, width, height,
-                                   zoom, offset,
-                                   startX, startY,
-                                   tileW, tileH,
-                                   maxIter * 2);
-            // ** Kein cudaDeviceSynchronize() hier! **
+                                  zoom, offset,
+                                  startX, startY,
+                                  tileW, tileH,
+                                  maxIter * 2);
         }
     }
 }
 
-// Host-Exports
-extern "C" {
-
-// Launcher für den Hybrid-Kernel
-__host__ void launch_mandelbrotHybrid(uchar4* img,
-                                      int w, int h,
-                                      float zoom, float2 offset,
-                                      int maxIter)
+extern "C" void launch_mandelbrotHybrid(uchar4* img,
+                                         int w, int h,
+                                         float zoom, float2 offset,
+                                         int maxIter)
 {
     dim3 blockDim(TILE_W, TILE_H);
     dim3 gridDim((w + TILE_W - 1) / TILE_W,
                  (h + TILE_H - 1) / TILE_H);
     mandelbrotHybrid<<<gridDim, blockDim>>>(img, w, h, zoom, offset, maxIter);
-    cudaDeviceSynchronize();
 }
-
-// Legacy-Funktionen, falls benötigt
-__host__ void mandelbrotPersistent(uchar4* img, int width, int height,
-                                   float zoom, float2 center, int maxIter)
-{
-    dim3 block(16,16), grid((width+15)/16,(height+15)/16);
-    mandelbrotHybrid<<<grid, block>>>(img, width, height, zoom, center, maxIter);
-    cudaDeviceSynchronize();
-}
-
-__host__ void computeComplexity(const uchar4* img, int width, int height, float* out)
-{
-    int count = 0;
-    for (int i = 0; i < width * height; ++i) {
-        if (img[i].x || img[i].y || img[i].z) ++count;
-    }
-    *out = float(count) / (width * height);
-}
-
-} // extern "C"
