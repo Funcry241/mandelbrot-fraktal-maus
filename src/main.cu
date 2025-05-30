@@ -1,8 +1,5 @@
 // File: src/main.cu
-// Variante 2: Modern OpenGL-Pipeline mit Shadern und VAO/VBO für Fullscreen-Quad
-
 #include "core_kernel.h"
-
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -28,12 +25,13 @@ void checkCuda(cudaError_t err, const char* msg) {
     }
 }
 
-// Komplexitäts-Kernel (unverändert)
+// Komplexitäts-Kernel
 __global__ void computeComplexity(const uchar4* img,
                                   int width, int height,
                                   float* complexity);
 
-// Vertex-Shader (Fullscreen-Quad)
+// Vertex- und Fragment-Shader (wie gehabt)...
+
 static const char* vertexShaderSrc = R"glsl(
 #version 330 core
 layout(location = 0) in vec2 aPos;
@@ -45,7 +43,6 @@ void main() {
 }
 )glsl";
 
-// Fragment-Shader (Textur-Sampling)
 static const char* fragmentShaderSrc = R"glsl(
 #version 330 core
 in vec2 TexCoord;
@@ -65,7 +62,7 @@ int main() {
     float2 offset = make_float2(0.0f, 0.0f);
     int   maxIter = 500;
 
-    // GLFW + OpenGL Core-Profile
+    // GLFW + OpenGL init (Core Profile)...
     if (!glfwInit()) std::exit(EXIT_FAILURE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -73,13 +70,9 @@ int main() {
     GLFWwindow* window = glfwCreateWindow(width, height, "Auto-Zoom Mandelbrot", nullptr, nullptr);
     if (!window) std::exit(EXIT_FAILURE);
     glfwMakeContextCurrent(window);
+    if (glewInit() != GLEW_OK) { std::cerr<<"GLEW init failed\n"; return EXIT_FAILURE; }
 
-    if (glewInit() != GLEW_OK) {
-        std::cerr << "GLEW init failed\n";
-        return EXIT_FAILURE;
-    }
-
-    // --- PBO + CUDA-GL Interop ---
+    // 1) PBO + CUDA-GL Interop
     GLuint pbo;
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -89,7 +82,7 @@ int main() {
     checkCuda(cudaGraphicsGLRegisterBuffer(&cudaPbo, pbo, cudaGraphicsMapFlagsWriteDiscard),
               "cudaGraphicsGLRegisterBuffer");
 
-    // --- Texture ---
+    // 2) Texture
     GLuint tex;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
@@ -98,125 +91,112 @@ int main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    // --- Shader-Programm erstellen ---
+    // 3) Shader-Programm und Quad (VAO/VBO) wie zuvor...
     auto compileShader = [&](GLenum type, const char* src) {
         GLuint s = glCreateShader(type);
         glShaderSource(s, 1, &src, nullptr);
         glCompileShader(s);
-        GLint ok;
-        glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-        if (!ok) {
-            char buf[512];
-            glGetShaderInfoLog(s, 512, nullptr, buf);
-            std::cerr << "Shader-Compile-Error:\n" << buf << std::endl;
-            std::exit(EXIT_FAILURE);
+        GLint ok; glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+        if (!ok) { char buf[512]; glGetShaderInfoLog(s,512,nullptr,buf);
+            std::cerr<<"Shader-Error:\n"<<buf; std::exit(EXIT_FAILURE);
         }
         return s;
     };
-
-    GLuint vs = compileShader(GL_VERTEX_SHADER,   vertexShaderSrc);
+    GLuint vs = compileShader(GL_VERTEX_SHADER, vertexShaderSrc);
     GLuint fs = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSrc);
     GLuint program = glCreateProgram();
     glAttachShader(program, vs);
     glAttachShader(program, fs);
     glLinkProgram(program);
-    {
-        GLint ok;
-        glGetProgramiv(program, GL_LINK_STATUS, &ok);
-        if (!ok) {
-            char buf[512];
-            glGetProgramInfoLog(program, 512, nullptr, buf);
-            std::cerr << "Program-Link-Error:\n" << buf << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
+    { GLint ok; glGetProgramiv(program,GL_LINK_STATUS,&ok);
+      if (!ok){ char buf[512]; glGetProgramInfoLog(program,512,nullptr,buf);
+          std::cerr<<"Link-Error:\n"<<buf; std::exit(EXIT_FAILURE);
+      }
     }
-    glDeleteShader(vs);
-    glDeleteShader(fs);
+    glDeleteShader(vs); glDeleteShader(fs);
 
-    // --- Fullscreen-Quad (VAO/VBO) ---
     float quadVerts[] = {
-        // positions    // texcoords
-        -1.0f, -1.0f,   0.0f, 0.0f,
-         1.0f, -1.0f,   1.0f, 0.0f,
-        -1.0f,  1.0f,   0.0f, 1.0f,
-         1.0f,  1.0f,   1.0f, 1.0f,
+        -1,-1, 0,0,
+         1,-1, 1,0,
+        -1, 1, 0,1,
+         1, 1, 1,1,
     };
     GLuint VAO, VBO;
-    glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);
+    glGenVertexArrays(1,&VAO);
+    glGenBuffers(1,&VBO);
     glBindVertexArray(VAO);
-      glBindBuffer(GL_ARRAY_BUFFER, VBO);
-      glBufferData(GL_ARRAY_BUFFER, sizeof(quadVerts), quadVerts, GL_STATIC_DRAW);
+      glBindBuffer(GL_ARRAY_BUFFER,VBO);
+      glBufferData(GL_ARRAY_BUFFER,sizeof(quadVerts),quadVerts,GL_STATIC_DRAW);
       glEnableVertexAttribArray(0);
-      glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+      glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)0);
       glEnableVertexAttribArray(1);
-      glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-      glBindBuffer(GL_ARRAY_BUFFER, 0);
+      glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)(2*sizeof(float)));
     glBindVertexArray(0);
 
-    // --- Complexity-Buffer ---
+    // 4) Complexity-Buffer
     int tilesX     = (width  + TILE_W - 1) / TILE_W;
     int tilesY     = (height + TILE_H - 1) / TILE_H;
-    int totalTiles = tilesX * tilesY;
-    float* d_complexity = nullptr;
-    checkCuda(cudaMalloc(&d_complexity, totalTiles * sizeof(float)), "cudaMalloc complexity");
+    int totalTiles = tilesX*tilesY;
+    float* d_complexity=nullptr;
+    checkCuda(cudaMalloc(&d_complexity, totalTiles*sizeof(float)), "cudaMalloc complexity");
     std::vector<float> h_complexity(totalTiles);
 
     // Haupt-Loop
     while (!glfwWindowShouldClose(window)) {
-        // Reset Complexity
-        checkCuda(cudaMemset(d_complexity, 0, totalTiles * sizeof(float)), "memset complexity");
+        // a) Reset Complexity
+        checkCuda(cudaMemset(d_complexity, 0, totalTiles*sizeof(float)), "memset complexity");
 
-        // PBO → CUDA
-        uchar4* d_img = nullptr;
-        size_t sz = 0;
-        checkCuda(cudaGraphicsMapResources(1, &cudaPbo, 0), "MapResources");
-        checkCuda(cudaGraphicsResourceGetMappedPointer((void**)&d_img, &sz, cudaPbo),
+        // b) Map PBO
+        uchar4* d_img=nullptr; size_t sz=0;
+        checkCuda(cudaGraphicsMapResources(1,&cudaPbo,0),"MapResources");
+        checkCuda(cudaGraphicsResourceGetMappedPointer((void**)&d_img,&sz,cudaPbo),
                   "GetMappedPointer");
 
-        // ** Hier: mandelbrotHybrid statt mandelbrotPersistent **
-        dim3 blockDim(TILE_W, TILE_H), gridDim(tilesX, tilesY);
-        mandelbrotHybrid<<<gridDim, blockDim>>>(d_img, width, height, zoom, offset, maxIter);
-        checkCuda(cudaDeviceSynchronize(), "mandelbrotHybrid");
+        // c) Aufruf Hybrid-Kernel
+        dim3 blockDim(TILE_W,TILE_H), gridDim(tilesX,tilesY);
+        mandelbrotHybrid<<<gridDim,blockDim>>>(d_img,width,height,zoom,offset,maxIter);
+        checkCuda(cudaDeviceSynchronize(),"mandelbrotHybrid");
 
-        // Complexity-Kernel
-        computeComplexity<<<gridDim, blockDim>>>(d_img, width, height, d_complexity);
-        checkCuda(cudaDeviceSynchronize(), "computeComplexity");
+        // d) Complexity-Kernel
+        computeComplexity<<<gridDim,blockDim>>>(d_img,width,height,d_complexity);
+        checkCuda(cudaDeviceSynchronize(),"computeComplexity");
 
-        // Unmap PBO
-        checkCuda(cudaGraphicsUnmapResources(1, &cudaPbo, 0), "UnmapResources");
+        // e) Unmap PBO
+        checkCuda(cudaGraphicsUnmapResources(1,&cudaPbo,0),"UnmapResources");
 
-        // Best Tile finden
-        checkCuda(cudaMemcpy(h_complexity.data(), d_complexity,
-                             totalTiles * sizeof(float),
-                             cudaMemcpyDeviceToHost),
-                  "Memcpy complexity");
-        int bestIdx = 0; float bestScore = -1.0f;
-        for (int i = 0; i < totalTiles; ++i) {
-            if (h_complexity[i] > bestScore) {
-                bestScore = h_complexity[i];
-                bestIdx = i;
+        // ————— NEU —————
+        // f) PBO → Texture
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
+                        GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+        // g) Best Tile finden & Zoom-Update
+        checkCuda(cudaMemcpy(h_complexity.data(),d_complexity,
+                             totalTiles*sizeof(float),
+                             cudaMemcpyDeviceToHost),"Memcpy complexity");
+        int bestIdx=0; float bestScore=-1.0f;
+        for(int i=0;i<totalTiles;++i){
+            if(h_complexity[i]>bestScore){
+                bestScore=h_complexity[i];
+                bestIdx=i;
             }
         }
-        int bestX = bestIdx % tilesX, bestY = bestIdx / tilesX;
-        offset.x += ((bestX + 0.5f) * TILE_W - width  * 0.5f) / zoom;
-        offset.y += ((bestY + 0.5f) * TILE_H - height * 0.5f) / zoom;
+        int bestX = bestIdx%tilesX, bestY=bestIdx/tilesX;
+        offset.x += ((bestX+0.5f)*TILE_W - width*0.5f)/zoom;
+        offset.y += ((bestY+0.5f)*TILE_H - height*0.5f)/zoom;
         zoom *= 1.2f;
 
-        // --- Rendern via Shader ---
-        glClearColor(0, 0, 0, 1);
+        // h) Rendern via Shader
+        glClearColor(0,0,0,1);
         glClear(GL_COLOR_BUFFER_BIT);
-
         glUseProgram(program);
         glBindVertexArray(VAO);
-
-        // Textur aus PBO
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, tex);
-        glUniform1i(glGetUniformLocation(program, "uTex"), 0);
-
-        // Draw Quad
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glUniform1i(glGetUniformLocation(program,"uTex"),0);
+        glDrawArrays(GL_TRIANGLE_STRIP,0,4);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -225,11 +205,11 @@ int main() {
     // Cleanup
     cudaFree(d_complexity);
     cudaGraphicsUnregisterResource(cudaPbo);
-    glDeleteBuffers(1, &pbo);
-    glDeleteTextures(1, &tex);
+    glDeleteBuffers(1,&pbo);
+    glDeleteTextures(1,&tex);
     glDeleteProgram(program);
-    glDeleteBuffers(1, &VBO);
-    glDeleteVertexArrays(1, &VAO);
+    glDeleteBuffers(1,&VBO);
+    glDeleteVertexArrays(1,&VAO);
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
