@@ -35,11 +35,7 @@ __global__ void computeComplexity(const uchar4* img,
                                   float* complexity);
 
 int main() {
-    // **––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––**
     std::cout << "=== Programm gestartet ===" << std::endl;
-    // prüfe, ob sofort ausgegeben wird
-    std::cout.flush();
-    // **––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––**
 
     const int width  = 1024;
     const int height = 768;
@@ -49,7 +45,6 @@ int main() {
     float2 offset = make_float2(0.0f, 0.0f);
     int   maxIter = 500;
 
-    // GLFW + OpenGL init
     if (!glfwInit()) {
         std::cerr << "glfwInit() failed" << std::endl;
         return EXIT_FAILURE;
@@ -71,7 +66,6 @@ int main() {
     }
     std::cout << "GLEW initialisiert, OpenGL-Kontext ready" << std::endl;
 
-    // PBO + CUDA-GL Interop
     GLuint pbo;
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -81,7 +75,6 @@ int main() {
     checkCuda(cudaGraphicsGLRegisterBuffer(&cudaPbo, pbo, cudaGraphicsMapFlagsWriteDiscard),
               "cudaGraphicsGLRegisterBuffer");
 
-    // Texture
     GLuint tex;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
@@ -89,7 +82,6 @@ int main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    // Complexity-Buffer
     int tilesX     = (width  + TILE_W - 1) / TILE_W;
     int tilesY     = (height + TILE_H - 1) / TILE_H;
     int totalTiles = tilesX * tilesY;
@@ -100,48 +92,42 @@ int main() {
 
     std::cout << "Setup abgeschlossen, betrete Haupt-Loop" << std::endl;
 
-    // Haupt-Loop
+    int frameCount = 0;
     while (!glfwWindowShouldClose(window)) {
-        // 1) Reset Complexity
+        // Debug-Ausgabe pro Frame
+        std::cout << "Frame " << frameCount++
+                  << ": Zoom=" << zoom
+                  << " Offset=(" << offset.x << "," << offset.y << ")" << std::endl;
+        std::cout.flush();
+
         checkCuda(cudaMemset(d_complexity, 0, totalTiles * sizeof(float)), "memset complexity");
 
-        // 2) PBO → CUDA
         uchar4* d_img = nullptr;
-        size_t   sz   = 0;
+        size_t sz = 0;
         checkCuda(cudaGraphicsMapResources(1, &cudaPbo, 0), "MapResources");
-        checkCuda(cudaGraphicsResourceGetMappedPointer((void**)&d_img, &sz, cudaPbo),
-                  "GetMappedPointer");
+        checkCuda(cudaGraphicsResourceGetMappedPointer((void**)&d_img, &sz, cudaPbo), "GetMappedPointer");
 
-        // 3) Fraktal-Kernel tile-parallel: ein Block pro Tile
         dim3 blockDim(TILE_W, TILE_H);
         dim3 gridDim (tilesX,   tilesY);
-        launch_mandelbrotHybrid(d_img,
-                                width, height,
-                                zoom, offset,
-                                maxIter);
+        launch_mandelbrotHybrid(d_img, width, height, zoom, offset, maxIter);
         checkCuda(cudaDeviceSynchronize(), "mandelbrotHybrid");
 
-        // 4) Complexity-Kernel
         computeComplexity<<<gridDim, blockDim>>>(d_img, width, height, d_complexity);
         checkCuda(cudaDeviceSynchronize(), "computeComplexity");
 
-        // 5) Unmap PBO
         checkCuda(cudaGraphicsUnmapResources(1, &cudaPbo, 0), "UnmapResources");
 
-        // 6) Best Tile finden
-        checkCuda(cudaMemcpy(h_complexity.data(), d_complexity,
-                             totalTiles * sizeof(float),
-                             cudaMemcpyDeviceToHost),
+        checkCuda(cudaMemcpy(h_complexity.data(), d_complexity, totalTiles * sizeof(float), cudaMemcpyDeviceToHost),
                   "Memcpy complexity");
 
-        int   bestIdx   = 0;
-        float bestScore = -1.0f;
+        int bestIdx = 0; float bestScore = -1.0f;
         for (int i = 0; i < totalTiles; ++i) {
             if (h_complexity[i] > bestScore) {
                 bestScore = h_complexity[i];
-                bestIdx   = i;
+                bestIdx = i;
             }
         }
+        std::cout << "  bestScore=" << bestScore << std::endl;
 
         int bestX = bestIdx % tilesX;
         int bestY = bestIdx / tilesX;
@@ -149,12 +135,10 @@ int main() {
         offset.y += ((bestY + 0.5f) * TILE_H - height * 0.5f) / zoom;
         zoom *= 1.2f;
 
-        // 7) Rendern aus PBO
         glClear(GL_COLOR_BUFFER_BIT);
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
         glBindTexture(GL_TEXTURE_2D, tex);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
-                        GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
         glBegin(GL_QUADS);
           glTexCoord2f(0,0); glVertex2f(-1,-1);
@@ -167,7 +151,6 @@ int main() {
         glfwPollEvents();
     }
 
-    // Cleanup
     cudaFree(d_complexity);
     cudaGraphicsUnregisterResource(cudaPbo);
     glDeleteBuffers(1, &pbo);
