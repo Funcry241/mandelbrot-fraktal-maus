@@ -115,8 +115,7 @@ int main() {
     // --- Mandelbrot-Parameter ---
     float zoom = 300.0f;
     float2 offset = make_float2(0.0f, 0.0f);
-    // Max. Iterationen erhöhen, damit bei stärkerem Zoom noch Struktur bleibt
-    int maxIter = 2000;
+    int maxIter = 500;  // wieder zurück auf 500, damit Farbstrukturen sichtbar bleiben
 
     // --- GLFW + GL Context ---
     if (!glfwInit()) std::exit(EXIT_FAILURE);
@@ -124,6 +123,7 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     GLFWwindow* win = glfwCreateWindow(W, H, "OtterDream Mandelbrot", nullptr, nullptr);
+    if (!win) std::exit(EXIT_FAILURE);
     glfwMakeContextCurrent(win);
 
     if (glewInit() != GLEW_OK) {
@@ -201,19 +201,19 @@ int main() {
 
     int frame = 0;
     while (!glfwWindowShouldClose(win)) {
-        // 1) map PBO
+        // 1) PBO → CUDA-Device
         uchar4* d_img = nullptr;
-        size_t sz = 0;
+        size_t sz_ptr = 0;
         CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPbo, 0));
         CUDA_CHECK(cudaGraphicsResourceGetMappedPointer(
-                       (void**)&d_img, &sz, cudaPbo));
+                       (void**)&d_img, &sz_ptr, cudaPbo));
 
-        // 2) Mandelbrot-Kernel
+        // 2) Mandelbrot-Kernel aufrufen
         launch_mandelbrotHybrid(d_img, W, H, zoom, offset, maxIter);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        // 3) Complexity
+        // 3) Complexity-Kernel
         CUDA_CHECK(cudaMemset(d_complexity, 0,
                               totalTiles * sizeof(float)));
         dim3 bd(TILE_W, TILE_H), gd(tilesX, tilesY);
@@ -221,10 +221,10 @@ int main() {
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        // 4) unmap PBO
+        // 4) PBO wieder freigeben
         CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPbo, 0));
 
-        // 5) read back complexity & find best tile
+        // 5) Auslesen der Complexity, beste Kachel finden
         CUDA_CHECK(cudaMemcpy(h_complexity.data(), d_complexity,
                               totalTiles * sizeof(float),
                               cudaMemcpyDeviceToHost));
@@ -238,22 +238,25 @@ int main() {
             }
         }
 
-        int bx = bestIdx % tilesX;
-        int by = bestIdx / tilesX;
-        offset.x += ((bx + 0.5f)*TILE_W - W*0.5f)/zoom;
-        offset.y += ((by + 0.5f)*TILE_H - H*0.5f)/zoom;
+        // Nur wenn die beste Kachel tatsächlich einen Score > 0 hat, verschieben
+        if (bestScore > 0.0f) {
+            int bx = bestIdx % tilesX;
+            int by = bestIdx / tilesX;
+            offset.x += ((bx + 0.5f)*TILE_W - W*0.5f)/zoom;
+            offset.y += ((by + 0.5f)*TILE_H - H*0.5f)/zoom;
+        }
 
-        // **Zoom langsamer gestalten**
-        zoom *= 1.05f;  // statt 1.2f
+        // Zoom **sehr langsam** anpassen (wegen zu schnellem „Wegzoom“ vorher)
+        zoom *= 1.01f;
 
-        // 6) upload to texture
+        // 6) PBO → Texture
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
         glBindTexture(GL_TEXTURE_2D, tex);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
                         GL_RGBA, GL_UNSIGNED_BYTE, 0);
         GL_CHECK();
 
-        // 7) render
+        // 7) Rendern mit Vollbild-Quad + Shader
         glViewport(0, 0, W, H);
         glClear(GL_COLOR_BUFFER_BIT);
         glUseProgram(program);
