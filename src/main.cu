@@ -1,6 +1,5 @@
 // Datei: src/main.cu
 // Maus-Kommentar: Vollständiger Host-Code mit Modern-GL, CUDA-Interop, Auto-Zoom + Complexity-Feedback
-//                 Jetzt so umgestellt, dass das Fraktal **erst** gerendert wird und **dann** zoom/offset aktualisiert wird.
 
 #include "core_kernel.h"
 
@@ -100,12 +99,10 @@ GLuint createProgram() {
 }
 
 // -------------------------------------------------------------
-// Prototyp für Complexity-Kernel (wird in core_kernel.cu definiert)
-extern "C" __global__ void computeComplexity(
-    const uchar4* img,
-    int width, int height,
-    float* complexity
-);
+// Prototyp für Complexity-Kernel
+__global__ void computeComplexity(const uchar4* img,
+                                  int width, int height,
+                                  float* complexity);
 
 // -------------------------------------------------------------
 int main() {
@@ -115,10 +112,11 @@ int main() {
     const int W = 1024, H = 768;
     size_t imgBytes = size_t(W) * H * sizeof(uchar4);
 
-    // --- Mandelbrot-Parameter (Initial) ---
+    // --- Mandelbrot-Parameter ---
     float zoom = 300.0f;
     float2 offset = make_float2(0.0f, 0.0f);
-    int maxIter = 500;
+    // Max. Iterationen erhöhen, damit bei stärkerem Zoom noch Struktur bleibt
+    int maxIter = 2000;
 
     // --- GLFW + GL Context ---
     if (!glfwInit()) std::exit(EXIT_FAILURE);
@@ -159,13 +157,13 @@ int main() {
     GLuint program = createProgram();
     GLuint VAO, VBO, EBO;
     float quad[] = {
-        //   Pos      // Tex
-        -1.0f, -1.0f,  0.0f, 0.0f,
-         1.0f, -1.0f,  1.0f, 0.0f,
-         1.0f,  1.0f,  1.0f, 1.0f,
-        -1.0f,  1.0f,  0.0f, 1.0f
+        // Pos    // Tex
+        -1,-1,    0,0,
+         1,-1,    1,0,
+         1, 1,    1,1,
+        -1, 1,    0,1
     };
-    unsigned idx[] = { 0,1,2,  2,3,0 };
+    unsigned idx[] = {0,1,2, 2,3,0};
 
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -179,12 +177,10 @@ int main() {
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
       glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(idx), idx, GL_STATIC_DRAW);
 
-      // Position (vec2)
-      glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+      glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0);
       glEnableVertexAttribArray(0);
-      // TexCoord (vec2)
-      glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                            (void*)(2 * sizeof(float)));
+      glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float),
+                            (void*)(2*sizeof(float)));
       glEnableVertexAttribArray(1);
 
     glBindVertexArray(0);
@@ -205,26 +201,19 @@ int main() {
 
     int frame = 0;
     while (!glfwWindowShouldClose(win)) {
-        // ===========================
-        // 1) PBO → CUDA (mappen)
-        // ===========================
+        // 1) map PBO
         uchar4* d_img = nullptr;
         size_t sz = 0;
         CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPbo, 0));
         CUDA_CHECK(cudaGraphicsResourceGetMappedPointer(
                        (void**)&d_img, &sz, cudaPbo));
 
-        // ===========================
-        // 2) Mandelbrot-Kernel starten
-        // ===========================
-        //    Erzeugt das Fraktal bei gegebener Zoom-/Offset-Kombination
+        // 2) Mandelbrot-Kernel
         launch_mandelbrotHybrid(d_img, W, H, zoom, offset, maxIter);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        // ===========================
-        // 3) Complexity-Kernel starten
-        // ===========================
+        // 3) Complexity
         CUDA_CHECK(cudaMemset(d_complexity, 0,
                               totalTiles * sizeof(float)));
         dim3 bd(TILE_W, TILE_H), gd(tilesX, tilesY);
@@ -232,14 +221,10 @@ int main() {
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        // ===========================
-        // 4) PBO → GL (unmappen)
-        // ===========================
+        // 4) unmap PBO
         CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPbo, 0));
 
-        // ===========================
-        // 5) Complexity nach Host kopieren & Best-Tile finden
-        // ===========================
+        // 5) read back complexity & find best tile
         CUDA_CHECK(cudaMemcpy(h_complexity.data(), d_complexity,
                               totalTiles * sizeof(float),
                               cudaMemcpyDeviceToHost));
@@ -255,18 +240,20 @@ int main() {
 
         int bx = bestIdx % tilesX;
         int by = bestIdx / tilesX;
+        offset.x += ((bx + 0.5f)*TILE_W - W*0.5f)/zoom;
+        offset.y += ((by + 0.5f)*TILE_H - H*0.5f)/zoom;
 
-        // ===========================
-        // 6) Jetzt rendern (erst nach dem Kernel‐Aufruf!)
-        // ===========================
-        //    - Texture aktualisieren
+        // **Zoom langsamer gestalten**
+        zoom *= 1.05f;  // statt 1.2f
+
+        // 6) upload to texture
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
         glBindTexture(GL_TEXTURE_2D, tex);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
                         GL_RGBA, GL_UNSIGNED_BYTE, 0);
         GL_CHECK();
 
-        //    - Draw Fullscreen Quad
+        // 7) render
         glViewport(0, 0, W, H);
         glClear(GL_COLOR_BUFFER_BIT);
         glUseProgram(program);
@@ -277,18 +264,7 @@ int main() {
         glfwSwapBuffers(win);
         glfwPollEvents();
 
-        // ===========================
-        // 7) Erst jetzt Zoom & Offset updaten
-        // ===========================
-        //    Damit das initial gerenderte Fraktal sichtbar bleibt,
-        //    bevor Zoom/Offset sich verändern.
-        offset.x += ((bx + 0.5f) * TILE_W - W * 0.5f) / zoom;
-        offset.y += ((by + 0.5f) * TILE_H - H * 0.5f) / zoom;
-        zoom *= 1.2f;
-
-        // ===========================
-        // Debug-Log
-        // ===========================
+        // Debug-Ausgabe
         std::cout << "Frame " << frame++
                   << ": zoom=" << zoom
                   << " offset=(" << offset.x << "," << offset.y << ")"
@@ -297,7 +273,7 @@ int main() {
     }
 
     // --- Cleanup ---
-    CUDA_CHECK(cudaFree(d_complexity));    
+    CUDA_CHECK(cudaFree(d_complexity));
     CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPbo));
     glDeleteBuffers(1, &pbo);
     glDeleteTextures(1, &tex);
