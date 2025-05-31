@@ -1,8 +1,12 @@
 // Datei: src/main.cu
-// Maus-Kommentar: Vollständiger Host-Code mit Modern-GL, CUDA-Interop,
-// Auto-Zoom + Complexity-Feedback. Jetzt mit richtig gesetztem Sampler-Uniform
-// und Zoom/Offset-Update _nach_ dem Drawcall, damit der erste Frame nicht sofort
-// ins Schwarz springt.
+// Maus-Kommentar:
+// 1) Debug-Modus: Einfache Gradient-Ausgabe, um PBO→Texture→Quad-Pipeline zu prüfen.
+// 2) Sobald der Gradient klappt, können wir wieder zu Mandelbrot™ zurückschalten.
+//    Dazu am Anfang DEBUG_GRADIENT auf 0 setzen.
+//
+// Der untenstehende Code kennt zwei Modi:
+//   - DEBUG_GRADIENT == 1 → testKernel() füllt das Bild mit einem X/Y-Gradient.
+//   - DEBUG_GRADIENT == 0 → launch_mandelbrotHybrid() füllt das Bild wie gewohnt.
 
 #include "core_kernel.h"
 
@@ -44,6 +48,10 @@
             std::exit(EXIT_FAILURE);                                       \
         }                                                                  \
     } while(0)
+
+// -------------------------------------------------------------
+// Umschalter für Debug-Gradient
+#define DEBUG_GRADIENT 1
 
 // -------------------------------------------------------------
 // Shader-Quellen
@@ -102,10 +110,33 @@ GLuint createProgram() {
 }
 
 // -------------------------------------------------------------
-// Prototyp für Complexity-Kernel
+// Prototyp für Complexity-Kernel (wird im echten Mandelbrot-Modus gebraucht)
 __global__ void computeComplexity(const uchar4* img,
                                   int width, int height,
                                   float* complexity);
+
+// -------------------------------------------------------------
+// Debug / Test-Kernel: füllt IMG mit einem einfachen X/Y-Gradient
+#if DEBUG_GRADIENT
+__global__ void testKernel(uchar4* img, int width, int height) {
+    int tx = blockIdx.x * blockDim.x + threadIdx.x;
+    int ty = blockIdx.y * blockDim.y + threadIdx.y;
+    if (tx >= width || ty >= height) return;
+    // einfacher Farbverlauf: R = (tx % 256), G = (ty % 256), B = 0
+    unsigned char r = static_cast<unsigned char>(tx & 0xFF);
+    unsigned char g = static_cast<unsigned char>(ty & 0xFF);
+    img[ty * width + tx] = make_uchar4(r, g, 0, 255);
+}
+#endif
+
+// -------------------------------------------------------------
+// Echt-Kernel-Prototyp für Mandelbrot (im Nicht-Debug-Modus)
+#if !DEBUG_GRADIENT
+extern "C" void launch_mandelbrotHybrid(uchar4* img,
+                                        int w, int h,
+                                        float zoom, float2 offset,
+                                        int maxIter);
+#endif
 
 // -------------------------------------------------------------
 int main() {
@@ -115,18 +146,25 @@ int main() {
     const int W = 1024, H = 768;
     size_t imgBytes = size_t(W) * H * sizeof(uchar4);
 
-    // --- Mandelbrot-Parameter ---
+    // --- Mandelbrot-Parameter (im echten Modus) ---
     float zoom = 300.0f;
     float2 offset = make_float2(0.0f, 0.0f);
-    int maxIter = 500;  // hoch genug, um Farbübergänge zu sehen, aber nicht zu stark
+    int maxIter = 500;
 
     // --- GLFW + GL Context ---
-    if (!glfwInit()) std::exit(EXIT_FAILURE);
+    if (!glfwInit()) {
+        std::cerr << "GLFW-Init fehlgeschlagen!\n";
+        std::exit(EXIT_FAILURE);
+    }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
     GLFWwindow* win = glfwCreateWindow(W, H, "OtterDream Mandelbrot", nullptr, nullptr);
-    if (!win) std::exit(EXIT_FAILURE);
+    if (!win) {
+        std::cerr << "Fenster-Erstellung fehlgeschlagen!\n";
+        std::exit(EXIT_FAILURE);
+    }
     glfwMakeContextCurrent(win);
 
     if (glewInit() != GLEW_OK) {
@@ -143,8 +181,9 @@ int main() {
     GL_CHECK();
 
     cudaGraphicsResource* cudaPbo;
-    CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPbo, pbo,
-                                            cudaGraphicsMapFlagsWriteDiscard));
+    CUDA_CHECK(cudaGraphicsGLRegisterBuffer(
+        &cudaPbo, pbo, cudaGraphicsMapFlagsWriteDiscard
+    ));
 
     // --- Texture Setup ---
     GLuint tex;
@@ -160,7 +199,7 @@ int main() {
     // --- Shader + Quad Setup ---
     GLuint program = createProgram();
 
-    // Setze Sampler-Uniform "uTex" auf Texture Unit 0
+    // Sampler-Uniform "uTex" auf Texture Unit 0 setzen
     glUseProgram(program);
     GLint loc = glGetUniformLocation(program, "uTex");
     if (loc >= 0) {
@@ -172,10 +211,10 @@ int main() {
     GLuint VAO, VBO, EBO;
     float quad[] = {
         // Pos    // Tex
-        -1,-1,    0,0,
-         1,-1,    1,0,
-         1, 1,    1,1,
-        -1, 1,    0,1
+        -1.0f,-1.0f,   0.0f,0.0f,
+         1.0f,-1.0f,   1.0f,0.0f,
+         1.0f, 1.0f,   1.0f,1.0f,
+        -1.0f, 1.0f,   0.0f,1.0f
     };
     unsigned idx[] = {0,1,2, 2,3,0};
 
@@ -191,24 +230,25 @@ int main() {
       glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(idx), idx, GL_STATIC_DRAW);
 
       // Position (location=0)
-      glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0);
+      glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
       glEnableVertexAttribArray(0);
       // TexCoord (location=1)
-      glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float),
-                            (void*)(2*sizeof(float)));
+      glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                            (void*)(2 * sizeof(float)));
       glEnableVertexAttribArray(1);
     glBindVertexArray(0);
     GL_CHECK();
 
-    // --- Complexity Buffer ---
+    // --- Complexity Buffer (wird im echten Modus benutzt) ---
     int tilesX = (W + TILE_W - 1) / TILE_W;
     int tilesY = (H + TILE_H - 1) / TILE_H;
     int totalTiles = tilesX * tilesY;
 
     float* d_complexity = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_complexity,
-                          totalTiles * sizeof(float)));
-
+    if (!DEBUG_GRADIENT) {
+        CUDA_CHECK(cudaMalloc(&d_complexity,
+                              totalTiles * sizeof(float)));
+    }
     std::vector<float> h_complexity(totalTiles);
 
     std::cout << "Setup abgeschlossen, betrete Haupt-Loop\n";
@@ -222,23 +262,59 @@ int main() {
         CUDA_CHECK(cudaGraphicsResourceGetMappedPointer(
                        (void**)&d_img, &sz_ptr, cudaPbo));
 
-        // 2) Mandelbrot-Kernel ausführen
+#if DEBUG_GRADIENT
+        // *** Debug-Modus: einfacher Gradient ***
+        dim3 bd_g(16, 16);
+        dim3 gd_g((W + bd_g.x - 1) / bd_g.x,
+                  (H + bd_g.y - 1) / bd_g.y);
+        testKernel<<<gd_g, bd_g>>>(d_img, W, H);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+#else
+        // *** Echte Mandelbrot-Ausgabe ***
         launch_mandelbrotHybrid(d_img, W, H, zoom, offset, maxIter);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        // 3) Complexity-Kernel
+        // Complexity-Kernel
         CUDA_CHECK(cudaMemset(d_complexity, 0,
                               totalTiles * sizeof(float)));
-        dim3 bd(TILE_W, TILE_H), gd(tilesX, tilesY);
+        dim3 bd(TILE_W, TILE_H);
+        dim3 gd(tilesX, tilesY);
         computeComplexity<<<gd, bd>>>(d_img, W, H, d_complexity);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
+#endif
 
-        // 4) PBO unmappen
+        // 2) PBO unmappen
         CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPbo, 0));
 
-        // 5) Complexity auslesen & „beste Kachel“ finden
+        // 3) Upload PBO → Texture
+        glActiveTexture(GL_TEXTURE0);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
+                        GL_RGBA, GL_UNSIGNED_BYTE, 0);
+        GL_CHECK();
+
+        // 4) Rendern mit Vollbild-Quad + Shader
+        glViewport(0, 0, W, H);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glUseProgram(program);
+        glBindVertexArray(VAO);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+        GL_CHECK();
+
+        glfwSwapBuffers(win);
+        glfwPollEvents();
+
+        // 5) Debug-Ausgabe (NUR im echten Modus sinnvoll)
+#if DEBUG_GRADIENT
+        if (frame == 0) {
+            std::cout << "(DEBUG_GRADIENT-Modus: Farbverlauf angezeigt)\n";
+        }
+#else
+        // read back complexity & finde beste Kachel
         CUDA_CHECK(cudaMemcpy(h_complexity.data(), d_complexity,
                               totalTiles * sizeof(float),
                               cudaMemcpyDeviceToHost));
@@ -252,46 +328,31 @@ int main() {
             }
         }
 
-        // 6) Upload PBO → Texture (jetzt erst auf Texture Unit 0 binden)
-        glActiveTexture(GL_TEXTURE0);
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
-                        GL_RGBA, GL_UNSIGNED_BYTE, 0);
-        GL_CHECK();
-
-        // 7) Rendern mit Vollbild-Quad + Shader
-        glViewport(0, 0, W, H);
-        glClear(GL_COLOR_BUFFER_BIT);
-        glUseProgram(program);
-        glBindVertexArray(VAO);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
-        GL_CHECK();
-
-        glfwSwapBuffers(win);
-        glfwPollEvents();
-
-        // 8) Debug-Ausgabe
-        std::cout << "Frame " << frame++
+        std::cout << "Frame " << frame
                   << ": zoom=" << zoom
                   << " offset=(" << offset.x << "," << offset.y << ")"
                   << " bestScore=" << bestScore
                   << std::endl;
+#endif
 
-        // 9) Zoom + Offset _nachdem_ wir bereits gerendert haben,
-        //    damit der allererste Frame noch die Mitte zeigt
+        frame++;
+
+#if !DEBUG_GRADIENT
+        // 6) Zoom + Offset NACH dem Rendern (nur im echten Modus)
         if (bestScore > 0.0f) {
             int bx = bestIdx % tilesX;
             int by = bestIdx / tilesX;
             offset.x += ((bx + 0.5f)*TILE_W - W*0.5f)/zoom;
             offset.y += ((by + 0.5f)*TILE_H - H*0.5f)/zoom;
         }
-        // Zoom verlangsamen, damit das Bild nicht sofort verschwindet
         zoom *= 1.01f;
+#endif
     }
 
     // --- Cleanup ---
-    CUDA_CHECK(cudaFree(d_complexity));
+    if (!DEBUG_GRADIENT) {
+        CUDA_CHECK(cudaFree(d_complexity));
+    }
     CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPbo));
     glDeleteBuffers(1, &pbo);
     glDeleteTextures(1, &tex);
