@@ -1,5 +1,8 @@
 // Datei: src/main.cu
-// Maus-Kommentar: Vollständiger Host-Code mit Modern-GL, CUDA-Interop, Auto-Zoom + Complexity-Feedback
+// Maus-Kommentar: Vollständiger Host-Code mit Modern-GL, CUDA-Interop,
+// Auto-Zoom + Complexity-Feedback. Jetzt mit richtig gesetztem Sampler-Uniform
+// und Zoom/Offset-Update _nach_ dem Drawcall, damit der erste Frame nicht sofort
+// ins Schwarz springt.
 
 #include "core_kernel.h"
 
@@ -115,7 +118,7 @@ int main() {
     // --- Mandelbrot-Parameter ---
     float zoom = 300.0f;
     float2 offset = make_float2(0.0f, 0.0f);
-    int maxIter = 500;  // wieder zurück auf 500, damit Farbstrukturen sichtbar bleiben
+    int maxIter = 500;  // hoch genug, um Farbübergänge zu sehen, aber nicht zu stark
 
     // --- GLFW + GL Context ---
     if (!glfwInit()) std::exit(EXIT_FAILURE);
@@ -146,6 +149,7 @@ int main() {
     // --- Texture Setup ---
     GLuint tex;
     glGenTextures(1, &tex);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -155,6 +159,16 @@ int main() {
 
     // --- Shader + Quad Setup ---
     GLuint program = createProgram();
+
+    // Setze Sampler-Uniform "uTex" auf Texture Unit 0
+    glUseProgram(program);
+    GLint loc = glGetUniformLocation(program, "uTex");
+    if (loc >= 0) {
+        glUniform1i(loc, 0);
+    } else {
+        std::cerr << "Warnung: Uniform 'uTex' nicht gefunden!\n";
+    }
+
     GLuint VAO, VBO, EBO;
     float quad[] = {
         // Pos    // Tex
@@ -170,19 +184,19 @@ int main() {
     glGenBuffers(1, &EBO);
 
     glBindVertexArray(VAO);
-
       glBindBuffer(GL_ARRAY_BUFFER, VBO);
       glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
 
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
       glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(idx), idx, GL_STATIC_DRAW);
 
+      // Position (location=0)
       glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0);
       glEnableVertexAttribArray(0);
+      // TexCoord (location=1)
       glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float),
                             (void*)(2*sizeof(float)));
       glEnableVertexAttribArray(1);
-
     glBindVertexArray(0);
     GL_CHECK();
 
@@ -201,14 +215,14 @@ int main() {
 
     int frame = 0;
     while (!glfwWindowShouldClose(win)) {
-        // 1) PBO → CUDA-Device
+        // 1) PBO → CUDA-Device (mappen)
         uchar4* d_img = nullptr;
         size_t sz_ptr = 0;
         CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPbo, 0));
         CUDA_CHECK(cudaGraphicsResourceGetMappedPointer(
                        (void**)&d_img, &sz_ptr, cudaPbo));
 
-        // 2) Mandelbrot-Kernel aufrufen
+        // 2) Mandelbrot-Kernel ausführen
         launch_mandelbrotHybrid(d_img, W, H, zoom, offset, maxIter);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
@@ -221,10 +235,10 @@ int main() {
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        // 4) PBO wieder freigeben
+        // 4) PBO unmappen
         CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPbo, 0));
 
-        // 5) Auslesen der Complexity, beste Kachel finden
+        // 5) Complexity auslesen & „beste Kachel“ finden
         CUDA_CHECK(cudaMemcpy(h_complexity.data(), d_complexity,
                               totalTiles * sizeof(float),
                               cudaMemcpyDeviceToHost));
@@ -238,18 +252,8 @@ int main() {
             }
         }
 
-        // Nur wenn die beste Kachel tatsächlich einen Score > 0 hat, verschieben
-        if (bestScore > 0.0f) {
-            int bx = bestIdx % tilesX;
-            int by = bestIdx / tilesX;
-            offset.x += ((bx + 0.5f)*TILE_W - W*0.5f)/zoom;
-            offset.y += ((by + 0.5f)*TILE_H - H*0.5f)/zoom;
-        }
-
-        // Zoom **sehr langsam** anpassen (wegen zu schnellem „Wegzoom“ vorher)
-        zoom *= 1.01f;
-
-        // 6) PBO → Texture
+        // 6) Upload PBO → Texture (jetzt erst auf Texture Unit 0 binden)
+        glActiveTexture(GL_TEXTURE0);
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
         glBindTexture(GL_TEXTURE_2D, tex);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
@@ -267,12 +271,23 @@ int main() {
         glfwSwapBuffers(win);
         glfwPollEvents();
 
-        // Debug-Ausgabe
+        // 8) Debug-Ausgabe
         std::cout << "Frame " << frame++
                   << ": zoom=" << zoom
                   << " offset=(" << offset.x << "," << offset.y << ")"
                   << " bestScore=" << bestScore
                   << std::endl;
+
+        // 9) Zoom + Offset _nachdem_ wir bereits gerendert haben,
+        //    damit der allererste Frame noch die Mitte zeigt
+        if (bestScore > 0.0f) {
+            int bx = bestIdx % tilesX;
+            int by = bestIdx / tilesX;
+            offset.x += ((bx + 0.5f)*TILE_W - W*0.5f)/zoom;
+            offset.y += ((by + 0.5f)*TILE_H - H*0.5f)/zoom;
+        }
+        // Zoom verlangsamen, damit das Bild nicht sofort verschwindet
+        zoom *= 1.01f;
     }
 
     // --- Cleanup ---
