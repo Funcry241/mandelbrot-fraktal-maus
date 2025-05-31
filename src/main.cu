@@ -1,5 +1,6 @@
 // Datei: src/main.cu
 // Maus-Kommentar: Vollständiger Host-Code mit Modern-GL, CUDA-Interop, Auto-Zoom + Complexity-Feedback
+//                 Jetzt so umgestellt, dass das Fraktal **erst** gerendert wird und **dann** zoom/offset aktualisiert wird.
 
 #include "core_kernel.h"
 
@@ -99,10 +100,12 @@ GLuint createProgram() {
 }
 
 // -------------------------------------------------------------
-// Prototyp für Complexity-Kernel (implementiert in core_kernel.cu)
-extern "C" __global__ void computeComplexity(const uchar4* img,
-                                              int width, int height,
-                                              float* complexity);
+// Prototyp für Complexity-Kernel (wird in core_kernel.cu definiert)
+extern "C" __global__ void computeComplexity(
+    const uchar4* img,
+    int width, int height,
+    float* complexity
+);
 
 // -------------------------------------------------------------
 int main() {
@@ -112,7 +115,7 @@ int main() {
     const int W = 1024, H = 768;
     size_t imgBytes = size_t(W) * H * sizeof(uchar4);
 
-    // --- Mandelbrot-Parameter ---
+    // --- Mandelbrot-Parameter (Initial) ---
     float zoom = 300.0f;
     float2 offset = make_float2(0.0f, 0.0f);
     int maxIter = 500;
@@ -154,47 +157,36 @@ int main() {
 
     // --- Shader + Quad Setup ---
     GLuint program = createProgram();
-
-    // ** Hier ist die entscheidende Ergänzung: den Sampler‐Uniform auf Texture‐Unit 0 setzen **
-    glUseProgram(program);
-    GLint loc = glGetUniformLocation(program, "uTex");
-    if (loc < 0) {
-        std::cerr << "Uniform 'uTex' nicht gefunden!\n";
-        std::exit(EXIT_FAILURE);
-    }
-    glUniform1i(loc, 0); // Der Frag-Shader liest später aus GL_TEXTURE0
-    GL_CHECK();
-
-    // Vertex‐Daten für ein Fullscreen‐Quad
     GLuint VAO, VBO, EBO;
     float quad[] = {
-        // Position (x,y)   // TexCoord (u,v)
-        -1.0f, -1.0f,       0.0f, 0.0f,
-         1.0f, -1.0f,       1.0f, 0.0f,
-         1.0f,  1.0f,       1.0f, 1.0f,
-        -1.0f,  1.0f,       0.0f, 1.0f
+        //   Pos      // Tex
+        -1.0f, -1.0f,  0.0f, 0.0f,
+         1.0f, -1.0f,  1.0f, 0.0f,
+         1.0f,  1.0f,  1.0f, 1.0f,
+        -1.0f,  1.0f,  0.0f, 1.0f
     };
-    unsigned int idx[] = { 0, 1, 2,  2, 3, 0 };
+    unsigned idx[] = { 0,1,2,  2,3,0 };
 
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
 
     glBindVertexArray(VAO);
+
       glBindBuffer(GL_ARRAY_BUFFER, VBO);
       glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
 
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
       glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(idx), idx, GL_STATIC_DRAW);
 
-      // Layout: location=0 → vec2 aPos
-      glEnableVertexAttribArray(0);
+      // Position (vec2)
       glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-
-      // Layout: location=1 → vec2 aTex
-      glEnableVertexAttribArray(1);
+      glEnableVertexAttribArray(0);
+      // TexCoord (vec2)
       glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
                             (void*)(2 * sizeof(float)));
+      glEnableVertexAttribArray(1);
+
     glBindVertexArray(0);
     GL_CHECK();
 
@@ -204,7 +196,8 @@ int main() {
     int totalTiles = tilesX * tilesY;
 
     float* d_complexity = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_complexity, totalTiles * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_complexity,
+                          totalTiles * sizeof(float)));
 
     std::vector<float> h_complexity(totalTiles);
 
@@ -212,34 +205,44 @@ int main() {
 
     int frame = 0;
     while (!glfwWindowShouldClose(win)) {
-        // 1) map PBO
+        // ===========================
+        // 1) PBO → CUDA (mappen)
+        // ===========================
         uchar4* d_img = nullptr;
         size_t sz = 0;
         CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPbo, 0));
         CUDA_CHECK(cudaGraphicsResourceGetMappedPointer(
                        (void**)&d_img, &sz, cudaPbo));
 
-        // 2) Mandelbrot-Kernel aufrufen
+        // ===========================
+        // 2) Mandelbrot-Kernel starten
+        // ===========================
+        //    Erzeugt das Fraktal bei gegebener Zoom-/Offset-Kombination
         launch_mandelbrotHybrid(d_img, W, H, zoom, offset, maxIter);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        // 3) Complexity-Kernel
-        CUDA_CHECK(cudaMemset(d_complexity, 0, totalTiles * sizeof(float)));
+        // ===========================
+        // 3) Complexity-Kernel starten
+        // ===========================
+        CUDA_CHECK(cudaMemset(d_complexity, 0,
+                              totalTiles * sizeof(float)));
         dim3 bd(TILE_W, TILE_H), gd(tilesX, tilesY);
         computeComplexity<<<gd, bd>>>(d_img, W, H, d_complexity);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        // 4) unmap PBO
+        // ===========================
+        // 4) PBO → GL (unmappen)
+        // ===========================
         CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPbo, 0));
 
-        // 5) read back complexity & find largest-score-Tile
-        CUDA_CHECK(cudaMemcpy(
-            h_complexity.data(),
-            d_complexity,
-            totalTiles * sizeof(float),
-            cudaMemcpyDeviceToHost));
+        // ===========================
+        // 5) Complexity nach Host kopieren & Best-Tile finden
+        // ===========================
+        CUDA_CHECK(cudaMemcpy(h_complexity.data(), d_complexity,
+                              totalTiles * sizeof(float),
+                              cudaMemcpyDeviceToHost));
 
         int bestIdx = 0;
         float bestScore = -1.0f;
@@ -252,23 +255,20 @@ int main() {
 
         int bx = bestIdx % tilesX;
         int by = bestIdx / tilesX;
-        offset.x += ((bx + 0.5f) * TILE_W - W * 0.5f) / zoom;
-        offset.y += ((by + 0.5f) * TILE_H - H * 0.5f) / zoom;
-        zoom *= 1.2f;
 
-        // 6) Textur‐Upload: PBO → Texture
-        //    Wichtig: aktiviere Texture‐Unit 0, bevor du bindest
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, tex);
+        // ===========================
+        // 6) Jetzt rendern (erst nach dem Kernel‐Aufruf!)
+        // ===========================
+        //    - Texture aktualisieren
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+        glBindTexture(GL_TEXTURE_2D, tex);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
                         GL_RGBA, GL_UNSIGNED_BYTE, 0);
         GL_CHECK();
 
-        // 7) Rendern des Vollbild‐Quads
+        //    - Draw Fullscreen Quad
         glViewport(0, 0, W, H);
         glClear(GL_COLOR_BUFFER_BIT);
-
         glUseProgram(program);
         glBindVertexArray(VAO);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
@@ -277,7 +277,18 @@ int main() {
         glfwSwapBuffers(win);
         glfwPollEvents();
 
-        // Debug‐Log
+        // ===========================
+        // 7) Erst jetzt Zoom & Offset updaten
+        // ===========================
+        //    Damit das initial gerenderte Fraktal sichtbar bleibt,
+        //    bevor Zoom/Offset sich verändern.
+        offset.x += ((bx + 0.5f) * TILE_W - W * 0.5f) / zoom;
+        offset.y += ((by + 0.5f) * TILE_H - H * 0.5f) / zoom;
+        zoom *= 1.2f;
+
+        // ===========================
+        // Debug-Log
+        // ===========================
         std::cout << "Frame " << frame++
                   << ": zoom=" << zoom
                   << " offset=(" << offset.x << "," << offset.y << ")"
@@ -286,7 +297,7 @@ int main() {
     }
 
     // --- Cleanup ---
-    CUDA_CHECK(cudaFree(d_complexity));
+    CUDA_CHECK(cudaFree(d_complexity));    
     CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPbo));
     glDeleteBuffers(1, &pbo);
     glDeleteTextures(1, &tex);
