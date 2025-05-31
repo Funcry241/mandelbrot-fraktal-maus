@@ -51,7 +51,7 @@
 
 // -------------------------------------------------------------
 // Umschalter für Debug-Gradient
-#define DEBUG_GRADIENT 1
+#define DEBUG_GRADIENT 0
 
 // -------------------------------------------------------------
 // Shader-Quellen
