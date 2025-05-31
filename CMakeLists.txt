@@ -1,55 +1,70 @@
 cmake_minimum_required(VERSION 3.24)
-project(mandelbrot_otterdream LANGUAGES CXX CUDA)
+project(OtterDreamMandelbrot LANGUAGES CXX CUDA)
 
-# ─── Manifest Mode für vcpkg ────────────────────────────────────────────────
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+# -------------------------------------------------
+#   vcpkg-Toolchain (falls Du vcpkg nutzt)
+#   Diese Zeile nur aktivieren, wenn Du vcpkg eingebunden hast:
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    CACHE STRING "Vcpkg toolchain file")
 set(VCPKG_MANIFEST_MODE ON)
 
-# ─── C++ & CUDA Standards ──────────────────────────────────────────────────
-set(CMAKE_CXX_STANDARD 17)
+# -------------------------------------------------
+#   C++ & CUDA Standard
+set(CMAKE_CXX_STANDARD    17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-enable_language(CUDA)
-set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD   17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-# ─── CUDA Setup ────────────────────────────────────────────────────────────
-# Separable Compilation erlaubt Device-Linking über mehrere CU-Units
+# -------------------------------------------------
+#   Explizit auf dynamische CUDA-Runtime umschalten:
+#   Verhindert, dass sowohl cudart.lib als auch cudart_static.lib eingebunden werden.
+#   (Benötigt CMake ≥ 3.17.)
+set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
+
+#   Separables Compilation erlaubt device‐Code in mehreren .cu‐Dateien
 set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
-# Ziel-Architekturen (ggf. an deine Karte anpassen)
-set(CMAKE_CUDA_ARCHITECTURES 50 60 70 75 80)
 
-# ─── OpenGL + Windowing über vcpkg ─────────────────────────────────────────
-find_package(OpenGL REQUIRED)
-find_package(glfw3 CONFIG REQUIRED)
-find_package(GLEW CONFIG REQUIRED)
+# -------------------------------------------------
+#   Find necessary packages
+find_package(CUDAToolkit REQUIRED)    # liefert CUDA::cudart
+find_package(OpenGL REQUIRED)         # liefert OpenGL::GL
+find_package(glfw3 3.3 REQUIRED CONFIG)  # GLFW::GLFW oder "glfw"
+find_package(GLEW REQUIRED)           # liefert GLEW::GLEW
 
-# ─── Executable – alle .cu und .cpp Dateien ─────────────────────────────────
+# -------------------------------------------------
+#   Executable aus Deinen Quell‐Dateien
 add_executable(mandelbrot_otterdream
     src/main.cu
     src/core_kernel.cu
 )
 
-# ─── Sprachstandards aktivieren ─────────────────────────────────────────────
-target_compile_features(mandelbrot_otterdream PRIVATE
-    cxx_std_17
-    cuda_std_17
+#   Header‐Verzeichnis
+target_include_directories(mandelbrot_otterdream
+    PRIVATE ${CMAKE_SOURCE_DIR}/src
 )
 
-# ─── Link gegen Libraries ──────────────────────────────────────────────────
+# -------------------------------------------------
+#   CUDA‐Compiler‐Optionen
+#   -rdc=true aktiviert Separables Compilation
+target_compile_options(mandelbrot_otterdream
+    PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>
+)
+
+# -------------------------------------------------
+#   Link gegen CUDA-Runtime (dynamisch), OpenGL, GLFW und GLEW
 target_link_libraries(mandelbrot_otterdream
     PRIVATE
-      # GLEW (Import-Library für glew32.dll)
-      GLEW::GLEW
-      # GLFW (Import-Library für glfw3.dll)
-      glfw
-      # OpenGL
+      CUDA::cudart
       OpenGL::GL
+      glfw
+      GLEW::GLEW
 )
 
-# ─── Falls du GLEW statisch verwenden willst, entkommentiere: ──────────────
-# target_compile_definitions(mandelbrot_otterdream PRIVATE GLEW_STATIC)
-
-# ─── Optional: Mehr Warnungen und Debug-Infos ───────────────────────────────
-# enable_testing()
-# add_compile_options(-Wall -Wextra -Wpedantic)
-# set(CMAKE_BUILD_TYPE Debug)
+# -------------------------------------------------
+#   Modern Language Features
+target_compile_features(mandelbrot_otterdream
+    PRIVATE
+      cxx_std_17
+      cuda_std_17
+)
