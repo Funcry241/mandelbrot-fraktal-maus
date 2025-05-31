@@ -1,19 +1,41 @@
-﻿# Build-Ordner und Distribution
+﻿# ----------------------------------------------------------------------
+# Build-Ordner und Distribution
 /build/
 /dist/
 
-# Visual Studio Dateien
-*.vcxproj*
+# ----------------------------------------------------------------------
+# Visual Studio-Dateien (Projekte & Lösungen)
+/*.vcxproj*
 *.suo
 *.user
 *.vcxproj.filters
 
-# VSCode Einstellungen
+# ----------------------------------------------------------------------
+# VSCode-Einstellungen
 .vscode/
 
-# Logs und temporÃ¤re Dateien
+# ----------------------------------------------------------------------
+# Temporäre Dateien und Logs
 *.log
 Thumbs.db
 
-# CUDA Laufzeit-DLLs
-"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*/bin/"
+# ----------------------------------------------------------------------
+# vcpkg-Ordner (Abhängigkeiten & Pakete)
+vcpkg/
+
+# ----------------------------------------------------------------------
+# (Optional) Weitere Artefakte, die üblicherweise nicht versioniert werden
+# Object- & Bibliotheksdateien
+*.obj
+*.lib
+*.dll
+*.exe
+*.pdb
+
+# ----------------------------------------------------------------------
+# (Optional) macOS-spezifisch
+.DS_Store
+
+# ----------------------------------------------------------------------
+# (Optional) Linux-spezifisch
+*~
