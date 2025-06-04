@@ -7,8 +7,8 @@ Dieser Renderer nutzt CUDA und `double`-Präzision für schnelles, interaktives 
 ## Voraussetzungen
 
 - Windows 10/11
-- NVIDIA CUDA Toolkit (v12.9 empfohlen)
-- Visual Studio Build Tools (2022)
+- NVIDIA CUDA Toolkit (v12.9 empfohlen) — **nvcc** muss im `PATH` verfügbar sein.
+- Visual Studio Build Tools (2022) mit **C++ Desktop Development**
 - [vcpkg](https://github.com/microsoft/vcpkg) installiert
 
 ## Abhängigkeiten
@@ -19,6 +19,15 @@ Dieser Renderer nutzt CUDA und `double`-Präzision für schnelles, interaktives 
 - Boost (`multiprecision` für CPU-Zoomsteuerung)
 
 Alle Bibliotheken werden über `vcpkg` eingebunden.
+
+## Erforderliche Umgebungsvariablen
+
+Folgende Umgebungsvariablen müssen gesetzt sein:
+
+- `CUDA_PATH` — Verzeichnis der installierten CUDA-Toolchain, z.B. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9`
+- `VCPKG_ROOT` — Verzeichnis der lokalen vcpkg-Installation, z.B. `C:\vcpkg`
+
+> Unter Windows kannst du die Variablen unter **Systemsteuerung → System → Erweiterte Systemeinstellungen → Umgebungsvariablen** setzen.
 
 ## Build mit CMake
 
