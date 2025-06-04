@@ -23,7 +23,7 @@ Thumbs.db
 # ----------------------------------------------------------------------
 # vcpkg-Ordner (Abhängigkeiten & Pakete)
 vcpkg/
-/vcpkg_installed/     # <--- NEU! GANZ WICHTIG!
+/vcpkg_installed/
 
 # ----------------------------------------------------------------------
 # Object- & Bibliotheksdateien
@@ -34,14 +34,18 @@ vcpkg/
 *.pdb
 
 # ----------------------------------------------------------------------
-# (Optional) macOS-spezifisch
+# macOS-spezifisch
 .DS_Store
 
 # ----------------------------------------------------------------------
-# (Optional) Linux-spezifisch
+# Linux-spezifisch
 *~
 
 # ----------------------------------------------------------------------
 # ZIP-Archive und Exporte
-*.zip                # <--- NEU! Verhindert ZIP-Versionierung
-OtterDream_Project.zip # <--- NEU! Falls du genau diese Datei hast
+*.zip
+OtterDream_Project.zip
+
+# ----------------------------------------------------------------------
+# User-Settings-Dateien (lokal)
+/imgui.ini
