@@ -91,6 +91,7 @@ New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
 # 8) CMake konfigurieren und bauen
 Write-Host "[BUILD] Konfiguriere mit CMake"
+$env:Path += ";C:\ProgramData\chocolatey\bin"
 Write-Host "→ Toolchain-File: $PSScriptRoot/vcpkg/scripts/buildsystems/vcpkg.cmake"
 cmake `
     -B build -S . `

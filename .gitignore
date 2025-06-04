@@ -23,9 +23,9 @@ Thumbs.db
 # ----------------------------------------------------------------------
 # vcpkg-Ordner (Abhängigkeiten & Pakete)
 vcpkg/
+/vcpkg_installed/     # <--- NEU! GANZ WICHTIG!
 
 # ----------------------------------------------------------------------
-# (Optional) Weitere Artefakte, die üblicherweise nicht versioniert werden
 # Object- & Bibliotheksdateien
 *.obj
 *.lib
@@ -40,3 +40,8 @@ vcpkg/
 # ----------------------------------------------------------------------
 # (Optional) Linux-spezifisch
 *~
+
+# ----------------------------------------------------------------------
+# ZIP-Archive und Exporte
+*.zip                # <--- NEU! Verhindert ZIP-Versionierung
+OtterDream_Project.zip # <--- NEU! Falls du genau diese Datei hast

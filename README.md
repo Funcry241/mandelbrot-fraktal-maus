@@ -1,11 +1,13 @@
-# OtterDream Mandelbrot Renderer (CUDA + Double)
+# 🦦 OtterDream Mandelbrot Renderer (CUDA + Double)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Dieser Renderer nutzt CUDA und `double`-Präzision für schnelles, interaktives Mandelbrot-Rendering mit Auto-Zoom. OpenGL und ImGui sorgen für eine moderne Darstellung auf Windows.
 
 ## Voraussetzungen
 
 - Windows 10/11
-- NVIDIA CUDA Toolkit (v12.8 empfohlen)
+- NVIDIA CUDA Toolkit (v12.9 empfohlen)
 - Visual Studio Build Tools (2022)
 - [vcpkg](https://github.com/microsoft/vcpkg) installiert
 
@@ -14,7 +16,7 @@ Dieser Renderer nutzt CUDA und `double`-Präzision für schnelles, interaktives 
 - GLFW
 - GLEW
 - ImGui
-- Boost (nur `multiprecision` für CPU-Zoomsteuerung)
+- Boost (`multiprecision` für CPU-Zoomsteuerung)
 
 Alle Bibliotheken werden über `vcpkg` eingebunden.
 
@@ -28,7 +30,7 @@ cmake --build --preset=build
 ## Dateien
 
 - `main.cpp`: GUI, Panning, Zoom, CUDA-Interop
-- `mandelbrot.cu`: CUDA-Renderer mit Supersampling & Distance Estimation (double)
+- `mandelbrot.cu`: CUDA-Renderer mit Supersampling & Distance Estimation (`double`)
 - `gui.cpp/hpp`: HUD via ImGui
 - `CMakeLists.txt` + `CMakePresets.json`: Build-Setup
 - `README.MAUS`: Interne KI-Dokumentation, nicht für Menschen bestimmt
@@ -37,16 +39,20 @@ cmake --build --preset=build
 
 - **Auto-Zoom & Auto-Pan** basierend auf Gradientendichte
 - **2×2 Supersampling** für glatte Kanten
-- **Distance Estimation** für schöne Farbverläufe
-- **Boost BigFloat** nur für CPU-Koordinaten, nicht im CUDA-Kern
+- **Distance Estimation** für schönere Farbverläufe
+- **Boost BigFloat** für CPU-Koordinaten (nicht im CUDA-Kern)
 - **Sanfte Farbgebung** basierend auf Sinusverlauf
 
 ## Bekannte Einschränkungen
 
-- Kein echtes Double-Double mehr – zugunsten von Geschwindigkeit
-- Kein Farbschema-Wechsel über HUD
+- Kein echtes Double-Double (zugunsten von Geschwindigkeit)
+- Kein Farbschema-Wechsel über das HUD
 - Kein Multithreading auf der CPU (GPU parallelisiert)
-- Kein Dragging per Maus (noch nicht reaktiviert)
+- Dragging per Maus (noch deaktiviert)
+
+## Lizenz
+
+Dieses Projekt steht unter der [MIT License](LICENSE).
 
 ## Autor
 
@@ -54,7 +60,4 @@ OtterDream & ChatGPT (2025)
 
 ---
 
-Fragen oder Ideen? Einfach den Otter fragen. 🦦
-
-
-**Hinweis:** Das Programm stürzte ab, weil irgendwann durch null geteilt wurde – ohne Sicherung.
+**Hinweis:** Das Programm stürzte früher ab, weil bei hohen Zoom-Faktoren durch Null geteilt wurde – **jetzt mit Sicherung**. 🦦
