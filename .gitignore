@@ -13,7 +13,8 @@
 
 # ----------------------------------------------------------------------
 # VSCode-Einstellungen
-.vscode/
+.vscode/*
+!.vscode/c_cpp_properties.json
 
 # ----------------------------------------------------------------------
 # Temporäre Dateien und Logs
