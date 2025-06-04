@@ -2,6 +2,10 @@
 
 #include "opengl_utils.hpp"
 #include <iostream>
+#include <GL/glew.h>  // Sicherstellen, dass GLEW eingebunden ist
+
+// Globale VAO-ID für das Fullscreen-Quad
+GLuint gFullscreenVAO = 0;
 
 // Hilfsfunktion: Shader kompilieren
 static GLuint compileShader(GLenum type, const char* src) {
@@ -62,12 +66,14 @@ void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) {
       glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
       glEnableVertexAttribArray(1);
     glBindVertexArray(0);
+
+    gFullscreenVAO = *outVAO; // Speichere das VAO global für drawFullscreenQuad
 }
 
 void drawFullscreenQuad() {
-    // Einfaches Draw-Call, vorausgesetzt VAO ist bereits gebunden
-    glBindVertexArray(0);
+    glBindVertexArray(gFullscreenVAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+    glBindVertexArray(0);
 }
 
 void deleteFullscreenQuad(GLuint* inVAO, GLuint* inVBO, GLuint* inEBO) {

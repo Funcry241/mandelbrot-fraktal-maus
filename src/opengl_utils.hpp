@@ -1,22 +1,16 @@
 // Datei: src/opengl_utils.hpp
-#ifndef OPENGL_UTILS_HPP
-#define OPENGL_UTILS_HPP
 
-#ifndef __CUDACC__
+#pragma once
+
 #include <GL/glew.h>
-#endif
 
+// Globale VAO-ID verfügbar machen
+extern GLuint gFullscreenVAO;
 
-// Erstellt ein Shader‐Programm aus Quelltexten (Vertex & Fragment)
+// Shader-Utils
 GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc);
 
-// Erstellt einen Vollbild‐Quad mit VAO, VBO, EBO
+// Fullscreen-Quad-Utils
 void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO);
-
-// Zeichnet das Quad (setzt VAO voraus)
 void drawFullscreenQuad();
-
-// Löscht die Ressourcen des Quad
 void deleteFullscreenQuad(GLuint* inVAO, GLuint* inVBO, GLuint* inEBO);
-
-#endif // OPENGL_UTILS_HPP
