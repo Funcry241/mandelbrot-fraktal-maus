@@ -10,7 +10,6 @@ using cudaGraphicsResource_t = struct cudaGraphicsResource*;
 // Kernel-Wrappers
 extern "C" void launch_debugGradient(uchar4* img, int w, int h);
 extern "C" void launch_mandelbrotHybrid(uchar4* img, int w, int h, float zoom, float2 offset, int maxIter);
-extern "C" void launchComplexityKernel(uchar4* img, int w, int h, float* d_complexity);
 
 // Gesamte CUDA-Rendering-Pipeline
 namespace CudaInterop {

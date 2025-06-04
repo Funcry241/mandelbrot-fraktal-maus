@@ -8,6 +8,6 @@
       "fstream": "cpp",
       "vector": "cpp",
       "cstring": "cpp"
-    }
-  }
-  
+    },
+    "files.insertFinalNewline": true
+}

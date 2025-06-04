@@ -9,7 +9,7 @@ Dieser Renderer nutzt CUDA und `double`-Präzision für schnelles, interaktives 
 - Windows 10/11
 - NVIDIA CUDA Toolkit (v12.9 empfohlen) — **nvcc** muss im `PATH` verfügbar sein.
 - Visual Studio Build Tools (2022) mit **C++ Desktop Development**
-- [vcpkg](https://github.com/microsoft/vcpkg) installiert
+- [vcpkg](https://github.com/microsoft/vcpkg) installiert (wird als Git-Submodul eingebunden)
 
 ## Abhängigkeiten
 
@@ -28,6 +28,16 @@ Folgende Umgebungsvariablen müssen gesetzt sein:
 - `VCPKG_ROOT` — Verzeichnis der lokalen vcpkg-Installation, z.B. `C:\vcpkg`
 
 > Unter Windows kannst du die Variablen unter **Systemsteuerung → System → Erweiterte Systemeinstellungen → Umgebungsvariablen** setzen.
+
+## vcpkg Setup
+
+Dieses Projekt verwendet [vcpkg](https://github.com/microsoft/vcpkg) als Git-Submodul. Vor dem ersten Build muss es initialisiert werden:
+
+```bash
+git submodule update --init --recursive
+```
+
+Danach stehen alle Bibliotheken bereit und der CMake-Build funktioniert wie erwartet.
 
 ## Build mit CMake
 
