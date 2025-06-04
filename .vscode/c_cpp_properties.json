@@ -4,7 +4,7 @@
       "name": "Windows",
       "includePath": [
         "${workspaceFolder}/src",
-        "${workspaceFolder}/vcpkg_installed/x64-windows/include",
+        "C:/vcpkg/installed/x64-windows/include",
         "${env:CUDA_PATH}/include"
       ],
       "defines": [
@@ -20,7 +20,7 @@
       "browse": {
         "path": [
           "${workspaceFolder}/src",
-          "${workspaceFolder}/vcpkg_installed/x64-windows/include",
+          "C:/vcpkg/installed/x64-windows/include",
           "${env:CUDA_PATH}/include"
         ],
         "limitSymbolsToIncludedHeaders": true,

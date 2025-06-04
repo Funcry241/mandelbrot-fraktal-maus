@@ -96,10 +96,12 @@ Write-Host "→ Toolchain-File: $PSScriptRoot/vcpkg/scripts/buildsystems/vcpkg.c
 cmake `
     -B build -S . `
     -G Ninja `
-    -DCMAKE_TOOLCHAIN_FILE="$PSScriptRoot/vcpkg/scripts/buildsystems/vcpkg.cmake" `
-    -DCMAKE_BUILD_TYPE="$Configuration" `
-    -DCMAKE_CUDA_COMPILER="$nvcc" `
-    -DCMAKE_CUDA_TOOLKIT_ROOT_DIR="$cudaBin\.." 
+    "-DCMAKE_TOOLCHAIN_FILE=$PSScriptRoot/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+    "-DCMAKE_BUILD_TYPE=$Configuration" `
+    "-DCMAKE_CUDA_COMPILER=$nvcc" `
+    "-DCMAKE_CUDA_TOOLKIT_ROOT_DIR=$cudaBin\.." `
+    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+
 Write-Host "[BUILD] Baue Projekt"
 cmake --build build --config $Configuration --parallel
 
