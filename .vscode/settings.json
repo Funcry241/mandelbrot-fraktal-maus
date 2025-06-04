@@ -6,7 +6,8 @@
     "files.associations": {
       "cmath": "cpp",
       "fstream": "cpp",
-      "vector": "cpp"
+      "vector": "cpp",
+      "cstring": "cpp"
     }
   }
   

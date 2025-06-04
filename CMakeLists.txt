@@ -2,69 +2,87 @@ cmake_minimum_required(VERSION 3.24)
 project(OtterDreamMandelbrot LANGUAGES CXX CUDA)
 
 # -------------------------------------------------
-#   vcpkg-Toolchain (falls Du vcpkg nutzt)
-#   Diese Zeile nur aktivieren, wenn Du vcpkg eingebunden hast:
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+# Falls ihr vcpkg nutzt, Toolchain‐Datei aktivieren:
+set(CMAKE_TOOLCHAIN_FILE
+    "${CMAKE_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake"
     CACHE STRING "Vcpkg toolchain file")
 set(VCPKG_MANIFEST_MODE ON)
 
 # -------------------------------------------------
-#   C++ & CUDA Standard
-set(CMAKE_CXX_STANDARD    17)
+# C++‐ und CUDA‐Standard setzen
+set(CMAKE_CXX_STANDARD          20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD   17)
+set(CMAKE_CUDA_STANDARD         17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # -------------------------------------------------
-#   Explizit auf dynamische CUDA-Runtime umschalten:
-#   Verhindert, dass sowohl cudart.lib als auch cudart_static.lib eingebunden werden.
-#   (Benötigt CMake ≥ 3.17.)
+# Dynamische CUDA-Runtime (Shared), damit nicht zweimal cudart.lib/cudart_static.lib gelinkt wird
 set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
 
-#   Separables Compilation erlaubt device‐Code in mehreren .cu‐Dateien
+# Separables Compilation (RDCC) erlauben
 set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 
 # -------------------------------------------------
-#   Find necessary packages
-find_package(CUDAToolkit REQUIRED)    # liefert CUDA::cudart
-find_package(OpenGL REQUIRED)         # liefert OpenGL::GL
-find_package(glfw3 3.3 REQUIRED CONFIG)  # GLFW::GLFW oder "glfw"
-find_package(GLEW REQUIRED)           # liefert GLEW::GLEW
+# Wichtige Pakete finden
+find_package(CUDAToolkit REQUIRED)
+find_package(OpenGL REQUIRED)
+find_package(glfw3 3.3 REQUIRED CONFIG)
+find_package(GLEW REQUIRED)
 
 # -------------------------------------------------
-#   Executable aus Deinen Quell‐Dateien
+# Executable bauen
 add_executable(mandelbrot_otterdream
-    src/main.cu
+    src/main.cpp
+    src/renderer_core.cu
+    src/cuda_interop.cu
     src/core_kernel.cu
+    src/hud.cpp
+    src/opengl_utils.cpp
+    src/memory_utils.cu
 )
 
-#   Header‐Verzeichnis
+# -------------------------------------------------
+# Include-Directories
 target_include_directories(mandelbrot_otterdream
-    PRIVATE ${CMAKE_SOURCE_DIR}/src
+  BEFORE
+  PRIVATE
+    "${CUDA_TOOLKIT_ROOT_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/src"
+    $<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:${VCPKG_INSTALLED_DIR}/x64-windows/include>
 )
 
 # -------------------------------------------------
-#   CUDA‐Compiler‐Optionen
-#   -rdc=true aktiviert Separables Compilation
+# CUDA compile options
 target_compile_options(mandelbrot_otterdream
-    PRIVATE
-      $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>
+  PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>
 )
 
 # -------------------------------------------------
-#   Link gegen CUDA-Runtime (dynamisch), OpenGL, GLFW und GLEW
+# Linker
 target_link_libraries(mandelbrot_otterdream
-    PRIVATE
-      CUDA::cudart
-      OpenGL::GL
-      glfw
-      GLEW::GLEW
+  PRIVATE
+    CUDA::cudart
+    OpenGL::GL
+    glfw
+    GLEW::GLEW
 )
 
 # -------------------------------------------------
-#   Modern Language Features
+# Moderne Sprachfeatures
 target_compile_features(mandelbrot_otterdream
-    PRIVATE
-      cxx_std_17
-      cuda_std_17
+  PRIVATE
+    cxx_std_20
+    cuda_std_17
+)
+
+# -------------------------------------------------
+# CUDA-Spezifikationen explizit setzen
+set_source_files_properties(
+    src/renderer_core.cu
+    src/cuda_interop.cu
+    src/core_kernel.cu
+    src/memory_utils.cu        # ✅ HIER ERGÄNZT
+    PROPERTIES
+      LANGUAGE CUDA
 )

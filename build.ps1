@@ -143,7 +143,7 @@ if (-not $cudaOk) {
 $scriptsToRun = @(
     'run_build_inner.ps1',
     'MausDelete.ps1',
-    'MausGit.ps1'
+    'MausGitAutoCommit.ps1'    # <-- statt "MausGit.ps1"
 )
 foreach ($script in $scriptsToRun) {
     $path = Join-Path $supporterDir $script
