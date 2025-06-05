@@ -1,3 +1,5 @@
+// Datei: src/core_kernel.cu
+
 #include <cstdio>
 #include "settings.hpp"
 #include <cuda_runtime.h>
@@ -30,9 +32,8 @@ extern "C" void launch_debugGradient(
     cudaDeviceSynchronize();
 }
 
-// 🐭 Farbkodierung für Mandelbrot – jetzt mit Smooth Coloring
-// 🐭 Farbkodierung für Mandelbrot – jetzt mit Smooth Coloring
-__device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy) {
+// 🐭 Farbkodierung für Mandelbrot – jetzt mit dynamischem Hue-Shift
+__device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy, float zoom) {
     if (iter >= maxIter) {
         // Punkte in der Mandelbrot-Menge -> Schwarz
         return make_uchar4(0, 0, 0, 255);
@@ -45,12 +46,15 @@ __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, floa
 
     // Normalisieren
     float t = smoothIter / maxIter;
-    t = fmodf(t * 10.0f, 1.0f);  // Wrap-around für schöne Farbringe
+    t = fmodf(t * 3.0f, 1.0f);  // Sanfte Farbringe
 
-    // Farbverlauf (Hue basierend, Rainbow Scheme)
-    float r = 0.5f + 0.5f * cosf(6.28318f * (t + 0.0f));
-    float g = 0.5f + 0.5f * cosf(6.28318f * (t + 0.33f));
-    float b = 0.5f + 0.5f * cosf(6.28318f * (t + 0.67f));
+    // 🐭 Hue-Shift abhängig vom Zoom
+    float hueShift = fmodf(logf(zoom + 1.0f) * 0.1f, 1.0f);
+
+    // Rainbow-Farbverlauf
+    float r = 0.5f + 0.5f * cosf(6.28318f * (t + hueShift + 0.0f));
+    float g = 0.5f + 0.5f * cosf(6.28318f * (t + hueShift + 0.33f));
+    float b = 0.5f + 0.5f * cosf(6.28318f * (t + hueShift + 0.67f));
 
     return make_uchar4(
         static_cast<unsigned char>(r * 255.0f),
@@ -58,34 +62,28 @@ __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, floa
         static_cast<unsigned char>(b * 255.0f),
         255
     );
-} // <-- HIER!! Funktion schließen
+}
 
 // 🐭 Verfeinerung für interessante Kacheln
 __global__ void refineTile(
-    uchar4* img,           // PBO-Device-Pointer
-    int width, int height, // Bildmaße
-    float zoom, float2 offset, // Zoom und Offset
-    int startX, int startY,    // Startposition des Tiles
-    int tileW, int tileH,      // Tile-Größe
-    int maxIter               // Maximale Iterationen für Verfeinerung
+    uchar4* img,
+    int width, int height,
+    float zoom, float2 offset,
+    int startX, int startY,
+    int tileW, int tileH,
+    int maxIter
 ) {
     int x = startX + blockIdx.x * blockDim.x + threadIdx.x;
     int y = startY + blockIdx.y * blockDim.y + threadIdx.y;
-
-    // Grenzprüfungen
     if (x >= (startX + tileW) || y >= (startY + tileH) || x >= width || y >= height) return;
 
-    // Weltkoordinaten berechnen
     float cx = (static_cast<float>(x) - width * 0.5f) / zoom + offset.x;
     float cy = (static_cast<float>(y) - height * 0.5f) / zoom + offset.y;
 
-    // Iteration starten
     float zx = 0.0f, zy = 0.0f;
     int iter = 0;
 
     const float escapeRadius2 = 4.0f;
-
-    // Mandelbrot-Iteration
     while (zx * zx + zy * zy < escapeRadius2 && iter < maxIter) {
         float xt = zx * zx - zy * zy + cx;
         zy = 2.0f * zx * zy + cy;
@@ -93,8 +91,7 @@ __global__ void refineTile(
         ++iter;
     }
 
-    // Smooth Coloring anwenden
-    img[y * width + x] = colorMap(iter, maxIter, zx, zy);
+    img[y * width + x] = colorMap(iter, maxIter, zx, zy, zoom);  // 🐭 Zoom-Parameter ergänzt
 }
 
 // 🐭 Mandelbrot Haupt-Kernel
@@ -141,7 +138,7 @@ __global__ void mandelbrotHybrid(
             localSum += iter;
             ++localCnt;
 
-            img[y * width + x] = colorMap(iter, maxIter, zx, zy);
+            img[y * width + x] = colorMap(iter, maxIter, zx, zy, zoom);  // 🐭 Zoom-Parameter ergänzt
         }
     }
 
