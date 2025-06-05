@@ -34,6 +34,10 @@ extern "C" void launch_debugGradient(
 
 // 🐭 Farbkodierung für Mandelbrot
 __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter) {
+    if (iter == maxIter) {
+        // Punkte in der Mandelbrot-Menge -> Weiß
+        return make_uchar4(255, 255, 255, 255);
+    }
     float t = static_cast<float>(iter) / maxIter;
     unsigned char r = static_cast<unsigned char>(9 * (1 - t) * t * t * t * 255);
     unsigned char g = static_cast<unsigned char>(15 * (1 - t) * (1 - t) * t * t * 255);

@@ -8,7 +8,7 @@
 namespace Settings {
 
     // Debug-Modus (für Debug-Gradient)
-    inline constexpr bool debugGradient = true; 
+    inline constexpr bool debugGradient = false; 
 
     // Fenstergröße
     inline constexpr int width  = 1024;  // Fensterbreite
