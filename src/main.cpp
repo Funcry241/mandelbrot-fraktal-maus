@@ -8,7 +8,7 @@
 #include <vector>
 #include "settings.hpp"
 #include "cuda_interop.hpp"
-#include "hud.hpp" // 🐭 HUD jetzt eingebunden
+#include "hud.hpp"
 
 // Shader Sources
 const char* vertexShaderSrc = R"(
@@ -32,17 +32,31 @@ void main() {
 }
 )";
 
-// Debug-Utilities
+// 🐭 Debug-Utilities
+inline void debugLog(const char* message) {
+    if (Settings::debugLogging) {
+        std::cout << message << std::endl;
+    }
+}
+
+inline void debugError(const char* message) {
+    if (Settings::debugLogging) {
+        std::cerr << message << std::endl;
+    }
+}
+
 #define CHECK_CUDA_ERROR(msg) { \
     cudaError_t err = cudaGetLastError(); \
-    if (err != cudaSuccess) { \
+    if (err != cudaSuccess && Settings::debugLogging) { \
         std::cerr << "[CUDA ERROR] " << msg << ": " << cudaGetErrorString(err) << std::endl; \
     } \
 }
 #define CHECK_GL_ERROR(msg) { \
     GLenum glErr; \
     while ((glErr = glGetError()) != GL_NO_ERROR) { \
-        std::cerr << "[GL ERROR] " << msg << ": 0x" << std::hex << glErr << std::dec << std::endl; \
+        if (Settings::debugLogging) { \
+            std::cerr << "[GL ERROR] " << msg << ": 0x" << std::hex << glErr << std::dec << std::endl; \
+        } \
     } \
 }
 
@@ -80,7 +94,7 @@ GLuint compileShader(GLenum type, const char* source) {
     if (!success) {
         char infoLog[512];
         glGetShaderInfoLog(shader, 512, nullptr, infoLog);
-        std::cerr << "[SHADER ERROR] " << infoLog << std::endl;
+        debugError(infoLog);
     }
     return shader;
 }
@@ -99,7 +113,7 @@ GLuint createShaderProgram(const char* vertexSrc, const char* fragmentSrc) {
     if (!success) {
         char infoLog[512];
         glGetProgramInfoLog(program, 512, nullptr, infoLog);
-        std::cerr << "[PROGRAM LINK ERROR] " << infoLog << std::endl;
+        debugError(infoLog);
     }
 
     glDeleteShader(vertexShader);
@@ -109,25 +123,24 @@ GLuint createShaderProgram(const char* vertexSrc, const char* fragmentSrc) {
 }
 
 void initGL() {
-    std::cout << "[INFO] Initialisiere GLEW...\n";
+    debugLog("[INFO] Initialisiere GLEW...");
     glewExperimental = GL_TRUE;
     glewInit();
     CHECK_GL_ERROR("nach glewInit");
 
-    Hud::init(); // 🐭 HUD initialisieren
+    Hud::init();
 
-    std::cout << "[INFO] Shader erstellen...\n";
+    debugLog("[INFO] Shader erstellen...");
     shaderProgram = createShaderProgram(vertexShaderSrc, fragmentShaderSrc);
 
-    std::cout << "[INFO] Erstelle Fullscreen Quad...\n";
+    debugLog("[INFO] Erstelle Fullscreen Quad...");
     float quadVertices[] = {
-        // Position   // TexCoord
-        -1.0f, -1.0f, 0.0f, 0.0f, // Links unten
-         1.0f, -1.0f, 1.0f, 0.0f, // Rechts unten
-         1.0f,  1.0f, 1.0f, 1.0f, // Rechts oben
-        -1.0f,  1.0f, 0.0f, 1.0f  // Links oben
+        -1.0f, -1.0f, 0.0f, 0.0f,
+         1.0f, -1.0f, 1.0f, 0.0f,
+         1.0f,  1.0f, 1.0f, 1.0f,
+        -1.0f,  1.0f, 0.0f, 1.0f
     };
-    unsigned int quadIndices[] = { 0, 1, 2, 2, 3, 0 }; // Zwei Dreiecke
+    unsigned int quadIndices[] = { 0, 1, 2, 2, 3, 0 };
 
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -147,20 +160,17 @@ void initGL() {
     glBindVertexArray(0);
 
     glUseProgram(shaderProgram);
-    glUniform1i(glGetUniformLocation(shaderProgram, "uTex"), 0); // Texture unit 0
+    glUniform1i(glGetUniformLocation(shaderProgram, "uTex"), 0);
     glUseProgram(0);
 
-    // --- PBO erstellen ---
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, WIDTH * HEIGHT * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    // --- CUDA-Interop registrieren ---
     cudaGraphicsGLRegisterBuffer(&cudaPboRes, pbo, cudaGraphicsMapFlagsWriteDiscard);
     CHECK_CUDA_ERROR("cudaGraphicsGLRegisterBuffer");
 
-    // --- Textur erstellen ---
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, WIDTH, HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -168,7 +178,6 @@ void initGL() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // --- Complexity-Buffer anlegen ---
     int tilesX = (WIDTH  + Settings::TILE_W - 1) / Settings::TILE_W;
     int tilesY = (HEIGHT + Settings::TILE_H - 1) / Settings::TILE_H;
     int totalTiles = tilesX * tilesY;
@@ -176,7 +185,6 @@ void initGL() {
     cudaMalloc(&d_complexity, totalTiles * sizeof(float));
     CHECK_CUDA_ERROR("cudaMalloc d_complexity");
 
-    // --- Viewport setzen ---
     glViewport(0, 0, WIDTH, HEIGHT);
 }
 
@@ -190,14 +198,7 @@ void render() {
     }
 
     CudaInterop::renderCudaFrame(
-        cudaPboRes,
-        WIDTH,
-        HEIGHT,
-        zoom,
-        offset,
-        maxIter,
-        d_complexity,
-        h_complexity
+        cudaPboRes, WIDTH, HEIGHT, zoom, offset, maxIter, d_complexity, h_complexity
     );
     CHECK_CUDA_ERROR("nach renderCudaFrame");
 
@@ -216,13 +217,13 @@ void render() {
     glBindVertexArray(0);
     glUseProgram(0);
 
-    Hud::draw(currentFPS, zoom, offset.x, offset.y, WIDTH, HEIGHT); // 🐭 HUD!
+    Hud::draw(currentFPS, zoom, offset.x, offset.y, WIDTH, HEIGHT);
 
     CHECK_GL_ERROR("nach Frame Rendering");
 }
 
 void cleanup() {
-    std::cout << "[INFO] Cleaning up...\n";
+    debugLog("[INFO] Cleaning up...");
     cudaGraphicsUnregisterResource(cudaPboRes);
     cudaFree(d_complexity);
 
@@ -234,14 +235,14 @@ void cleanup() {
     glDeleteBuffers(1, &EBO);
     glDeleteVertexArrays(1, &VAO);
 
-    Hud::cleanup(); // 🐭 HUD Ressourcen aufräumen
-    std::cout << "[INFO] Cleanup done.\n";
+    Hud::cleanup();
+    debugLog("[INFO] Cleanup done.");
 }
 
 int main() {
-    std::cout << "[INFO] Starte GLFW...\n";
+    debugLog("[INFO] Starte GLFW...");
     if (!glfwInit()) {
-        std::cerr << "[FATAL] GLFW-Initialisierung fehlgeschlagen!\n";
+        debugError("[FATAL] GLFW-Initialisierung fehlgeschlagen!");
         return -1;
     }
 
@@ -249,10 +250,10 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    std::cout << "[INFO] Erstelle Fenster...\n";
+    debugLog("[INFO] Erstelle Fenster...");
     GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "Mandelbrot OtterDream", nullptr, nullptr);
     if (!window) {
-        std::cerr << "[FATAL] Fenstererstellung fehlgeschlagen!\n";
+        debugError("[FATAL] Fenstererstellung fehlgeschlagen!");
         glfwTerminate();
         return -1;
     }
@@ -265,7 +266,7 @@ int main() {
 
     initGL();
 
-    std::cout << "[INFO] Starte Render-Loop...\n";
+    debugLog("[INFO] Starte Render-Loop...");
     while (!glfwWindowShouldClose(window)) {
         render();
         glfwSwapBuffers(window);
@@ -276,6 +277,6 @@ int main() {
     glfwDestroyWindow(window);
     glfwTerminate();
 
-    std::cout << "[INFO] Programm beendet.\n";
+    debugLog("[INFO] Programm beendet.");
     return 0;
 }
