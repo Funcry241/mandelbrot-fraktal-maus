@@ -2,37 +2,35 @@ cmake_minimum_required(VERSION 3.24)
 project(OtterDreamMandelbrot LANGUAGES CXX CUDA)
 
 # -------------------------------------------------
-# Falls ihr vcpkg nutzt, Toolchain‐Datei aktivieren:
+# Vcpkg Toolchain, falls vorhanden
 set(CMAKE_TOOLCHAIN_FILE
     "${CMAKE_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake"
     CACHE STRING "Vcpkg toolchain file")
 set(VCPKG_MANIFEST_MODE ON)
 
 # -------------------------------------------------
-# C++‐ und CUDA‐Standard setzen
+# Standards setzen
 set(CMAKE_CXX_STANDARD          20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD         17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # -------------------------------------------------
-# Dynamische CUDA-Runtime (Shared), damit nicht zweimal cudart.lib/cudart_static.lib gelinkt wird
+# CUDA Runtime dynamisch linken (keine doppelte cudart)
 set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
-
-# Separables Compilation (RDCC) erlauben
 set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 
 # -------------------------------------------------
-# Wichtige Pakete finden
+# Wichtige Pakete
 find_package(CUDAToolkit REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(glfw3 3.3 REQUIRED CONFIG)
 find_package(GLEW REQUIRED)
 
 # -------------------------------------------------
-# Executable bauen
+# Executable
 add_executable(mandelbrot_otterdream
-    src/main.cpp
+    src/main.cpp             # 🐭 jetzt Shader/VAO/VBO-Renderer
     src/renderer_core.cu
     src/cuda_interop.cu
     src/core_kernel.cu
@@ -43,9 +41,8 @@ add_executable(mandelbrot_otterdream
 )
 
 # -------------------------------------------------
-# Include-Directories
+# Include-Pfade
 target_include_directories(mandelbrot_otterdream
-  BEFORE
   PRIVATE
     "${CUDA_TOOLKIT_ROOT_DIR}/include"
     "${CMAKE_SOURCE_DIR}/src"
@@ -53,14 +50,14 @@ target_include_directories(mandelbrot_otterdream
 )
 
 # -------------------------------------------------
-# CUDA compile options
+# CUDA Compile Optionen
 target_compile_options(mandelbrot_otterdream
   PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>
+    $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true --expt-relaxed-constexpr>
 )
 
 # -------------------------------------------------
-# Linker
+# Link Libraries
 target_link_libraries(mandelbrot_otterdream
   PRIVATE
     CUDA::cudart
@@ -70,7 +67,7 @@ target_link_libraries(mandelbrot_otterdream
 )
 
 # -------------------------------------------------
-# Moderne Sprachfeatures
+# Sprachfeatures aktivieren
 target_compile_features(mandelbrot_otterdream
   PRIVATE
     cxx_std_20
@@ -78,12 +75,16 @@ target_compile_features(mandelbrot_otterdream
 )
 
 # -------------------------------------------------
-# CUDA-Spezifikationen explizit setzen
+# CUDA-Dateien deklarieren
 set_source_files_properties(
     src/renderer_core.cu
     src/cuda_interop.cu
     src/core_kernel.cu
-    src/memory_utils.cu        # ✅ HIER ERGÄNZT    
+    src/memory_utils.cu
     PROPERTIES
       LANGUAGE CUDA
 )
+
+# -------------------------------------------------
+# 🐭 Optional: Mehr Debug Infos
+# set(CMAKE_VERBOSE_MAKEFILE ON)

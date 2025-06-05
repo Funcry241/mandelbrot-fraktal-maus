@@ -1,82 +1,49 @@
-# 🦦 OtterDream Mandelbrot Renderer (CUDA + Double)
+# 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Dieser Renderer nutzt CUDA und `double`-Präzision für schnelles, interaktives Mandelbrot-Rendering mit Auto-Zoom. OpenGL und ImGui sorgen für eine moderne Darstellung auf Windows.
+Ein schneller, moderner Mandelbrot-Renderer für Windows basierend auf CUDA und OpenGL 4.3 Core Profile. Dynamisches Auto-Zooming, sanfte Farbverläufe und ein leichtgewichtiges HUD.
+
+---
+
+## Features
+
+- **CUDA-Optimiert**: Schnelles Mandelbrot-Rendering mit progressiver Verfeinerung.
+- **OpenGL 4.3 Core Profile**: Moderne Shader-Pipeline ohne Fixed-Function OpenGL.
+- **Auto-Zoom**: Automatisches Zoomen auf interessante Bildregionen.
+- **Dynamic Hue Coloring**: Farbverlauf abhängig vom Zoom-Level.
+- **HUD (FPS/Zoom)**: Eingeblendetes HUD via Shader (keine veralteten Funktionen).
+- **Resizing**: Fenstergrößenänderung mit dynamischem Viewport.
+- **Smooth Iteration Coloring**: Feine Farbübergänge für hohe Zoomstufen.
+- **Progressive Iterationen**: Automatisches Hochzählen der Iterationen.
+
+---
 
 ## Voraussetzungen
 
 - Windows 10/11
-- NVIDIA CUDA Toolkit (v12.9 empfohlen) — **nvcc** muss im `PATH` verfügbar sein.
-- Visual Studio Build Tools (2022) mit **C++ Desktop Development**
-- [vcpkg](https://github.com/microsoft/vcpkg) installiert (wird als Git-Submodul eingebunden)
-
-## Abhängigkeiten
-
-- GLFW
-- GLEW
-- ImGui
-- Boost (`multiprecision` für CPU-Zoomsteuerung)
-
-Alle Bibliotheken werden über `vcpkg` eingebunden.
-
-## Erforderliche Umgebungsvariablen
-
-Folgende Umgebungsvariablen müssen gesetzt sein:
-
-- `CUDA_PATH` — Verzeichnis der installierten CUDA-Toolchain, z.B. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9`
-- `VCPKG_ROOT` — Verzeichnis der lokalen vcpkg-Installation, z.B. `C:\vcpkg`
-
-> Unter Windows kannst du die Variablen unter **Systemsteuerung → System → Erweiterte Systemeinstellungen → Umgebungsvariablen** setzen.
-
-## vcpkg Setup
-
-Dieses Projekt verwendet [vcpkg](https://github.com/microsoft/vcpkg) als Git-Submodul. Vor dem ersten Build muss es initialisiert werden:
-
-```bash
-git submodule update --init --recursive
-```
-
-Danach stehen alle Bibliotheken bereit und der CMake-Build funktioniert wie erwartet.
-
-## Build mit CMake
-
-```bash
-cmake --preset=windows-msvc
-cmake --build --preset=build
-```
-
-## Dateien
-
-- `main.cpp`: GUI, Panning, Zoom, CUDA-Interop
-- `mandelbrot.cu`: CUDA-Renderer mit Supersampling & Distance Estimation (`double`)
-- `gui.cpp/hpp`: HUD via ImGui
-- `CMakeLists.txt` + `CMakePresets.json`: Build-Setup
-- `README.MAUS`: Interne KI-Dokumentation, nicht für Menschen bestimmt
-
-## Besonderheiten
-
-- **Auto-Zoom & Auto-Pan** basierend auf Gradientendichte
-- **2×2 Supersampling** für glatte Kanten
-- **Distance Estimation** für schönere Farbverläufe
-- **Boost BigFloat** für CPU-Koordinaten (nicht im CUDA-Kern)
-- **Sanfte Farbgebung** basierend auf Sinusverlauf
-
-## Bekannte Einschränkungen
-
-- Kein echtes Double-Double (zugunsten von Geschwindigkeit)
-- Kein Farbschema-Wechsel über das HUD
-- Kein Multithreading auf der CPU (GPU parallelisiert)
-- Dragging per Maus (noch deaktiviert)
-
-## Lizenz
-
-Dieses Projekt steht unter der [MIT License](LICENSE).
-
-## Autor
-
-OtterDream & ChatGPT (2025)
+- NVIDIA CUDA Toolkit (v12.9 empfohlen)
+- Visual Studio 2022 (mit C++ und CUDA Support)
+- CMake 3.24+ und Ninja
+- Vcpkg (für GLFW, GLEW)
 
 ---
 
-**Hinweis:** Das Programm stürzte früher ab, weil bei hohen Zoom-Faktoren durch Null geteilt wurde – **jetzt mit Sicherung**. 🦦
+## Abhängigkeiten (über vcpkg)
+
+- **GLFW**: Fenster und Eingabe
+- **GLEW**: OpenGL Extension Wrangler
+- **STB Easy Font**: Leichtgewichtiges Text-Rendering
+
+---
+
+## Build-Anleitung
+
+### Vcpkg Setup
+
+```bash
+git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg
+./bootstrap-vcpkg.bat
+vcpkg integrate install
+vcpkg install glfw3 glew

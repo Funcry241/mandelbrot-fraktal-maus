@@ -193,7 +193,7 @@ extern "C" void launch_mandelbrotHybrid(
     cudaDeviceSynchronize();
 }
 
-// 🐭 Complexity-Messung für Auto-Zoom
+// 🐭 Parallelisierte Complexity-Messung für Auto-Zoom
 __global__ void computeComplexity(
     const uchar4* img,
     int width, int height,
@@ -201,22 +201,40 @@ __global__ void computeComplexity(
 ) {
     int tileX = blockIdx.x;
     int tileY = blockIdx.y;
-    int tilesX = (width  + Settings::TILE_W - 1) / Settings::TILE_W;
+    int tilesX = (width + Settings::TILE_W - 1) / Settings::TILE_W;
 
     int startX = tileX * Settings::TILE_W;
     int startY = tileY * Settings::TILE_H;
-    int endX = min(startX + Settings::TILE_W, width);
-    int endY = min(startY + Settings::TILE_H, height);
 
-    float count = 0.0f;
-    for (int y = startY; y < endY; ++y) {
-        int baseIdx = y * width;
-        for (int x = startX; x < endX; ++x) {
-            const uchar4& px = img[baseIdx + x];
-            if (px.x < 250u || px.y < 250u || px.z < 250u) {
-                count += 1.0f;
-            }
+    int localX = threadIdx.x;
+    int localY = threadIdx.y;
+
+    int x = startX + localX;
+    int y = startY + localY;
+
+    const int localId = localY * blockDim.x + localX;
+    __shared__ int sharedCount[Settings::TILE_W * Settings::TILE_H];
+
+    int count = 0;
+    if (x < width && y < height) {
+        const uchar4& px = img[y * width + x];
+        if (px.x < 250u || px.y < 250u || px.z < 250u) {
+            count = 1;
         }
     }
-    complexity[tileY * tilesX + tileX] = count;
+    sharedCount[localId] = count;
+    __syncthreads();
+
+    // Reduktion im Shared Memory
+    for (int stride = (blockDim.x * blockDim.y) / 2; stride > 0; stride >>= 1) {
+        if (localId < stride) {
+            sharedCount[localId] += sharedCount[localId + stride];
+        }
+        __syncthreads();
+    }
+
+    if (localId == 0) {
+        complexity[tileY * tilesX + tileX] = static_cast<float>(sharedCount[0]);
+    }
 }
+
