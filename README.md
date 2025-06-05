@@ -54,7 +54,7 @@ vcpkg install glfw3 glew
 ```bash
 cmake --preset windows-msvc
 cmake --build --preset build
-.uild\mandelbrot_otterdream.exe
+.\build\mandelbrot_otterdream.exe
 ```
 
 ---
