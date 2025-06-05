@@ -39,6 +39,7 @@ add_executable(mandelbrot_otterdream
     src/hud.cpp
     src/opengl_utils.cpp
     src/memory_utils.cu
+    src/progressive.cpp
 )
 
 # -------------------------------------------------
@@ -82,7 +83,7 @@ set_source_files_properties(
     src/renderer_core.cu
     src/cuda_interop.cu
     src/core_kernel.cu
-    src/memory_utils.cu        # ✅ HIER ERGÄNZT
+    src/memory_utils.cu        # ✅ HIER ERGÄNZT    
     PROPERTIES
       LANGUAGE CUDA
 )

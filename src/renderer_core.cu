@@ -14,6 +14,7 @@
 #include "renderer_core.hpp"
 #include "hud.hpp"
 #include "memory_utils.hpp"
+#include "progressive.hpp"
 
 #include <iostream>
 #include <vector>

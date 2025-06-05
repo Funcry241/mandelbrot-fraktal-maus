@@ -1,5 +1,3 @@
-// Datei: src/core_kernel.cu
-
 #include <cstdio>
 #include "settings.hpp"
 #include <cuda_runtime.h>
@@ -32,42 +30,64 @@ extern "C" void launch_debugGradient(
     cudaDeviceSynchronize();
 }
 
-// 🐭 Farbkodierung für Mandelbrot
-__device__ __forceinline__ uchar4 colorMap(int iter, int maxIter) {
-    if (iter == maxIter) {
+// 🐭 Farbkodierung für Mandelbrot – jetzt mit Smooth Coloring
+__device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy) {
+    if (iter >= maxIter) {
         // Punkte in der Mandelbrot-Menge -> Weiß
         return make_uchar4(255, 255, 255, 255);
     }
-    float t = static_cast<float>(iter) / maxIter;
-    unsigned char r = static_cast<unsigned char>(9 * (1 - t) * t * t * t * 255);
-    unsigned char g = static_cast<unsigned char>(15 * (1 - t) * (1 - t) * t * t * 255);
-    unsigned char b = static_cast<unsigned char>(8.5f * (1 - t) * (1 - t) * (1 - t) * t * 255);
+
+    // Smooth Iteration Count
+    float log_zn = logf(zx * zx + zy * zy) / 2.0f;
+    float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
+    float smoothIter = iter + 1.0f - nu;
+
+    // Normalisieren
+    float t = smoothIter / maxIter;
+
+    // Schöner Farbverlauf (Blau → Gold → Weiß)
+    unsigned char r = static_cast<unsigned char>(9 * (1.0f - t) * t * t * t * 255);
+    unsigned char g = static_cast<unsigned char>(15 * (1.0f - t) * (1.0f - t) * t * t * 255);
+    unsigned char b = static_cast<unsigned char>(8.5f * (1.0f - t) * (1.0f - t) * (1.0f - t) * t * 255);
+
     return make_uchar4(r, g, b, 255);
 }
 
 // 🐭 Verfeinerung für interessante Kacheln
 __global__ void refineTile(
-    uchar4* img, int width, int height,
-    float zoom, float2 offset,
-    int startX, int startY,
-    int tileW, int tileH,
-    int maxIter
+    uchar4* img,           // PBO-Device-Pointer
+    int width, int height, // Bildmaße
+    float zoom, float2 offset, // Zoom und Offset
+    int startX, int startY,    // Startposition des Tiles
+    int tileW, int tileH,      // Tile-Größe
+    int maxIter               // Maximale Iterationen für Verfeinerung
 ) {
     int x = startX + blockIdx.x * blockDim.x + threadIdx.x;
     int y = startY + blockIdx.y * blockDim.y + threadIdx.y;
+
+    // Grenzprüfungen
     if (x >= (startX + tileW) || y >= (startY + tileH) || x >= width || y >= height) return;
 
+    // Weltkoordinaten berechnen
     float cx = (static_cast<float>(x) - width * 0.5f) / zoom + offset.x;
     float cy = (static_cast<float>(y) - height * 0.5f) / zoom + offset.y;
+
+    // Iteration starten
     float zx = 0.0f, zy = 0.0f;
     int iter = 0;
-    while (zx * zx + zy * zy < 4.0f && iter < maxIter) {
+
+    const float escapeRadius2 = 4.0f;
+
+    // Mandelbrot-Iteration
+    while (zx * zx + zy * zy < escapeRadius2 && iter < maxIter) {
         float xt = zx * zx - zy * zy + cx;
         zy = 2.0f * zx * zy + cy;
         zx = xt;
         ++iter;
     }
-    img[y * width + x] = colorMap(iter, maxIter);
+
+    // Smooth Coloring anwenden
+    img[y * width + x] = colorMap(iter, maxIter, zx, zy);
 }
 
 // 🐭 Mandelbrot Haupt-Kernel
@@ -95,21 +115,26 @@ __global__ void mandelbrotHybrid(
     }
     __syncthreads();
 
+    const float escapeRadius2 = 4.0f;
+
     for (int y = startY + threadIdx.y; y < endY; y += blockDim.y) {
         for (int x = startX + threadIdx.x; x < endX; x += blockDim.x) {
             float cx = (static_cast<float>(x) - width * 0.5f) / zoom + offset.x;
             float cy = (static_cast<float>(y) - height * 0.5f) / zoom + offset.y;
             float zx = 0.0f, zy = 0.0f;
             int iter = 0;
-            while (zx * zx + zy * zy < 4.0f && iter < maxIter) {
+
+            while (zx * zx + zy * zy < escapeRadius2 && iter < maxIter) {
                 float xt = zx * zx - zy * zy + cx;
                 zy = 2.0f * zx * zy + cy;
                 zx = xt;
                 ++iter;
             }
+
             localSum += iter;
             ++localCnt;
-            img[y * width + x] = colorMap(iter, maxIter);
+
+            img[y * width + x] = colorMap(iter, maxIter, zx, zy);
         }
     }
 
@@ -184,7 +209,7 @@ __global__ void computeComplexity(
         int baseIdx = y * width;
         for (int x = startX; x < endX; ++x) {
             const uchar4& px = img[baseIdx + x];
-            if (px.w != 0u) {
+            if (px.x < 250u || px.y < 250u || px.z < 250u) {
                 count += 1.0f;
             }
         }

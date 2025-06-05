@@ -1,4 +1,6 @@
-// 🐭 Maus-Kommentar: Umgebaut auf RUNTIME-Wechsel per Settings::debugGradient
+// Datei: src/cuda_interop.cu
+
+// 🐭 Maus-Kommentar: Umgebaut auf RUNTIME-Wechsel per Settings::debugGradient, plus Reset bei Zoom-/Offset-Change
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -13,6 +15,7 @@
 #include "settings.hpp"
 #include "core_kernel.h"
 #include "memory_utils.hpp"
+#include "progressive.hpp"
 
 namespace CudaInterop {
 
@@ -80,11 +83,15 @@ void renderCudaFrame(
             }
         }
 
+        bool offsetChanged = false;
+        bool zoomChanged = false;
+
         if (bestScore > 0.0f) {
             int bx = bestIdx % tilesX;
             int by = bestIdx / tilesX;
             float newOffX = offset.x + ((bx + 0.5f) * Settings::TILE_W - width * 0.5f) / zoom;
             float newOffY = offset.y + ((by + 0.5f) * Settings::TILE_H - height * 0.5f) / zoom;
+            offsetChanged = (std::fabs(newOffX - offset.x) > 1e-6f) || (std::fabs(newOffY - offset.y) > 1e-6f);
             if (std::isfinite(newOffX) && std::isfinite(newOffY)) {
                 offset.x = newOffX;
                 offset.y = newOffY;
@@ -94,9 +101,16 @@ void renderCudaFrame(
 
         float newZoom = zoom * Settings::zoomFactor;
         constexpr float maxZoomAllowed = 1e6f;
+        zoomChanged = (std::fabs(newZoom - zoom) > 1e-6f);
         if (std::isfinite(newZoom) && newZoom < maxZoomAllowed) {
             zoom = newZoom;
             std::fprintf(stdout, "[INFO] Neuer Zoom: %.6f\n", zoom);
+        }
+
+        // Reset Iterationen, wenn Zoom oder Offset sich geändert haben
+        if (offsetChanged || zoomChanged) {
+            std::fprintf(stdout, "[INFO] Zoom oder Offset geändert — Iterationen werden zurückgesetzt.\n");
+            resetIterations();
         }
     }
 
