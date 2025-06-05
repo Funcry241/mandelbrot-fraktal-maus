@@ -240,6 +240,12 @@ int main() {
     }
 
     glfwMakeContextCurrent(window);
+
+    // 🐭 CUDA-Device setzen für OpenGL-Interop
+    int device = 0;
+    cudaSetDevice(device);         // CUDA Standard Device setzen
+    cudaGLSetGLDevice(device);     // OpenGL-Interop aktivieren
+
     glewExperimental = GL_TRUE;
 
     initGL();
