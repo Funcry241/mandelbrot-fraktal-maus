@@ -31,10 +31,11 @@ extern "C" void launch_debugGradient(
 }
 
 // 🐭 Farbkodierung für Mandelbrot – jetzt mit Smooth Coloring
+// 🐭 Farbkodierung für Mandelbrot – jetzt mit Smooth Coloring
 __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy) {
     if (iter >= maxIter) {
-        // Punkte in der Mandelbrot-Menge -> Weiß
-        return make_uchar4(255, 255, 255, 255);
+        // Punkte in der Mandelbrot-Menge -> Schwarz
+        return make_uchar4(0, 0, 0, 255);
     }
 
     // Smooth Iteration Count
@@ -44,14 +45,20 @@ __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, floa
 
     // Normalisieren
     float t = smoothIter / maxIter;
+    t = fmodf(t * 10.0f, 1.0f);  // Wrap-around für schöne Farbringe
 
-    // Schöner Farbverlauf (Blau → Gold → Weiß)
-    unsigned char r = static_cast<unsigned char>(9 * (1.0f - t) * t * t * t * 255);
-    unsigned char g = static_cast<unsigned char>(15 * (1.0f - t) * (1.0f - t) * t * t * 255);
-    unsigned char b = static_cast<unsigned char>(8.5f * (1.0f - t) * (1.0f - t) * (1.0f - t) * t * 255);
+    // Farbverlauf (Hue basierend, Rainbow Scheme)
+    float r = 0.5f + 0.5f * cosf(6.28318f * (t + 0.0f));
+    float g = 0.5f + 0.5f * cosf(6.28318f * (t + 0.33f));
+    float b = 0.5f + 0.5f * cosf(6.28318f * (t + 0.67f));
 
-    return make_uchar4(r, g, b, 255);
-}
+    return make_uchar4(
+        static_cast<unsigned char>(r * 255.0f),
+        static_cast<unsigned char>(g * 255.0f),
+        static_cast<unsigned char>(b * 255.0f),
+        255
+    );
+} // <-- HIER!! Funktion schließen
 
 // 🐭 Verfeinerung für interessante Kacheln
 __global__ void refineTile(
