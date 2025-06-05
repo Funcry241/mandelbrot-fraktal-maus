@@ -14,14 +14,11 @@ extern "C" void launch_mandelbrotHybrid(
 );
 
 // ----------------------------------------------------------------------
-// 2) Debug-Gradient-Kernel (nur wenn DEBUG_GRADIENT definiert ist)
-#ifdef DEBUG_GRADIENT
+// 2) Debug-Gradient-Kernel: Erzeugt Test-Farbverlauf (nur bei debugGradient=true aktiv)
 extern "C" void launch_debugGradient(
-    uchar4* img,        // Pointer auf Bild-Puffer
-    int width,          // Bildbreite
-    int height          // Bildhöhe
+    uchar4* img,
+    int width, int height
 );
-#endif
 
 // ----------------------------------------------------------------------
 // 3) Complexity-Kernel: Zählt Pixel (Grauwert-Summe) pro Tile
