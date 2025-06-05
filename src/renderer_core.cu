@@ -1,12 +1,8 @@
-// 🐭 Maus-Kommentar: Jetzt mit dynamischem glViewport für Fenster-Resize
+// 🐭 Maus-Kommentar: Jetzt mit dynamischem glViewport für Fenster-Resize und fixiertem Texture-Binding und CUDA-Device-Set!
 
-// 1) Zuerst glew.h einbinden (verhindert "gl.h included before glew.h"-Fehler)
 #include <GL/glew.h>
-
-// 2) Direkt danach GLFW
 #include <GLFW/glfw3.h>
 
-// 3) Projekt‐Header
 #include "settings.hpp"
 #include "core_kernel.h"
 #include "cuda_interop.hpp"
@@ -50,7 +46,6 @@ static float  currentFPS     = 0.0f;
 // Zoom / Offset
 static float   zoom          = Settings::initialZoom;
 static float2  offset        = {Settings::initialOffsetX, Settings::initialOffsetY};
-static int     maxIter       = Settings::maxIterations;
 
 // Complexity-Buffer
 static float*            d_complexity = nullptr;
@@ -125,7 +120,6 @@ void Renderer::initGL() {
 
     initGL_impl(window);
 
-    // Viewport-Callback setzen
     glfwSetFramebufferSizeCallback(window, [](GLFWwindow*, int w, int h) {
         glViewport(0, 0, w, h);
     });
@@ -154,6 +148,10 @@ void Renderer::initGL_impl(GLFWwindow* window) {
         std::exit(EXIT_FAILURE);
     }
 
+    // 🐭 Setze CUDA-Device für OpenGL-Interop
+    cudaSetDevice(0);
+    cudaGLSetGLDevice(0);
+
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, WIDTH * HEIGHT * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
@@ -169,6 +167,12 @@ void Renderer::initGL_impl(GLFWwindow* window) {
 
     program = createProgramFromSource(vertexShaderSrc, fragmentShaderSrc);
 
+    // 🐭 Binde Sampler-Uniform 'uTex' auf Texture Unit 0
+    glUseProgram(program);
+    GLint texLoc = glGetUniformLocation(program, "uTex");
+    glUniform1i(texLoc, 0);  // uTex -> GL_TEXTURE0
+    glUseProgram(0);
+
     createFullscreenQuad(&VAO, &VBO, &EBO);
     GL_CHECK();
 
@@ -182,7 +186,6 @@ void Renderer::initGL_impl(GLFWwindow* window) {
     frameCount = 0;
     currentFPS = 0.0f;
 
-    // Initiales Viewport-Setup
     glViewport(0, 0, WIDTH, HEIGHT);
 }
 
@@ -199,9 +202,12 @@ void Renderer::renderFrame_impl(GLFWwindow* window) {
         cudaPboRes,
         WIDTH, HEIGHT,
         zoom, offset,
-        maxIter,
+        currentMaxIter,               // Progressive Iterations
         d_complexity, h_complexity
     );
+
+    // Progressive Iteration erhöhen
+    currentMaxIter = std::min(currentMaxIter + iterStep, iterMax);
 
     // PBO → Texture kopieren
     glBindTexture(GL_TEXTURE_2D, tex);
@@ -224,9 +230,7 @@ void Renderer::renderFrame_impl(GLFWwindow* window) {
 }
 
 void Renderer::cleanup_impl() {
-#if !DEBUG_GRADIENT
     CUDA_CHECK(cudaFree(d_complexity));
-#endif
     CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboRes));
     glDeleteBuffers(1, &pbo);
     glDeleteTextures(1, &tex);
