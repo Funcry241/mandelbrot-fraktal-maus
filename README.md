@@ -9,38 +9,37 @@ Ein schneller, moderner Mandelbrot-Renderer für Windows basierend auf CUDA und 
 ## Features
 
 - **CUDA-Optimiert**: Schnelles Mandelbrot-Rendering mit progressiver Verfeinerung.
-- **OpenGL 4.3 Core Profile**: Moderne Shader-Pipeline — keine veralteten OpenGL-Features.
-- **Auto-Zoom**: Automatisches Zoomen auf interessante Regionen des Fraktals.
+- **OpenGL 4.3 Core Profile**: Moderne Shader-Pipeline ohne Fixed-Function OpenGL.
+- **Auto-Zoom**: Automatisches Zoomen auf interessante Bildregionen.
 - **Dynamic Hue Coloring**: Farbverlauf abhängig vom Zoom-Level.
-- **HUD (FPS, Zoom, Offset)**: Über Shader gerendertes Head-Up-Display — kompatibel mit Core Profile.
-- **Resizing**: Anpassung an Fenstergrößenänderung mit dynamischem glViewport.
+- **HUD (FPS/Zoom)**: Eingeblendetes HUD via moderner Shader.
+- **Resizing**: Fenstergrößenänderung mit dynamischem Viewport.
 - **Smooth Iteration Coloring**: Feine Farbübergänge für hohe Zoomstufen.
-- **Progressive Iterationen**: Iterationsanzahl erhöht sich automatisch für feinere Details.
-- **Double-Präzision**: CUDA- und CPU-Operationen mit hoher Genauigkeit.
+- **Progressive Iterationen**: Automatisches Hochzählen der Iterationen.
 
 ---
 
 ## Voraussetzungen
 
-- Windows 10 oder 11
+- Windows 10/11
 - NVIDIA CUDA Toolkit (v12.9 empfohlen)
-- Visual Studio 2022 (C++ Desktop Development + CUDA-Support)
+- Visual Studio 2022 (mit C++ und CUDA Support)
 - CMake 3.24+ und Ninja
-- [vcpkg](https://github.com/microsoft/vcpkg) (Paketmanager für C++-Bibliotheken)
+- vcpkg (für GLFW, GLEW)
 
 ---
 
 ## Abhängigkeiten (über vcpkg)
 
-- **GLFW**: Fenster- und Eingabeverwaltung
-- **GLEW**: OpenGL-Extension-Management
-- **STB Easy Font**: Leichtgewichtiges Text-Rendering für das HUD
+- **GLFW**: Fenster und Eingabe
+- **GLEW**: OpenGL Extension Wrangler
+- **STB Easy Font**: Leichtgewichtiges Text-Rendering
 
 ---
 
 ## Build-Anleitung
 
-### 1. vcpkg Setup
+### Vcpkg Setup
 
 ```bash
 git clone https://github.com/microsoft/vcpkg.git
