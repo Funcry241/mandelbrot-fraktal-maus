@@ -1,8 +1,7 @@
-// Datei: src/hud.cpp
-
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
 #include "hud.hpp"
+#include <vector>
 
 #ifndef __CUDACC__
 #include <GL/glew.h>
@@ -71,20 +70,39 @@ void init() {
 }
 
 void drawText(const std::string& text, float x, float y, float width, float height) {
+    if (text.empty()) return; // 🐭 Schutz gegen leere Strings
+
     char buffer[99999];
-    int num_quads = stb_easy_font_print(0.0f, 0.0f, const_cast<char*>(text.c_str()), nullptr, buffer, sizeof(buffer));
+    int num_quads = stb_easy_font_print(x, y, const_cast<char*>(text.c_str()), nullptr, buffer, sizeof(buffer));
+
+    struct Vertex {
+        float x, y;
+    };
+
+    std::vector<Vertex> vertices;
+    vertices.reserve(num_quads * 6); // 2 Triangles pro Zeichen
+
+    for (int i = 0; i < num_quads; ++i) {
+        float* quad = reinterpret_cast<float*>(buffer + i * 64);
+        vertices.push_back({quad[0], quad[1]});
+        vertices.push_back({quad[2], quad[3]});
+        vertices.push_back({quad[4], quad[5]});
+        vertices.push_back({quad[0], quad[1]});
+        vertices.push_back({quad[4], quad[5]});
+        vertices.push_back({quad[6], quad[7]});
+    }
 
     glBindVertexArray(hudVAO);
     glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
-    glBufferData(GL_ARRAY_BUFFER, num_quads * 4 * sizeof(float), buffer, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 16, (void*)0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
 
     glUseProgram(hudProgram);
     glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
 
-    glDrawArrays(GL_QUADS, 0, num_quads * 4);
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
 
     glUseProgram(0);
     glDisableVertexAttribArray(0);

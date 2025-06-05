@@ -1,3 +1,5 @@
+// Datei: src/renderer_core.cu
+
 // 🐭 Maus-Kommentar: Jetzt mit dynamischem glViewport für Fenster-Resize und fixiertem Texture-Binding und CUDA-Device-Set!
 
 #include <GL/glew.h>
@@ -8,7 +10,7 @@
 #include "cuda_interop.hpp"
 #include "opengl_utils.hpp"
 #include "renderer_core.hpp"
-#include "hud.hpp"
+#include "hud.hpp"                // 🐭 HUD
 #include "memory_utils.hpp"
 #include "progressive.hpp"
 
@@ -187,6 +189,9 @@ void Renderer::initGL_impl(GLFWwindow* window) {
     currentFPS = 0.0f;
 
     glViewport(0, 0, WIDTH, HEIGHT);
+
+    // 🐭 HUD initialisieren
+    Hud::init();
 }
 
 void Renderer::renderFrame_impl(GLFWwindow* window) {
@@ -236,4 +241,7 @@ void Renderer::cleanup_impl() {
     glDeleteTextures(1, &tex);
     glDeleteProgram(program);
     deleteFullscreenQuad(&VAO, &VBO, &EBO);
+
+    // 🐭 HUD Ressourcen freigeben
+    Hud::cleanup();
 }

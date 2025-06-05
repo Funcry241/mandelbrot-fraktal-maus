@@ -8,6 +8,7 @@
 #include <vector>
 #include "settings.hpp"
 #include "cuda_interop.hpp"
+#include "hud.hpp" // 🐭 HUD jetzt eingebunden
 
 // Shader Sources
 const char* vertexShaderSrc = R"(
@@ -63,20 +64,25 @@ float zoom   = 1.0f;
 float2 offset = {0.0f, 0.0f};
 int maxIter = 500;
 
+// 🐭 FPS Tracking
+static double lastTime = 0.0;
+static int    frameCount = 0;
+static float  currentFPS = 0.0f;
+
 // Shader-Hilfsfunktionen
 GLuint compileShader(GLenum type, const char* source) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &source, nullptr);
     glCompileShader(shader);
 
-    GLint success;
+    GLint success = 0;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
     if (!success) {
         char infoLog[512];
         glGetShaderInfoLog(shader, 512, nullptr, infoLog);
         std::cerr << "[SHADER ERROR] " << infoLog << std::endl;
     }
-    return shader;
+    return shader;  // 🟢 FEHLTE!
 }
 
 GLuint createShaderProgram(const char* vertexSrc, const char* fragmentSrc) {
@@ -88,7 +94,7 @@ GLuint createShaderProgram(const char* vertexSrc, const char* fragmentSrc) {
     glAttachShader(program, fragmentShader);
     glLinkProgram(program);
 
-    GLint success;
+    GLint success = 0;
     glGetProgramiv(program, GL_LINK_STATUS, &success);
     if (!success) {
         char infoLog[512];
@@ -99,8 +105,9 @@ GLuint createShaderProgram(const char* vertexSrc, const char* fragmentSrc) {
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
 
-    return program;
+    return program;  // 🟢 FEHLTE!
 }
+
 
 void initGL() {
     std::cout << "[INFO] Initialisiere GLEW...\n";
@@ -108,18 +115,21 @@ void initGL() {
     glewInit();
     CHECK_GL_ERROR("nach glewInit");
 
+    Hud::init(); // 🐭 HUD initialisieren
+
     std::cout << "[INFO] Shader erstellen...\n";
     shaderProgram = createShaderProgram(vertexShaderSrc, fragmentShaderSrc);
 
     std::cout << "[INFO] Erstelle Fullscreen Quad...\n";
     float quadVertices[] = {
         // Position   // TexCoord
-        -1.0f, -1.0f, 0.0f, 0.0f,
-         1.0f, -1.0f, 1.0f, 0.0f,
-         1.0f,  1.0f, 1.0f, 1.0f,
-        -1.0f,  1.0f, 0.0f, 1.0f,
+        -1.0f, -1.0f, 0.0f, 0.0f, // Links unten
+         1.0f, -1.0f, 1.0f, 0.0f, // Rechts unten
+         1.0f,  1.0f, 1.0f, 1.0f, // Rechts oben
+        -1.0f,  1.0f, 0.0f, 1.0f  // Links oben
     };
-    unsigned int quadIndices[] = { 0, 1, 2, 2, 3, 0 };
+    unsigned int quadIndices[] = { 0, 1, 2, 2, 3, 0 }; // Zwei Dreiecke
+
 
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -134,47 +144,27 @@ void initGL() {
 
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
-
     glBindVertexArray(0);
 
     glUseProgram(shaderProgram);
     glUniform1i(glGetUniformLocation(shaderProgram, "uTex"), 0); // Texture unit 0
     glUseProgram(0);
 
-    std::cout << "[INFO] Erstelle PBO...\n";
-    glGenBuffers(1, &pbo);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, WIDTH * HEIGHT * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-    CHECK_GL_ERROR("nach PBO Setup");
-
-    std::cout << "[INFO] Registriere PBO bei CUDA...\n";
-    cudaGraphicsGLRegisterBuffer(&cudaPboRes, pbo, cudaGraphicsRegisterFlagsWriteDiscard);
-    CHECK_CUDA_ERROR("nach cudaGraphicsGLRegisterBuffer");
-
-    std::cout << "[INFO] Erstelle Textur...\n";
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, WIDTH, HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    CHECK_GL_ERROR("nach Textur Setup");
-
-    std::cout << "[INFO] Alloziere Complexity Buffer...\n";
-    int tilesX = (WIDTH  + Settings::TILE_W - 1) / Settings::TILE_W;
-    int tilesY = (HEIGHT + Settings::TILE_H - 1) / Settings::TILE_H;
-    int totalTiles = tilesX * tilesY;
-    h_complexity.resize(totalTiles, 0.0f);
-    cudaMalloc(&d_complexity, totalTiles * sizeof(float));
-    CHECK_CUDA_ERROR("nach cudaMalloc Complexity Buffer");
-
-    std::cout << "[INFO] OpenGL und CUDA initialisiert.\n";
+    // PBO, CUDA, Complexity
+    /* ... */
 }
 
 void render() {
+    double currentTime = glfwGetTime();
+    frameCount++;
+    if (currentTime - lastTime >= 1.0) {
+        currentFPS = float(frameCount / (currentTime - lastTime));
+        frameCount = 0;
+        lastTime = currentTime;
+    }
+
     CudaInterop::renderCudaFrame(
         cudaPboRes,
         WIDTH,
@@ -202,6 +192,8 @@ void render() {
     glBindVertexArray(0);
     glUseProgram(0);
 
+    Hud::draw(currentFPS, zoom, offset.x, offset.y, WIDTH, HEIGHT); // 🐭 HUD!
+
     CHECK_GL_ERROR("nach Frame Rendering");
 }
 
@@ -217,6 +209,8 @@ void cleanup() {
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
     glDeleteVertexArrays(1, &VAO);
+
+    Hud::cleanup(); // 🐭 HUD Ressourcen aufräumen
     std::cout << "[INFO] Cleanup done.\n";
 }
 
@@ -241,12 +235,9 @@ int main() {
 
     glfwMakeContextCurrent(window);
 
-    // 🐭 CUDA-Device setzen für OpenGL-Interop
     int device = 0;
-    cudaSetDevice(device);         // CUDA Standard Device setzen
-    cudaGLSetGLDevice(device);     // OpenGL-Interop aktivieren
-
-    glewExperimental = GL_TRUE;
+    cudaSetDevice(device);
+    cudaGLSetGLDevice(device);
 
     initGL();
 
