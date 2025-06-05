@@ -82,7 +82,7 @@ GLuint compileShader(GLenum type, const char* source) {
         glGetShaderInfoLog(shader, 512, nullptr, infoLog);
         std::cerr << "[SHADER ERROR] " << infoLog << std::endl;
     }
-    return shader;  // 🟢 FEHLTE!
+    return shader;
 }
 
 GLuint createShaderProgram(const char* vertexSrc, const char* fragmentSrc) {
@@ -105,9 +105,8 @@ GLuint createShaderProgram(const char* vertexSrc, const char* fragmentSrc) {
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
 
-    return program;  // 🟢 FEHLTE!
+    return program;
 }
-
 
 void initGL() {
     std::cout << "[INFO] Initialisiere GLEW...\n";
@@ -130,7 +129,6 @@ void initGL() {
     };
     unsigned int quadIndices[] = { 0, 1, 2, 2, 3, 0 }; // Zwei Dreiecke
 
-
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
@@ -152,8 +150,34 @@ void initGL() {
     glUniform1i(glGetUniformLocation(shaderProgram, "uTex"), 0); // Texture unit 0
     glUseProgram(0);
 
-    // PBO, CUDA, Complexity
-    /* ... */
+    // --- PBO erstellen ---
+    glGenBuffers(1, &pbo);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, WIDTH * HEIGHT * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+    // --- CUDA-Interop registrieren ---
+    cudaGraphicsGLRegisterBuffer(&cudaPboRes, pbo, cudaGraphicsMapFlagsWriteDiscard);
+    CHECK_CUDA_ERROR("cudaGraphicsGLRegisterBuffer");
+
+    // --- Textur erstellen ---
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, WIDTH, HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // --- Complexity-Buffer anlegen ---
+    int tilesX = (WIDTH  + Settings::TILE_W - 1) / Settings::TILE_W;
+    int tilesY = (HEIGHT + Settings::TILE_H - 1) / Settings::TILE_H;
+    int totalTiles = tilesX * tilesY;
+    h_complexity.resize(totalTiles, 0.0f);
+    cudaMalloc(&d_complexity, totalTiles * sizeof(float));
+    CHECK_CUDA_ERROR("cudaMalloc d_complexity");
+
+    // --- Viewport setzen ---
+    glViewport(0, 0, WIDTH, HEIGHT);
 }
 
 void render() {
