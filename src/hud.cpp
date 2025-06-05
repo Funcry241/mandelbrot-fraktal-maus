@@ -1,3 +1,5 @@
+// Datei: src/hud.cpp
+
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
 #include "hud.hpp"
@@ -31,7 +33,7 @@ static const char* fragmentShaderSrc = R"GLSL(
 #version 430 core
 out vec4 FragColor;
 void main() {
-    FragColor = vec4(1.0); // White text
+    FragColor = vec4(1.0, 1.0, 1.0, 1.0); // White text with alpha
 }
 )GLSL";
 
@@ -67,6 +69,10 @@ void init() {
     glGenVertexArrays(1, &hudVAO);
     glGenBuffers(1, &hudVBO);
     hudProgram = createHUDProgram();
+
+    // 🐭 Blending für transparente Schrift
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
 void drawText(const std::string& text, float x, float y, float width, float height) {
@@ -83,13 +89,18 @@ void drawText(const std::string& text, float x, float y, float width, float heig
     vertices.reserve(num_quads * 6); // 2 Triangles pro Zeichen
 
     for (int i = 0; i < num_quads; ++i) {
-        float* quad = reinterpret_cast<float*>(buffer + i * 64);
-        vertices.push_back({quad[0], quad[1]});
-        vertices.push_back({quad[2], quad[3]});
-        vertices.push_back({quad[4], quad[5]});
-        vertices.push_back({quad[0], quad[1]});
-        vertices.push_back({quad[4], quad[5]});
-        vertices.push_back({quad[6], quad[7]});
+        unsigned char* quad = reinterpret_cast<unsigned char*>(buffer) + i * 64;
+        Vertex v0 = *reinterpret_cast<Vertex*>(quad +  0); // x0, y0
+        Vertex v1 = *reinterpret_cast<Vertex*>(quad + 16); // x1, y1
+        Vertex v2 = *reinterpret_cast<Vertex*>(quad + 32); // x2, y2
+        Vertex v3 = *reinterpret_cast<Vertex*>(quad + 48); // x3, y3
+
+        vertices.push_back(v0);
+        vertices.push_back(v1);
+        vertices.push_back(v2);
+        vertices.push_back(v0);
+        vertices.push_back(v2);
+        vertices.push_back(v3);
     }
 
     glBindVertexArray(hudVAO);
