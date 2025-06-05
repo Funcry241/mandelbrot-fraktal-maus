@@ -117,6 +117,7 @@ void drawText(const std::string& text, float x, float y, float width, float heig
 
     glUseProgram(0);
     glDisableVertexAttribArray(0);
+    glBindVertexArray(0); // 🐭 NEU: sauber unbinden!
 }
 
 void draw(float fps, float zoom, float offsetX, float offsetY, int width, int height) {

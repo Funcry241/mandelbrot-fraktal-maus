@@ -51,6 +51,7 @@ inline void debugError(const char* message) {
         std::cerr << "[CUDA ERROR] " << msg << ": " << cudaGetErrorString(err) << std::endl; \
     } \
 }
+
 #define CHECK_GL_ERROR(msg) { \
     GLenum glErr; \
     while ((glErr = glGetError()) != GL_NO_ERROR) { \
@@ -59,10 +60,6 @@ inline void debugError(const char* message) {
         } \
     } \
 }
-
-// Fenstergröße
-constexpr int WIDTH  = 800;
-constexpr int HEIGHT = 600;
 
 // OpenGL / CUDA Ressourcen
 static cudaGraphicsResource* cudaPboRes = nullptr;
@@ -165,7 +162,7 @@ void initGL() {
 
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, WIDTH * HEIGHT * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, Settings::width * Settings::height * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     cudaGraphicsGLRegisterBuffer(&cudaPboRes, pbo, cudaGraphicsMapFlagsWriteDiscard);
@@ -173,19 +170,19 @@ void initGL() {
 
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, WIDTH, HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, Settings::width, Settings::height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    int tilesX = (WIDTH  + Settings::TILE_W - 1) / Settings::TILE_W;
-    int tilesY = (HEIGHT + Settings::TILE_H - 1) / Settings::TILE_H;
+    int tilesX = (Settings::width  + Settings::TILE_W - 1) / Settings::TILE_W;
+    int tilesY = (Settings::height + Settings::TILE_H - 1) / Settings::TILE_H;
     int totalTiles = tilesX * tilesY;
     h_complexity.resize(totalTiles, 0.0f);
     cudaMalloc(&d_complexity, totalTiles * sizeof(float));
     CHECK_CUDA_ERROR("cudaMalloc d_complexity");
 
-    glViewport(0, 0, WIDTH, HEIGHT);
+    glViewport(0, 0, Settings::width, Settings::height);
 }
 
 void render() {
@@ -198,13 +195,13 @@ void render() {
     }
 
     CudaInterop::renderCudaFrame(
-        cudaPboRes, WIDTH, HEIGHT, zoom, offset, maxIter, d_complexity, h_complexity
+        cudaPboRes, Settings::width, Settings::height, zoom, offset, maxIter, d_complexity, h_complexity
     );
     CHECK_CUDA_ERROR("nach renderCudaFrame");
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Settings::width, Settings::height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     CHECK_GL_ERROR("nach glTexSubImage2D");
 
@@ -217,7 +214,7 @@ void render() {
     glBindVertexArray(0);
     glUseProgram(0);
 
-    Hud::draw(currentFPS, zoom, offset.x, offset.y, WIDTH, HEIGHT);
+    Hud::draw(currentFPS, zoom, offset.x, offset.y, Settings::width, Settings::height);
 
     CHECK_GL_ERROR("nach Frame Rendering");
 }
@@ -251,7 +248,7 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     debugLog("[INFO] Erstelle Fenster...");
-    GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "Mandelbrot OtterDream", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(Settings::width, Settings::height, "Mandelbrot OtterDream", nullptr, nullptr);
     if (!window) {
         debugError("[FATAL] Fenstererstellung fehlgeschlagen!");
         glfwTerminate();

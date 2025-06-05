@@ -47,3 +47,26 @@ cd vcpkg
 ./bootstrap-vcpkg.bat
 vcpkg integrate install
 vcpkg install glfw3 glew
+```
+
+### Projekt Build
+
+```bash
+cmake --preset windows-msvc
+cmake --build --preset build
+.uild\mandelbrot_otterdream.exe
+```
+
+---
+
+## Hinweise
+
+- Zum Ausführen wird eine CUDA-fähige NVIDIA GPU benötigt.
+- Fenstergröße und Zoom-Verhalten können über `settings.hpp` angepasst werden.
+- Debug-Ausgaben lassen sich mit `Settings::debugLogging` steuern.
+
+---
+
+## Lizenz
+
+Dieses Projekt steht unter der MIT-Lizenz – siehe [LICENSE](LICENSE) für Details.
