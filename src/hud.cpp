@@ -130,6 +130,10 @@ void cleanup() {
     glDeleteVertexArrays(1, &hudVAO);
     glDeleteBuffers(1, &hudVBO);
     glDeleteProgram(hudProgram);
+
+    // 🐭 Blending sauber deaktivieren
+    glDisable(GL_BLEND);
 }
+
 
 } // namespace Hud

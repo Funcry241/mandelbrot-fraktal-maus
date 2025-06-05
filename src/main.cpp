@@ -51,7 +51,6 @@ inline void debugError(const char* message) {
         std::cerr << "[CUDA ERROR] " << msg << ": " << cudaGetErrorString(err) << std::endl; \
     } \
 }
-
 #define CHECK_GL_ERROR(msg) { \
     GLenum glErr; \
     while ((glErr = glGetError()) != GL_NO_ERROR) { \
@@ -71,9 +70,9 @@ static GLuint shaderProgram = 0;
 std::vector<float> h_complexity;
 float* d_complexity = nullptr;
 
-float zoom   = 1.0f;
-float2 offset = {0.0f, 0.0f};
-int maxIter = 500;
+float zoom   = Settings::initialZoom;
+float2 offset = {Settings::initialOffsetX, Settings::initialOffsetY};
+int maxIter = Settings::maxIterations;
 
 // 🐭 FPS Tracking
 static double lastTime = 0.0;
@@ -119,7 +118,7 @@ GLuint createShaderProgram(const char* vertexSrc, const char* fragmentSrc) {
     return program;
 }
 
-void initGL() {
+void initGL(GLFWwindow* window) {
     debugLog("[INFO] Initialisiere GLEW...");
     glewExperimental = GL_TRUE;
     glewInit();
@@ -175,7 +174,7 @@ void initGL() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    int tilesX = (Settings::width  + Settings::TILE_W - 1) / Settings::TILE_W;
+    int tilesX = (Settings::width + Settings::TILE_W - 1) / Settings::TILE_W;
     int tilesY = (Settings::height + Settings::TILE_H - 1) / Settings::TILE_H;
     int totalTiles = tilesX * tilesY;
     h_complexity.resize(totalTiles, 0.0f);
@@ -183,6 +182,10 @@ void initGL() {
     CHECK_CUDA_ERROR("cudaMalloc d_complexity");
 
     glViewport(0, 0, Settings::width, Settings::height);
+
+    glfwSetFramebufferSizeCallback(window, [](GLFWwindow*, int w, int h) {
+        glViewport(0, 0, w, h);
+    });
 }
 
 void render() {
@@ -261,7 +264,7 @@ int main() {
     cudaSetDevice(device);
     cudaGLSetGLDevice(device);
 
-    initGL();
+    initGL(window);
 
     debugLog("[INFO] Starte Render-Loop...");
     while (!glfwWindowShouldClose(window)) {
