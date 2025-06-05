@@ -48,7 +48,7 @@ static float  currentFPS     = 0.0f;
 
 // Zoom / Offset
 static float   zoom          = Settings::initialZoom;
-static float2  offset        = {0.0f, 0.0f};
+static float2  offset        = {Settings::initialOffsetX, Settings::initialOffsetY};
 static int     maxIter       = Settings::maxIterations;
 
 // Complexity-Buffer

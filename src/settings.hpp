@@ -35,4 +35,8 @@ namespace Settings {
 
     // Schwellwert für dynamische Verfeinerung (NEU)
     inline constexpr float DYNAMIC_THRESHOLD = 400.0f;
+
+    // 🐭 NEU: Initiale Offset-Position – klassisch bei Mandelbrot
+    inline constexpr float initialOffsetX = -0.5f;
+    inline constexpr float initialOffsetY = 0.0f;
 }
