@@ -13,18 +13,19 @@ extern "C" {
 
 namespace Hud {
 
-    /// Initialisiert HUD-Shader und -Puffer
+    /// Initializes HUD shaders and buffers
     void init();
 
-    /// Zeichnet den kompletten HUD (FPS + Zoom/Offset).
+    /// Draws the complete HUD (FPS, Frame Time, Zoom/Offset).
     void draw(float fps,
+              float frameTimeMs,   // 🐭 NEU: Frame Time in ms
               float zoom,
               float offsetX,
               float offsetY,
               int width,
               int height);
 
-    /// Gibt alle OpenGL-Ressourcen des HUD frei
+    /// Frees all OpenGL resources of the HUD
     void cleanup();
 
 }

@@ -70,13 +70,12 @@ void init() {
     glGenBuffers(1, &hudVBO);
     hudProgram = createHUDProgram();
 
-    // 🐭 Blending für transparente Schrift
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
 void drawText(const std::string& text, float x, float y, float width, float height) {
-    if (text.empty()) return; // 🐭 Schutz gegen leere Strings
+    if (text.empty()) return;
 
     char buffer[99999];
     int num_quads = stb_easy_font_print(x, y, const_cast<char*>(text.c_str()), nullptr, buffer, sizeof(buffer));
@@ -86,14 +85,14 @@ void drawText(const std::string& text, float x, float y, float width, float heig
     };
 
     std::vector<Vertex> vertices;
-    vertices.reserve(num_quads * 6); // 2 Triangles pro Zeichen
+    vertices.reserve(num_quads * 6);
 
     for (int i = 0; i < num_quads; ++i) {
         unsigned char* quad = reinterpret_cast<unsigned char*>(buffer) + i * 64;
-        Vertex v0 = *reinterpret_cast<Vertex*>(quad +  0); // x0, y0
-        Vertex v1 = *reinterpret_cast<Vertex*>(quad + 16); // x1, y1
-        Vertex v2 = *reinterpret_cast<Vertex*>(quad + 32); // x2, y2
-        Vertex v3 = *reinterpret_cast<Vertex*>(quad + 48); // x3, y3
+        Vertex v0 = *reinterpret_cast<Vertex*>(quad +  0);
+        Vertex v1 = *reinterpret_cast<Vertex*>(quad + 16);
+        Vertex v2 = *reinterpret_cast<Vertex*>(quad + 32);
+        Vertex v3 = *reinterpret_cast<Vertex*>(quad + 48);
 
         vertices.push_back(v0);
         vertices.push_back(v1);
@@ -117,23 +116,24 @@ void drawText(const std::string& text, float x, float y, float width, float heig
 
     glUseProgram(0);
     glDisableVertexAttribArray(0);
-    glBindVertexArray(0); // 🐭 NEU: sauber unbinden!
+    glBindVertexArray(0);
 }
 
-void draw(float fps, float zoom, float offsetX, float offsetY, int width, int height) {
-    char hudText[256];
-    std::snprintf(hudText, sizeof(hudText), "FPS: %.1f  Zoom: %.2f  Offset: (%.3f, %.3f)", fps, zoom, offsetX, offsetY);
-    drawText(hudText, 10.0f, 20.0f, static_cast<float>(width), static_cast<float>(height));
+void draw(float fps, float frameTimeMs, float zoom, float offsetX, float offsetY, int width, int height) {
+    char hudText1[256];
+    char hudText2[256];
+    std::snprintf(hudText1, sizeof(hudText1), "FPS: %.1f | Zoom: %.2f | Offset: (%.3f, %.3f)", fps, zoom, offsetX, offsetY);
+    std::snprintf(hudText2, sizeof(hudText2), "Frame Time: %.2f ms", frameTimeMs);
+
+    drawText(hudText1, 10.0f, 20.0f, static_cast<float>(width), static_cast<float>(height));
+    drawText(hudText2, 10.0f, 50.0f, static_cast<float>(width), static_cast<float>(height));
 }
 
 void cleanup() {
     glDeleteVertexArrays(1, &hudVAO);
     glDeleteBuffers(1, &hudVBO);
     glDeleteProgram(hudProgram);
-
-    // 🐭 Blending sauber deaktivieren
     glDisable(GL_BLEND);
 }
-
 
 } // namespace Hud

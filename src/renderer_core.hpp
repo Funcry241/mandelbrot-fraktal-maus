@@ -1,5 +1,3 @@
-// Datei: src/renderer_core.hpp
-
 #ifndef RENDERER_CORE_HPP
 #define RENDERER_CORE_HPP
 
@@ -13,7 +11,9 @@ public:
     void initGL();
     void renderFrame();
     void cleanup();
-    bool shouldClose() const;   // <-- nur Deklaration, keine Definition hier
+    bool shouldClose() const;
+
+    void resize(int newWidth, int newHeight);   // 🆕 Für Window-Resize
 
 private:
     void initGL_impl(GLFWwindow* window);

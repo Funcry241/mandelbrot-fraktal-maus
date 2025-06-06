@@ -1,5 +1,3 @@
-// Datei: src/renderer_core.cu
-
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
@@ -19,13 +17,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <algorithm> // <-- Für std::min
+#include <algorithm>
 
 #include "stb_easy_font.h"
-
-// -------------------------------------------------------------
-static int WIDTH  = Settings::width;
-static int HEIGHT = Settings::height;
 
 // -------------------------------------------------------------
 static GLuint pbo = 0;
@@ -39,6 +33,7 @@ static GLuint EBO = 0;
 static double lastTime = 0.0;
 static int    frameCount = 0;
 static float  currentFPS = 0.0f;
+static float  lastFrameTime = 0.0f;     // 🆕 Frame-Time in ms
 
 static float   zoom = Settings::initialZoom;
 static float2  offset = {Settings::initialOffsetX, Settings::initialOffsetY};
@@ -101,11 +96,14 @@ void Renderer::initGL() {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
-    initGL_impl(window);
-
-    glfwSetFramebufferSizeCallback(window, [](GLFWwindow*, int w, int h) {
-        glViewport(0, 0, w, h);
+    // Window-Resize-Callback
+    glfwSetWindowUserPointer(window, this);   // 🆕 User-Data
+    glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int newW, int newH) {
+        auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w));
+        if (self) self->resize(newW, newH);
     });
+
+    initGL_impl(window);
 }
 
 void Renderer::renderFrame() {
@@ -124,6 +122,38 @@ bool Renderer::shouldClose() const {
     return (window && glfwWindowShouldClose(window));
 }
 
+void Renderer::resize(int newWidth, int newHeight) {
+    if (newWidth <= 0 || newHeight <= 0) return;
+    windowWidth = newWidth;
+    windowHeight = newHeight;
+
+    // 🆕 Realloc PBO/Texture
+    CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboRes));
+    glDeleteBuffers(1, &pbo);
+    glDeleteTextures(1, &tex);
+
+    glGenBuffers(1, &pbo);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, windowWidth * windowHeight * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPboRes, pbo, cudaGraphicsMapFlagsWriteDiscard));
+
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, windowWidth, windowHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // 🆕 Realloc Complexity-Buffer
+    CUDA_CHECK(cudaFree(d_complexity));
+    int tilesX = (windowWidth + Settings::TILE_W - 1) / Settings::TILE_W;
+    int tilesY = (windowHeight + Settings::TILE_H - 1) / Settings::TILE_H;
+    int totalTiles = tilesX * tilesY;
+    d_complexity = allocComplexityBuffer(totalTiles);
+    h_complexity.resize(totalTiles);
+
+    glViewport(0, 0, windowWidth, windowHeight);
+}
+
 void Renderer::initGL_impl(GLFWwindow* window) {
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
@@ -136,13 +166,13 @@ void Renderer::initGL_impl(GLFWwindow* window) {
 
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, WIDTH * HEIGHT * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, windowWidth * windowHeight * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPboRes, pbo, cudaGraphicsMapFlagsWriteDiscard));
 
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, WIDTH, HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, windowWidth, windowHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -156,8 +186,8 @@ void Renderer::initGL_impl(GLFWwindow* window) {
     createFullscreenQuad(&VAO, &VBO, &EBO);
     GL_CHECK();
 
-    int tilesX = (WIDTH + Settings::TILE_W - 1) / Settings::TILE_W;
-    int tilesY = (HEIGHT + Settings::TILE_H - 1) / Settings::TILE_H;
+    int tilesX = (windowWidth + Settings::TILE_W - 1) / Settings::TILE_W;
+    int tilesY = (windowHeight + Settings::TILE_H - 1) / Settings::TILE_H;
     int totalTiles = tilesX * tilesY;
     d_complexity = allocComplexityBuffer(totalTiles);
     h_complexity.resize(totalTiles);
@@ -166,34 +196,34 @@ void Renderer::initGL_impl(GLFWwindow* window) {
     frameCount = 0;
     currentFPS = 0.0f;
 
-    glViewport(0, 0, WIDTH, HEIGHT);
+    glViewport(0, 0, windowWidth, windowHeight);
 
     Hud::init();
 }
 
 void Renderer::renderFrame_impl(GLFWwindow* window) {
-    double currentTime = glfwGetTime();
+    double frameStart = glfwGetTime();  // 🆕
     frameCount++;
-    if (currentTime - lastTime >= 1.0) {
-        currentFPS = float(frameCount / (currentTime - lastTime));
+
+    if (frameStart - lastTime >= 1.0) {
+        currentFPS = float(frameCount / (frameStart - lastTime));
         frameCount = 0;
-        lastTime = currentTime;
+        lastTime = frameStart;
     }
 
     CudaInterop::renderCudaFrame(
         cudaPboRes,
-        WIDTH, HEIGHT,
+        windowWidth, windowHeight,
         zoom, offset,
         getCurrentIterations(),
         d_complexity, h_complexity
     );
 
-    // Progressive Iteration erhöhen
     currentMaxIter = std::min(currentMaxIter + iterStep, iterMax);
 
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, windowWidth, windowHeight, GL_RGBA, GL_UNSIGNED_BYTE, 0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     glClear(GL_COLOR_BUFFER_BIT);
@@ -204,7 +234,8 @@ void Renderer::renderFrame_impl(GLFWwindow* window) {
     glBindVertexArray(0);
     glUseProgram(0);
 
-    Hud::draw(currentFPS, zoom, offset.x, offset.y, WIDTH, HEIGHT);
+    lastFrameTime = float((glfwGetTime() - frameStart) * 1000.0);  // 🆕 ms
+    Hud::draw(currentFPS, lastFrameTime, zoom, offset.x, offset.y, windowWidth, windowHeight);
 
     glfwSwapBuffers(window);
     glfwPollEvents();
