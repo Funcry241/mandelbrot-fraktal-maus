@@ -1,8 +1,22 @@
 // Datei: src/progressive.cpp
+
 #include <cstdio>
 #include "progressive.hpp"
 
+#ifndef __CUDACC__
+int currentMaxIter = 100;  // Host-Version (nur wenn NICHT CUDA-Compiler)
+#endif
+
+// 🐭 Reset iterations (only if needed)
 void resetIterations() {
-    currentMaxIter = 100;     // Reset auf Anfang
-    std::fprintf(stdout, "[RESET] Iterationen auf %d zurückgesetzt.\n", currentMaxIter);
+    static int lastResetIter = 100;
+    if (currentMaxIter != 100) {
+        currentMaxIter = 100;
+        std::fprintf(stdout, "[RESET] Iterations reset to %d.\n", currentMaxIter);
+    }
+}
+
+// 🐭 Getter for current iteration count
+int getCurrentIterations() {
+    return currentMaxIter;
 }

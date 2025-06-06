@@ -2,10 +2,16 @@
 
 // 🐭 progressive.hpp – Deklaration für progressives Mandelbrot-Rendering
 
-extern void resetIterations();
+#ifdef __CUDACC__
+// Für CUDA-Compiler (Device und Host gemeinsam)
+__device__ __managed__ inline int currentMaxIter = 100;
+#else
+// Für Host-Compiler (Deklaration)
+extern int currentMaxIter;
+#endif
 
-// 🐭 Laufzeitvariable
-inline int currentMaxIter = 100;             // Startwert (wird dynamisch verändert)
+extern void resetIterations();
+extern int getCurrentIterations();  // 🐭 Getter-Deklaration
 
 // 🐭 Konstante Schrittweiten (modern, constexpr)
 inline constexpr int iterStep = 50;          // Schrittweite pro Frame

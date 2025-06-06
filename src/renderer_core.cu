@@ -1,7 +1,5 @@
 // Datei: src/renderer_core.cu
 
-// 🐭 Maus-Kommentar: Jetzt mit dynamischem glViewport für Fenster-Resize und fixiertem Texture-Binding und CUDA-Device-Set!
-
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
@@ -10,7 +8,7 @@
 #include "cuda_interop.hpp"
 #include "opengl_utils.hpp"
 #include "renderer_core.hpp"
-#include "hud.hpp"                // 🐭 HUD
+#include "hud.hpp"
 #include "memory_utils.hpp"
 #include "progressive.hpp"
 
@@ -21,53 +19,42 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm> // <-- Für std::min
 
 #include "stb_easy_font.h"
 
 // -------------------------------------------------------------
-// Definiere Fenstergröße
 static int WIDTH  = Settings::width;
 static int HEIGHT = Settings::height;
 
 // -------------------------------------------------------------
-// Globale Ressourcen
-
-static GLuint pbo            = 0;
-static GLuint tex            = 0;
+static GLuint pbo = 0;
+static GLuint tex = 0;
 static cudaGraphicsResource* cudaPboRes = nullptr;
-static GLuint program        = 0;
-static GLuint VAO            = 0;
-static GLuint VBO            = 0;
-static GLuint EBO            = 0;
+static GLuint program = 0;
+static GLuint VAO = 0;
+static GLuint VBO = 0;
+static GLuint EBO = 0;
 
-// FPS
-static double lastTime       = 0.0;
-static int    frameCount     = 0;
-static float  currentFPS     = 0.0f;
+static double lastTime = 0.0;
+static int    frameCount = 0;
+static float  currentFPS = 0.0f;
 
-// Zoom / Offset
-static float   zoom          = Settings::initialZoom;
-static float2  offset        = {Settings::initialOffsetX, Settings::initialOffsetY};
+static float   zoom = Settings::initialZoom;
+static float2  offset = {Settings::initialOffsetX, Settings::initialOffsetY};
 
-// Complexity-Buffer
 static float*            d_complexity = nullptr;
 static std::vector<float> h_complexity;
 
-// -------------------------------------------------------------
-// Fehlerprüfungs-Makros
-
 #define CUDA_CHECK(call) \
     do { cudaError_t err = call; if (err != cudaSuccess) { \
-        std::cerr << "CUDA-Fehler in " << __FILE__ << ":" << __LINE__ \
+        std::cerr << "CUDA error at " << __FILE__ << ":" << __LINE__ \
                   << " -> " << cudaGetErrorString(err) << std::endl; std::exit(EXIT_FAILURE); }} while(0)
 
 #define GL_CHECK() \
     do { GLenum err = glGetError(); if (err != GL_NO_ERROR) { \
-        std::cerr << "OpenGL-Fehler in " << __FILE__ << ":" << __LINE__ \
+        std::cerr << "OpenGL error at " << __FILE__ << ":" << __LINE__ \
                   << " -> 0x" << std::hex << err << std::dec << std::endl; std::exit(EXIT_FAILURE); }} while(0)
-
-// -------------------------------------------------------------
-// Shader
 
 static const char* vertexShaderSrc = R"GLSL(
 #version 430 core
@@ -90,20 +77,14 @@ void main() {
 }
 )GLSL";
 
-// -------------------------------------------------------------
-// Renderer-Methoden
-
 Renderer::Renderer(int width, int height)
-    : windowWidth(width), windowHeight(height), window(nullptr)
-{
-}
+    : windowWidth(width), windowHeight(height), window(nullptr) {}
 
-Renderer::~Renderer() {
-}
+Renderer::~Renderer() {}
 
 void Renderer::initGL() {
     if (!glfwInit()) {
-        std::cerr << "GLFW-Init fehlgeschlagen\n";
+        std::cerr << "GLFW initialization failed\n";
         std::exit(EXIT_FAILURE);
     }
 
@@ -113,7 +94,7 @@ void Renderer::initGL() {
 
     window = glfwCreateWindow(windowWidth, windowHeight, "OtterDream Mandelbrot", nullptr, nullptr);
     if (!window) {
-        std::cerr << "Fenster-Erstellung fehlgeschlagen\n";
+        std::cerr << "Window creation failed\n";
         glfwTerminate();
         std::exit(EXIT_FAILURE);
     }
@@ -146,11 +127,10 @@ bool Renderer::shouldClose() const {
 void Renderer::initGL_impl(GLFWwindow* window) {
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
-        std::cerr << "GLEW-Init fehlgeschlagen\n";
+        std::cerr << "GLEW initialization failed\n";
         std::exit(EXIT_FAILURE);
     }
 
-    // 🐭 Setze CUDA-Device für OpenGL-Interop
     cudaSetDevice(0);
     cudaGLSetGLDevice(0);
 
@@ -168,29 +148,26 @@ void Renderer::initGL_impl(GLFWwindow* window) {
     glBindTexture(GL_TEXTURE_2D, 0);
 
     program = createProgramFromSource(vertexShaderSrc, fragmentShaderSrc);
-
-    // 🐭 Binde Sampler-Uniform 'uTex' auf Texture Unit 0
     glUseProgram(program);
     GLint texLoc = glGetUniformLocation(program, "uTex");
-    glUniform1i(texLoc, 0);  // uTex -> GL_TEXTURE0
+    glUniform1i(texLoc, 0);
     glUseProgram(0);
 
     createFullscreenQuad(&VAO, &VBO, &EBO);
     GL_CHECK();
 
-    int tilesX     = (WIDTH  + Settings::TILE_W - 1) / Settings::TILE_W;
-    int tilesY     = (HEIGHT + Settings::TILE_H - 1) / Settings::TILE_H;
+    int tilesX = (WIDTH + Settings::TILE_W - 1) / Settings::TILE_W;
+    int tilesY = (HEIGHT + Settings::TILE_H - 1) / Settings::TILE_H;
     int totalTiles = tilesX * tilesY;
-    d_complexity   = allocComplexityBuffer(totalTiles);
+    d_complexity = allocComplexityBuffer(totalTiles);
     h_complexity.resize(totalTiles);
 
-    lastTime   = glfwGetTime();
+    lastTime = glfwGetTime();
     frameCount = 0;
     currentFPS = 0.0f;
 
     glViewport(0, 0, WIDTH, HEIGHT);
 
-    // 🐭 HUD initialisieren
     Hud::init();
 }
 
@@ -198,23 +175,22 @@ void Renderer::renderFrame_impl(GLFWwindow* window) {
     double currentTime = glfwGetTime();
     frameCount++;
     if (currentTime - lastTime >= 1.0) {
-        currentFPS  = float(frameCount / (currentTime - lastTime));
-        frameCount  = 0;
-        lastTime    = currentTime;
+        currentFPS = float(frameCount / (currentTime - lastTime));
+        frameCount = 0;
+        lastTime = currentTime;
     }
 
     CudaInterop::renderCudaFrame(
         cudaPboRes,
         WIDTH, HEIGHT,
         zoom, offset,
-        currentMaxIter,               // Progressive Iterations
+        getCurrentIterations(),
         d_complexity, h_complexity
     );
 
     // Progressive Iteration erhöhen
     currentMaxIter = std::min(currentMaxIter + iterStep, iterMax);
 
-    // PBO → Texture kopieren
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, 0);
@@ -241,7 +217,5 @@ void Renderer::cleanup_impl() {
     glDeleteTextures(1, &tex);
     glDeleteProgram(program);
     deleteFullscreenQuad(&VAO, &VBO, &EBO);
-
-    // 🐭 HUD Ressourcen freigeben
     Hud::cleanup();
 }

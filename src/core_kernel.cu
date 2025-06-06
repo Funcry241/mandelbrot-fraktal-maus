@@ -178,12 +178,17 @@ extern "C" void launch_mandelbrotHybrid(
     float zoom, float2 offset,
     int maxIter
 ) {
+    static bool firstLaunch = true;
+
     int tilesX = (width  + Settings::TILE_W - 1) / Settings::TILE_W;
     int tilesY = (height + Settings::TILE_H - 1) / Settings::TILE_H;
     dim3 blocks(tilesX, tilesY);
     dim3 threads(Settings::TILE_W, Settings::TILE_H);
 
-    printf("[INFO] Starte mandelbrotHybrid mit Grid (%d,%d) und Threads (%d,%d)\n", blocks.x, blocks.y, threads.x, threads.y);
+    if (firstLaunch) {
+        printf("[INFO] Launching mandelbrotHybrid: Grid (%d,%d), Threads (%d,%d)\n", blocks.x, blocks.y, threads.x, threads.y);
+        firstLaunch = false;
+    }
 
     mandelbrotHybrid<<<blocks, threads>>>(img, width, height, zoom, offset, maxIter);
     cudaError_t err = cudaGetLastError();
@@ -193,7 +198,8 @@ extern "C" void launch_mandelbrotHybrid(
     cudaDeviceSynchronize();
 }
 
-// 🐭 Parallelisierte Complexity-Messung für Auto-Zoom
+
+// 🐭 Parallelisierte Complexity-Messung basierend auf Varianz der Iterationen
 __global__ void computeComplexity(
     const uchar4* img,
     int width, int height,
@@ -213,28 +219,50 @@ __global__ void computeComplexity(
     int y = startY + localY;
 
     const int localId = localY * blockDim.x + localX;
-    __shared__ int sharedCount[Settings::TILE_W * Settings::TILE_H];
 
-    int count = 0;
+    __shared__ float sharedSum[Settings::TILE_W * Settings::TILE_H];
+    __shared__ float sharedSqSum[Settings::TILE_W * Settings::TILE_H];
+    __shared__ int   sharedCount[Settings::TILE_W * Settings::TILE_H];
+
+    float value = 0.0f;
+    int valid = 0;
+
     if (x < width && y < height) {
         const uchar4& px = img[y * width + x];
-        if (px.x < 250u || px.y < 250u || px.z < 250u) {
-            count = 1;
-        }
+
+        // Simple brightness as "proxy" for complexity
+        float brightness = (static_cast<float>(px.x) + px.y + px.z) / (3.0f * 255.0f);
+
+        value = brightness;
+        valid = 1;
     }
-    sharedCount[localId] = count;
+
+    sharedSum[localId] = value;
+    sharedSqSum[localId] = value * value;
+    sharedCount[localId] = valid;
     __syncthreads();
 
-    // Reduktion im Shared Memory
+    // Reduktion
     for (int stride = (blockDim.x * blockDim.y) / 2; stride > 0; stride >>= 1) {
         if (localId < stride) {
+            sharedSum[localId] += sharedSum[localId + stride];
+            sharedSqSum[localId] += sharedSqSum[localId + stride];
             sharedCount[localId] += sharedCount[localId + stride];
         }
         __syncthreads();
     }
 
     if (localId == 0) {
-        complexity[tileY * tilesX + tileX] = static_cast<float>(sharedCount[0]);
+        int count = sharedCount[0];
+        if (count > 1) {
+            float mean = sharedSum[0] / count;
+            float meanSq = sharedSqSum[0] / count;
+            float variance = meanSq - mean * mean; // Varianzformel
+
+            complexity[tileY * tilesX + tileX] = variance;
+        } else {
+            complexity[tileY * tilesX + tileX] = 0.0f;
+        }
     }
 }
 

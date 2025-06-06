@@ -1,7 +1,5 @@
 // Datei: src/cuda_interop.cu
 
-// 🐭 Maus-Kommentar: Umgebaut auf RUNTIME-Wechsel per Settings::debugGradient, Debug-Logging über Settings::debugLogging.
-
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <cuda_runtime.h>
@@ -19,7 +17,6 @@
 
 namespace CudaInterop {
 
-// Fehlerbehandlung für CUDA-Calls
 #define CHECK_CUDA_STEP(call, msg) { \
     cudaError_t err = (call); \
     if (err != cudaSuccess) { \
@@ -27,7 +24,6 @@ namespace CudaInterop {
     } \
 }
 
-// 🐭 Debug-Ausgabe zentral steuerbar
 #define DEBUG_PRINT(fmt, ...) \
     do { if (Settings::debugLogging) { std::fprintf(stdout, "[DEBUG] " fmt "\n", ##__VA_ARGS__); } } while(0)
 
@@ -74,22 +70,25 @@ void renderCudaFrame(
 
         CHECK_CUDA_STEP(cudaMemcpy(h_complexity.data(), d_complexity, totalTiles * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy d_complexity->h_complexity");
 
-        DEBUG_PRINT("Suche Bereich mit höchster Komplexität...");
+        DEBUG_PRINT("Suche Bereich mit größter Varianz...");
 
         int tilesX = (width + Settings::TILE_W - 1) / Settings::TILE_W;
-        float bestScore = -1.0f;
-        int   bestIdx   = 0;
+        float bestVariance = -1.0f;
+        int   bestIdx = 0;
+
         for (int i = 0; i < totalTiles; ++i) {
-            if (h_complexity[i] > bestScore) {
-                bestScore = h_complexity[i];
-                bestIdx   = i;
+            if (h_complexity[i] > bestVariance) {
+                bestVariance = h_complexity[i];
+                bestIdx = i;
             }
         }
 
-        bool offsetChanged = false;
-        bool zoomChanged   = false;
+        DEBUG_PRINT("Beste gefundene Varianz: %.6f", bestVariance);
 
-        if (bestScore > 0.0f) {
+        bool offsetChanged = false;
+        bool zoomChanged = false;
+
+        if (bestVariance > 0.0f) {
             int bx = bestIdx % tilesX;
             int by = bestIdx / tilesX;
             float newOffX = offset.x + ((bx + 0.5f) * Settings::TILE_W - width * 0.5f) / zoom;
@@ -105,7 +104,7 @@ void renderCudaFrame(
         }
 
         float newZoom = zoom * Settings::zoomFactor;
-        constexpr float maxZoomAllowed = 1e6f;
+        constexpr float maxZoomAllowed = 1e15f; // 🐭 deutlich höher für Deep-Zooms
 
         zoomChanged = (std::fabs(newZoom - zoom) > 1e-6f);
         if (std::isfinite(newZoom) && newZoom < maxZoomAllowed) {
