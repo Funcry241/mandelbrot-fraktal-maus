@@ -190,7 +190,7 @@ foreach ($script in $scriptsToRun) {
 }
 
 # 🧡 Bonus Extra 🧡
-Write-Host "`n✨ Fun Fact: Otters hold hands while sleeping so they don't drift apart. 🦦" -ForegroundColor Cyan
+Write-Host "`n Fun Fact: Otters hold hands while sleeping so they don't drift apart. 🦦" -ForegroundColor Cyan
 
-Write-Host "`n✅ Build and copy completed successfully!" -ForegroundColor Green
+Write-Host "`n Build and copy completed successfully!" -ForegroundColor Green
 exit 0

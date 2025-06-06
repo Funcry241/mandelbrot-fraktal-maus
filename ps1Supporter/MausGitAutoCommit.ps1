@@ -44,7 +44,7 @@ $branch = git rev-parse --abbrev-ref HEAD
 Write-Host "[GIT] Pushing to branch '$branch'..."
 git push origin $branch
 
-Write-Host "[GIT] ✅ Changes successfully pushed!" -ForegroundColor Green
+Write-Host "[GIT] Changes successfully pushed!" -ForegroundColor Green
 
 # 7) Rare Otter Surprise (1 in 20 chance)
 $rareChance = Get-Random -Minimum 1 -Maximum 21
