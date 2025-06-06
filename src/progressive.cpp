@@ -1,6 +1,7 @@
 // Datei: src/progressive.cpp
 
 #include <cstdio>
+#include <cstdlib>   // ✨ Fix: für std::exit()
 #include "progressive.hpp"
 
 #ifndef __CUDACC__

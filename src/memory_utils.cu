@@ -2,6 +2,7 @@
 
 #include <cuda_runtime.h>
 #include <cstdio>
+#include <cstdlib>   // ✨ Fix: für std::exit()
 #include "memory_utils.hpp"
 
 // Device-Speicher für Complexity-Buffer

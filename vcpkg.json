@@ -3,8 +3,6 @@
   "version": "1.0.0",
   "dependencies": [
     "glfw3",
-    "glew",
-    "imgui",
-    "boost-multiprecision"
+    "glew"
   ]
 }
