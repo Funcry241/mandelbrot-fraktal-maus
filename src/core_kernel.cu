@@ -230,7 +230,7 @@ __global__ void computeComplexity(
     if (x < width && y < height) {
         const uchar4& px = img[y * width + x];
 
-        // Simple brightness as "proxy" for complexity
+        // Interpret brightness as pseudo-iteration proxy
         float brightness = (static_cast<float>(px.x) + px.y + px.z) / (3.0f * 255.0f);
 
         value = brightness;
@@ -242,7 +242,7 @@ __global__ void computeComplexity(
     sharedCount[localId] = valid;
     __syncthreads();
 
-    // Reduktion
+    // Parallel reduction
     for (int stride = (blockDim.x * blockDim.y) / 2; stride > 0; stride >>= 1) {
         if (localId < stride) {
             sharedSum[localId] += sharedSum[localId + stride];
@@ -257,12 +257,14 @@ __global__ void computeComplexity(
         if (count > 1) {
             float mean = sharedSum[0] / count;
             float meanSq = sharedSqSum[0] / count;
-            float variance = meanSq - mean * mean; // Varianzformel
+            float variance = meanSq - mean * mean;
 
-            complexity[tileY * tilesX + tileX] = variance;
+            // 🐭 Soft-Threshold — avoid numerical noise
+            complexity[tileY * tilesX + tileX] = (variance > 1e-6f) ? variance : 0.0f;
         } else {
             complexity[tileY * tilesX + tileX] = 0.0f;
         }
     }
 }
+
 
