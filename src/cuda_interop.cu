@@ -1,9 +1,15 @@
 // Datei: src/cuda_interop.cu
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <cuda_runtime.h>
-#include <cuda_gl_interop.h>
+#pragma once
+
+#ifdef _WIN32
+    #define NOMINMAX
+    #include <windows.h>    // Erst Windows-Header
+#endif
+
+#include <GL/gl.h>           // Dann OpenGL (GL.h)
+#include <cuda_runtime.h>    // Dann CUDA
+#include <cuda_gl_interop.h> // CUDA-OpenGL Interop
 
 #include <cstdio>
 #include <cstdlib>
@@ -14,6 +20,7 @@
 #include "core_kernel.h"
 #include "memory_utils.hpp"
 #include "progressive.hpp"
+
 
 namespace CudaInterop {
 
@@ -38,7 +45,7 @@ void renderCudaFrame(
     float*                d_complexity,
     std::vector<float>&   h_complexity
 ) {
-    DEBUG_PRINT("Starte Frame-Render");
+    DEBUG_PRINT("Starting frame render");
 
     uchar4* d_img = nullptr;
     size_t  imgSize = 0;
@@ -47,11 +54,11 @@ void renderCudaFrame(
     CHECK_CUDA_STEP(cudaGraphicsResourceGetMappedPointer(reinterpret_cast<void**>(&d_img), &imgSize, cudaPboRes), "cudaGraphicsResourceGetMappedPointer");
 
     if (Settings::debugGradient) {
-        DEBUG_PRINT("Starte Debug-Gradient");
+        DEBUG_PRINT("Launching debug gradient kernel");
         launch_debugGradient(d_img, width, height);
-        CHECK_CUDA_STEP(cudaDeviceSynchronize(), "DebugGradient Synchronize");
+        CHECK_CUDA_STEP(cudaDeviceSynchronize(), "DebugGradient synchronize");
     } else {
-        DEBUG_PRINT("Starte Mandelbrot-Kernel");
+        DEBUG_PRINT("Launching Mandelbrot kernel");
         launch_mandelbrotHybrid(d_img, width, height, zoom, offset, maxIter);
         CHECK_CUDA_STEP(cudaGetLastError(), "launch_mandelbrotHybrid");
 
@@ -63,15 +70,15 @@ void renderCudaFrame(
         dim3 gridDim((width + Settings::TILE_W - 1) / Settings::TILE_W,
                      (height + Settings::TILE_H - 1) / Settings::TILE_H);
 
-        DEBUG_PRINT("Starte Complexity-Kernel mit Grid (%d,%d) Block (%d,%d)", gridDim.x, gridDim.y, blockDim.x, blockDim.y);
+        DEBUG_PRINT("Launching complexity kernel with Grid (%d, %d) Block (%d, %d)", gridDim.x, gridDim.y, blockDim.x, blockDim.y);
 
         computeComplexity<<<gridDim, blockDim>>>(d_img, width, height, d_complexity);
-        CHECK_CUDA_STEP(cudaGetLastError(), "computeComplexity Kernel-Start");
-        CHECK_CUDA_STEP(cudaDeviceSynchronize(), "computeComplexity Synchronize");
+        CHECK_CUDA_STEP(cudaGetLastError(), "computeComplexity kernel launch");
+        CHECK_CUDA_STEP(cudaDeviceSynchronize(), "computeComplexity synchronize");
 
-        CHECK_CUDA_STEP(cudaMemcpy(h_complexity.data(), d_complexity, totalTiles * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy d_complexity->h_complexity");
+        CHECK_CUDA_STEP(cudaMemcpy(h_complexity.data(), d_complexity, totalTiles * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy d_complexity -> h_complexity");
 
-        DEBUG_PRINT("Suche Bereich mit größter Varianz...");
+        DEBUG_PRINT("Searching for tile with highest variance...");
 
         int tilesX = (width + Settings::TILE_W - 1) / Settings::TILE_W;
         float bestVariance = -1.0f;
@@ -84,7 +91,7 @@ void renderCudaFrame(
             }
         }
 
-        DEBUG_PRINT("Beste gefundene Varianz: %.6f", bestVariance);
+        DEBUG_PRINT("Best variance found: %.6f", bestVariance);
 
         bool offsetChanged = false;
         bool zoomChanged = false;
@@ -101,27 +108,37 @@ void renderCudaFrame(
                 offset.y = newOffY;
             }
 
-            DEBUG_PRINT("Neue Offset-Position: (%.6f, %.6f)", offset.x, offset.y);
+            DEBUG_PRINT("New offset: (%.6f, %.6f)", offset.x, offset.y);
         }
 
         float newZoom = zoom * Settings::zoomFactor;
-        constexpr float maxZoomAllowed = 1e15f; // 🐭 deutlich höher für Deep-Zooms
+        constexpr float maxZoomAllowed = 1e15f;
 
         zoomChanged = (std::fabs(newZoom - zoom) > 1e-6f);
         if (std::isfinite(newZoom) && newZoom < maxZoomAllowed) {
             zoom = newZoom;
-            DEBUG_PRINT("Neuer Zoom: %.6f", zoom);
+            DEBUG_PRINT("New zoom: %.6f", zoom);
         }
 
         if (offsetChanged || zoomChanged) {
-            DEBUG_PRINT("Zoom oder Offset geändert — Iterationen werden zurückgesetzt.");
+            DEBUG_PRINT("Offset or zoom changed — resetting iterations");
             resetIterations();
         }
     }
 
     CHECK_CUDA_STEP(cudaGraphicsUnmapResources(1, &cudaPboRes), "cudaGraphicsUnmapResources");
 
-    DEBUG_PRINT("Frame-Render abgeschlossen");
+    DEBUG_PRINT("Frame render complete");
+}
+
+void checkDynamicParallelismSupport() {
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+
+    if (prop.major < 3 || (prop.major == 3 && prop.minor < 5)) {
+        std::fprintf(stderr, "Dynamic Parallelism not supported. Compute Capability 3.5+ required.\n");
+        std::exit(EXIT_FAILURE);
+    }
 }
 
 } // namespace CudaInterop

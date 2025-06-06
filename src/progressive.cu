@@ -1,13 +1,9 @@
 #include <cstdio>
 #include "progressive.hpp"
 
-#ifdef __CUDACC__
+// Definition — EINMAL
 __device__ __managed__ int currentMaxIter = 100;
 __device__ __managed__ bool justResetFlag = false;
-#else
-int currentMaxIter = 100;
-bool justResetFlag = false;
-#endif
 
 void resetIterations() {
     currentMaxIter = 100;

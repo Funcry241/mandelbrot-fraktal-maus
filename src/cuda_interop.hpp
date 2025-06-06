@@ -13,6 +13,8 @@ extern "C" void launch_mandelbrotHybrid(uchar4* img, int w, int h, float zoom, f
 
 // Gesamte CUDA-Rendering-Pipeline
 namespace CudaInterop {
+
+/// Renders a CUDA frame into a mapped OpenGL PBO
 void renderCudaFrame(
     cudaGraphicsResource_t cudaPboRes,
     int width,
@@ -23,4 +25,8 @@ void renderCudaFrame(
     float* d_complexity,
     std::vector<float>& h_complexity
 );
+
+/// 🐭 Checks if the current GPU supports Dynamic Parallelism (Compute Capability 3.5+ required)
+void checkDynamicParallelismSupport();
+
 }

@@ -1,21 +1,14 @@
 #pragma once
 
-// 🐭 progressive.hpp – Declaration for progressive Mandelbrot rendering
+// progressive.hpp – Declaration for progressive Mandelbrot rendering
 
-#ifdef __CUDACC__
-// Für CUDA-Compiler (Device und Host gemeinsam)
-__device__ __managed__ inline int currentMaxIter = 100;
-__device__ __managed__ inline bool justResetFlag = false;   // 🐭 NEU: Flag für Reset
-#else
-// Für Host-Compiler (Deklaration)
-extern int currentMaxIter;
-extern bool justResetFlag;                                  // 🐭 NEU: Flag für Reset
-#endif
+// Nur Deklaration (extern) — *keine* __device__ oder __managed__ hier!
+extern __device__ __managed__ int currentMaxIter;
+extern __device__ __managed__ bool justResetFlag;  // 🐭 Reset-Flag
 
-extern void resetIterations();
-extern int getCurrentIterations();
-extern bool wasJustReset();    // 🐭 NEU
+void resetIterations();
+int getCurrentIterations();
+bool wasJustReset();  // 🐭
 
-// 🐭 Konstante Schrittweiten (modern, constexpr)
-inline constexpr int iterStep = 50;          // Schrittweite pro Frame
-inline constexpr int iterMax  = 5000;        // Maximale Iterationen
+inline constexpr int iterStep = 50;   // Schrittweite pro Frame
+inline constexpr int iterMax  = 5000; // Maximale Iterationen

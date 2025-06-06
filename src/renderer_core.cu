@@ -22,6 +22,7 @@
 #include "stb_easy_font.h"
 
 // -------------------------------------------------------------
+// Global resources
 static GLuint pbo = 0;
 static GLuint tex = 0;
 static cudaGraphicsResource* cudaPboRes = nullptr;
@@ -33,7 +34,7 @@ static GLuint EBO = 0;
 static double lastTime = 0.0;
 static int    frameCount = 0;
 static float  currentFPS = 0.0f;
-static float  lastFrameTime = 0.0f;     // 🆕 Frame-Time in ms
+static float  lastFrameTime = 0.0f;     // Frame time in milliseconds
 
 static float   zoom = Settings::initialZoom;
 static float2  offset = {Settings::initialOffsetX, Settings::initialOffsetY};
@@ -78,6 +79,9 @@ Renderer::Renderer(int width, int height)
 Renderer::~Renderer() {}
 
 void Renderer::initGL() {
+    // 🆕 Check dynamic parallelism support early
+    CudaInterop::checkDynamicParallelismSupport();
+
     if (!glfwInit()) {
         std::cerr << "GLFW initialization failed\n";
         std::exit(EXIT_FAILURE);
@@ -96,8 +100,8 @@ void Renderer::initGL() {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
-    // Window-Resize-Callback
-    glfwSetWindowUserPointer(window, this);   // 🆕 User-Data
+    // Set resize callback
+    glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int newW, int newH) {
         auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w));
         if (self) self->resize(newW, newH);
@@ -127,7 +131,6 @@ void Renderer::resize(int newWidth, int newHeight) {
     windowWidth = newWidth;
     windowHeight = newHeight;
 
-    // 🆕 Realloc PBO/Texture
     CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboRes));
     glDeleteBuffers(1, &pbo);
     glDeleteTextures(1, &tex);
@@ -143,7 +146,6 @@ void Renderer::resize(int newWidth, int newHeight) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, windowWidth, windowHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // 🆕 Realloc Complexity-Buffer
     CUDA_CHECK(cudaFree(d_complexity));
     int tilesX = (windowWidth + Settings::TILE_W - 1) / Settings::TILE_W;
     int tilesY = (windowHeight + Settings::TILE_H - 1) / Settings::TILE_H;
@@ -202,7 +204,7 @@ void Renderer::initGL_impl(GLFWwindow* window) {
 }
 
 void Renderer::renderFrame_impl(GLFWwindow* window) {
-    double frameStart = glfwGetTime();  // 🆕
+    double frameStart = glfwGetTime();
     frameCount++;
 
     if (frameStart - lastTime >= 1.0) {
@@ -236,7 +238,7 @@ void Renderer::renderFrame_impl(GLFWwindow* window) {
     glBindVertexArray(0);
     glUseProgram(0);
 
-    lastFrameTime = float((glfwGetTime() - frameStart) * 1000.0);  // 🆕 ms
+    lastFrameTime = float((glfwGetTime() - frameStart) * 1000.0f);
     Hud::draw(currentFPS, lastFrameTime, zoom, offset.x, offset.y, windowWidth, windowHeight);
 
     glfwSwapBuffers(window);
