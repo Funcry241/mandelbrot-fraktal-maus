@@ -1,23 +1,26 @@
-// Datei: src/progressive.cpp
-
 #include <cstdio>
-#include <cstdlib>   // ✨ Fix: für std::exit()
 #include "progressive.hpp"
 
-#ifndef __CUDACC__
-int currentMaxIter = 100;  // Host-Version (nur wenn NICHT CUDA-Compiler)
+#ifdef __CUDACC__
+__device__ __managed__ int currentMaxIter = 100;
+__device__ __managed__ bool justResetFlag = false;
+#else
+int currentMaxIter = 100;
+bool justResetFlag = false;
 #endif
 
-// 🐭 Reset iterations (only if needed)
 void resetIterations() {
-    static int lastResetIter = 100;
-    if (currentMaxIter != 100) {
-        currentMaxIter = 100;
-        std::fprintf(stdout, "[RESET] Iterations reset to %d.\n", currentMaxIter);
-    }
+    currentMaxIter = 100;
+    justResetFlag = true;    // 🐭 Reset-Flag setzen
+    std::fprintf(stdout, "[RESET] Iterations reset to %d.\n", currentMaxIter);
 }
 
-// 🐭 Getter for current iteration count
 int getCurrentIterations() {
     return currentMaxIter;
+}
+
+bool wasJustReset() {
+    bool flag = justResetFlag;
+    justResetFlag = false;   // 🐭 Einmalig liefern
+    return flag;
 }

@@ -2,46 +2,65 @@
 .SYNOPSIS
     MausGitAutoCommit.ps1
 .DESCRIPTION
-    Automatischer Commit und Push aller Änderungen im bestehenden Git-Repository.
+    Automatically commit and push all changes in the existing Git repository.
 #>
 
 param(
-    [string]$Message = "Auto-Commit: Aenderungen OtterDream"
+    [string]$Message = "Auto-Commit: Changes OtterDream"
 )
 
-# Stoppe bei Fehlern
+# Stop on errors
 $ErrorActionPreference = 'Stop'
 
-# 1) Git-Repository prüfen
+# 1) Check if Git repository exists
 if (-not (Test-Path ".git")) {
-    Write-Error "[GIT] Kein Git-Repository gefunden! Bitte initialisieren mit MausGit.ps1."
+    Write-Error "[GIT] No Git repository found! Please initialize with MausGit.ps1."
     exit 1
 }
 
-# 2) Änderungen zum Commit vormerken
-Write-Host "[GIT] Stage Aenderungen..."
+# 2) Stage changes
+Write-Host "[GIT] Staging changes..."
 git add .
 
-# 3) Prüfen, ob es etwas zu committen gibt
+# 3) Check if there is anything to commit
 $status = git status --porcelain
 if (-not $status) {
-    Write-Host "[GIT] Keine Aenderungen zum Commit." -ForegroundColor Yellow
+    Write-Host "[GIT] No changes to commit." -ForegroundColor Yellow
     exit 0
 }
 
-# 4) Commit erstellen (jetzt mit Datum/Uhrzeit)
+# 4) Create commit (with timestamp)
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 $fullMessage = "$Message $timestamp"
 
-Write-Host "[GIT] Erstelle Commit mit Nachricht:" -NoNewline
+Write-Host "[GIT] Creating commit with message:" -NoNewline
 Write-Host " $fullMessage" -ForegroundColor Cyan
 git commit -m "$fullMessage"
 
-# 5) Aktuellen Branch herausfinden
+# 5) Find current branch
 $branch = git rev-parse --abbrev-ref HEAD
 
-# 6) Push auf Remote
-Write-Host "[GIT] Pushe auf Branch '$branch'..."
+# 6) Push to remote
+Write-Host "[GIT] Pushing to branch '$branch'..."
 git push origin $branch
 
-Write-Host "[GIT] ✅ Aenderungen erfolgreich gepusht!" -ForegroundColor Green
+Write-Host "[GIT] ✅ Changes successfully pushed!" -ForegroundColor Green
+
+# 7) Rare Otter Surprise (1 in 20 chance)
+$rareChance = Get-Random -Minimum 1 -Maximum 21
+if ($rareChance -eq 1) {
+    $otterArt = @(
+        '    .--.',
+        '   /    \',
+        '  /_    _\',
+        ' // \  / \\',
+        ' |\__\/__/|',
+        ' \    /\   /',
+        '  ''--''  ''--'''
+    )
+    foreach ($line in $otterArt) {
+        Write-Host $line -ForegroundColor Cyan
+    }
+    Write-Host "Rare Otter Encounter!" -ForegroundColor Magenta
+}
+

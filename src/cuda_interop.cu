@@ -21,6 +21,7 @@ namespace CudaInterop {
     cudaError_t err = (call); \
     if (err != cudaSuccess) { \
         std::fprintf(stderr, "[CUDA ERROR] %s: %s\n", msg, cudaGetErrorString(err)); \
+        std::exit(EXIT_FAILURE); \
     } \
 }
 

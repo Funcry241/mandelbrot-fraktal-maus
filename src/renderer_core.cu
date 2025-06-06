@@ -219,7 +219,9 @@ void Renderer::renderFrame_impl(GLFWwindow* window) {
         d_complexity, h_complexity
     );
 
-    currentMaxIter = std::min(currentMaxIter + iterStep, iterMax);
+    if (!wasJustReset()) {
+        currentMaxIter = std::min(currentMaxIter + iterStep, iterMax);
+    }
 
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
