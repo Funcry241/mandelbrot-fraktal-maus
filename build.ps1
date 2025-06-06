@@ -1,10 +1,6 @@
-<#
-  MausID: kryptó-42
-  # Meta-Kommentar: Updated Build-Script
-  # Features:
-  # - Clean ENGLISH console output
-  # - Auto SSH-agent startup and key loading
-  # - Small extra: Build duration timer!
+<#+
+  MausID: κρυπτό-42
+  # Meta: Zentrale Fehlerbehandlung + SSH Agent Setup + kleine UX-Extras.
 #>
 
 param(
@@ -12,34 +8,41 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$buildStartTime = Get-Date
 
-Write-Host "=== Build started at $($buildStartTime.ToString("o")) ==="
+Write-Host "=== 🚀 Starting Build $(Get-Date -Format o) ==="
 
-# 0) Ensure SSH agent is running and key is loaded
-try {
-    $agentStatus = Get-Service -Name ssh-agent -ErrorAction Stop
-    if ($agentStatus.Status -ne 'Running') {
-        Write-Host "[SSH] Starting ssh-agent..."
-        Start-Service ssh-agent
-    } else {
-        Write-Host "[SSH] ssh-agent already running."
-    }
-} catch {
-    Write-Error "ssh-agent service not found! Please ensure OpenSSH Client is installed."
+# 0) SSH-Agent Setup
+Write-Host "[SSH] Checking if ssh-agent service is running..."
+
+if (-not (Get-Service ssh-agent -ErrorAction SilentlyContinue)) {
+    Write-Error "[SSH] ssh-agent service not found! Please install OpenSSH Client via 'Optional Features'."
     exit 1
 }
 
-$sshKeyPath = "$env:USERPROFILE\.ssh\id_ed25519"
-$existingKeys = ssh-add -l 2>$null
-if (-not $existingKeys -or ($existingKeys -notmatch [Regex]::Escape($sshKeyPath))) {
-    Write-Host "[SSH] Adding SSH key..."
-    ssh-add $sshKeyPath
+$sshAgent = Get-Service ssh-agent
+if ($sshAgent.Status -ne 'Running') {
+    Start-Service ssh-agent
+    Write-Host "[SSH] ssh-agent service started."
 } else {
-    Write-Host "[SSH] SSH key already added."
+    Write-Host "[SSH] ssh-agent already running."
 }
 
-# 1) Clean old build artifacts
+$sshKeys = ssh-add -l 2>&1
+if ($sshKeys -match "The agent has no identities") {
+    Write-Host "[SSH] No SSH keys found. Adding default key..."
+    $keyPath = "$Env:USERPROFILE\.ssh\id_ed25519"
+    if (Test-Path $keyPath) {
+        ssh-add $keyPath | Out-Null
+        Write-Host "[SSH] SSH key loaded successfully."
+    } else {
+        Write-Error "[SSH] SSH key not found at $keyPath"
+        exit 1
+    }
+} else {
+    Write-Host "[SSH] SSH key is already loaded."
+}
+
+# 1) Clean previous builds
 $toClean = @("build","dist","mandelbrot_otterdream_log.txt")
 foreach ($p in $toClean) {
     if (Test-Path $p) {
@@ -48,10 +51,10 @@ foreach ($p in $toClean) {
     }
 }
 
-# 2) Check supporter directory
+# 2) Validate supporter directory
 $supporterDir = "ps1Supporter"
 if (-not (Test-Path $supporterDir)) {
-    Write-Error "[SUPPORT] Directory '$supporterDir' not found. Ensure support scripts exist."
+    Write-Error "[SUPPORT] Directory '$supporterDir' not found. Please ensure all scripts are inside."
     exit 1
 }
 
@@ -61,24 +64,24 @@ try {
     $cudaBin = Split-Path $nvcc -Parent
     Write-Host "[CUDA] nvcc found: $nvcc"
 } catch {
-    Write-Error "nvcc.exe not found in PATH. Please install the CUDA Toolkit or update PATH."
+    Write-Error "[CUDA] nvcc.exe not found. Please install CUDA Toolkit or fix your PATH."
     exit 1
 }
 
-# 4) Load MSVC Environment via vswhere
+# 4) MSVC Environment Setup via vswhere
 $vswhere = Join-Path ${Env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path $vswhere)) {
-    Write-Error "vswhere.exe not found!"
+    Write-Error "[MSVC] vswhere.exe not found!"
     exit 1
 }
 $vsInstall = & "$vswhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vsInstall) {
-    Write-Error "No valid Visual Studio installation found!"
+    Write-Error "[MSVC] No valid Visual Studio installation found!"
     exit 1
 }
 $vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
 if (-not (Test-Path $vcvars)) {
-    Write-Error "vcvars64.bat not found!"
+    Write-Error "[MSVC] vcvars64.bat not found!"
     exit 1
 }
 Write-Host "[ENV] Loading MSVC environment from $vcvars"
@@ -94,7 +97,7 @@ if (Test-Path .env) {
     Get-Content .env | ForEach-Object {
         if ($_ -match '^(.*?)=(.*)$') {
             [Environment]::SetEnvironmentVariable($matches[1], $matches[2])
-            Write-Host "[ENV] Set $($matches[1])"
+            Write-Host "[ENV] $($matches[1]) set"
         }
     }
 }
@@ -103,34 +106,36 @@ if (Test-Path .env) {
 try {
     $vcpkg = (Get-Command vcpkg.exe -ErrorAction Stop).Source
 } catch {
-    Write-Error "vcpkg.exe not found in PATH!"
+    Write-Error "[VCPKG] vcpkg.exe not found in PATH!"
     exit 1
 }
 $vcpkgRoot = Split-Path $vcpkg -Parent
 $toolchain = Join-Path $vcpkgRoot 'scripts\buildsystems\vcpkg.cmake'
 if (-not (Test-Path $toolchain)) {
-    Write-Error "vcpkg toolchain not found!"
+    Write-Error "[VCPKG] Toolchain file not found!"
     exit 1
 }
-Write-Host "[ENV] vcpkg toolchain: $toolchain"
+Write-Host "[ENV] vcpkg Toolchain: $toolchain"
 
-# 7) Create build & dist directories
+# 7) Create build & dist folders
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
-# 8) CMake configure and build
-Write-Host "[BUILD] Configuring with CMake"
-$env:Path += ";C:\\ProgramData\\chocolatey\\bin"
-cmake -B build -S . -G Ninja `
-    "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
+# 8) CMake Configure & Build
+Write-Host "[BUILD] Configuring with CMake..."
+$env:Path += ";C:\ProgramData\chocolatey\bin"
+cmake `
+    -B build -S . `
+    -G Ninja `
+    "-DCMAKE_TOOLCHAIN_FILE=$PSScriptRoot/vcpkg/scripts/buildsystems/vcpkg.cmake" `
     "-DCMAKE_BUILD_TYPE=$Configuration" `
     "-DCMAKE_CUDA_COMPILER=$nvcc" `
     "-DCMAKE_CUDA_TOOLKIT_ROOT_DIR=$cudaBin\.." `
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
 
-Write-Host "[BUILD] Building project"
+Write-Host "[BUILD] Building project..."
 cmake --build build --config $Configuration --parallel
 
-# 9) Copy EXE and DLLs
+# 9) Copy binaries
 $exe = "build\$Configuration\mandelbrot_otterdream.exe"
 if (-not (Test-Path $exe)) {
     $exe = "build\mandelbrot_otterdream.exe"
@@ -184,8 +189,8 @@ foreach ($script in $scriptsToRun) {
     }
 }
 
-# End and duration output
-$buildEndTime = Get-Date
-$duration = New-TimeSpan -Start $buildStartTime -End $buildEndTime
-Write-Host "`n✅ Build and copy completed successfully! Duration: $($duration.ToString())" -ForegroundColor Green
+# 🧡 Bonus Extra 🧡
+Write-Host "`n✨ Fun Fact: Otters hold hands while sleeping so they don't drift apart. 🦦" -ForegroundColor Cyan
+
+Write-Host "`n✅ Build and copy completed successfully!" -ForegroundColor Green
 exit 0
