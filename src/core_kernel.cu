@@ -6,7 +6,6 @@
 #include <vector_types.h>
 #include <device_launch_parameters.h>
 #include "core_kernel.h"
-#include "settings.hpp"   // 🐭 Damit Settings::debugLogging bekannt ist
 
 // 🐭 Test-Gradient-Kernel – IMMER definiert
 __global__ void testKernel(uchar4* img, int width, int height) {
@@ -188,7 +187,16 @@ extern "C" void launch_mandelbrotHybrid(
     }
 
     mandelbrotHybrid<<<blocks, threads>>>(img, width, height, zoom, offset, maxIter);
-    cudaDeviceSynchronize();
+
+    // Synchronisation vor Fehlerprüfung
+    cudaError_t errSync  = cudaDeviceSynchronize();
+    cudaError_t errAsync = cudaGetLastError();
+    if (errSync != cudaSuccess) {
+        printf("[SYNC ERROR] mandelbrotHybrid: %s\n", cudaGetErrorString(errSync));
+    }
+    if (errAsync != cudaSuccess) {
+        printf("[ASYNC ERROR] mandelbrotHybrid: %s\n", cudaGetErrorString(errAsync));
+    }
 }
 
 __global__ void computeComplexity(

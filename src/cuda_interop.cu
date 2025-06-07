@@ -4,12 +4,12 @@
 
 #ifdef _WIN32
     #define NOMINMAX
-    #include <windows.h>    // Erst Windows-Header
+    #include <windows.h>
 #endif
 
-#include <GL/gl.h>           // Dann OpenGL (GL.h)
-#include <cuda_runtime.h>    // Dann CUDA
-#include <cuda_gl_interop.h> // CUDA-OpenGL Interop
+#include <GL/gl.h>
+#include <cuda_runtime.h>
+#include <cuda_gl_interop.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -20,7 +20,6 @@
 #include "core_kernel.h"
 #include "memory_utils.hpp"
 #include "progressive.hpp"
-
 
 namespace CudaInterop {
 
@@ -93,38 +92,33 @@ void renderCudaFrame(
 
         DEBUG_PRINT("Best variance found: %.6f", bestVariance);
 
-        bool offsetChanged = false;
-        bool zoomChanged = false;
-
         if (bestVariance > 0.0f) {
             int bx = bestIdx % tilesX;
             int by = bestIdx / tilesX;
             float newOffX = offset.x + ((bx + 0.5f) * Settings::TILE_W - width * 0.5f) / zoom;
             float newOffY = offset.y + ((by + 0.5f) * Settings::TILE_H - height * 0.5f) / zoom;
 
-            offsetChanged = (std::fabs(newOffX - offset.x) > 1e-6f) || (std::fabs(newOffY - offset.y) > 1e-6f);
             if (std::isfinite(newOffX) && std::isfinite(newOffY)) {
                 offset.x = 0.9f * offset.x + 0.1f * newOffX;
                 offset.y = 0.9f * offset.y + 0.1f * newOffY;
+                DEBUG_PRINT("New offset: (%.6f, %.6f)", offset.x, offset.y);
             }
 
+            float newZoom = zoom * Settings::zoomFactor;
+            constexpr float maxZoomAllowed = 1e15f;
 
-            DEBUG_PRINT("New offset: (%.6f, %.6f)", offset.x, offset.y);
+            if (std::isfinite(newZoom) && newZoom < maxZoomAllowed) {
+                zoom = 0.9f * zoom + 0.1f * newZoom;
+                DEBUG_PRINT("New zoom: %.6f", zoom);
+            }
         }
+    }
 
-        float newZoom = zoom * Settings::zoomFactor;
-        constexpr float maxZoomAllowed = 1e15f;
-
-        zoomChanged = (std::fabs(newZoom - zoom) > 1e-6f);
-        if (std::isfinite(newZoom) && newZoom < maxZoomAllowed) {
-            zoom = newZoom;
-            DEBUG_PRINT("New zoom: %.6f", zoom);
-        }
-
-        if (std::isfinite(newZoom) && newZoom < maxZoomAllowed) {
-            zoom = 0.9f * zoom + 0.1f * newZoom;
-            DEBUG_PRINT("New zoom: %.6f", zoom);
-        }
+    // Synchronisation bevor Unmap
+    cudaError_t syncErr = cudaDeviceSynchronize();
+    if (syncErr != cudaSuccess) {
+        std::fprintf(stderr, "[SYNC ERROR] Before unmap: %s\n", cudaGetErrorString(syncErr));
+        std::exit(EXIT_FAILURE);
     }
 
     CHECK_CUDA_STEP(cudaGraphicsUnmapResources(1, &cudaPboRes), "cudaGraphicsUnmapResources");
