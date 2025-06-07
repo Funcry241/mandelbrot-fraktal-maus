@@ -70,3 +70,6 @@ cmake --build --preset build
 ## Lizenz
 
 Dieses Projekt steht unter der MIT-Lizenz – siehe [LICENSE](LICENSE) für Details.
+
+📚 Weitere Informationen zu Build-Agents und Tooling:  
+👉 [AGENTS.md](./AGENTS.md)
