@@ -1,19 +1,16 @@
 // Datei: src/main.cpp
-
 #include "renderer_core.hpp"
 #include "settings.hpp"
-#include "cuda_interop.hpp"   // 🐭 Added to call checkDynamicParallelismSupport()
+#include "cuda_interop.hpp"
 
 int main() {
-    // 🐭 Check if the GPU supports dynamic parallelism before anything else
     CudaInterop::checkDynamicParallelismSupport();
-
     Renderer renderer(Settings::width, Settings::height);
     renderer.initGL();
 
-    while (!renderer.shouldClose()) {
+    while (!renderer.shouldClose())
         renderer.renderFrame();
-    }
 
+    // 🐭 Kein explizites cleanup mehr nötig – wird im Renderer-Destruktor automatisch erledigt
     return 0;
 }

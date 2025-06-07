@@ -5,23 +5,24 @@
 #include <vector>
 #include <cuda_gl_interop.h>
 
+// Minimal forward declaration
 typedef struct cudaGraphicsResource* cudaGraphicsResource_t;
 
 class Renderer {
 public:
     Renderer(int width, int height);
-    ~Renderer();
+    ~Renderer();                               // 🐭 Automatisches Cleanup
 
-    void initGL();
-    void renderFrame();
-    void cleanup();               // 🐭 ✅ HINZUGEFÜGT
-    bool shouldClose() const;
-    void resize(int newWidth, int newHeight);
+    void initGL();                             // Initialisiert OpenGL & CUDA
+    void renderFrame();                        // Rendert einen Frame
+    bool shouldClose() const;                  // Prüft, ob Fenster geschlossen werden soll
+    void resize(int newWidth, int newHeight);  // Behandelt Fenstergrößenänderung
 
 private:
-    void initGL_impl();
-    void renderFrame_impl();
-    void cleanup_impl();
+    void initGL_impl();                        // OpenGL Context Setup intern
+    void renderFrame_impl();                   // Frame Render intern
+    void setupPBOAndTexture();                 // 🆕 PBO + Texture initialisieren
+    void setupBuffers();                       // 🆕 CUDA-Buffer initialisieren
 
     int windowWidth, windowHeight;
     GLFWwindow* window;
