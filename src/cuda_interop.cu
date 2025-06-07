@@ -104,9 +104,10 @@ void renderCudaFrame(
 
             offsetChanged = (std::fabs(newOffX - offset.x) > 1e-6f) || (std::fabs(newOffY - offset.y) > 1e-6f);
             if (std::isfinite(newOffX) && std::isfinite(newOffY)) {
-                offset.x = newOffX;
-                offset.y = newOffY;
+                offset.x = 0.9f * offset.x + 0.1f * newOffX;
+                offset.y = 0.9f * offset.y + 0.1f * newOffY;
             }
+
 
             DEBUG_PRINT("New offset: (%.6f, %.6f)", offset.x, offset.y);
         }
@@ -120,9 +121,9 @@ void renderCudaFrame(
             DEBUG_PRINT("New zoom: %.6f", zoom);
         }
 
-        if (offsetChanged || zoomChanged) {
-            DEBUG_PRINT("Offset or zoom changed — resetting iterations");
-            resetIterations();
+        if (std::isfinite(newZoom) && newZoom < maxZoomAllowed) {
+            zoom = 0.9f * zoom + 0.1f * newZoom;
+            DEBUG_PRINT("New zoom: %.6f", zoom);
         }
     }
 
