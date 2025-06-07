@@ -1,5 +1,4 @@
-// Datei: src/renderer_core.cu
-// 🐭 Maus-Kommentar: Maximal komprimierter Mandelbrot-Renderer mit korrektem wasJustReset() und CUDA-kompatiblem to_hex()
+// 🐭 Maus-Kommentar: Mandelbrot-Renderer – ultraschlank für maximale Effizienz
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -7,7 +6,7 @@
 #include <cuda_runtime.h>
 #include <iostream>
 #include <vector>
-#include <sstream> // 🐭 Neu für hex Conversion
+#include <sstream>
 #include <stdexcept>
 #include "settings.hpp"
 #include "core_kernel.h"
@@ -19,26 +18,14 @@
 #include "progressive.hpp"
 #include "stb_easy_font.h"
 
-inline void CUDA_CHECK(cudaError_t err) {
-    if (err != cudaSuccess)
-        throw std::runtime_error("CUDA error: " + std::string(cudaGetErrorString(err)));
-}
-
-inline std::string to_hex(GLenum err) {
-    std::ostringstream oss;
-    oss << std::hex << err;
-    return oss.str();
-}
-
-inline void GL_CHECK() {
-    if (auto err = glGetError(); err != GL_NO_ERROR)
-        throw std::runtime_error("OpenGL error: 0x" + to_hex(err));
-}
+inline void CUDA_CHECK(cudaError_t e) { if (e != cudaSuccess) throw std::runtime_error("CUDA: " + std::string(cudaGetErrorString(e))); }
+inline std::string to_hex(GLenum e) { std::ostringstream oss; oss << std::hex << e; return oss.str(); }
+inline void GL_CHECK() { if (auto e = glGetError(); e != GL_NO_ERROR) throw std::runtime_error("OpenGL: 0x" + to_hex(e)); }
 
 static constexpr const char* vertSrc = R"GLSL(
 #version 430 core
-layout(location=0) in vec2 aPos; layout(location=1) in vec2 aTex;
-out vec2 vTex; void main() { vTex = aTex; gl_Position = vec4(aPos, 0.0, 1.0); }
+layout(location=0) in vec2 aPos, aTex; out vec2 vTex;
+void main() { vTex = aTex; gl_Position = vec4(aPos, 0, 1); }
 )GLSL";
 
 static constexpr const char* fragSrc = R"GLSL(
@@ -48,11 +35,10 @@ void main() { FragColor = texture(uTex, vTex); }
 )GLSL";
 
 Renderer::Renderer(int w, int h)
-    : windowWidth(w), windowHeight(h), window(nullptr),
-      pbo(0), tex(0), program(0), VAO(0), VBO(0), EBO(0),
-      cudaPboRes(nullptr), d_complexity(nullptr), d_iterations(nullptr),
-      zoom(Settings::initialZoom), offset{Settings::initialOffsetX, Settings::initialOffsetY},
-      lastTime(0.0), frameCount(0), currentFPS(0.0f), lastFrameTime(0.0f) {}
+: windowWidth(w), windowHeight(h), window(nullptr), pbo(0), tex(0), program(0), VAO(0), VBO(0), EBO(0),
+  cudaPboRes(nullptr), d_complexity(nullptr), d_iterations(nullptr),
+  zoom(Settings::initialZoom), offset{Settings::initialOffsetX, Settings::initialOffsetY},
+  lastTime(0.0), frameCount(0), currentFPS(0), lastFrameTime(0) {}
 
 Renderer::~Renderer() {
     try {
@@ -65,7 +51,7 @@ Renderer::~Renderer() {
         deleteFullscreenQuad(&VAO, &VBO, &EBO);
         Hud::cleanup();
         if (window) { glfwDestroyWindow(window); glfwTerminate(); }
-    } catch (...) { std::cerr << "[Destructor Error] Resource cleanup failed.\n"; }
+    } catch (...) { std::cerr << "[Destructor Error]\n"; }
 }
 
 void Renderer::initGL() {
@@ -73,15 +59,29 @@ void Renderer::initGL() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    window = glfwCreateWindow(windowWidth, windowHeight, "OtterDream Mandelbrot", nullptr, nullptr);
-    if (!window) throw std::runtime_error("Window creation failed");
+    if (!(window = glfwCreateWindow(windowWidth, windowHeight, "OtterDream Mandelbrot", nullptr, nullptr)))
+        throw std::runtime_error("Window creation failed");
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int nw, int nh) {
         if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w))) self->resize(nw, nh);
     });
-    initGL_impl();
+    glewExperimental = GL_TRUE;
+    if (glewInit() != GLEW_OK) throw std::runtime_error("GLEW init failed");
+    CUDA_CHECK(cudaSetDevice(0));
+    CUDA_CHECK(cudaGLSetGLDevice(0));
+    setupPBOAndTexture();
+    program = createProgramFromSource(vertSrc, fragSrc);
+    glUseProgram(program);
+    glUniform1i(glGetUniformLocation(program, "uTex"), 0);
+    glUseProgram(0);
+    createFullscreenQuad(&VAO, &VBO, &EBO);
+    GL_CHECK();
+    setupBuffers();
+    glViewport(0, 0, windowWidth, windowHeight);
+    Hud::init();
+    lastTime = glfwGetTime();
 }
 
 void Renderer::renderFrame() { renderFrame_impl(); }
@@ -100,31 +100,11 @@ void Renderer::resize(int nw, int nh) {
     glViewport(0, 0, windowWidth, windowHeight);
 }
 
-void Renderer::initGL_impl() {
-    glewExperimental = GL_TRUE;
-    if (glewInit() != GLEW_OK) throw std::runtime_error("GLEW init failed");
-    CUDA_CHECK(cudaSetDevice(0));
-    CUDA_CHECK(cudaGLSetGLDevice(0));
-    setupPBOAndTexture();
-    program = createProgramFromSource(vertSrc, fragSrc);
-    glUseProgram(program);
-    glUniform1i(glGetUniformLocation(program, "uTex"), 0);
-    glUseProgram(0);
-    createFullscreenQuad(&VAO, &VBO, &EBO);
-    GL_CHECK();
-    setupBuffers();
-    lastTime = glfwGetTime();
-    frameCount = 0;
-    currentFPS = 0.0f;
-    glViewport(0, 0, windowWidth, windowHeight);
-    Hud::init();
-}
-
 void Renderer::renderFrame_impl() {
     double frameStart = glfwGetTime();
     frameCount++;
     if (frameStart - lastTime >= 1.0) {
-        currentFPS = (float)frameCount / (float)(frameStart - lastTime);
+        currentFPS = frameCount / (frameStart - lastTime);
         frameCount = 0;
         lastTime = frameStart;
     }
@@ -134,19 +114,18 @@ void Renderer::renderFrame_impl() {
 
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, windowWidth, windowHeight, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, windowWidth, windowHeight, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(program);
     glBindVertexArray(VAO);
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
     glUseProgram(0);
 
-    lastFrameTime = (float)((glfwGetTime() - frameStart) * 1000.0);
+    lastFrameTime = float((glfwGetTime() - frameStart) * 1000.0);
     Hud::draw(currentFPS, lastFrameTime, zoom, offset.x, offset.y, windowWidth, windowHeight);
-
     glfwSwapBuffers(window);
     glfwPollEvents();
 }
@@ -176,6 +155,4 @@ void Renderer::setupBuffers() {
     CUDA_CHECK(cudaMalloc(&d_iterations, windowWidth * windowHeight * sizeof(int)));
 }
 
-bool wasJustReset() {
-    return std::exchange(justResetFlag, false);
-}
+bool wasJustReset() { return std::exchange(justResetFlag, false); }

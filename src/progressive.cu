@@ -1,5 +1,7 @@
+// Datei: src/progressive.cu
 #include <cstdio>
 #include <cmath>
+#include <algorithm> // 🐭✨ NEU: nötig für std::min
 #include "progressive.hpp"
 #include "settings.hpp"
 
@@ -13,7 +15,9 @@ void resetIterations() {
         std::fprintf(stdout, "[RESET] Iterations reset to %d.\n", currentMaxIter);
 }
 
-int getCurrentIterations() { return currentMaxIter; }
+int getCurrentIterations() {
+    return currentMaxIter;
+}
 
 void incrementIterations() {
     if (currentMaxIter < Settings::MAX_ITERATIONS_CAP) {

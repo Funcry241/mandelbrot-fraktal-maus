@@ -1,5 +1,4 @@
-// Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit brutal kompaktem Pan-Step und Variance-Threshold
+// 🐭 CUDA-OpenGL Interop – brutal komprimiert für maximale Geschwindigkeit
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -22,21 +21,12 @@
 
 namespace CudaInterop {
 
-#define CHECK_CUDA_STEP(call, msg) do { \
-    if (auto err = (call); err != cudaSuccess) \
-        throw std::runtime_error("[CUDA ERROR] " + std::string(msg) + ": " + cudaGetErrorString(err)); \
-} while (0)
+#define CHECK_CUDA_STEP(call, msg) if (auto e = (call); e != cudaSuccess) throw std::runtime_error("[CUDA] " + std::string(msg) + ": " + cudaGetErrorString(e))
+#define DEBUG_PRINT(fmt, ...) if (Settings::debugLogging) std::fprintf(stdout, "[DEBUG] " fmt "\n", ##__VA_ARGS__)
 
-#define DEBUG_PRINT(fmt, ...) do { \
-    if (Settings::debugLogging) \
-        std::fprintf(stdout, "[DEBUG] " fmt "\n", ##__VA_ARGS__); \
-} while (0)
-
-void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoom, float2& offset,
-                     int maxIter, float* d_comp, std::vector<float>& h_comp, int* d_iters) {
+void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoom, float2& offset, int maxIter, float* d_comp, std::vector<float>& h_comp, int* d_iters) {
     DEBUG_PRINT("Starting frame render");
-    uchar4* d_img = nullptr;
-    size_t imgSize = 0;
+    uchar4* d_img = nullptr; size_t imgSize = 0;
     CHECK_CUDA_STEP(cudaGraphicsMapResources(1, &cudaPboRes), "MapResources");
     CHECK_CUDA_STEP(cudaGraphicsResourceGetMappedPointer((void**)&d_img, &imgSize, cudaPboRes), "GetMappedPointer");
 
@@ -44,10 +34,8 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
         DEBUG_PRINT("Launching debug kernel");
         launch_debugGradient(d_img, w, h);
     } else {
-        DEBUG_PRINT("Launching Mandelbrot kernel");
         launch_mandelbrotHybrid(d_img, d_iters, w, h, zoom, offset, maxIter);
-
-        int totalTiles = (int)h_comp.size();
+        int totalTiles = h_comp.size();
         CHECK_CUDA_STEP(cudaMemset(d_comp, 0, totalTiles * sizeof(float)), "Memset complexity");
 
         dim3 block(Settings::TILE_W, Settings::TILE_H), grid((w + block.x - 1) / block.x, (h + block.y - 1) / block.y);
@@ -55,8 +43,7 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
 
         float dynThreshold = Settings::dynamicVarianceThreshold(zoom);
         computeComplexity<<<grid, block>>>(d_iters, w, h, d_comp, dynThreshold);
-
-        CHECK_CUDA_STEP(cudaDeviceSynchronize(), "complexity sync");
+        CHECK_CUDA_STEP(cudaDeviceSynchronize(), "Complexity sync");
         CHECK_CUDA_STEP(cudaMemcpy(h_comp.data(), d_comp, totalTiles * sizeof(float), cudaMemcpyDeviceToHost), "Memcpy complexity");
 
         DEBUG_PRINT("Searching best tile...");
@@ -64,8 +51,7 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
         float bestVar = -1.0f;
 
         for (int i = 0; i < totalTiles; ++i)
-            if (h_comp[i] > dynThreshold && h_comp[i] > bestVar)
-                bestVar = h_comp[i], bestIdx = i;
+            if (h_comp[i] > dynThreshold && h_comp[i] > bestVar) bestVar = h_comp[i], bestIdx = i;
 
         if (bestIdx != -1) {
             DEBUG_PRINT("Best variance: %.12f", bestVar);
@@ -76,7 +62,7 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
             if (std::isfinite(targetX) && std::isfinite(targetY)) {
                 auto step = [](float d, float f, float z) {
                     float s = fminf(fmaxf(fabsf(d), fmaxf(Settings::MIN_OFFSET_STEP, 1e-5f / z)), f / z);
-                    return (d > 0.0f) ? s : -s;
+                    return d > 0.0f ? s : -s;
                 };
                 offset.x += step(targetX - offset.x, Settings::OFFSET_STEP_FACTOR, zoom);
                 offset.y += step(targetY - offset.y, Settings::OFFSET_STEP_FACTOR, zoom);
@@ -86,8 +72,7 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
             float targetZoom = zoom * Settings::zoomFactor;
             if (std::isfinite(targetZoom) && targetZoom < 1e15f) {
                 float delta = targetZoom - zoom;
-                float zoomStep = fminf(fmaxf(fabsf(delta), Settings::MIN_ZOOM_STEP), Settings::ZOOM_STEP_FACTOR * zoom);
-                zoom += (delta > 0.0f) ? zoomStep : -zoomStep;
+                zoom += (delta > 0.0f ? 1 : -1) * fminf(fmaxf(fabsf(delta), Settings::MIN_ZOOM_STEP), Settings::ZOOM_STEP_FACTOR * zoom);
                 DEBUG_PRINT("New zoom: %.12f", zoom);
             }
         }

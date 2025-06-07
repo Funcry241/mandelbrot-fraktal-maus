@@ -1,5 +1,4 @@
-// Datei: core_kernel.cu
-// 🐭 Maus-Kommentar: CUDA-Kernel für Mandelbrot mit dynamischem Variance-Threshold (maximal komprimiert)
+// 🐭 CUDA Mandelbrot-Kernel – maximal komprimiert
 
 #include <cstdio>
 #include <cuda_runtime.h>
@@ -13,10 +12,9 @@ __global__ void testKernel(uchar4* img, int w, int h) {
 }
 
 extern "C" void launch_debugGradient(uchar4* img, int w, int h) {
-    dim3 t(Settings::TILE_W, Settings::TILE_H), b((w + t.x - 1) / t.x, (h + t.y - 1) / t.y);
-    printf("[INFO] DebugGradient Grid (%d, %d)\n", b.x, b.y);
-    testKernel<<<b, t>>>(img, w, h);
-    cudaDeviceSynchronize();
+    dim3 t(Settings::TILE_W, Settings::TILE_H), g((w + t.x - 1) / t.x, (h + t.y - 1) / t.y);
+    printf("[INFO] DebugGradient Grid (%d, %d)\n", g.x, g.y);
+    testKernel<<<g, t>>>(img, w, h); cudaDeviceSynchronize();
 }
 
 __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy, float zoom) {
@@ -45,11 +43,10 @@ __global__ void mandelbrotHybrid(uchar4* img, int* iters, int w, int h, float zo
 }
 
 extern "C" void launch_mandelbrotHybrid(uchar4* img, int* iters, int w, int h, float zoom, float2 offset, int maxIter) {
-    static bool firstLaunch = true;
-    dim3 t(Settings::TILE_W, Settings::TILE_H), b((w + t.x - 1) / t.x, (h + t.y - 1) / t.y);
-    if (firstLaunch) { printf("[INFO] Launch mandelbrotHybrid: Grid (%d, %d)\n", b.x, b.y); firstLaunch = false; }
-    mandelbrotHybrid<<<b, t>>>(img, iters, w, h, zoom, offset, maxIter);
-    cudaDeviceSynchronize();
+    static bool first = true;
+    dim3 t(Settings::TILE_W, Settings::TILE_H), g((w + t.x - 1) / t.x, (h + t.y - 1) / t.y);
+    if (first) { printf("[INFO] Mandelbrot Grid (%d, %d)\n", g.x, g.y); first = false; }
+    mandelbrotHybrid<<<g, t>>>(img, iters, w, h, zoom, offset, maxIter); cudaDeviceSynchronize();
 }
 
 __global__ void computeComplexity(const int* iters, int w, int h, float* comp, float threshold) {
@@ -57,20 +54,21 @@ __global__ void computeComplexity(const int* iters, int w, int h, float* comp, f
     int lid = threadIdx.y * blockDim.x + threadIdx.x, tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
     __shared__ float sum[Settings::TILE_W * Settings::TILE_H], sqSum[Settings::TILE_W * Settings::TILE_H];
     __shared__ int minIter[Settings::TILE_W * Settings::TILE_H], maxIter[Settings::TILE_W * Settings::TILE_H], count[Settings::TILE_W * Settings::TILE_H];
-    float val = 0.0f; int valid = 0, iVal = 0;
+    float val = 0; int valid = 0, iVal = 0;
     if (x < w && y < h) { iVal = iters[y * w + x]; val = (float)iVal; valid = 1; }
     sum[lid] = val; sqSum[lid] = val * val; minIter[lid] = maxIter[lid] = iVal; count[lid] = valid;
     __syncthreads();
     for (int s = (blockDim.x * blockDim.y) >> 1; s; s >>= 1) {
         if (lid < s) {
             sum[lid] += sum[lid + s]; sqSum[lid] += sqSum[lid + s];
-            minIter[lid] = min(minIter[lid], minIter[lid + s]); maxIter[lid] = max(maxIter[lid], maxIter[lid + s]);
+            minIter[lid] = min(minIter[lid], minIter[lid + s]);
+            maxIter[lid] = max(maxIter[lid], maxIter[lid + s]);
             count[lid] += count[lid + s];
         }
         __syncthreads();
     }
     if (!lid) {
-        int n = count[0]; float score = 0.0f;
+        int n = count[0]; float score = 0;
         if (n > 1) {
             float mean = sum[0] / n, var = (sqSum[0] / n) - mean * mean;
             int spread = maxIter[0] - minIter[0];
