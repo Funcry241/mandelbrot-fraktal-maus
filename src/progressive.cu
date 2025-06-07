@@ -31,9 +31,3 @@ void incrementIterations() {
         }
     }
 }
-
-bool wasJustReset() {
-    bool flag = justResetFlag;
-    justResetFlag = false; // 🐭 Einmalig liefern
-    return flag;
-}

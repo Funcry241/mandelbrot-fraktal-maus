@@ -1,26 +1,21 @@
-// 🐭 Maus-Kommentar: CUDA-Kernel für Mandelbrot mit dynamischem Variance-Threshold via __device__ Symbol
+// Datei: core_kernel.cu
+// 🐭 Maus-Kommentar: CUDA-Kernel für Mandelbrot mit dynamischem Variance-Threshold (perfektioniert)
 
 #include <cstdio>
 #include "settings.hpp"
 #include <cuda_runtime.h>
-#include <vector_types.h>
 #include <device_launch_parameters.h>
 #include "core_kernel.h"
 
-// 🐭 Device-Variable für dynamischen Threshold
+// 🐭 Dynamischer Threshold als Device-Symbol
 __device__ float deviceVarianceThreshold = 1e-6f;
 
-// 🐭 Setter-Funktion für den Threshold
-extern "C" void setDeviceVarianceThreshold(float threshold) {
-    cudaMemcpyToSymbol(deviceVarianceThreshold, &threshold, sizeof(float));
-}
-
-// 🐭 Gradient-Testbild
-__global__ void testKernel(uchar4* img, int w, int h) {
+// 🐭 Gradient-Testkernel
+__global__ void testKernel(uchar4* __restrict__ img, int w, int h) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= w || y >= h) return;
-    img[y * w + x] = make_uchar4((x * 255) / w, (y * 255) / h, 128, 255);
+    if (x < w && y < h)
+        img[y * w + x] = make_uchar4((x * 255) / w, (y * 255) / h, 128, 255);
 }
 
 extern "C" void launch_debugGradient(uchar4* img, int w, int h) {
@@ -28,38 +23,32 @@ extern "C" void launch_debugGradient(uchar4* img, int w, int h) {
     dim3 blocks((w + threads.x - 1) / threads.x, (h + threads.y - 1) / threads.y);
     printf("[INFO] DebugGradient Grid (%d, %d)\n", blocks.x, blocks.y);
     testKernel<<<blocks, threads>>>(img, w, h);
-    cudaError_t err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
+    if (cudaError_t err = cudaDeviceSynchronize(); err != cudaSuccess)
         fprintf(stderr, "[ERROR] launch_debugGradient failed: %s\n", cudaGetErrorString(err));
-    }
 }
 
-// 🐭 Farbkodierung
+// 🐭 Farbzuordnung mit sanftem Verlauf
 __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy, float zoom) {
     if (iter >= maxIter) return make_uchar4(0, 0, 0, 255);
 
     float log_zn = logf(zx * zx + zy * zy) * 0.5f;
     float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
     float t = (iter + 1.0f - nu) / maxIter;
+    float shift = fmodf(logf(zoom + 2.0f) * 0.07f, 1.0f);
 
-    float zoomShift = fmodf(logf(zoom + 2.0f) * 0.07f, 1.0f);
-
-    float r = 0.8f + 0.2f * cosf(6.28318f * (t + zoomShift));
-    float g = 0.6f + 0.4f * cosf(6.28318f * (t + zoomShift + 0.3f));
-    float b = 0.4f + 0.6f * cosf(6.28318f * (t + zoomShift + 0.6f));
-
-    r = powf(r, 1.5f);
-    g = powf(g, 1.5f);
-    b = powf(b, 1.5f);
+    float r = powf(0.8f + 0.2f * cosf(6.28318f * (t + shift)), 1.5f);
+    float g = powf(0.6f + 0.4f * cosf(6.28318f * (t + shift + 0.3f)), 1.5f);
+    float b = powf(0.4f + 0.6f * cosf(6.28318f * (t + shift + 0.6f)), 1.5f);
 
     return make_uchar4(fminf(r * 255.0f, 255.0f), fminf(g * 255.0f, 255.0f), fminf(b * 255.0f, 255.0f), 255);
 }
 
-// 🐭 Mandelbrot Kernel
-__global__ void mandelbrotHybrid(uchar4* img, int* iterations, int w, int h, float zoom, float2 offset, int maxIter) {
+// 🐭 Mandelbrot-Rendering mit Iterationspuffer
+__global__ void mandelbrotHybrid(uchar4* __restrict__ img, int* __restrict__ iterations, int w, int h, float zoom, float2 offset, int maxIter) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= w || y >= h) return;
+
     float cx = (x - w * 0.5f) / zoom + offset.x;
     float cy = (y - h * 0.5f) / zoom + offset.y;
     float zx = 0.0f, zy = 0.0f;
@@ -83,24 +72,18 @@ extern "C" void launch_mandelbrotHybrid(uchar4* img, int* iterations, int w, int
         firstLaunch = false;
     }
     mandelbrotHybrid<<<blocks, threads>>>(img, iterations, w, h, zoom, offset, maxIter);
-    cudaError_t err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
+    if (cudaError_t err = cudaDeviceSynchronize(); err != cudaSuccess)
         fprintf(stderr, "[ERROR] launch_mandelbrotHybrid failed: %s\n", cudaGetErrorString(err));
-    }
 }
 
-// 🐭 Complexity Kernel
-__global__ void computeComplexity(const int* iterations, int w, int h, float* complexity) {
-    int tileX = blockIdx.x;
-    int tileY = blockIdx.y;
-    int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
+// 🐭 Komplexitätsberechnung mit dynamischem Threshold
+__global__ void computeComplexity(const int* __restrict__ iterations, int w, int h, float* __restrict__ complexity) {
+    int tileX = blockIdx.x, tileY = blockIdx.y;
     int startX = tileX * Settings::TILE_W;
     int startY = tileY * Settings::TILE_H;
-    int localX = threadIdx.x;
-    int localY = threadIdx.y;
-    int x = startX + localX;
-    int y = startY + localY;
-    int localId = localY * blockDim.x + localX;
+    int x = startX + threadIdx.x;
+    int y = startY + threadIdx.y;
+    int lid = threadIdx.y * blockDim.x + threadIdx.x;
 
     __shared__ float sum[Settings::TILE_W * Settings::TILE_H];
     __shared__ float sqSum[Settings::TILE_W * Settings::TILE_H];
@@ -108,49 +91,44 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
     __shared__ int maxIter[Settings::TILE_W * Settings::TILE_H];
     __shared__ int count[Settings::TILE_W * Settings::TILE_H];
 
-    float value = 0.0f;
-    int valid = 0;
-    int iterValue = 0;
+    float val = 0.0f;
+    int valid = 0, iterVal = 0;
 
-    if (x < w && y < h) { 
-        iterValue = iterations[y * w + x]; 
-        value = static_cast<float>(iterValue); 
-        valid = 1; 
+    if (x < w && y < h) {
+        iterVal = iterations[y * w + x];
+        val = static_cast<float>(iterVal);
+        valid = 1;
     }
 
-    sum[localId] = value;
-    sqSum[localId] = value * value;
-    minIter[localId] = iterValue;
-    maxIter[localId] = iterValue;
-    count[localId] = valid;
+    sum[lid] = val;
+    sqSum[lid] = val * val;
+    minIter[lid] = iterVal;
+    maxIter[lid] = iterVal;
+    count[lid] = valid;
     __syncthreads();
 
-    for (int stride = (blockDim.x * blockDim.y) / 2; stride > 0; stride >>= 1) {
-        if (localId < stride) {
-            sum[localId] += sum[localId + stride];
-            sqSum[localId] += sqSum[localId + stride];
-            minIter[localId] = min(minIter[localId], minIter[localId + stride]);
-            maxIter[localId] = max(maxIter[localId], maxIter[localId + stride]);
-            count[localId] += count[localId + stride];
+    // 🐭 Reduction für Summe, Quadrat-Summe, Minimum, Maximum und Count
+    for (int stride = (blockDim.x * blockDim.y) >> 1; stride > 0; stride >>= 1) {
+        if (lid < stride) {
+            sum[lid] += sum[lid + stride];
+            sqSum[lid] += sqSum[lid + stride];
+            minIter[lid] = min(minIter[lid], minIter[lid + stride]);
+            maxIter[lid] = max(maxIter[lid], maxIter[lid + stride]);
+            count[lid] += count[lid + stride];
         }
         __syncthreads();
     }
 
-    if (localId == 0) {
+    if (lid == 0) {
         int n = count[0];
+        float score = 0.0f;
         if (n > 1) {
             float mean = sum[0] / n;
             float var = (sqSum[0] / n) - (mean * mean);
-            int minVal = minIter[0];
-            int maxVal = maxIter[0];
-            int spread = maxVal - minVal;
-
-            float score = var * (spread > 0 ? spread : 1);
-
-            // 🐭 Device-seitige dynamische Schwelle
-            complexity[tileY * tilesX + tileX] = (score > deviceVarianceThreshold) ? score : 0.0f;
-        } else {
-            complexity[tileY * tilesX + tileX] = 0.0f;
+            int spread = maxIter[0] - minIter[0];
+            score = var * (spread > 0 ? spread : 1);
         }
+        int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
+        complexity[tileY * tilesX + tileX] = (score > deviceVarianceThreshold) ? score : 0.0f;
     }
 }

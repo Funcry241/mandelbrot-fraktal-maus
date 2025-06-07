@@ -1,4 +1,6 @@
 // Datei: src/renderer_core.cu
+// 🐭 Maus-Kommentar: Renderer mit besserem Fehlerhandling, Cleanup und konsistenter API
+
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <cuda_gl_interop.h>
@@ -14,9 +16,17 @@
 #include "stb_easy_font.h"
 #include <iostream>
 #include <vector>
+#include <stdexcept>
 
-inline void CUDA_CHECK(cudaError_t err) { if (err != cudaSuccess) { std::cerr << "CUDA error: " << cudaGetErrorString(err) << '\n'; std::exit(EXIT_FAILURE); } }
-inline void GL_CHECK() { if (GLenum err = glGetError(); err != GL_NO_ERROR) { std::cerr << "OpenGL error: 0x" << std::hex << err << std::dec << '\n'; std::exit(EXIT_FAILURE); } }
+inline void CUDA_CHECK(cudaError_t err) {
+    if (err != cudaSuccess)
+        throw std::runtime_error(std::string("CUDA error: ") + cudaGetErrorString(err));
+}
+
+inline void GL_CHECK() {
+    if (GLenum err = glGetError(); err != GL_NO_ERROR)
+        throw std::runtime_error("OpenGL error: 0x" + std::to_string(err));
+}
 
 static constexpr const char* vertexShaderSrc = R"GLSL(
 #version 430 core
@@ -38,39 +48,56 @@ Renderer::Renderer(int width, int height)
       lastTime(0.0), frameCount(0), currentFPS(0.0f), lastFrameTime(0.0f) {}
 
 Renderer::~Renderer() {
-    if (d_complexity) CUDA_CHECK(cudaFree(d_complexity));
-    if (d_iterations) CUDA_CHECK(cudaFree(d_iterations));
-    if (cudaPboRes) CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboRes));
-    if (pbo) glDeleteBuffers(1, &pbo);
-    if (tex) glDeleteTextures(1, &tex);
-    if (program) glDeleteProgram(program);
-    deleteFullscreenQuad(&VAO, &VBO, &EBO);
-    Hud::cleanup();
-    if (window) { glfwDestroyWindow(window); glfwTerminate(); }
+    try {
+        if (d_complexity) cudaFree(d_complexity);
+        if (d_iterations) cudaFree(d_iterations);
+        if (cudaPboRes) cudaGraphicsUnregisterResource(cudaPboRes);
+        if (pbo) glDeleteBuffers(1, &pbo);
+        if (tex) glDeleteTextures(1, &tex);
+        if (program) glDeleteProgram(program);
+        deleteFullscreenQuad(&VAO, &VBO, &EBO);
+        Hud::cleanup();
+        if (window) {
+            glfwDestroyWindow(window);
+            glfwTerminate();
+        }
+    } catch (...) {
+        std::cerr << "[Destructor Error] Resource cleanup failed.\n";
+    }
 }
 
 void Renderer::initGL() {
-    if (!glfwInit()) { std::cerr << "GLFW init failed\n"; std::exit(EXIT_FAILURE); }
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4); glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    if (!glfwInit()) throw std::runtime_error("GLFW init failed");
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     window = glfwCreateWindow(windowWidth, windowHeight, "OtterDream Mandelbrot", nullptr, nullptr);
-    if (!window) { std::cerr << "Window creation failed\n"; glfwTerminate(); std::exit(EXIT_FAILURE); }
-    glfwMakeContextCurrent(window); glfwSwapInterval(1);
+    if (!window) throw std::runtime_error("Window creation failed");
+    glfwMakeContextCurrent(window);
+    glfwSwapInterval(1);
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int newW, int newH) {
-        if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w))) self->resize(newW, newH);
+        if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w)))
+            self->resize(newW, newH);
     });
+
     initGL_impl();
 }
 
-void Renderer::renderFrame() { renderFrame_impl(); }
-bool Renderer::shouldClose() const { return (window && glfwWindowShouldClose(window)); }
+void Renderer::renderFrame() {
+    renderFrame_impl();
+}
+
+bool Renderer::shouldClose() const {
+    return window && glfwWindowShouldClose(window);
+}
 
 void Renderer::resize(int newWidth, int newHeight) {
     if (newWidth <= 0 || newHeight <= 0) return;
-    windowWidth = newWidth; windowHeight = newHeight;
-    if (cudaPboRes) CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboRes));
+    windowWidth = newWidth;
+    windowHeight = newHeight;
+    if (cudaPboRes) cudaGraphicsUnregisterResource(cudaPboRes);
     if (pbo) glDeleteBuffers(1, &pbo);
     if (tex) glDeleteTextures(1, &tex);
     setupPBOAndTexture();
@@ -80,17 +107,21 @@ void Renderer::resize(int newWidth, int newHeight) {
 
 void Renderer::initGL_impl() {
     glewExperimental = GL_TRUE;
-    if (glewInit() != GLEW_OK) { std::cerr << "GLEW init failed\n"; std::exit(EXIT_FAILURE); }
-    cudaSetDevice(0); cudaGLSetGLDevice(0);
+    if (glewInit() != GLEW_OK) throw std::runtime_error("GLEW init failed");
+    CUDA_CHECK(cudaSetDevice(0));
+    CUDA_CHECK(cudaGLSetGLDevice(0));
 
     setupPBOAndTexture();
     program = createProgramFromSource(vertexShaderSrc, fragmentShaderSrc);
     glUseProgram(program);
     glUniform1i(glGetUniformLocation(program, "uTex"), 0);
     glUseProgram(0);
-    createFullscreenQuad(&VAO, &VBO, &EBO); GL_CHECK();
+    createFullscreenQuad(&VAO, &VBO, &EBO);
+    GL_CHECK();
     setupBuffers();
-    lastTime = glfwGetTime(); frameCount = 0; currentFPS = 0.0f;
+    lastTime = glfwGetTime();
+    frameCount = 0;
+    currentFPS = 0.0f;
     glViewport(0, 0, windowWidth, windowHeight);
     Hud::init();
 }
@@ -105,8 +136,6 @@ void Renderer::renderFrame_impl() {
     }
 
     CudaInterop::renderCudaFrame(cudaPboRes, windowWidth, windowHeight, zoom, offset, getCurrentIterations(), d_complexity, h_complexity, d_iterations);
-
-    // 🐭 Kein Iterations-Update mehr hier!
 
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -143,9 +172,10 @@ void Renderer::setupPBOAndTexture() {
 }
 
 void Renderer::setupBuffers() {
-    if (d_complexity) CUDA_CHECK(cudaFree(d_complexity));
-    if (d_iterations) CUDA_CHECK(cudaFree(d_iterations));
+    if (d_complexity) cudaFree(d_complexity);
+    if (d_iterations) cudaFree(d_iterations);
     int totalTiles = ((windowWidth + Settings::TILE_W - 1) / Settings::TILE_W) * ((windowHeight + Settings::TILE_H - 1) / Settings::TILE_H);
-    d_complexity = allocComplexityBuffer(totalTiles); h_complexity.resize(totalTiles);
+    d_complexity = allocComplexityBuffer(totalTiles);
+    h_complexity.resize(totalTiles);
     CUDA_CHECK(cudaMalloc(&d_iterations, windowWidth * windowHeight * sizeof(int)));
 }

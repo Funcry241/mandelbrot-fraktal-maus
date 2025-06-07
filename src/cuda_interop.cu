@@ -1,4 +1,5 @@
-// 🐭 Maus-Kommentar: Implementation für CUDA-OpenGL Interop ohne #pragma once; Exception-basiertes Fehler-Handling; Auto-Zoom-Step Fix
+// Datei: src/cuda_interop.cu
+// 🐭 Maus-Kommentar: Implementation für CUDA-OpenGL Interop mit Auto-Zoom Pan-Step Fix
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -12,7 +13,7 @@
 #include <cstdlib>
 #include <vector>
 #include <cmath>
-#include <stdexcept>  // 🐭 Exception für Fehler-Handling
+#include <stdexcept>  // 🐭 Exception-basiertes Fehler-Handling
 
 #include "settings.hpp"
 #include "core_kernel.h"
@@ -21,7 +22,7 @@
 
 namespace CudaInterop {
 
-// 🚀 Fehlerbehandlung: wirf Exception statt std::exit!
+// 🚀 Fehlerbehandlung: Exception statt std::exit!
 #define CHECK_CUDA_STEP(call, msg) do { \
     if (cudaError_t err = (call); err != cudaSuccess) { \
         throw std::runtime_error(std::string("[CUDA ERROR] ") + msg + ": " + cudaGetErrorString(err)); \
@@ -63,7 +64,6 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
         float bestVariance = -1.0f;
         int bestIdx = -1;
 
-        // 🐭 Dynamischer Threshold basierend auf Zoom
         float dynamicThreshold = Settings::dynamicVarianceThreshold(zoom);
 
         for (int i = 0; i < totalTiles; ++i) {
@@ -84,17 +84,13 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
 
             if (std::isfinite(targetOffX) && std::isfinite(targetOffY)) {
                 auto step = [](float delta, float factor, float zoom) {
-                    float s = factor / zoom;
-                    float dynamicMinStep = fmaxf(Settings::MIN_OFFSET_STEP, 1e-5f / zoom);
-                    // 🐭 Dynamisches Step-Limit: immer mindestens MinStep
-                    s = fmaxf(s, dynamicMinStep);
+                    const float maxStep = factor / zoom;
+                    const float minStep = fmaxf(Settings::MIN_OFFSET_STEP, 1e-5f / zoom);
 
-                    if (std::fabs(delta) > s)
-                        delta = (delta > 0 ? s : -s);
-                    if (std::fabs(delta) < dynamicMinStep)
-                        delta = (delta > 0 ? dynamicMinStep : -dynamicMinStep);
-                    return delta;
+                    float stepSize = fminf(fmaxf(std::fabs(delta), minStep), maxStep);  // 🐭 Clamping zwischen Min und Max
+                    return (delta > 0.0f) ? stepSize : -stepSize;
                 };
+
                 offset.x += step(targetOffX - offset.x, Settings::OFFSET_STEP_FACTOR, zoom);
                 offset.y += step(targetOffY - offset.y, Settings::OFFSET_STEP_FACTOR, zoom);
                 DEBUG_PRINT("New offset: (%.12f, %.12f)", offset.x, offset.y);
@@ -103,12 +99,9 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
             float targetZoom = zoom * Settings::zoomFactor;
             if (std::isfinite(targetZoom) && targetZoom < 1e15f) {
                 float zoomDelta = targetZoom - zoom;
-                float maxStep = Settings::ZOOM_STEP_FACTOR * zoom;
-                if (std::fabs(zoomDelta) > maxStep)
-                    zoomDelta = (zoomDelta > 0 ? maxStep : -maxStep);
-                if (std::fabs(zoomDelta) < Settings::MIN_ZOOM_STEP)
-                    zoomDelta = (zoomDelta > 0 ? Settings::MIN_ZOOM_STEP : -Settings::MIN_ZOOM_STEP);
-                zoom += zoomDelta;
+                float maxZoomStep = Settings::ZOOM_STEP_FACTOR * zoom;
+                float zoomStep = fminf(fmaxf(std::fabs(zoomDelta), Settings::MIN_ZOOM_STEP), maxZoomStep);  // 🐭 Clamping Zoom Step
+                zoom += (zoomDelta > 0.0f) ? zoomStep : -zoomStep;
                 DEBUG_PRINT("New zoom: %.12f", zoom);
             }
         }
