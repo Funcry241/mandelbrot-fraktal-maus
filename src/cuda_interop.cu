@@ -102,7 +102,7 @@ void renderCudaFrame(
                 // Maus-Sanftheit: Limitiere Offset-Delta
                 float deltaX = targetOffX - offset.x;
                 float deltaY = targetOffY - offset.y;
-                const float maxOffsetStep = 0.05f / zoom;  // 🐭 Anpassung abhängig vom Zoom
+                const float maxOffsetStep = 0.15f / zoom;  // 🐭 Statt 0.05 → 0.15 → dreifach schneller schwenken
 
                 if (std::fabs(deltaX) > maxOffsetStep) deltaX = (deltaX > 0.0f ? maxOffsetStep : -maxOffsetStep);
                 if (std::fabs(deltaY) > maxOffsetStep) deltaY = (deltaY > 0.0f ? maxOffsetStep : -maxOffsetStep);
@@ -118,7 +118,7 @@ void renderCudaFrame(
             if (std::isfinite(targetZoom) && targetZoom < maxZoomAllowed) {
                 // Maus-Sanftheit: Limitiere Zoom-Delta
                 float zoomDelta = targetZoom - zoom;
-                const float maxZoomStep = 0.03f * zoom;  // 3% Zoom-Change maximal
+                const float maxZoomStep   = 0.05f * zoom;  // 🐭 Statt 3% → 5% pro Frame zoomen
 
                 if (std::fabs(zoomDelta) > maxZoomStep) {
                     zoomDelta = (zoomDelta > 0.0f ? maxZoomStep : -maxZoomStep);
