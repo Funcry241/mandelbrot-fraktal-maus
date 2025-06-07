@@ -32,7 +32,7 @@ extern "C" void launch_debugGradient(
     cudaDeviceSynchronize();
 }
 
-// 🐭 Farbkodierung für Mandelbrot – jetzt mit dynamischem Hue-Shift
+// 🐭 Farbkodierung für Mandelbrot
 __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy, float zoom) {
     if (iter >= maxIter) {
         return make_uchar4(0, 0, 0, 255);
@@ -59,21 +59,20 @@ __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, floa
     );
 }
 
-__global__ void refineTile(
+// 🐭 Mandelbrot Haupt-Kernel – schreibt jetzt Iterationen separat
+__global__ void mandelbrotHybrid(
     uchar4* img,
+    int* iterations,
     int width, int height,
     float zoom, float2 offset,
-    int startX, int startY,
-    int tileW, int tileH,
     int maxIter
 ) {
-    int x = startX + blockIdx.x * blockDim.x + threadIdx.x;
-    int y = startY + blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= (startX + tileW) || y >= (startY + tileH) || x >= width || y >= height) return;
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= width || y >= height) return;
 
     float cx = (static_cast<float>(x) - width * 0.5f) / zoom + offset.x;
     float cy = (static_cast<float>(y) - height * 0.5f) / zoom + offset.y;
-
     float zx = 0.0f, zy = 0.0f;
     int iter = 0;
 
@@ -86,109 +85,30 @@ __global__ void refineTile(
     }
 
     img[y * width + x] = colorMap(iter, maxIter, zx, zy, zoom);
+    iterations[y * width + x] = iter;
 }
 
-__global__ void mandelbrotHybrid(
-    uchar4* img,
-    int width, int height,
-    float zoom, float2 offset,
-    int maxIter
-) {
-    int tileX = blockIdx.x;
-    int tileY = blockIdx.y;
-    int startX = tileX * Settings::TILE_W;
-    int startY = tileY * Settings::TILE_H;
-    int endX = min(startX + Settings::TILE_W, width);
-    int endY = min(startY + Settings::TILE_H, height);
-
-    float localSum = 0.0f;
-    int   localCnt = 0;
-
-    __shared__ float blockSum;
-    __shared__ int   blockCnt;
-    if (threadIdx.x == 0 && threadIdx.y == 0) {
-        blockSum = 0.0f;
-        blockCnt = 0;
-    }
-    __syncthreads();
-
-    const float escapeRadius2 = 4.0f;
-
-    for (int y = startY + threadIdx.y; y < endY; y += blockDim.y) {
-        for (int x = startX + threadIdx.x; x < endX; x += blockDim.x) {
-            float cx = (static_cast<float>(x) - width * 0.5f) / zoom + offset.x;
-            float cy = (static_cast<float>(y) - height * 0.5f) / zoom + offset.y;
-            float zx = 0.0f, zy = 0.0f;
-            int iter = 0;
-
-            while (zx * zx + zy * zy < escapeRadius2 && iter < maxIter) {
-                float xt = zx * zx - zy * zy + cx;
-                zy = 2.0f * zx * zy + cy;
-                zx = xt;
-                ++iter;
-            }
-
-            localSum += iter;
-            ++localCnt;
-
-            img[y * width + x] = colorMap(iter, maxIter, zx, zy, zoom);
-        }
-    }
-
-    atomicAdd(&blockSum, localSum);
-    atomicAdd(&blockCnt, localCnt);
-    __syncthreads();
-
-    if (threadIdx.x == 0 && threadIdx.y == 0) {
-        float avgIter = blockSum / static_cast<float>(blockCnt);
-        if (avgIter > Settings::DYNAMIC_THRESHOLD) {
-            if (tileX % 10 == 0 && tileY % 10 == 0) { // 🐭 Limitierung eingefügt!
-                int tileW = endX - startX;
-                int tileH = endY - startY;
-                dim3 bs(min(tileW, Settings::TILE_W), min(tileH, Settings::TILE_H));
-                dim3 gs((tileW + bs.x - 1) / bs.x,
-                        (tileH + bs.y - 1) / bs.y);
-                refineTile<<<gs, bs>>>(
-                    img, width, height,
-                    zoom, offset,
-                    startX, startY,
-                    tileW, tileH,
-                    maxIter * 2
-                );
-                cudaError_t errNested = cudaGetLastError();
-                if (errNested != cudaSuccess) {
-                    printf("[NESTED ERROR] refineTile: %s\n", cudaGetErrorString(errNested));
-                } else {
-                    if (Settings::debugLogging) {
-                        printf("[INFO] refineTile gestartet (TileX: %d, TileY: %d)\n", tileX, tileY);
-                    }
-                }
-            }
-        }
-    }
-}
-
+// 🐭 Wrapper für Hauptkernel
 extern "C" void launch_mandelbrotHybrid(
     uchar4* img,
+    int* iterations,
     int width, int height,
     float zoom, float2 offset,
     int maxIter
 ) {
     static bool firstLaunch = true;
 
-    int tilesX = (width  + Settings::TILE_W - 1) / Settings::TILE_W;
-    int tilesY = (height + Settings::TILE_H - 1) / Settings::TILE_H;
-    dim3 blocks(tilesX, tilesY);
     dim3 threads(Settings::TILE_W, Settings::TILE_H);
+    dim3 blocks((width + threads.x - 1) / threads.x,
+                (height + threads.y - 1) / threads.y);
 
     if (firstLaunch) {
         printf("[INFO] Launching mandelbrotHybrid: Grid (%d,%d), Threads (%d,%d)\n", blocks.x, blocks.y, threads.x, threads.y);
         firstLaunch = false;
     }
 
-    mandelbrotHybrid<<<blocks, threads>>>(img, width, height, zoom, offset, maxIter);
+    mandelbrotHybrid<<<blocks, threads>>>(img, iterations, width, height, zoom, offset, maxIter);
 
-    // Synchronisation vor Fehlerprüfung
     cudaError_t errSync  = cudaDeviceSynchronize();
     cudaError_t errAsync = cudaGetLastError();
     if (errSync != cudaSuccess) {
@@ -199,9 +119,11 @@ extern "C" void launch_mandelbrotHybrid(
     }
 }
 
+// 🐭 Complexity Kernel – auf Iterationspuffer
 __global__ void computeComplexity(
-    const uchar4* img,
-    int width, int height,
+    const int* iterations,
+    int width,
+    int height,
     float* complexity
 ) {
     int tileX = blockIdx.x;
@@ -227,11 +149,8 @@ __global__ void computeComplexity(
     int valid = 0;
 
     if (x < width && y < height) {
-        const uchar4& px = img[y * width + x];
-
-        float brightness = (static_cast<float>(px.x) + px.y + px.z) / (3.0f * 255.0f);
-
-        value = brightness;
+        int iter = iterations[y * width + x];
+        value = static_cast<float>(iter);
         valid = 1;
     }
 
@@ -255,7 +174,6 @@ __global__ void computeComplexity(
             float mean = sharedSum[0] / count;
             float meanSq = sharedSqSum[0] / count;
             float variance = meanSq - mean * mean;
-
             complexity[tileY * tilesX + tileX] = (variance > 1e-6f) ? variance : 0.0f;
         } else {
             complexity[tileY * tilesX + tileX] = 0.0f;

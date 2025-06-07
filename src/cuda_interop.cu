@@ -42,7 +42,8 @@ void renderCudaFrame(
     float2& offset,
     int maxIter,
     float* d_complexity,
-    std::vector<float>& h_complexity
+    std::vector<float>& h_complexity,
+    int* d_iterations    // 🐭 Iterationspuffer
 ) {
     DEBUG_PRINT("Starting frame render");
 
@@ -55,11 +56,9 @@ void renderCudaFrame(
     if (Settings::debugGradient) {
         DEBUG_PRINT("Launching debug gradient kernel");
         launch_debugGradient(d_img, width, height);
-        CHECK_CUDA_STEP(cudaDeviceSynchronize(), "DebugGradient synchronize");
     } else {
         DEBUG_PRINT("Launching Mandelbrot kernel");
-        launch_mandelbrotHybrid(d_img, width, height, zoom, offset, maxIter);
-        CHECK_CUDA_STEP(cudaGetLastError(), "launch_mandelbrotHybrid");
+        launch_mandelbrotHybrid(d_img, d_iterations, width, height, zoom, offset, maxIter);
 
         int totalTiles = static_cast<int>(h_complexity.size());
 
@@ -71,8 +70,7 @@ void renderCudaFrame(
 
         DEBUG_PRINT("Launching complexity kernel with Grid (%d, %d) Block (%d, %d)", gridDim.x, gridDim.y, blockDim.x, blockDim.y);
 
-        computeComplexity<<<gridDim, blockDim>>>(d_img, width, height, d_complexity);
-        CHECK_CUDA_STEP(cudaGetLastError(), "computeComplexity kernel launch");
+        computeComplexity<<<gridDim, blockDim>>>(d_iterations, width, height, d_complexity);
         CHECK_CUDA_STEP(cudaDeviceSynchronize(), "computeComplexity synchronize");
 
         CHECK_CUDA_STEP(cudaMemcpy(h_complexity.data(), d_complexity, totalTiles * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy d_complexity -> h_complexity");
@@ -110,7 +108,6 @@ void renderCudaFrame(
                     deltaY = (deltaY > 0.0f ? maxOffsetStep : -maxOffsetStep);
                 }
 
-                // 🐭 NEU: Minimalbewegung sicherstellen
                 if (std::fabs(deltaX) < Settings::MIN_OFFSET_STEP) {
                     deltaX = (deltaX > 0.0f ? Settings::MIN_OFFSET_STEP : -Settings::MIN_OFFSET_STEP);
                 }
@@ -134,7 +131,6 @@ void renderCudaFrame(
                     zoomDelta = (zoomDelta > 0.0f ? maxZoomStep : -maxZoomStep);
                 }
 
-                // 🐭 NEU: Minimalzoom sicherstellen
                 if (std::fabs(zoomDelta) < Settings::MIN_ZOOM_STEP) {
                     zoomDelta = (zoomDelta > 0.0f ? Settings::MIN_ZOOM_STEP : -Settings::MIN_ZOOM_STEP);
                 }
@@ -143,12 +139,6 @@ void renderCudaFrame(
                 DEBUG_PRINT("New zoom: %.12f", zoom);
             }
         }
-    }
-
-    cudaError_t syncErr = cudaDeviceSynchronize();
-    if (syncErr != cudaSuccess) {
-        std::fprintf(stderr, "[SYNC ERROR] Before unmap: %s\n", cudaGetErrorString(syncErr));
-        std::exit(EXIT_FAILURE);
     }
 
     CHECK_CUDA_STEP(cudaGraphicsUnmapResources(1, &cudaPboRes), "cudaGraphicsUnmapResources");

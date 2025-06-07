@@ -1,6 +1,6 @@
 <#+
   MausID: κρυπτό-42
-  # Meta: Zentrale Fehlerbehandlung + SSH Agent Setup + kleine UX-Extras.
+  # Meta: Optimiertes Build-Script mit SSH, CMake und vcpkg für Mandelbrot-Otterdream.
 #>
 
 param(
@@ -12,120 +12,95 @@ $ErrorActionPreference = 'Stop'
 Write-Host "=== 🚀 Starting Build $(Get-Date -Format o) ==="
 
 # 0) SSH-Agent Setup
-Write-Host "[SSH] Checking if ssh-agent service is running..."
-
-if (-not (Get-Service ssh-agent -ErrorAction SilentlyContinue)) {
-    Write-Error "[SSH] ssh-agent service not found! Please install OpenSSH Client via 'Optional Features'."
-    exit 1
-}
-
-$sshAgent = Get-Service ssh-agent
-if ($sshAgent.Status -ne 'Running') {
+if ((Get-Service ssh-agent -ErrorAction SilentlyContinue).Status -ne 'Running') {
     Start-Service ssh-agent
-    Write-Host "[SSH] ssh-agent service started."
+    Write-Host "[SSH] ssh-agent started."
 } else {
     Write-Host "[SSH] ssh-agent already running."
 }
 
-$sshKeys = ssh-add -l 2>&1
-if ($sshKeys -match "The agent has no identities") {
-    Write-Host "[SSH] No SSH keys found. Adding default key..."
+if (-not (ssh-add -l 2>&1) -match "SHA256") {
     $keyPath = "$Env:USERPROFILE\.ssh\id_ed25519"
     if (Test-Path $keyPath) {
         ssh-add $keyPath | Out-Null
-        Write-Host "[SSH] SSH key loaded successfully."
+        Write-Host "[SSH] SSH key loaded."
     } else {
-        Write-Error "[SSH] SSH key not found at $keyPath"
+        Write-Error "[SSH] No SSH key found at $keyPath."
         exit 1
     }
 } else {
-    Write-Host "[SSH] SSH key is already loaded."
+    Write-Host "[SSH] SSH key already loaded."
 }
 
-# 1) Clean previous builds
-$toClean = @("build","dist","mandelbrot_otterdream_log.txt")
-foreach ($p in $toClean) {
+# 1) Clean old builds
+foreach ($p in "build", "dist", "mandelbrot_otterdream_log.txt") {
     if (Test-Path $p) {
-        Remove-Item -Recurse -Force $p
+        Remove-Item $p -Recurse -Force
         Write-Host "[CLEAN] Removed: $p"
     }
 }
 
-# 2) Validate supporter directory
+# 2) Supporter check
 $supporterDir = "ps1Supporter"
 if (-not (Test-Path $supporterDir)) {
-    Write-Error "[SUPPORT] Directory '$supporterDir' not found. Please ensure all scripts are inside."
+    Write-Error "[SUPPORT] Missing supporter folder: $supporterDir"
     exit 1
 }
 
-# 3) Detect nvcc
+# 3) Find nvcc
 try {
     $nvcc = (Get-Command nvcc.exe -ErrorAction Stop).Source
     $cudaBin = Split-Path $nvcc -Parent
     Write-Host "[CUDA] nvcc found: $nvcc"
 } catch {
-    Write-Error "[CUDA] nvcc.exe not found. Please install CUDA Toolkit or fix your PATH."
+    Write-Error "[CUDA] nvcc not found in PATH."
     exit 1
 }
 
-# 4) MSVC Environment Setup via vswhere
-$vswhere = Join-Path ${Env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-if (-not (Test-Path $vswhere)) {
-    Write-Error "[MSVC] vswhere.exe not found!"
-    exit 1
-}
+# 4) Find MSVC via vswhere
+$vswhere = "${Env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vsInstall = & "$vswhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vsInstall) {
-    Write-Error "[MSVC] No valid Visual Studio installation found!"
+    Write-Error "[MSVC] No valid Visual Studio installation."
     exit 1
 }
 $vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
-if (-not (Test-Path $vcvars)) {
-    Write-Error "[MSVC] vcvars64.bat not found!"
-    exit 1
-}
-Write-Host "[ENV] Loading MSVC environment from $vcvars"
+Write-Host "[ENV] Loading MSVC env from $vcvars"
 & cmd /c "`"$vcvars`" && set" | ForEach-Object {
-    if ($_ -match '^(.*?)=(.*)$') {
+    if ($_ -match '^(\w+)=(.*)$') {
         [Environment]::SetEnvironmentVariable($matches[1], $matches[2])
     }
 }
 
-# 5) Load .env (optional)
+# 5) Load optional .env
 if (Test-Path .env) {
-    Write-Host "[ENV] Loading environment variables from .env"
+    Write-Host "[ENV] Loading .env file"
     Get-Content .env | ForEach-Object {
         if ($_ -match '^(.*?)=(.*)$') {
             [Environment]::SetEnvironmentVariable($matches[1], $matches[2])
-            Write-Host "[ENV] $($matches[1]) set"
+            Write-Host "[ENV] $($matches[1]) set."
         }
     }
 }
 
-# 6) vcpkg Toolchain
+# 6) vcpkg Setup
 try {
     $vcpkg = (Get-Command vcpkg.exe -ErrorAction Stop).Source
 } catch {
-    Write-Error "[VCPKG] vcpkg.exe not found in PATH!"
+    Write-Error "[VCPKG] vcpkg not found in PATH."
     exit 1
 }
 $vcpkgRoot = Split-Path $vcpkg -Parent
-$toolchain = Join-Path $vcpkgRoot 'scripts\buildsystems\vcpkg.cmake'
-if (-not (Test-Path $toolchain)) {
-    Write-Error "[VCPKG] Toolchain file not found!"
-    exit 1
-}
+$toolchain = "$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
 Write-Host "[ENV] vcpkg Toolchain: $toolchain"
 
-# 7) Create build & dist folders
+# 7) Create build folders
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
 # 8) CMake Configure & Build
-Write-Host "[BUILD] Configuring with CMake..."
+Write-Host "[BUILD] Configuring CMake..."
 $env:Path += ";C:\ProgramData\chocolatey\bin"
-cmake `
-    -B build -S . `
-    -G Ninja `
+cmake -S . -B build -G Ninja `
     "-DCMAKE_TOOLCHAIN_FILE=$PSScriptRoot/vcpkg/scripts/buildsystems/vcpkg.cmake" `
     "-DCMAKE_BUILD_TYPE=$Configuration" `
     "-DCMAKE_CUDA_COMPILER=$nvcc" `
@@ -137,60 +112,50 @@ cmake --build build --config $Configuration --parallel
 
 # 9) Copy binaries
 $exe = "build\$Configuration\mandelbrot_otterdream.exe"
-if (-not (Test-Path $exe)) {
-    $exe = "build\mandelbrot_otterdream.exe"
-}
+if (-not (Test-Path $exe)) { $exe = "build\mandelbrot_otterdream.exe" }
 if (Test-Path $exe) {
     Copy-Item $exe -Destination dist -Force
     Write-Host "[COPY] mandelbrot_otterdream.exe → dist" -ForegroundColor Green
 } else {
-    Write-Host "[COPY] mandelbrot_otterdream.exe missing!" -ForegroundColor Yellow
+    Write-Error "[COPY] Executable missing after build."
     exit 1
 }
 
-foreach ($d in @('glfw3.dll','glew32.dll')) {
-    $found = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" -Filter $d -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($found) {
-        Copy-Item $found.FullName -Destination dist -Force
-        Write-Host "[COPY] $d → dist" -ForegroundColor Green
+foreach ($dll in 'glfw3.dll','glew32.dll') {
+    $src = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" -Filter $dll -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($src) {
+        Copy-Item $src.FullName -Destination dist -Force
+        Write-Host "[COPY] $dll → dist" -ForegroundColor Green
     } else {
-        Write-Host "[COPY] $d missing!" -ForegroundColor Yellow
+        Write-Error "[COPY] $dll missing!"
         exit 1
     }
 }
 
-$cudaOk = $false
-foreach ($dll in Get-ChildItem $cudaBin -Filter 'cudart64_*.dll') {
-    if ($dll) {
+$cudaDlls = Get-ChildItem $cudaBin -Filter 'cudart64_*.dll'
+if ($cudaDlls) {
+    foreach ($dll in $cudaDlls) {
         Copy-Item $dll.FullName -Destination dist -Force
         Write-Host "[CUDA] $($dll.Name) → dist" -ForegroundColor Green
-        $cudaOk = $true
     }
-}
-if (-not $cudaOk) {
-    Write-Host "[CUDA] cudart64_*.dll missing!" -ForegroundColor Yellow
+} else {
+    Write-Error "[CUDA] cudart64_*.dll missing!"
     exit 1
 }
 
 # 10) Run supporter scripts
-$scriptsToRun = @(
-    'run_build_inner.ps1',
-    'MausDelete.ps1',
-    'MausGitAutoCommit.ps1'
-)
-foreach ($script in $scriptsToRun) {
+foreach ($script in 'run_build_inner.ps1','MausDelete.ps1','MausGitAutoCommit.ps1') {
     $path = Join-Path $supporterDir $script
     if (Test-Path $path) {
         Write-Host "[SUPPORT] Running $script"
         & $path
     } else {
-        Write-Warning "[SUPPORT] '$script' not found in $supporterDir"
+        Write-Error "[SUPPORT] Missing supporter script: $script"
         exit 1
     }
 }
 
-# 🧡 Bonus Extra 🧡
-Write-Host "`n Fun Fact: Otters hold hands while sleeping so they don't drift apart. 🦦" -ForegroundColor Cyan
-
-Write-Host "`n Build and copy completed successfully!" -ForegroundColor Green
+# 🧡 Fun Fact
+Write-Host "`nFun Fact: Otters hold hands while sleeping so they don't drift apart. 🦦" -ForegroundColor Cyan
+Write-Host "`nBuild completed successfully!" -ForegroundColor Green
 exit 0

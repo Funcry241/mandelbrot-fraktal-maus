@@ -3,9 +3,10 @@
 #include <vector_types.h>   // für uchar4, float2
 
 // ----------------------------------------------------------------------
-// 1) Haupt-Kernel: Hybrid-Mandelbrot mit dynamischer Rekursion
+// 1) Haupt-Kernel: Hybrid-Mandelbrot mit Iteration Buffer
 extern "C" void launch_mandelbrotHybrid(
     uchar4* img,        // Pointer auf Bild-Puffer (PBO-Mapping)
+    int* iterations,    // 🐭 Buffer für Iterationszahlen
     int width,          // Bildbreite
     int height,         // Bildhöhe
     float zoom,         // aktueller Zoom-Faktor
@@ -17,14 +18,15 @@ extern "C" void launch_mandelbrotHybrid(
 // 2) Debug-Gradient-Kernel: Erzeugt Test-Farbverlauf (nur bei debugGradient=true aktiv)
 extern "C" void launch_debugGradient(
     uchar4* img,
-    int width, int height
+    int width,
+    int height
 );
 
 // ----------------------------------------------------------------------
-// 3) Complexity-Kernel: Zählt Pixel (Grauwert-Summe) pro Tile
+// 3) Complexity-Kernel: Komplexitätsmessung auf Iterationspuffer
 __global__ void computeComplexity(
-    const uchar4* img,  // bereits fertiggerendertes Bild (CUDA-Pointer auf PBO)
-    int width,          // Bildbreite
-    int height,         // Bildhöhe
-    float* complexity   // Device-Array mit Länge (tilesX * tilesY)
+    const int* iterations,  // 🐭 Iterationsbuffer statt fertiges Bild
+    int width,              // Bildbreite
+    int height,             // Bildhöhe
+    float* complexity       // Device-Array mit Länge (tilesX * tilesY)
 );

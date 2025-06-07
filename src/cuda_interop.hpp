@@ -7,10 +7,23 @@
 // Typalias für bessere Lesbarkeit
 using cudaGraphicsResource_t = struct cudaGraphicsResource*;
 
+// ----------------------------------------------------------------------
 // Kernel-Wrappers
-extern "C" void launch_debugGradient(uchar4* img, int w, int h);
-extern "C" void launch_mandelbrotHybrid(uchar4* img, int w, int h, float zoom, float2 offset, int maxIter);
 
+extern "C" void launch_debugGradient(uchar4* img, int width, int height);
+
+// 🐭 NEU: KEIN extern "C" bei C++-Signaturen mit mehr Parametern (Iterationspuffer)!
+void launch_mandelbrotHybrid(
+    uchar4* img,
+    int* iterations,   // 🐭 Iteration Buffer
+    int width,
+    int height,
+    float zoom,
+    float2 offset,
+    int maxIter
+);
+
+// ----------------------------------------------------------------------
 // Gesamte CUDA-Rendering-Pipeline
 namespace CudaInterop {
 
@@ -23,7 +36,8 @@ void renderCudaFrame(
     float2& offset,
     int maxIter,
     float* d_complexity,
-    std::vector<float>& h_complexity
+    std::vector<float>& h_complexity,
+    int* d_iterations    // 🐭 Iteration Buffer
 );
 
 /// 🐭 Checks if the current GPU supports Dynamic Parallelism (Compute Capability 3.5+ required)
