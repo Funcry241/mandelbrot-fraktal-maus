@@ -40,7 +40,8 @@ target_include_directories(mandelbrot_otterdream PRIVATE
 set_target_properties(mandelbrot_otterdream PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_EXTENSIONS OFF
-    CUDA_ARCHITECTURES 75
+    # 🐭 Unterstützt mehrere Compute-Architekturen (Ampere, Ada, Hopper)
+    CUDA_ARCHITECTURES 75;86;89
 )
 
 # Compiler-Optionen
