@@ -42,4 +42,8 @@ namespace Settings {
     // 🐭 Offset-Startposition
     inline constexpr float initialOffsetX = -0.5f;
     inline constexpr float initialOffsetY =  0.0f;
+
+    // 🐭 Schwenk- und Zoom-Parameter
+    inline constexpr float OFFSET_STEP_FACTOR = 0.15f;  // Größere Werte = schnelleres Schwenken
+    inline constexpr float ZOOM_STEP_FACTOR   = 0.05f;  // Größere Werte = schnellerer Zoom
 }
