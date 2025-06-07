@@ -1,4 +1,3 @@
-// Datei: src/cuda_interop.cu
 #pragma once
 #ifdef _WIN32
 #define NOMINMAX
@@ -59,25 +58,32 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
         DEBUG_PRINT("Searching best tile...");
         int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
         float bestVariance = -1.0f; int bestIdx = -1;
+
+        // 🐭 Dynamischer Threshold basierend auf Zoom
+        float dynamicThreshold = Settings::VARIANCE_THRESHOLD / logf(zoom + 2.0f);
+
         for (int i = 0; i < totalTiles; ++i)
-            if (h_complexity[i] > Settings::VARIANCE_THRESHOLD && h_complexity[i] > bestVariance)
+            if (h_complexity[i] > dynamicThreshold && h_complexity[i] > bestVariance)
                 bestVariance = h_complexity[i], bestIdx = i;
 
         if (bestIdx != -1) {
             DEBUG_PRINT("Best variance: %.12f", bestVariance);
             int bx = bestIdx % tilesX, by = bestIdx / tilesX;
             float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f, ty = (by + 0.5f) * Settings::TILE_H - h * 0.5f;
-            float targetOffX = offset.x + tx / zoom, targetOffY = offset.y + ty / zoom;
+            float targetOffX = offset.x + tx / zoom;
+            float targetOffY = offset.y + ty / zoom;
 
             if (std::isfinite(targetOffX) && std::isfinite(targetOffY)) {
-                auto step = [](float delta, float factor, float minStep, float zoom) {
+                auto step = [](float delta, float factor, float zoom) {
                     float s = factor / zoom;
+                    // 🐭 Dynamischer Minimal-Schritt: bei extremem Zoom > größere Schrittweite
+                    float dynamicMinStep = fmaxf(1e-8f, 1e-5f / zoom);
                     if (std::fabs(delta) > s) delta = (delta > 0 ? s : -s);
-                    if (std::fabs(delta) < minStep) delta = (delta > 0 ? minStep : -minStep);
+                    if (std::fabs(delta) < dynamicMinStep) delta = (delta > 0 ? dynamicMinStep : -dynamicMinStep);
                     return delta;
                 };
-                offset.x += step(targetOffX - offset.x, Settings::OFFSET_STEP_FACTOR, Settings::MIN_OFFSET_STEP, zoom);
-                offset.y += step(targetOffY - offset.y, Settings::OFFSET_STEP_FACTOR, Settings::MIN_OFFSET_STEP, zoom);
+                offset.x += step(targetOffX - offset.x, Settings::OFFSET_STEP_FACTOR, zoom);
+                offset.y += step(targetOffY - offset.y, Settings::OFFSET_STEP_FACTOR, zoom);
                 DEBUG_PRINT("New offset: (%.12f, %.12f)", offset.x, offset.y);
             }
 
@@ -96,13 +102,6 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
     DEBUG_PRINT("Frame render complete");
 }
 
-void checkDynamicParallelismSupport() {
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    if (prop.major < 3 || (prop.major == 3 && prop.minor < 5)) {
-        std::fprintf(stderr, "Dynamic Parallelism not supported (Compute 3.5+ needed).\n");
-        std::exit(EXIT_FAILURE);
-    }
-}
+// 🐭 Dynamic Parallelism Check entfernt — nicht mehr nötig!
 
 } // namespace CudaInterop

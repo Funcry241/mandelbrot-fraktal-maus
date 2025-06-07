@@ -4,7 +4,7 @@
 #include "cuda_interop.hpp"
 
 int main() {
-    CudaInterop::checkDynamicParallelismSupport();
+    // 🐭 Dynamic Parallelism Check entfernt – unnötig
     Renderer renderer(Settings::width, Settings::height);
     renderer.initGL();
 

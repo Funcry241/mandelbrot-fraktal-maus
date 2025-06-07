@@ -50,7 +50,6 @@ Renderer::~Renderer() {
 }
 
 void Renderer::initGL() {
-    CudaInterop::checkDynamicParallelismSupport();
     if (!glfwInit()) { std::cerr << "GLFW init failed\n"; std::exit(EXIT_FAILURE); }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4); glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
