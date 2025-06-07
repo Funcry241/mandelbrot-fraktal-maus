@@ -11,8 +11,10 @@ set(VCPKG_MANIFEST_MODE ON)
 # ⚙️ Standards
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)        # 🔒 Kein Compiler-Extension-Unsinn bei C++
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_EXTENSIONS OFF)       # 🔒 CUDA ebenfalls ohne Extensions
 
 # ---------------------------------------------------------
 # 📚 Pakete
@@ -39,22 +41,18 @@ add_executable(mandelbrot_otterdream
 target_include_directories(mandelbrot_otterdream PRIVATE
     "${CUDA_TOOLKIT_ROOT_DIR}/include"
     "${CMAKE_SOURCE_DIR}/src"
-    "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/include"
 )
 
 # ---------------------------------------------------------
 # 🛠️ Target Properties
 set_target_properties(mandelbrot_otterdream PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
-    CUDA_EXTENSIONS OFF
 )
 
 # ---------------------------------------------------------
 # 🧠 Dynamische GPU-Erkennung
-# Default: breite Liste für Releases
 set(DEFAULT_CUDA_ARCHITECTURES 60 70 75 80 86 89)
 
-# Option: Benutzer kann -DUSE_NATIVE_GPU=ON angeben
 option(USE_NATIVE_GPU "Detect GPU architecture natively at build time" OFF)
 
 if (USE_NATIVE_GPU)
@@ -69,8 +67,10 @@ endif()
 # 🛡️ Compiler-Optionen
 target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
-    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/W4>
-    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Wall -Wextra -Wno-unknown-pragmas>
+    $<$<COMPILE_LANGUAGE:CXX>:
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /Zc:__cplusplus>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Wno-unknown-pragmas>
+    >
 )
 
 # ---------------------------------------------------------
@@ -89,16 +89,21 @@ set_source_files_properties(
     src/cuda_interop.cu
     src/core_kernel.cu
     src/memory_utils.cu
+    src/progressive.cu
     PROPERTIES LANGUAGE CUDA
 )
 
 # ---------------------------------------------------------
 # 🧹 Build-Typen und Optimierungen
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CUDA_FLAGS_DEBUG "-G -g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --use_fast_math")
+
+# ---------------------------------------------------------
+# ✅ Abschlussmeldung
+message(STATUS "OtterDream Mandelbrot Projekt konfiguriert 🚀")

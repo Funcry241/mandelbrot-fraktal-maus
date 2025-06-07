@@ -1,4 +1,5 @@
 // Datei: src/hud.cpp
+// 🐭 Maus-Kommentar: Ultrakompakter HUD-Renderer mit minimalem Shader-Overhead
 
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
@@ -15,124 +16,92 @@
 
 namespace Hud {
 
-static GLuint hudVAO = 0;
-static GLuint hudVBO = 0;
-static GLuint hudProgram = 0;
+static GLuint vao = 0, vbo = 0, prog = 0;
 
-static const char* vertexShaderSrc = R"GLSL(
+static constexpr const char* vertSrc = R"GLSL(
 #version 430 core
-layout(location = 0) in vec2 aPos;
+layout(location=0) in vec2 aPos;
 uniform vec2 uResolution;
-void main() {
-    vec2 pos = aPos / uResolution * 2.0 - 1.0;
-    gl_Position = vec4(pos.x, -pos.y, 0.0, 1.0); // Flip Y for top-left origin
-}
+void main() { vec2 p = aPos / uResolution * 2.0 - 1.0; gl_Position = vec4(p.x, -p.y, 0.0, 1.0); }
 )GLSL";
 
-static const char* fragmentShaderSrc = R"GLSL(
+static constexpr const char* fragSrc = R"GLSL(
 #version 430 core
 out vec4 FragColor;
-void main() {
-    FragColor = vec4(1.0, 1.0, 1.0, 1.0); // White text with alpha
-}
+void main() { FragColor = vec4(1.0); }
 )GLSL";
 
-GLuint compileShader(GLenum type, const char* src) {
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &src, nullptr);
-    glCompileShader(shader);
-
-    GLint success;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char infoLog[512];
-        glGetShaderInfoLog(shader, 512, nullptr, infoLog);
-        fprintf(stderr, "[SHADER ERROR] %s\n", infoLog);
+GLuint compile(GLenum type, const char* src) {
+    GLuint s = glCreateShader(type);
+    glShaderSource(s, 1, &src, nullptr);
+    glCompileShader(s);
+    GLint ok;
+    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        char log[512];
+        glGetShaderInfoLog(s, 512, nullptr, log);
+        fprintf(stderr, "[SHADER ERROR] %s\n", log);
     }
-
-    return shader;
+    return s;
 }
 
-GLuint createHUDProgram() {
-    GLuint vs = compileShader(GL_VERTEX_SHADER, vertexShaderSrc);
-    GLuint fs = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSrc);
-    GLuint prog = glCreateProgram();
-    glAttachShader(prog, vs);
-    glAttachShader(prog, fs);
-    glLinkProgram(prog);
+GLuint createProgram() {
+    GLuint vs = compile(GL_VERTEX_SHADER, vertSrc);
+    GLuint fs = compile(GL_FRAGMENT_SHADER, fragSrc);
+    GLuint p = glCreateProgram();
+    glAttachShader(p, vs);
+    glAttachShader(p, fs);
+    glLinkProgram(p);
     glDeleteShader(vs);
     glDeleteShader(fs);
-    return prog;
+    return p;
 }
 
 void init() {
-    glGenVertexArrays(1, &hudVAO);
-    glGenBuffers(1, &hudVBO);
-    hudProgram = createHUDProgram();
-
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    prog = createProgram();
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
-void drawText(const std::string& text, float x, float y, float width, float height) {
+void drawText(const std::string& text, float x, float y, float w, float h) {
     if (text.empty()) return;
-
-    char buffer[99999];
-    int num_quads = stb_easy_font_print(x, y, const_cast<char*>(text.c_str()), nullptr, buffer, sizeof(buffer));
-
-    struct Vertex {
-        float x, y;
-    };
-
-    std::vector<Vertex> vertices;
-    vertices.reserve(num_quads * 6);
-
-    for (int i = 0; i < num_quads; ++i) {
-        unsigned char* quad = reinterpret_cast<unsigned char*>(buffer) + i * 64;
-        Vertex v0 = *reinterpret_cast<Vertex*>(quad +  0);
-        Vertex v1 = *reinterpret_cast<Vertex*>(quad + 16);
-        Vertex v2 = *reinterpret_cast<Vertex*>(quad + 32);
-        Vertex v3 = *reinterpret_cast<Vertex*>(quad + 48);
-
-        vertices.push_back(v0);
-        vertices.push_back(v1);
-        vertices.push_back(v2);
-        vertices.push_back(v0);
-        vertices.push_back(v2);
-        vertices.push_back(v3);
+    char buf[99999];
+    int quads = stb_easy_font_print(x, y, const_cast<char*>(text.c_str()), nullptr, buf, sizeof(buf));
+    struct V { float x, y; };
+    std::vector<V> verts;
+    verts.reserve(quads * 6);
+    for (int i = 0; i < quads; ++i) {
+        auto* q = reinterpret_cast<V*>(buf + i * 64);
+        verts.push_back(q[0]); verts.push_back(q[1]); verts.push_back(q[2]);
+        verts.push_back(q[0]); verts.push_back(q[2]); verts.push_back(q[3]);
     }
-
-    glBindVertexArray(hudVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
-
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(V), verts.data(), GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
-
-    glUseProgram(hudProgram);
-    glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
-
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
-
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(V), nullptr);
+    glUseProgram(prog);
+    glUniform2f(glGetUniformLocation(prog, "uResolution"), w, h);
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size()));
     glUseProgram(0);
     glDisableVertexAttribArray(0);
     glBindVertexArray(0);
 }
 
-void draw(float fps, float frameTimeMs, float zoom, float offsetX, float offsetY, int width, int height) {
-    char hudText1[256];
-    char hudText2[256];
-    std::snprintf(hudText1, sizeof(hudText1), "FPS: %.1f | Zoom: %.2f | Offset: (%.3f, %.3f)", fps, zoom, offsetX, offsetY);
-    std::snprintf(hudText2, sizeof(hudText2), "Frame Time: %.2f ms", frameTimeMs);
-
-    drawText(hudText1, 10.0f, 20.0f, static_cast<float>(width), static_cast<float>(height));
-    drawText(hudText2, 10.0f, 50.0f, static_cast<float>(width), static_cast<float>(height));
+void draw(float fps, float frameTimeMs, float zoom, float offX, float offY, int w, int h) {
+    char hud1[256], hud2[256];
+    std::snprintf(hud1, sizeof(hud1), "FPS: %.1f | Zoom: %.2f | Offset: (%.3f, %.3f)", fps, zoom, offX, offY);
+    std::snprintf(hud2, sizeof(hud2), "Frame Time: %.2f ms", frameTimeMs);
+    drawText(hud1, 10.0f, 20.0f, (float)w, (float)h);
+    drawText(hud2, 10.0f, 50.0f, (float)w, (float)h);
 }
 
 void cleanup() {
-    glDeleteVertexArrays(1, &hudVAO);
-    glDeleteBuffers(1, &hudVBO);
-    glDeleteProgram(hudProgram);
+    glDeleteVertexArrays(1, &vao);
+    glDeleteBuffers(1, &vbo);
+    glDeleteProgram(prog);
     glDisable(GL_BLEND);
 }
 

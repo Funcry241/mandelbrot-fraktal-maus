@@ -1,10 +1,14 @@
 // Datei: src/renderer_core.cu
-// 🐭 Maus-Kommentar: Renderer mit besserem Fehlerhandling, Cleanup und konsistenter API
+// 🐭 Maus-Kommentar: Maximal komprimierter Mandelbrot-Renderer mit korrektem wasJustReset() und CUDA-kompatiblem to_hex()
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
+#include <iostream>
+#include <vector>
+#include <sstream> // 🐭 Neu für hex Conversion
+#include <stdexcept>
 #include "settings.hpp"
 #include "core_kernel.h"
 #include "cuda_interop.hpp"
@@ -14,34 +18,37 @@
 #include "memory_utils.hpp"
 #include "progressive.hpp"
 #include "stb_easy_font.h"
-#include <iostream>
-#include <vector>
-#include <stdexcept>
 
 inline void CUDA_CHECK(cudaError_t err) {
     if (err != cudaSuccess)
-        throw std::runtime_error(std::string("CUDA error: ") + cudaGetErrorString(err));
+        throw std::runtime_error("CUDA error: " + std::string(cudaGetErrorString(err)));
+}
+
+inline std::string to_hex(GLenum err) {
+    std::ostringstream oss;
+    oss << std::hex << err;
+    return oss.str();
 }
 
 inline void GL_CHECK() {
-    if (GLenum err = glGetError(); err != GL_NO_ERROR)
-        throw std::runtime_error("OpenGL error: 0x" + std::to_string(err));
+    if (auto err = glGetError(); err != GL_NO_ERROR)
+        throw std::runtime_error("OpenGL error: 0x" + to_hex(err));
 }
 
-static constexpr const char* vertexShaderSrc = R"GLSL(
+static constexpr const char* vertSrc = R"GLSL(
 #version 430 core
 layout(location=0) in vec2 aPos; layout(location=1) in vec2 aTex;
 out vec2 vTex; void main() { vTex = aTex; gl_Position = vec4(aPos, 0.0, 1.0); }
 )GLSL";
 
-static constexpr const char* fragmentShaderSrc = R"GLSL(
+static constexpr const char* fragSrc = R"GLSL(
 #version 430 core
 in vec2 vTex; out vec4 FragColor; uniform sampler2D uTex;
 void main() { FragColor = texture(uTex, vTex); }
 )GLSL";
 
-Renderer::Renderer(int width, int height)
-    : windowWidth(width), windowHeight(height), window(nullptr),
+Renderer::Renderer(int w, int h)
+    : windowWidth(w), windowHeight(h), window(nullptr),
       pbo(0), tex(0), program(0), VAO(0), VBO(0), EBO(0),
       cudaPboRes(nullptr), d_complexity(nullptr), d_iterations(nullptr),
       zoom(Settings::initialZoom), offset{Settings::initialOffsetX, Settings::initialOffsetY},
@@ -57,13 +64,8 @@ Renderer::~Renderer() {
         if (program) glDeleteProgram(program);
         deleteFullscreenQuad(&VAO, &VBO, &EBO);
         Hud::cleanup();
-        if (window) {
-            glfwDestroyWindow(window);
-            glfwTerminate();
-        }
-    } catch (...) {
-        std::cerr << "[Destructor Error] Resource cleanup failed.\n";
-    }
+        if (window) { glfwDestroyWindow(window); glfwTerminate(); }
+    } catch (...) { std::cerr << "[Destructor Error] Resource cleanup failed.\n"; }
 }
 
 void Renderer::initGL() {
@@ -71,32 +73,25 @@ void Renderer::initGL() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
     window = glfwCreateWindow(windowWidth, windowHeight, "OtterDream Mandelbrot", nullptr, nullptr);
     if (!window) throw std::runtime_error("Window creation failed");
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
     glfwSetWindowUserPointer(window, this);
-    glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int newW, int newH) {
-        if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w)))
-            self->resize(newW, newH);
+    glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int nw, int nh) {
+        if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w))) self->resize(nw, nh);
     });
-
     initGL_impl();
 }
 
-void Renderer::renderFrame() {
-    renderFrame_impl();
-}
+void Renderer::renderFrame() { renderFrame_impl(); }
 
-bool Renderer::shouldClose() const {
-    return window && glfwWindowShouldClose(window);
-}
+bool Renderer::shouldClose() const { return window && glfwWindowShouldClose(window); }
 
-void Renderer::resize(int newWidth, int newHeight) {
-    if (newWidth <= 0 || newHeight <= 0) return;
-    windowWidth = newWidth;
-    windowHeight = newHeight;
+void Renderer::resize(int nw, int nh) {
+    if (nw <= 0 || nh <= 0) return;
+    windowWidth = nw; windowHeight = nh;
+    resetIterations();
     if (cudaPboRes) cudaGraphicsUnregisterResource(cudaPboRes);
     if (pbo) glDeleteBuffers(1, &pbo);
     if (tex) glDeleteTextures(1, &tex);
@@ -110,9 +105,8 @@ void Renderer::initGL_impl() {
     if (glewInit() != GLEW_OK) throw std::runtime_error("GLEW init failed");
     CUDA_CHECK(cudaSetDevice(0));
     CUDA_CHECK(cudaGLSetGLDevice(0));
-
     setupPBOAndTexture();
-    program = createProgramFromSource(vertexShaderSrc, fragmentShaderSrc);
+    program = createProgramFromSource(vertSrc, fragSrc);
     glUseProgram(program);
     glUniform1i(glGetUniformLocation(program, "uTex"), 0);
     glUseProgram(0);
@@ -130,12 +124,13 @@ void Renderer::renderFrame_impl() {
     double frameStart = glfwGetTime();
     frameCount++;
     if (frameStart - lastTime >= 1.0) {
-        currentFPS = static_cast<float>(frameCount) / static_cast<float>(frameStart - lastTime);
+        currentFPS = (float)frameCount / (float)(frameStart - lastTime);
         frameCount = 0;
         lastTime = frameStart;
     }
 
-    CudaInterop::renderCudaFrame(cudaPboRes, windowWidth, windowHeight, zoom, offset, getCurrentIterations(), d_complexity, h_complexity, d_iterations);
+    CudaInterop::renderCudaFrame(cudaPboRes, windowWidth, windowHeight, zoom, offset,
+                                 getCurrentIterations(), d_complexity, h_complexity, d_iterations);
 
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -149,7 +144,7 @@ void Renderer::renderFrame_impl() {
     glBindVertexArray(0);
     glUseProgram(0);
 
-    lastFrameTime = static_cast<float>((glfwGetTime() - frameStart) * 1000.0);
+    lastFrameTime = (float)((glfwGetTime() - frameStart) * 1000.0);
     Hud::draw(currentFPS, lastFrameTime, zoom, offset.x, offset.y, windowWidth, windowHeight);
 
     glfwSwapBuffers(window);
@@ -174,8 +169,13 @@ void Renderer::setupPBOAndTexture() {
 void Renderer::setupBuffers() {
     if (d_complexity) cudaFree(d_complexity);
     if (d_iterations) cudaFree(d_iterations);
-    int totalTiles = ((windowWidth + Settings::TILE_W - 1) / Settings::TILE_W) * ((windowHeight + Settings::TILE_H - 1) / Settings::TILE_H);
+    int totalTiles = ((windowWidth + Settings::TILE_W - 1) / Settings::TILE_W) *
+                     ((windowHeight + Settings::TILE_H - 1) / Settings::TILE_H);
     d_complexity = allocComplexityBuffer(totalTiles);
     h_complexity.resize(totalTiles);
     CUDA_CHECK(cudaMalloc(&d_iterations, windowWidth * windowHeight * sizeof(int)));
+}
+
+bool wasJustReset() {
+    return std::exchange(justResetFlag, false);
 }

@@ -1,19 +1,13 @@
 // Datei: src/memory_utils.cu
-// 🐭 Maus-Kommentar: Exception-basiertes Fehlerhandling bei Speicher-Allokation
+// 🐭 Maus-Kommentar: CUDA-Speicher-Handling mit brutal klarer Exception
 
 #include <cuda_runtime.h>
-#include <stdexcept>   // 🐭 Besser: <stdexcept> für Exception
+#include <stdexcept>
 #include "memory_utils.hpp"
 
-// 🐭 Device-Speicher für Complexity-Buffer mit sauberem Fehler-Handling
 extern "C" float* allocComplexityBuffer(int totalTiles) {
-    float* d_complexity = nullptr;
-    cudaError_t err = cudaMalloc(&d_complexity, totalTiles * sizeof(float));
-    if (err != cudaSuccess) {
-        throw std::runtime_error(
-            std::string("cudaMalloc für Complexity-Buffer fehlgeschlagen: ") +
-            cudaGetErrorString(err)
-        );
-    }
-    return d_complexity;
+    float* d = nullptr;
+    if (auto err = cudaMalloc(&d, totalTiles * sizeof(float)); err != cudaSuccess)
+        throw std::runtime_error("cudaMalloc failed: " + std::string(cudaGetErrorString(err)));
+    return d;
 }

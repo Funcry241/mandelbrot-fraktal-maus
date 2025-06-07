@@ -2,16 +2,13 @@
 #include "renderer_core.hpp"
 #include "settings.hpp"
 #include "cuda_interop.hpp"
-#include "progressive.hpp"  // 🐭 Jetzt richtig eingebunden für Iterations-Handling
+#include "progressive.hpp"
 
 int main() {
-    Renderer renderer(Settings::width, Settings::height);
-    renderer.initGL();
-
-    while (!renderer.shouldClose()) {
-        renderer.renderFrame();
-        incrementIterations();  // 🐭 Nach jedem Frame Iterationen erhöhen
+    Renderer r(Settings::width, Settings::height);
+    r.initGL();
+    while (!r.shouldClose()) {
+        r.renderFrame();
+        incrementIterations();
     }
-
-    return 0;
 }

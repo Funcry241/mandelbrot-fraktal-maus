@@ -1,41 +1,31 @@
-#ifndef RENDERER_CORE_HPP
-#define RENDERER_CORE_HPP
+#pragma once
 
 #include <GLFW/glfw3.h>
 #include <vector>
 #include <cuda_gl_interop.h>
 
-// Minimal forward declaration
-typedef struct cudaGraphicsResource* cudaGraphicsResource_t;
+using cudaGraphicsResource_t = struct cudaGraphicsResource*;
 
 class Renderer {
 public:
-    Renderer(int width, int height);
-    ~Renderer();                               // 🐭 Automatisches Cleanup
-
-    void initGL();                             // Initialisiert OpenGL & CUDA
-    void renderFrame();                        // Rendert einen Frame
-    bool shouldClose() const;                  // Prüft, ob Fenster geschlossen werden soll
-    void resize(int newWidth, int newHeight);  // Behandelt Fenstergrößenänderung
+    Renderer(int w, int h);
+    ~Renderer();
+    void initGL(), renderFrame();
+    bool shouldClose() const;
+    void resize(int newW, int newH);
 
 private:
-    void initGL_impl();                        // OpenGL Context Setup intern
-    void renderFrame_impl();                   // Frame Render intern
-    void setupPBOAndTexture();                 // 🆕 PBO + Texture initialisieren
-    void setupBuffers();                       // 🆕 CUDA-Buffer initialisieren
-
+    void initGL_impl(), renderFrame_impl(), setupPBOAndTexture(), setupBuffers();
     int windowWidth, windowHeight;
     GLFWwindow* window;
     GLuint pbo, tex, program, VAO, VBO, EBO;
     cudaGraphicsResource_t cudaPboRes;
-    float* d_complexity;
-    int* d_iterations;
-    std::vector<float> h_complexity;
+    float* d_complexity;               // ✅ Device Buffer
+    int* d_iterations;                 // ✅ Device Buffer
+    std::vector<float> h_complexity;    // ✅ Host Buffer (std::vector!)
     float zoom;
     float2 offset;
     double lastTime;
     int frameCount;
     float currentFPS, lastFrameTime;
 };
-
-#endif // RENDERER_CORE_HPP
