@@ -16,14 +16,20 @@ void resetIterations() {
 }
 
 int getCurrentIterations() {
-    // 🐭 Pro Frame leicht steigern für mehr Details bei tieferem Zoom
+    return currentMaxIter;
+}
+
+void incrementIterations() {
+    // 🐭 Iterationen explizit erhöhen — kontrollierter
     if (currentMaxIter < Settings::MAX_ITERATIONS_CAP) {
         currentMaxIter += Settings::ITERATION_STEP;
         if (currentMaxIter > Settings::MAX_ITERATIONS_CAP) {
             currentMaxIter = Settings::MAX_ITERATIONS_CAP;
         }
+        if (Settings::debugLogging) {
+            std::fprintf(stdout, "[UPDATE] Iterations increased to %d.\n", currentMaxIter);
+        }
     }
-    return currentMaxIter;
 }
 
 bool wasJustReset() {

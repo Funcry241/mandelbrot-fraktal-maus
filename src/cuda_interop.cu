@@ -53,7 +53,7 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
 
         dim3 blockDim(Settings::TILE_W, Settings::TILE_H);
         dim3 gridDim((w + blockDim.x - 1) / blockDim.x, (h + blockDim.y - 1) / blockDim.y);
-        DEBUG_PRINT("Launching complexity kernel Grid(%d,%d) Block(%d,%d)", gridDim.x, gridDim.y, blockDim.x, blockDim.y);
+        DEBUG_PRINT("Launching complexity kernel Grid(%d, %d) Block(%d, %d)", gridDim.x, gridDim.y, blockDim.x, blockDim.y);
         computeComplexity<<<gridDim, blockDim>>>(d_iterations, w, h, d_complexity);
         CHECK_CUDA_STEP(cudaDeviceSynchronize(), "complexity sync");
         CHECK_CUDA_STEP(cudaMemcpy(h_complexity.data(), d_complexity, totalTiles * sizeof(float), cudaMemcpyDeviceToHost), "Memcpy complexity");
@@ -64,7 +64,7 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
         int bestIdx = -1;
 
         // 🐭 Dynamischer Threshold basierend auf Zoom
-        float dynamicThreshold = Settings::VARIANCE_THRESHOLD / logf(zoom + 2.0f);
+        float dynamicThreshold = Settings::dynamicVarianceThreshold(zoom);
 
         for (int i = 0; i < totalTiles; ++i) {
             if (h_complexity[i] > dynamicThreshold && h_complexity[i] > bestVariance) {
@@ -85,12 +85,14 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
             if (std::isfinite(targetOffX) && std::isfinite(targetOffY)) {
                 auto step = [](float delta, float factor, float zoom) {
                     float s = factor / zoom;
-                    float dynamicMinStep = fmaxf(1e-8f, 1e-5f / zoom);
-                    // 🐭 Erst minStep erzwingen, dann maxStep klemmen
-                    if (std::fabs(delta) < dynamicMinStep)
-                        delta = (delta > 0 ? dynamicMinStep : -dynamicMinStep);
+                    float dynamicMinStep = fmaxf(Settings::MIN_OFFSET_STEP, 1e-5f / zoom);
+                    // 🐭 Dynamisches Step-Limit: immer mindestens MinStep
+                    s = fmaxf(s, dynamicMinStep);
+
                     if (std::fabs(delta) > s)
                         delta = (delta > 0 ? s : -s);
+                    if (std::fabs(delta) < dynamicMinStep)
+                        delta = (delta > 0 ? dynamicMinStep : -dynamicMinStep);
                     return delta;
                 };
                 offset.x += step(targetOffX - offset.x, Settings::OFFSET_STEP_FACTOR, zoom);

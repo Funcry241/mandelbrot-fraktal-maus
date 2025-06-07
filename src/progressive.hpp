@@ -9,6 +9,7 @@ extern __device__ __managed__ bool justResetFlag;  // Reset-Flag (true, wenn Res
 
 // ----------------------------------------------------------------------
 // Funktionen zur Steuerung der Iterationen
-void resetIterations();    // Setzt Iterationen auf Initialwert zurück und setzt Reset-Flag
-int  getCurrentIterations(); // Erhöht Iterationen progressiv bis zur Maximalgrenze
-bool wasJustReset();         // Liefert true einmalig nach einem Reset
+void resetIterations();       // Setzt Iterationen auf Initialwert zurück und setzt Reset-Flag
+int  getCurrentIterations();  // Gibt aktuelle Iterationszahl zurück (ohne Erhöhung)
+void incrementIterations();   // Erhöht Iterationen progressiv bis zur Maximalgrenze
+bool wasJustReset();          // Liefert true einmalig nach einem Reset

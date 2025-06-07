@@ -96,16 +96,17 @@ void Renderer::initGL_impl() {
 }
 
 void Renderer::renderFrame_impl() {
-    double frameStart = glfwGetTime(); frameCount++;
+    double frameStart = glfwGetTime();
+    frameCount++;
     if (frameStart - lastTime >= 1.0) {
         currentFPS = static_cast<float>(frameCount) / static_cast<float>(frameStart - lastTime);
-        frameCount = 0; lastTime = frameStart;
+        frameCount = 0;
+        lastTime = frameStart;
     }
+
     CudaInterop::renderCudaFrame(cudaPboRes, windowWidth, windowHeight, zoom, offset, getCurrentIterations(), d_complexity, h_complexity, d_iterations);
 
-    if (!wasJustReset()) {
-        currentMaxIter = std::min(currentMaxIter + Settings::ITERATION_STEP, Settings::MAX_ITERATIONS_CAP);
-    }
+    // 🐭 Kein Iterations-Update mehr hier!
 
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -113,16 +114,18 @@ void Renderer::renderFrame_impl() {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     glClear(GL_COLOR_BUFFER_BIT);
-    glUseProgram(program); glBindVertexArray(VAO);
+    glUseProgram(program);
+    glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0); glUseProgram(0);
+    glBindVertexArray(0);
+    glUseProgram(0);
 
     lastFrameTime = static_cast<float>((glfwGetTime() - frameStart) * 1000.0);
     Hud::draw(currentFPS, lastFrameTime, zoom, offset.x, offset.y, windowWidth, windowHeight);
 
-    glfwSwapBuffers(window); glfwPollEvents();
+    glfwSwapBuffers(window);
+    glfwPollEvents();
 }
-
 
 void Renderer::setupPBOAndTexture() {
     glGenBuffers(1, &pbo);

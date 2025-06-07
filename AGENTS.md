@@ -38,7 +38,7 @@ It supports:
 
 ## GPU Compatibility
 
-- Requires Compute Capability **≥ 3.0**.
+- Requires Compute Capability **≥ 6.0** (Pascal generation and newer).
 - No need for Dynamic Parallelism.
 - Recommended: NVIDIA RTX 20xx or newer.
 
