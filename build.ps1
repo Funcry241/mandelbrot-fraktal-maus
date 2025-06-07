@@ -3,10 +3,7 @@
   # Meta: Optimiertes Build-Script mit SSH, CMake und vcpkg für Mandelbrot-Otterdream.
 #>
 
-param(
-    [string]$Configuration = "RelWithDebInfo"
-)
-
+param([string]$Configuration = "RelWithDebInfo")
 $ErrorActionPreference = 'Stop'
 
 Write-Host "=== 🚀 Starting Build $(Get-Date -Format o) ==="
@@ -18,7 +15,6 @@ if ((Get-Service ssh-agent -ErrorAction SilentlyContinue).Status -ne 'Running') 
 } else {
     Write-Host "[SSH] ssh-agent already running."
 }
-
 if (-not (ssh-add -l 2>&1) -match "SHA256") {
     $keyPath = "$Env:USERPROFILE\.ssh\id_ed25519"
     if (Test-Path $keyPath) {

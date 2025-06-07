@@ -15,6 +15,5 @@ int main() {
         renderer.renderFrame();
     }
 
-    renderer.cleanup();
     return 0;
 }
