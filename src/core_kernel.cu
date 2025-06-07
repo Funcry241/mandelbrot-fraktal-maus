@@ -6,6 +6,7 @@
 #include <vector_types.h>
 #include <device_launch_parameters.h>
 #include "core_kernel.h"
+#include "settings.hpp"   // 🐭 Damit Settings::debugLogging bekannt ist
 
 // 🐭 Test-Gradient-Kernel – IMMER definiert
 __global__ void testKernel(uchar4* img, int width, int height) {
@@ -165,7 +166,9 @@ __global__ void mandelbrotHybrid(
             if (errNested != cudaSuccess) {
                 printf("[NESTED ERROR] refineTile: %s\n", cudaGetErrorString(errNested));
             } else {
-                printf("[INFO] refineTile gestartet (TileX: %d, TileY: %d)\n", tileX, tileY);
+                if (Settings::debugLogging) {
+                    printf("[INFO] refineTile gestartet (TileX: %d, TileY: %d)\n", tileX, tileY);
+                }
             }
         }
     }
