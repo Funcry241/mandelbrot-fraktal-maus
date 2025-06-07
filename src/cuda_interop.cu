@@ -36,13 +36,13 @@ namespace CudaInterop {
 
 void renderCudaFrame(
     cudaGraphicsResource_t cudaPboRes,
-    int                   width,
-    int                   height,
-    float&                zoom,
-    float2&               offset,
-    int                   maxIter,
-    float*                d_complexity,
-    std::vector<float>&   h_complexity
+    int width,
+    int height,
+    float& zoom,
+    float2& offset,
+    int maxIter,
+    float* d_complexity,
+    std::vector<float>& h_complexity
 ) {
     DEBUG_PRINT("Starting frame render");
 
@@ -95,26 +95,41 @@ void renderCudaFrame(
         if (bestVariance > 0.0f) {
             int bx = bestIdx % tilesX;
             int by = bestIdx / tilesX;
-            float newOffX = offset.x + ((bx + 0.5f) * Settings::TILE_W - width * 0.5f) / zoom;
-            float newOffY = offset.y + ((by + 0.5f) * Settings::TILE_H - height * 0.5f) / zoom;
+            float targetOffX = offset.x + ((bx + 0.5f) * Settings::TILE_W - width * 0.5f) / zoom;
+            float targetOffY = offset.y + ((by + 0.5f) * Settings::TILE_H - height * 0.5f) / zoom;
 
-            if (std::isfinite(newOffX) && std::isfinite(newOffY)) {
-                offset.x = 0.9f * offset.x + 0.1f * newOffX;
-                offset.y = 0.9f * offset.y + 0.1f * newOffY;
+            if (std::isfinite(targetOffX) && std::isfinite(targetOffY)) {
+                // Maus-Sanftheit: Limitiere Offset-Delta
+                float deltaX = targetOffX - offset.x;
+                float deltaY = targetOffY - offset.y;
+                const float maxOffsetStep = 0.05f / zoom;  // 🐭 Anpassung abhängig vom Zoom
+
+                if (std::fabs(deltaX) > maxOffsetStep) deltaX = (deltaX > 0.0f ? maxOffsetStep : -maxOffsetStep);
+                if (std::fabs(deltaY) > maxOffsetStep) deltaY = (deltaY > 0.0f ? maxOffsetStep : -maxOffsetStep);
+
+                offset.x += deltaX;
+                offset.y += deltaY;
                 DEBUG_PRINT("New offset: (%.6f, %.6f)", offset.x, offset.y);
             }
 
-            float newZoom = zoom * Settings::zoomFactor;
+            float targetZoom = zoom * Settings::zoomFactor;
             constexpr float maxZoomAllowed = 1e15f;
 
-            if (std::isfinite(newZoom) && newZoom < maxZoomAllowed) {
-                zoom = 0.9f * zoom + 0.1f * newZoom;
+            if (std::isfinite(targetZoom) && targetZoom < maxZoomAllowed) {
+                // Maus-Sanftheit: Limitiere Zoom-Delta
+                float zoomDelta = targetZoom - zoom;
+                const float maxZoomStep = 0.03f * zoom;  // 3% Zoom-Change maximal
+
+                if (std::fabs(zoomDelta) > maxZoomStep) {
+                    zoomDelta = (zoomDelta > 0.0f ? maxZoomStep : -maxZoomStep);
+                }
+
+                zoom += zoomDelta;
                 DEBUG_PRINT("New zoom: %.6f", zoom);
             }
         }
     }
 
-    // Synchronisation bevor Unmap
     cudaError_t syncErr = cudaDeviceSynchronize();
     if (syncErr != cudaSuccess) {
         std::fprintf(stderr, "[SYNC ERROR] Before unmap: %s\n", cudaGetErrorString(syncErr));
