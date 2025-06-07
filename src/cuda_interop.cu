@@ -81,51 +81,66 @@ void renderCudaFrame(
 
         int tilesX = (width + Settings::TILE_W - 1) / Settings::TILE_W;
         float bestVariance = -1.0f;
-        int   bestIdx = 0;
+        int   bestIdx = -1;
 
         for (int i = 0; i < totalTiles; ++i) {
-            if (h_complexity[i] > bestVariance) {
+            if (h_complexity[i] > Settings::VARIANCE_THRESHOLD && h_complexity[i] > bestVariance) {
                 bestVariance = h_complexity[i];
                 bestIdx = i;
             }
         }
 
-        DEBUG_PRINT("Best variance found: %.6f", bestVariance);
+        DEBUG_PRINT("Best variance found: %.12f", bestVariance);
 
-        if (bestVariance > 0.0f) {
+        if (bestIdx != -1) {
             int bx = bestIdx % tilesX;
             int by = bestIdx / tilesX;
             float targetOffX = offset.x + ((bx + 0.5f) * Settings::TILE_W - width * 0.5f) / zoom;
             float targetOffY = offset.y + ((by + 0.5f) * Settings::TILE_H - height * 0.5f) / zoom;
 
             if (std::isfinite(targetOffX) && std::isfinite(targetOffY)) {
-                // Maus-Sanftheit: Limitiere Offset-Delta
                 float deltaX = targetOffX - offset.x;
                 float deltaY = targetOffY - offset.y;
                 const float maxOffsetStep = Settings::OFFSET_STEP_FACTOR / zoom;
 
-                if (std::fabs(deltaX) > maxOffsetStep) deltaX = (deltaX > 0.0f ? maxOffsetStep : -maxOffsetStep);
-                if (std::fabs(deltaY) > maxOffsetStep) deltaY = (deltaY > 0.0f ? maxOffsetStep : -maxOffsetStep);
+                if (std::fabs(deltaX) > maxOffsetStep) {
+                    deltaX = (deltaX > 0.0f ? maxOffsetStep : -maxOffsetStep);
+                }
+                if (std::fabs(deltaY) > maxOffsetStep) {
+                    deltaY = (deltaY > 0.0f ? maxOffsetStep : -maxOffsetStep);
+                }
+
+                // 🐭 NEU: Minimalbewegung sicherstellen
+                if (std::fabs(deltaX) < Settings::MIN_OFFSET_STEP) {
+                    deltaX = (deltaX > 0.0f ? Settings::MIN_OFFSET_STEP : -Settings::MIN_OFFSET_STEP);
+                }
+                if (std::fabs(deltaY) < Settings::MIN_OFFSET_STEP) {
+                    deltaY = (deltaY > 0.0f ? Settings::MIN_OFFSET_STEP : -Settings::MIN_OFFSET_STEP);
+                }
 
                 offset.x += deltaX;
                 offset.y += deltaY;
-                DEBUG_PRINT("New offset: (%.6f, %.6f)", offset.x, offset.y);
+                DEBUG_PRINT("New offset: (%.12f, %.12f)", offset.x, offset.y);
             }
 
             float targetZoom = zoom * Settings::zoomFactor;
             constexpr float maxZoomAllowed = 1e15f;
 
             if (std::isfinite(targetZoom) && targetZoom < maxZoomAllowed) {
-                // Maus-Sanftheit: Limitiere Zoom-Delta
                 float zoomDelta = targetZoom - zoom;
-                const float maxZoomStep  = Settings::ZOOM_STEP_FACTOR * zoom;
+                const float maxZoomStep = Settings::ZOOM_STEP_FACTOR * zoom;
 
                 if (std::fabs(zoomDelta) > maxZoomStep) {
                     zoomDelta = (zoomDelta > 0.0f ? maxZoomStep : -maxZoomStep);
                 }
 
+                // 🐭 NEU: Minimalzoom sicherstellen
+                if (std::fabs(zoomDelta) < Settings::MIN_ZOOM_STEP) {
+                    zoomDelta = (zoomDelta > 0.0f ? Settings::MIN_ZOOM_STEP : -Settings::MIN_ZOOM_STEP);
+                }
+
                 zoom += zoomDelta;
-                DEBUG_PRINT("New zoom: %.6f", zoom);
+                DEBUG_PRINT("New zoom: %.12f", zoom);
             }
         }
     }
