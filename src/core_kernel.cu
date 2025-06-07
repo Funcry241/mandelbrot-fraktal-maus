@@ -24,15 +24,27 @@ extern "C" void launch_debugGradient(uchar4* img, int w, int h) {
 // 🐭 Farbkodierung
 __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy, float zoom) {
     if (iter >= maxIter) return make_uchar4(0, 0, 0, 255);
+
     float log_zn = logf(zx * zx + zy * zy) * 0.5f;
     float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
-    float t = fmodf(((iter + 1.0f - nu) / maxIter) * 3.0f, 1.0f);
-    float hueShift = fmodf(logf(zoom + 1.0f) * 0.1f, 1.0f);
-    float r = 0.5f + 0.5f * cosf(6.28318f * (t + hueShift + 0.0f));
-    float g = 0.5f + 0.5f * cosf(6.28318f * (t + hueShift + 0.33f));
-    float b = 0.5f + 0.5f * cosf(6.28318f * (t + hueShift + 0.67f));
-    return make_uchar4(r * 255, g * 255, b * 255, 255);
+    float t = (iter + 1.0f - nu) / maxIter;
+
+    // Dynamischer Farbshift basierend auf Zoom
+    float zoomShift = fmodf(logf(zoom + 2.0f) * 0.07f, 1.0f);
+
+    // Eleganter Gold-Blau Verlauf
+    float r = 0.8f + 0.2f * cosf(6.28318f * (t + zoomShift + 0.0f));
+    float g = 0.6f + 0.4f * cosf(6.28318f * (t + zoomShift + 0.3f));
+    float b = 0.4f + 0.6f * cosf(6.28318f * (t + zoomShift + 0.6f));
+
+    // Sanftes Power-Gefühl
+    r = powf(r, 1.5f);
+    g = powf(g, 1.5f);
+    b = powf(b, 1.5f);
+
+    return make_uchar4(fminf(r * 255.0f, 255.0f), fminf(g * 255.0f, 255.0f), fminf(b * 255.0f, 255.0f), 255);
 }
+
 
 // 🐭 Mandelbrot Kernel
 __global__ void mandelbrotHybrid(uchar4* img, int* iterations, int w, int h, float zoom, float2 offset, int maxIter) {
@@ -66,18 +78,36 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
     int localX = threadIdx.x, localY = threadIdx.y, x = startX + localX, y = startY + localY;
     int localId = localY * blockDim.x + localX;
 
-    __shared__ float sum[Settings::TILE_W * Settings::TILE_H], sqSum[Settings::TILE_W * Settings::TILE_H];
+    __shared__ float sum[Settings::TILE_W * Settings::TILE_H];
+    __shared__ float sqSum[Settings::TILE_W * Settings::TILE_H];
+    __shared__ int minIter[Settings::TILE_W * Settings::TILE_H];
+    __shared__ int maxIter[Settings::TILE_W * Settings::TILE_H];
     __shared__ int count[Settings::TILE_W * Settings::TILE_H];
 
     float value = 0.0f; int valid = 0;
-    if (x < w && y < h) { value = static_cast<float>(iterations[y * w + x]); valid = 1; }
-    sum[localId] = value; sqSum[localId] = value * value; count[localId] = valid;
+    int iterValue = 0;
+
+    if (x < w && y < h) { 
+        iterValue = iterations[y * w + x]; 
+        value = static_cast<float>(iterValue); 
+        valid = 1; 
+    } else {
+        iterValue = 0;
+    }
+
+    sum[localId] = value;
+    sqSum[localId] = value * value;
+    minIter[localId] = iterValue;
+    maxIter[localId] = iterValue;
+    count[localId] = valid;
     __syncthreads();
 
     for (int stride = (blockDim.x * blockDim.y) / 2; stride > 0; stride >>= 1) {
         if (localId < stride) {
             sum[localId] += sum[localId + stride];
             sqSum[localId] += sqSum[localId + stride];
+            minIter[localId] = min(minIter[localId], minIter[localId + stride]);
+            maxIter[localId] = max(maxIter[localId], maxIter[localId + stride]);
             count[localId] += count[localId + stride];
         }
         __syncthreads();
@@ -85,7 +115,20 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
 
     if (localId == 0) {
         int n = count[0];
-        float var = (n > 1) ? (sqSum[0] / n - (sum[0] / n) * (sum[0] / n)) : 0.0f;
-        complexity[tileY * tilesX + tileX] = (var > Settings::VARIANCE_THRESHOLD) ? var : 0.0f;
+        if (n > 1) {
+            float mean = sum[0] / n;
+            float var = (sqSum[0] / n) - (mean * mean);
+            int minVal = minIter[0];
+            int maxVal = maxIter[0];
+            int spread = maxVal - minVal;
+
+            // Kombiniertes Scoring
+            float score = var * (spread > 0 ? spread : 1);
+
+            complexity[tileY * tilesX + tileX] = (score > Settings::VARIANCE_THRESHOLD) ? score : 0.0f;
+        } else {
+            complexity[tileY * tilesX + tileX] = 0.0f;
+        }
     }
 }
+
