@@ -1,4 +1,5 @@
-#pragma once
+// 🐭 Maus-Kommentar: Implementation für CUDA-OpenGL Interop ohne #pragma once; Exception-basiertes Fehler-Handling; Auto-Zoom-Step Fix
+
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <vector>
 #include <cmath>
+#include <stdexcept>  // 🐭 Exception für Fehler-Handling
 
 #include "settings.hpp"
 #include "core_kernel.h"
@@ -19,10 +21,10 @@
 
 namespace CudaInterop {
 
+// 🚀 Fehlerbehandlung: wirf Exception statt std::exit!
 #define CHECK_CUDA_STEP(call, msg) do { \
     if (cudaError_t err = (call); err != cudaSuccess) { \
-        std::fprintf(stderr, "[CUDA ERROR] %s: %s\n", msg, cudaGetErrorString(err)); \
-        std::exit(EXIT_FAILURE); \
+        throw std::runtime_error(std::string("[CUDA ERROR] ") + msg + ": " + cudaGetErrorString(err)); \
     } \
 } while (0)
 
@@ -49,7 +51,8 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
         int totalTiles = static_cast<int>(h_complexity.size());
         CHECK_CUDA_STEP(cudaMemset(d_complexity, 0, totalTiles * sizeof(float)), "Memset complexity");
 
-        dim3 blockDim(Settings::TILE_W, Settings::TILE_H), gridDim((w + blockDim.x - 1) / blockDim.x, (h + blockDim.y - 1) / blockDim.y);
+        dim3 blockDim(Settings::TILE_W, Settings::TILE_H);
+        dim3 gridDim((w + blockDim.x - 1) / blockDim.x, (h + blockDim.y - 1) / blockDim.y);
         DEBUG_PRINT("Launching complexity kernel Grid(%d,%d) Block(%d,%d)", gridDim.x, gridDim.y, blockDim.x, blockDim.y);
         computeComplexity<<<gridDim, blockDim>>>(d_iterations, w, h, d_complexity);
         CHECK_CUDA_STEP(cudaDeviceSynchronize(), "complexity sync");
@@ -57,29 +60,37 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
 
         DEBUG_PRINT("Searching best tile...");
         int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
-        float bestVariance = -1.0f; int bestIdx = -1;
+        float bestVariance = -1.0f;
+        int bestIdx = -1;
 
         // 🐭 Dynamischer Threshold basierend auf Zoom
         float dynamicThreshold = Settings::VARIANCE_THRESHOLD / logf(zoom + 2.0f);
 
-        for (int i = 0; i < totalTiles; ++i)
-            if (h_complexity[i] > dynamicThreshold && h_complexity[i] > bestVariance)
-                bestVariance = h_complexity[i], bestIdx = i;
+        for (int i = 0; i < totalTiles; ++i) {
+            if (h_complexity[i] > dynamicThreshold && h_complexity[i] > bestVariance) {
+                bestVariance = h_complexity[i];
+                bestIdx = i;
+            }
+        }
 
         if (bestIdx != -1) {
             DEBUG_PRINT("Best variance: %.12f", bestVariance);
-            int bx = bestIdx % tilesX, by = bestIdx / tilesX;
-            float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f, ty = (by + 0.5f) * Settings::TILE_H - h * 0.5f;
+            int bx = bestIdx % tilesX;
+            int by = bestIdx / tilesX;
+            float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f;
+            float ty = (by + 0.5f) * Settings::TILE_H - h * 0.5f;
             float targetOffX = offset.x + tx / zoom;
             float targetOffY = offset.y + ty / zoom;
 
             if (std::isfinite(targetOffX) && std::isfinite(targetOffY)) {
                 auto step = [](float delta, float factor, float zoom) {
                     float s = factor / zoom;
-                    // 🐭 Dynamischer Minimal-Schritt: bei extremem Zoom > größere Schrittweite
                     float dynamicMinStep = fmaxf(1e-8f, 1e-5f / zoom);
-                    if (std::fabs(delta) > s) delta = (delta > 0 ? s : -s);
-                    if (std::fabs(delta) < dynamicMinStep) delta = (delta > 0 ? dynamicMinStep : -dynamicMinStep);
+                    // 🐭 Erst minStep erzwingen, dann maxStep klemmen
+                    if (std::fabs(delta) < dynamicMinStep)
+                        delta = (delta > 0 ? dynamicMinStep : -dynamicMinStep);
+                    if (std::fabs(delta) > s)
+                        delta = (delta > 0 ? s : -s);
                     return delta;
                 };
                 offset.x += step(targetOffX - offset.x, Settings::OFFSET_STEP_FACTOR, zoom);
@@ -91,8 +102,10 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
             if (std::isfinite(targetZoom) && targetZoom < 1e15f) {
                 float zoomDelta = targetZoom - zoom;
                 float maxStep = Settings::ZOOM_STEP_FACTOR * zoom;
-                if (std::fabs(zoomDelta) > maxStep) zoomDelta = (zoomDelta > 0 ? maxStep : -maxStep);
-                if (std::fabs(zoomDelta) < Settings::MIN_ZOOM_STEP) zoomDelta = (zoomDelta > 0 ? Settings::MIN_ZOOM_STEP : -Settings::MIN_ZOOM_STEP);
+                if (std::fabs(zoomDelta) > maxStep)
+                    zoomDelta = (zoomDelta > 0 ? maxStep : -maxStep);
+                if (std::fabs(zoomDelta) < Settings::MIN_ZOOM_STEP)
+                    zoomDelta = (zoomDelta > 0 ? Settings::MIN_ZOOM_STEP : -Settings::MIN_ZOOM_STEP);
                 zoom += zoomDelta;
                 DEBUG_PRINT("New zoom: %.12f", zoom);
             }

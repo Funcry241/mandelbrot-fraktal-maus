@@ -103,7 +103,9 @@ void Renderer::renderFrame_impl() {
     }
     CudaInterop::renderCudaFrame(cudaPboRes, windowWidth, windowHeight, zoom, offset, getCurrentIterations(), d_complexity, h_complexity, d_iterations);
 
-    if (!wasJustReset()) currentMaxIter = std::min(currentMaxIter + iterStep, iterMax);
+    if (!wasJustReset()) {
+        currentMaxIter = std::min(currentMaxIter + Settings::ITERATION_STEP, Settings::MAX_ITERATIONS_CAP);
+    }
 
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -120,6 +122,7 @@ void Renderer::renderFrame_impl() {
 
     glfwSwapBuffers(window); glfwPollEvents();
 }
+
 
 void Renderer::setupPBOAndTexture() {
     glGenBuffers(1, &pbo);

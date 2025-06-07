@@ -1,14 +1,14 @@
 #pragma once
 
-// progressive.hpp – Declaration for progressive Mandelbrot rendering
+// progressive.hpp – 🐭 Declaration für progressive Mandelbrot-Iteration (keine Konstanten!)
 
-// Nur Deklaration (extern) — *keine* __device__ oder __managed__ hier!
-extern __device__ __managed__ int currentMaxIter;
-extern __device__ __managed__ bool justResetFlag;  // 🐭 Reset-Flag
+// ----------------------------------------------------------------------
+// Device-Managed globale Variablen für Iterationssteuerung
+extern __device__ __managed__ int currentMaxIter;  // Aktuelle maximale Iterationen
+extern __device__ __managed__ bool justResetFlag;  // Reset-Flag (true, wenn Reset passiert ist)
 
-void resetIterations();
-int getCurrentIterations();
-bool wasJustReset();  // 🐭
-
-inline constexpr int iterStep = 50;   // Schrittweite pro Frame
-inline constexpr int iterMax  = 5000; // Maximale Iterationen
+// ----------------------------------------------------------------------
+// Funktionen zur Steuerung der Iterationen
+void resetIterations();    // Setzt Iterationen auf Initialwert zurück und setzt Reset-Flag
+int  getCurrentIterations(); // Erhöht Iterationen progressiv bis zur Maximalgrenze
+bool wasJustReset();         // Liefert true einmalig nach einem Reset

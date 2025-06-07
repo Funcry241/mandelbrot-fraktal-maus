@@ -1,18 +1,14 @@
 #include <cstdio>
 #include <cmath>        // 🐭 Für logf()
 #include "progressive.hpp"
-#include "settings.hpp" // 🐭 Damit Settings::debugLogging bekannt ist
+#include "settings.hpp" // 🐭 Settings enthält alles Nötige
 
 // Definition — EINMAL
-__device__ __managed__ int currentMaxIter = 100;
+__device__ __managed__ int currentMaxIter = Settings::INITIAL_ITERATIONS;
 __device__ __managed__ bool justResetFlag = false;
 
-constexpr int initialIterations = 100;
-constexpr int maxIterationsCap  = 5000; // 🐭 Nicht unendlich wachsen lassen
-constexpr int iterationStep     = 5;    // 🐭 Schrittweise Erhöhung
-
 void resetIterations() {
-    currentMaxIter = initialIterations;
+    currentMaxIter = Settings::INITIAL_ITERATIONS;
     justResetFlag = true; // 🐭 Reset-Flag setzen
     if (Settings::debugLogging) {
         std::fprintf(stdout, "[RESET] Iterations reset to %d.\n", currentMaxIter);
@@ -21,9 +17,11 @@ void resetIterations() {
 
 int getCurrentIterations() {
     // 🐭 Pro Frame leicht steigern für mehr Details bei tieferem Zoom
-    if (currentMaxIter < maxIterationsCap) {
-        currentMaxIter += iterationStep;
-        if (currentMaxIter > maxIterationsCap) currentMaxIter = maxIterationsCap;
+    if (currentMaxIter < Settings::MAX_ITERATIONS_CAP) {
+        currentMaxIter += Settings::ITERATION_STEP;
+        if (currentMaxIter > Settings::MAX_ITERATIONS_CAP) {
+            currentMaxIter = Settings::MAX_ITERATIONS_CAP;
+        }
     }
     return currentMaxIter;
 }

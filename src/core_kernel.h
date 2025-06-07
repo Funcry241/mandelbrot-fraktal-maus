@@ -30,3 +30,9 @@ __global__ void computeComplexity(
     int height,             // Bildhöhe
     float* complexity       // Device-Array mit Länge (tilesX * tilesY)
 );
+
+// ----------------------------------------------------------------------
+// 4) Threshold Setter: Setzt dynamischen Variance-Threshold für Device-Seite
+extern "C" void setDeviceVarianceThreshold(
+    float threshold         // 🐭 Schwellenwert für die Komplexitätsbewertung
+);

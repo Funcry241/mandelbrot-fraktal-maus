@@ -1,10 +1,19 @@
-// Datei: src/core_kernel.cu
+// 🐭 Maus-Kommentar: CUDA-Kernel für Mandelbrot mit dynamischem Variance-Threshold via __device__ Symbol
+
 #include <cstdio>
 #include "settings.hpp"
 #include <cuda_runtime.h>
 #include <vector_types.h>
 #include <device_launch_parameters.h>
 #include "core_kernel.h"
+
+// 🐭 Device-Variable für dynamischen Threshold
+__device__ float deviceVarianceThreshold = 1e-6f;
+
+// 🐭 Setter-Funktion für den Threshold
+extern "C" void setDeviceVarianceThreshold(float threshold) {
+    cudaMemcpyToSymbol(deviceVarianceThreshold, &threshold, sizeof(float));
+}
 
 // 🐭 Gradient-Testbild
 __global__ void testKernel(uchar4* img, int w, int h) {
@@ -29,22 +38,18 @@ __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, floa
     float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
     float t = (iter + 1.0f - nu) / maxIter;
 
-    // Dynamischer Farbshift basierend auf Zoom
     float zoomShift = fmodf(logf(zoom + 2.0f) * 0.07f, 1.0f);
 
-    // Eleganter Gold-Blau Verlauf
     float r = 0.8f + 0.2f * cosf(6.28318f * (t + zoomShift + 0.0f));
     float g = 0.6f + 0.4f * cosf(6.28318f * (t + zoomShift + 0.3f));
     float b = 0.4f + 0.6f * cosf(6.28318f * (t + zoomShift + 0.6f));
 
-    // Sanftes Power-Gefühl
     r = powf(r, 1.5f);
     g = powf(g, 1.5f);
     b = powf(b, 1.5f);
 
     return make_uchar4(fminf(r * 255.0f, 255.0f), fminf(g * 255.0f, 255.0f), fminf(b * 255.0f, 255.0f), 255);
 }
-
 
 // 🐭 Mandelbrot Kernel
 __global__ void mandelbrotHybrid(uchar4* img, int* iterations, int w, int h, float zoom, float2 offset, int maxIter) {
@@ -65,7 +70,10 @@ extern "C" void launch_mandelbrotHybrid(uchar4* img, int* iterations, int w, int
     static bool firstLaunch = true;
     dim3 threads(Settings::TILE_W, Settings::TILE_H);
     dim3 blocks((w + threads.x - 1) / threads.x, (h + threads.y - 1) / threads.y);
-    if (firstLaunch) { printf("[INFO] Launch mandelbrotHybrid: Grid (%d,%d)\n", blocks.x, blocks.y); firstLaunch = false; }
+    if (firstLaunch) {
+        printf("[INFO] Launch mandelbrotHybrid: Grid (%d,%d)\n", blocks.x, blocks.y);
+        firstLaunch = false;
+    }
     mandelbrotHybrid<<<blocks, threads>>>(img, iterations, w, h, zoom, offset, maxIter);
     cudaDeviceSynchronize();
     if (cudaGetLastError() != cudaSuccess) printf("[ERROR] mandelbrotHybrid launch failed.\n");
@@ -84,7 +92,8 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
     __shared__ int maxIter[Settings::TILE_W * Settings::TILE_H];
     __shared__ int count[Settings::TILE_W * Settings::TILE_H];
 
-    float value = 0.0f; int valid = 0;
+    float value = 0.0f;
+    int valid = 0;
     int iterValue = 0;
 
     if (x < w && y < h) { 
@@ -122,13 +131,12 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
             int maxVal = maxIter[0];
             int spread = maxVal - minVal;
 
-            // Kombiniertes Scoring
             float score = var * (spread > 0 ? spread : 1);
 
-            complexity[tileY * tilesX + tileX] = (score > Settings::VARIANCE_THRESHOLD) ? score : 0.0f;
+            // 🐭 Device-seitige dynamische Schwelle
+            complexity[tileY * tilesX + tileX] = (score > deviceVarianceThreshold) ? score : 0.0f;
         } else {
             complexity[tileY * tilesX + tileX] = 0.0f;
         }
     }
 }
-

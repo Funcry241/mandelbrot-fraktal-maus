@@ -40,7 +40,4 @@ void renderCudaFrame(
     int* d_iterations    // 🐭 Iteration Buffer
 );
 
-/// 🐭 Checks if the current GPU supports Dynamic Parallelism (Compute Capability 3.5+ required)
-void checkDynamicParallelismSupport();
-
 }

@@ -1,9 +1,12 @@
 <#+
   MausID: κρυπτό-42
-  # Meta: Optimiertes Build-Script mit SSH, CMake und vcpkg für Mandelbrot-Otterdream.
+  # Meta: Optimiertes Build-Script mit SSH, CMake und vcpkg für Mandelbrot-Otterdream, jetzt mit GPU Auto-Detection!
 #>
 
-param([string]$Configuration = "RelWithDebInfo")
+param(
+    [string]$Configuration = "RelWithDebInfo",
+    [switch]$UseNativeGpu  # 🧠 Neue Option: Auto-GPU Detection
+)
 $ErrorActionPreference = 'Stop'
 
 Write-Host "=== 🚀 Starting Build $(Get-Date -Format o) ==="
@@ -96,12 +99,23 @@ New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 # 8) CMake Configure & Build
 Write-Host "[BUILD] Configuring CMake..."
 $env:Path += ";C:\ProgramData\chocolatey\bin"
+
+# ✨ Dynamisch -DUSE_NATIVE_GPU=ON setzen, falls Parameter aktiv
+$gpuOption = ""
+if ($UseNativeGpu) {
+    Write-Host "[GPU] Native GPU Architecture Detection ENABLED." -ForegroundColor Cyan
+    $gpuOption = "-DUSE_NATIVE_GPU=ON"
+} else {
+    Write-Host "[GPU] Default GPU Architectures ENABLED." -ForegroundColor Cyan
+}
+
 cmake -S . -B build -G Ninja `
     "-DCMAKE_TOOLCHAIN_FILE=$PSScriptRoot/vcpkg/scripts/buildsystems/vcpkg.cmake" `
     "-DCMAKE_BUILD_TYPE=$Configuration" `
     "-DCMAKE_CUDA_COMPILER=$nvcc" `
     "-DCMAKE_CUDA_TOOLKIT_ROOT_DIR=$cudaBin\.." `
-    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON" `
+    $gpuOption
 
 Write-Host "[BUILD] Building project..."
 cmake --build build --config $Configuration --parallel
