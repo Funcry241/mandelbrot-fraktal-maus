@@ -69,4 +69,4 @@ MIT License — free for personal and commercial use.
 ---
 
 ## Screenshot
-![Mandelbrot Screenshot](assets/mandelbrot_example.png)
+<!-- Screenshot removed to avoid broken image link -->

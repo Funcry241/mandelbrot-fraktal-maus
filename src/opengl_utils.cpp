@@ -79,11 +79,6 @@ void createFullscreenQuad(GLuint* vao, GLuint* vbo, GLuint* ebo) {
     gFullscreenVAO = *vao;
 }
 
-[[maybe_unused]] void drawFullscreenQuad() {
-    glBindVertexArray(gFullscreenVAO);
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
-}
-
 void deleteFullscreenQuad(GLuint* vao, GLuint* vbo, GLuint* ebo) {
     glDeleteBuffers(1, vbo);
     glDeleteBuffers(1, ebo);
