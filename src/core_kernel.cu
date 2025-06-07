@@ -36,23 +36,18 @@ extern "C" void launch_debugGradient(
 // 🐭 Farbkodierung für Mandelbrot – jetzt mit dynamischem Hue-Shift
 __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy, float zoom) {
     if (iter >= maxIter) {
-        // Punkte in der Mandelbrot-Menge -> Schwarz
         return make_uchar4(0, 0, 0, 255);
     }
 
-    // Smooth Iteration Count
     float log_zn = logf(zx * zx + zy * zy) / 2.0f;
     float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
     float smoothIter = iter + 1.0f - nu;
 
-    // Normalisieren
     float t = smoothIter / maxIter;
-    t = fmodf(t * 3.0f, 1.0f);  // Sanfte Farbringe
+    t = fmodf(t * 3.0f, 1.0f);
 
-    // 🐭 Hue-Shift abhängig vom Zoom
     float hueShift = fmodf(logf(zoom + 1.0f) * 0.1f, 1.0f);
 
-    // Rainbow-Farbverlauf
     float r = 0.5f + 0.5f * cosf(6.28318f * (t + hueShift + 0.0f));
     float g = 0.5f + 0.5f * cosf(6.28318f * (t + hueShift + 0.33f));
     float b = 0.5f + 0.5f * cosf(6.28318f * (t + hueShift + 0.67f));
@@ -65,7 +60,6 @@ __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, floa
     );
 }
 
-// 🐭 Verfeinerung für interessante Kacheln
 __global__ void refineTile(
     uchar4* img,
     int width, int height,
@@ -92,10 +86,9 @@ __global__ void refineTile(
         ++iter;
     }
 
-    img[y * width + x] = colorMap(iter, maxIter, zx, zy, zoom);  // 🐭 Zoom-Parameter ergänzt
+    img[y * width + x] = colorMap(iter, maxIter, zx, zy, zoom);
 }
 
-// 🐭 Mandelbrot Haupt-Kernel
 __global__ void mandelbrotHybrid(
     uchar4* img,
     int width, int height,
@@ -139,7 +132,7 @@ __global__ void mandelbrotHybrid(
             localSum += iter;
             ++localCnt;
 
-            img[y * width + x] = colorMap(iter, maxIter, zx, zy, zoom);  // 🐭 Zoom-Parameter ergänzt
+            img[y * width + x] = colorMap(iter, maxIter, zx, zy, zoom);
         }
     }
 
@@ -150,31 +143,32 @@ __global__ void mandelbrotHybrid(
     if (threadIdx.x == 0 && threadIdx.y == 0) {
         float avgIter = blockSum / static_cast<float>(blockCnt);
         if (avgIter > Settings::DYNAMIC_THRESHOLD) {
-            int tileW = endX - startX;
-            int tileH = endY - startY;
-            dim3 bs(min(tileW, Settings::TILE_W), min(tileH, Settings::TILE_H));
-            dim3 gs((tileW + bs.x - 1) / bs.x,
-                    (tileH + bs.y - 1) / bs.y);
-            refineTile<<<gs, bs>>>(
-                img, width, height,
-                zoom, offset,
-                startX, startY,
-                tileW, tileH,
-                maxIter * 2
-            );
-            cudaError_t errNested = cudaGetLastError();
-            if (errNested != cudaSuccess) {
-                printf("[NESTED ERROR] refineTile: %s\n", cudaGetErrorString(errNested));
-            } else {
-                if (Settings::debugLogging) {
-                    printf("[INFO] refineTile gestartet (TileX: %d, TileY: %d)\n", tileX, tileY);
+            if (tileX % 10 == 0 && tileY % 10 == 0) { // 🐭 Limitierung eingefügt!
+                int tileW = endX - startX;
+                int tileH = endY - startY;
+                dim3 bs(min(tileW, Settings::TILE_W), min(tileH, Settings::TILE_H));
+                dim3 gs((tileW + bs.x - 1) / bs.x,
+                        (tileH + bs.y - 1) / bs.y);
+                refineTile<<<gs, bs>>>(
+                    img, width, height,
+                    zoom, offset,
+                    startX, startY,
+                    tileW, tileH,
+                    maxIter * 2
+                );
+                cudaError_t errNested = cudaGetLastError();
+                if (errNested != cudaSuccess) {
+                    printf("[NESTED ERROR] refineTile: %s\n", cudaGetErrorString(errNested));
+                } else {
+                    if (Settings::debugLogging) {
+                        printf("[INFO] refineTile gestartet (TileX: %d, TileY: %d)\n", tileX, tileY);
+                    }
                 }
             }
         }
     }
 }
 
-// 🐭 Mandelbrot-Launcher
 extern "C" void launch_mandelbrotHybrid(
     uchar4* img,
     int width, int height,
@@ -194,15 +188,9 @@ extern "C" void launch_mandelbrotHybrid(
     }
 
     mandelbrotHybrid<<<blocks, threads>>>(img, width, height, zoom, offset, maxIter);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("[LAUNCH ERROR] mandelbrotHybrid: %s\n", cudaGetErrorString(err));
-    }
     cudaDeviceSynchronize();
 }
 
-
-// 🐭 Parallelisierte Complexity-Messung basierend auf Varianz der Iterationen
 __global__ void computeComplexity(
     const uchar4* img,
     int width, int height,
@@ -233,7 +221,6 @@ __global__ void computeComplexity(
     if (x < width && y < height) {
         const uchar4& px = img[y * width + x];
 
-        // Interpret brightness as pseudo-iteration proxy
         float brightness = (static_cast<float>(px.x) + px.y + px.z) / (3.0f * 255.0f);
 
         value = brightness;
@@ -245,7 +232,6 @@ __global__ void computeComplexity(
     sharedCount[localId] = valid;
     __syncthreads();
 
-    // Parallel reduction
     for (int stride = (blockDim.x * blockDim.y) / 2; stride > 0; stride >>= 1) {
         if (localId < stride) {
             sharedSum[localId] += sharedSum[localId + stride];
@@ -262,12 +248,9 @@ __global__ void computeComplexity(
             float meanSq = sharedSqSum[0] / count;
             float variance = meanSq - mean * mean;
 
-            // 🐭 Soft-Threshold — avoid numerical noise
             complexity[tileY * tilesX + tileX] = (variance > 1e-6f) ? variance : 0.0f;
         } else {
             complexity[tileY * tilesX + tileX] = 0.0f;
         }
     }
 }
-
-
