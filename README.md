@@ -1,51 +1,72 @@
-# 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
+# OtterDream Mandelbrot Renderer
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-Ein schneller, moderner Mandelbrot-Renderer für Windows basierend auf CUDA und OpenGL 4.3 Core Profile. Dynamisches Auto-Zooming, sanfte Farbverläufe und ein flexibler Renderer.
+🐭 CUDA + OpenGL Renderer für das Mandelbrot-Fraktal mit intelligentem Auto-Zoom.
 
 ---
 
 ## Features
-
-- **CUDA-Optimiert**: Schnelles Mandelbrot-Rendering mit progressiver Verfeinerung.
-- **OpenGL 4.3 Core Profile**: Moderne Shader-Pipeline ohne Fixed-Function OpenGL.
-- **Auto-Zoom**: Automatisches Zoomen auf interessante Bildregionen.
-- **Dynamic Hue Coloring**: Farbverlauf abhängig vom Zoom-Level.
-- **Smooth Iteration Coloring**: Feine Farbübergänge für hohe Zoomstufen.
-- **Progressive Iterationen**: Automatisches Hochzählen der Iterationen.
-- **Resizing**: Fenstergrößenänderung mit dynamischem Viewport.
-- **GPU-Kompatibilität**: Läuft auf GPUs ab **Compute Capability 3.0**.
+- 🚀 **CUDA-Accelerated**: Echtzeit-Rendering mit GPU-Boost.
+- 🧠 **Auto-Zoom**: Fokussiert auf Bereiche mit maximaler Variabilität.
+- 🎨 **High-Quality Coloring**: Log-basiertes Smoothing für sanfte Farbübergänge.
+- 🖥️ **OpenGL-Interop**: Effiziente Framebuffer-Updates über PBOs.
+- 🛠️ **Debug Mode**: Optionale Gradienten-Visualisierung.
 
 ---
 
-## Voraussetzungen
+## Build Instructions
 
-- Windows 10/11
-- NVIDIA CUDA Toolkit (v12.9 empfohlen)
-- Visual Studio 2022 (mit C++ und CUDA Support)
-- CMake 3.24+ und Ninja
-- vcpkg (für GLFW, GLEW)
+1. **Clone repository**:
+   ```bash
+   git clone https://github.com/dein-username/otterdream-mandelbrot.git
+   cd otterdream-mandelbrot
+   ```
 
-> **Hinweis:** Keine Dynamic Parallelism-Unterstützung erforderlich — der Renderer läuft auf GPUs ab Compute Capability 3.0.
+2. **Setup vcpkg**:
+   ```bash
+   git clone https://github.com/microsoft/vcpkg.git
+   cd vcpkg
+   ./bootstrap-vcpkg.bat
+   vcpkg integrate install
+   vcpkg install glfw3 glew
+   ```
+
+3. **Build**:
+   ```bash
+   mkdir build
+   cd build
+   cmake .. -DCMAKE_TOOLCHAIN_FILE=path/to/vcpkg/scripts/buildsystems/vcpkg.cmake
+   cmake --build .
+   ```
+
+4. **Run**:
+   ```bash
+   ./OtterDreamMandelbrot
+   ```
 
 ---
 
-## Abhängigkeiten (über vcpkg)
-
-- **GLFW**: Fenster und Eingabe
-- **GLEW**: OpenGL Extension Wrangler
-- **STB Easy Font**: Leichtgewichtiges Text-Rendering *(optional für späteres HUD)*
+## Controls
+| Key | Action         |
+|:---:|----------------|
+| `Arrow Keys` | Pan View     |
+| `+ / -`     | Zoom In/Out  |
+| `ESC`       | Exit Program |
 
 ---
 
-## Build-Anleitung
+## Dependencies
+- CUDA 12+
+- OpenGL 4.3+
+- GLEW
+- GLFW
+- vcpkg (for package management)
 
-### Vcpkg Setup
+---
 
-```bash
-git clone https://github.com/microsoft/vcpkg.git
-cd vcpkg
-./bootstrap-vcpkg.bat
-vcpkg integrate install
-vcpkg install glfw3 glew
+## License
+MIT License — free for personal and commercial use.
+
+---
+
+## Screenshot
+![Mandelbrot Screenshot](assets/mandelbrot_example.png)
