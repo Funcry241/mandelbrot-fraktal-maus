@@ -68,8 +68,7 @@ void Renderer::initGL() {
         if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w))) self->resize(nw, nh);
     });
     glewExperimental = GL_TRUE;
-    if (glewInit() != GLEW_OK) throw std::runtime_error("GLEW init failed");
-    CUDA_CHECK(cudaSetDevice(0));
+    if (glewInit() != GLEW_OK) throw std::runtime_error("GLEW init failed");    
     CUDA_CHECK(cudaGLSetGLDevice(0));
     setupPBOAndTexture();
     program = createProgramFromSource(vertSrc, fragSrc);
