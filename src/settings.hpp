@@ -44,6 +44,6 @@ namespace Settings {
     inline constexpr float initialOffsetY =  0.0f;
 
     // 🐭 Schwenk- und Zoom-Parameter
-    inline constexpr float OFFSET_STEP_FACTOR = 1.00f;  // Größere Werte = schnelleres Schwenken
-    inline constexpr float ZOOM_STEP_FACTOR   = 0.15f;  // Größere Werte = schnellerer Zoom
+    inline constexpr float OFFSET_STEP_FACTOR = 0.30f;  // Größere Werte = schnelleres Schwenken
+    inline constexpr float ZOOM_STEP_FACTOR   = 0.35f;  // Größere Werte = schnellerer Zoom
 }
