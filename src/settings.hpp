@@ -15,7 +15,7 @@ inline constexpr int windowPosX   = 100;
 inline constexpr int windowPosY   = 100;        
 
 // 🔎 Zoom & Pan Einstellungen
-inline constexpr float initialZoom    = 3000.0f;  // 🐭 höherer Start-Zoom
+inline constexpr float initialZoom    = 300.0f;  // 🐭 höherer Start-Zoom
 inline constexpr float zoomFactor     = 1.01f;    
 inline constexpr float initialOffsetX = -0.5f;    
 inline constexpr float initialOffsetY =  0.0f;    
