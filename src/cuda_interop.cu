@@ -64,8 +64,8 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
         int bestIdx = -1;
 
         // 🐭 Dynamischer Threshold basierend auf Zoom
-        float dynamicThreshold = 0.0f;
-
+        float dynamicThreshold = Settings::dynamicVarianceThreshold(zoom);
+        
         for (int i = 0; i < totalTiles; ++i) {
             if (h_complexity[i] > dynamicThreshold && h_complexity[i] > bestVariance) {
                 bestVariance = h_complexity[i];
