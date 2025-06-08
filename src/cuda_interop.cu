@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit sanftem Zoom- und Offset-Gliding inkl. Pause-Funktion mit Leertaste
+// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit sanftem Zoom- und Offset-Gliding inkl. Pause-Funktion mit Leertaste + Ziel-Glättung gegen Zittern
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -6,7 +6,7 @@
 #endif
 
 #include <GL/gl.h>
-#include <GLFW/glfw3.h> // 🐭 Für Tasteneingaben
+#include <GLFW/glfw3.h>
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 #include <cstdio>
@@ -33,7 +33,7 @@ namespace CudaInterop {
         std::fprintf(stdout, "[DEBUG] " fmt "\n", ##__VA_ARGS__); \
 } while (0)
 
-static bool pauseZoom = false; // 🐭 Zoom pausieren
+static bool pauseZoom = false;
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_SPACE && action == GLFW_PRESS) {
@@ -45,17 +45,20 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 
 void renderCudaFrame(
     cudaGraphicsResource_t cudaPboRes,
-    int width,
-    int height,
+    int w,
+    int h,
     float& zoom,
     float2& offset,
     int maxIter,
     float* d_complexity,
     std::vector<float>& h_complexity,
     int* d_iterations,
-    bool autoZoomEnabled // 🐭 NEU: Auto-Zoom Parameter
+    bool autoZoomEnabled
 ) {
     DEBUG_PRINT("Starting frame render");
+
+    static float2 targetOffset = offset; // 🐭 Sanftes Ziel
+    static float lastBestVariance = -1.0f; // 🐭 Letzte beste Varianz
 
     uchar4* d_img = nullptr;
     size_t imgSize = 0;
@@ -64,19 +67,19 @@ void renderCudaFrame(
 
     if (Settings::debugGradient) {
         DEBUG_PRINT("Launching debug kernel");
-        launch_debugGradient(d_img, width, height);
+        launch_debugGradient(d_img, w, h);
     } else {
         DEBUG_PRINT("Launching Mandelbrot kernel");
-        launch_mandelbrotHybrid(d_img, d_iterations, width, height, zoom, offset, maxIter);
+        launch_mandelbrotHybrid(d_img, d_iterations, w, h, zoom, offset, maxIter);
 
         int totalTiles = static_cast<int>(h_complexity.size());
         CHECK_CUDA_STEP(cudaMemset(d_complexity, 0, totalTiles * sizeof(float)), "Memset complexity");
 
         dim3 blockDim(Settings::TILE_W, Settings::TILE_H);
-        dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y);
+        dim3 gridDim((w + blockDim.x - 1) / blockDim.x, (h + blockDim.y - 1) / blockDim.y);
         DEBUG_PRINT("Launching complexity kernel Grid(%d, %d) Block(%d, %d)", gridDim.x, gridDim.y, blockDim.x, blockDim.y);
 
-        computeComplexity<<<gridDim, blockDim>>>(d_iterations, width, height, d_complexity);
+        computeComplexity<<<gridDim, blockDim>>>(d_iterations, w, h, d_complexity);
         CHECK_CUDA_STEP(cudaDeviceSynchronize(), "complexity sync");
         CHECK_CUDA_STEP(cudaMemcpy(h_complexity.data(), d_complexity, totalTiles * sizeof(float), cudaMemcpyDeviceToHost), "Memcpy complexity");
 
@@ -96,10 +99,11 @@ void renderCudaFrame(
         }
 
         float avgComplexity = (nonzeroTiles > 0) ? (sumComplexity / nonzeroTiles) : 0.0f;
+
         DEBUG_PRINT("Complexity Stats: Nonzero Tiles: %d / %d | Max: %.6e | Min: %.6e | Avg: %.6e", nonzeroTiles, totalTiles, maxComplexity, minComplexity, avgComplexity);
 
         DEBUG_PRINT("Searching best tile...");
-        int tilesX = (width + Settings::TILE_W - 1) / Settings::TILE_W;
+        int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
         float bestVariance = -1.0f;
         int bestIdx = -1;
 
@@ -117,26 +121,36 @@ void renderCudaFrame(
         } else {
             DEBUG_PRINT("Best Tile Index: %d | Variance Score: %.6e", bestIdx, bestVariance);
 
-            int bx = bestIdx % tilesX;
-            int by = bestIdx / tilesX;
-            float tx = (bx + 0.5f) * Settings::TILE_W - width * 0.5f;
-            float ty = (by + 0.5f) * Settings::TILE_H - height * 0.5f;
-            float targetOffX = offset.x + tx / zoom;
-            float targetOffY = offset.y + ty / zoom;
+            if (bestVariance > lastBestVariance * 1.02f || lastBestVariance < 0.0f) {
+                lastBestVariance = bestVariance;
 
-            if (std::isfinite(targetOffX) && std::isfinite(targetOffY)) {
-                float lerpFactor = 0.05f; // 🐭 Sanftes Gleiten
-                offset.x += (targetOffX - offset.x) * lerpFactor;
-                offset.y += (targetOffY - offset.y) * lerpFactor;
-                DEBUG_PRINT("Smoothed offset: (%.12f, %.12f)", offset.x, offset.y);
+                int bx = bestIdx % tilesX;
+                int by = bestIdx / tilesX;
+                float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f;
+                float ty = (by + 0.5f) * Settings::TILE_H - h * 0.5f;
+
+                float newTargetX = offset.x + tx / zoom;
+                float newTargetY = offset.y + ty / zoom;
+
+                if (std::isfinite(newTargetX) && std::isfinite(newTargetY)) {
+                    targetOffset.x = newTargetX;
+                    targetOffset.y = newTargetY;
+                    DEBUG_PRINT("New target offset set: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
+                }
             }
         }
+
+        float lerpFactor = 0.05f;
+        offset.x += (targetOffset.x - offset.x) * lerpFactor;
+        offset.y += (targetOffset.y - offset.y) * lerpFactor;
+        DEBUG_PRINT("Smoothed offset: (%.12f, %.12f)", offset.x, offset.y);
     }
 
-    if (std::isfinite(zoom) && zoom < 1e15f) {
-        float zoomStep = fminf(2.0f, zoom * 0.0025f); // 🐭 maximal +2.0, aber max 0.25% des Zooms
-        zoom += zoomStep;
-        DEBUG_PRINT("Zoom updated: %.12f", zoom);
+    if (autoZoomEnabled && !pauseZoom) {
+        if (std::isfinite(zoom) && zoom < 1e15f) {
+            zoom += Settings::ZOOM_STEP_FACTOR * zoom;
+            DEBUG_PRINT("Zoom updated: %.12f", zoom);
+        }
     }
 
     CHECK_CUDA_STEP(cudaGraphicsUnmapResources(1, &cudaPboRes), "UnmapResources");
