@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.26)
+cmake_minimum_required(VERSION 4.0)
 
 project(OtterDreamMandelbrot LANGUAGES CXX CUDA)
 
@@ -11,15 +11,20 @@ set(VCPKG_MANIFEST_MODE ON)
 # ⚙️ Standards
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 20) # CUDA 12.9+: C++20 support (experimental but enabled)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
+# Modern Target compile features
+set(CMAKE_CXX_EXTENSIONS OFF) # No gnu++xx
+set(CMAKE_CUDA_EXTENSIONS OFF)
 
 # ---------------------------------------------------------
 # 📚 Pakete
-find_package(OpenGL REQUIRED)
+find_package(OpenGL 4.3 REQUIRED)          # 🎯 OpenGL Mindestversion 4.3 wegen Core Profile
 find_package(GLEW REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
+find_package(Threads REQUIRED)             # 🎯 Threads explizit
 
 # ---------------------------------------------------------
 # 🛠️ Executable
@@ -46,10 +51,9 @@ target_include_directories(mandelbrot_otterdream PRIVATE
 # 🛠️ Target Properties
 set_target_properties(mandelbrot_otterdream PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
-    CUDA_EXTENSIONS OFF
-    CXX_STANDARD 23
-    CUDA_STANDARD 17
 )
+
+target_compile_features(mandelbrot_otterdream PRIVATE cxx_std_23)
 
 # ---------------------------------------------------------
 # 🧠 Dynamische GPU-Erkennung
@@ -69,7 +73,7 @@ endif()
 target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
     $<$<COMPILE_LANGUAGE:CXX>:
-        $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /Zc:__cplusplus>
         $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Wno-unknown-pragmas>
     >
 )
@@ -81,6 +85,7 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
     GLEW::GLEW
     glfw
     CUDA::cudart
+    Threads::Threads
 )
 
 # ---------------------------------------------------------
@@ -104,6 +109,10 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 set(CMAKE_CUDA_FLAGS_DEBUG "-G -g")
-set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --use_fast_math")
+# 🎯 Präzisere CUDA Floating Point Math statt --use_fast_math
+set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --fmad=false --prec-div=true")
 
-# 🐭 Hinweis: --use_fast_math kann helfen, ist aber für numerisch extrem genaue Berechnungen manchmal problematisch.
+# ---------------------------------------------------------
+# 📦 Install-Support
+install(TARGETS mandelbrot_otterdream RUNTIME DESTINATION bin)
+

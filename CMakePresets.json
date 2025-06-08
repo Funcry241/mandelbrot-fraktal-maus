@@ -1,24 +1,74 @@
 {
-  "version": 3,
+  "version": 5,
   "configurePresets": [
     {
       "name": "windows-msvc",
+      "displayName": "Windows (MSVC, CUDA)",
       "hidden": false,
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build",
+      "binaryDir": "${sourceDir}/build/windows",
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_CUDA_COMPILER": "$env{CUDA_PATH}/bin/nvcc.exe",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_CXX_STANDARD": "23",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CUDA_STANDARD": "20",
+        "CMAKE_CUDA_EXTENSIONS": "OFF",
+        "CMAKE_CUDA_ARCHITECTURES": "75;80;86;89",
+        "CMAKE_CUDA_COMPILER": "$env{CUDA_PATH}/bin/nvcc.exe"
+      },
+      "conditions": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "linux-gcc",
+      "displayName": "Linux (GCC, CUDA)",
+      "hidden": false,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_STANDARD": "23",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CUDA_STANDARD": "20",
+        "CMAKE_CUDA_EXTENSIONS": "OFF",
+        "CMAKE_CUDA_ARCHITECTURES": "75;80;86;89"
+      },
+      "conditions": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
       }
     }
   ],
   "buildPresets": [
     {
-      "name": "build",
-      "configurePreset": "windows-msvc"
+      "name": "windows-build",
+      "displayName": "Build (Windows)",
+      "configurePreset": "windows-msvc",
+      "conditions": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "linux-build",
+      "displayName": "Build (Linux)",
+      "configurePreset": "linux-gcc",
+      "conditions": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
     }
   ]
 }
