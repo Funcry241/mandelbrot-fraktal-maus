@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.26)
 
 project(OtterDreamMandelbrot LANGUAGES CXX CUDA)
 
@@ -9,7 +9,7 @@ set(VCPKG_MANIFEST_MODE ON)
 
 # ---------------------------------------------------------
 # ⚙️ Standards
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
@@ -47,7 +47,7 @@ target_include_directories(mandelbrot_otterdream PRIVATE
 set_target_properties(mandelbrot_otterdream PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_EXTENSIONS OFF
-    CXX_STANDARD 20
+    CXX_STANDARD 23
     CUDA_STANDARD 17
 )
 
@@ -70,7 +70,7 @@ target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
     $<$<COMPILE_LANGUAGE:CXX>:
         $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->
-        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wno-unknown-pragmas>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Wno-unknown-pragmas>
     >
 )
 

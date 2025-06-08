@@ -1,0 +1,35 @@
+# Datei: .github/workflows/ci.yml
+# 🐭 Maus-Kommentar: CI-Workflow für OtterDream Mandelbrot mit C++23, CUDA, CMake und Ninja unter Ubuntu 22.04.
+
+name: Build Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v1.14
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Install CUDA Toolkit
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nvidia-cuda-toolkit
+
+      - name: Configure project
+        run: cmake -B build -G Ninja -DCMAKE_CXX_STANDARD=23 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build project
+        run: cmake --build build

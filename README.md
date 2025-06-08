@@ -1,5 +1,6 @@
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
+[![Build Status](https://github.com/dein-benutzername/otterdream-mandelbrot/actions/workflows/ci.yml/badge.svg)](https://github.com/dein-benutzername/otterdream-mandelbrot/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Ein schneller, moderner Mandelbrot-Renderer für Windows basierend auf CUDA und OpenGL 4.3 Core Profile. Dynamisches Auto-Zooming, sanfte Farbverläufe und ein flexibler Renderer.
