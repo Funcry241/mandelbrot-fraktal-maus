@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: Verbesserte Auto-Zoom-Strategie – nur lokale Navigation, kein globaler Sprung, kein Zittern
+// 🍝 Maus-Kommentar: Auto-Zoom mit Gradient-Erkennung für wirklich interessante Fraktalbereiche
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -74,7 +74,7 @@ void renderCudaFrame(
     DEBUG_PRINT("Starting frame render");
 
     static float2 targetOffset = offset;
-    static float lastBestVariance = -1.0f;
+    static float lastBestGradient = -1.0f;
 
     uchar4* d_img = nullptr;
     size_t imgSize = 0;
@@ -99,31 +99,6 @@ void renderCudaFrame(
         CHECK_CUDA_STEP(cudaDeviceSynchronize(), "complexity sync");
         CHECK_CUDA_STEP(cudaMemcpy(h_complexity.data(), d_complexity, totalTiles * sizeof(float), cudaMemcpyDeviceToHost), "Memcpy complexity");
 
-        int nonzeroTiles = 0;
-        float maxComplexity = -1.0f, minComplexity = 1e30f, sumComplexity = 0.0f;
-
-        for (float val : h_complexity) {
-            if (val > 0.0f) {
-                nonzeroTiles++;
-                maxComplexity = std::max(maxComplexity, val);
-                minComplexity = std::min(minComplexity, val);
-                sumComplexity += val;
-            }
-        }
-
-        float avgComplexity = (nonzeroTiles > 0) ? (sumComplexity / nonzeroTiles) : 0.0f;
-
-        DEBUG_PRINT("Complexity Stats: Nonzero: %d / %d | Max: %.6e | Min: %.6e | Avg: %.6e", nonzeroTiles, totalTiles, maxComplexity, minComplexity, avgComplexity);
-
-        int tilesAboveThreshold = 0;
-        float threshold = avgComplexity * (1.0f + 0.3f * std::log10(zoom + 10.0f));
-        for (float val : h_complexity) {
-            if (val > threshold) {
-                tilesAboveThreshold++;
-            }
-        }
-        DEBUG_PRINT("Tiles above threshold (%.6e): %d", threshold, tilesAboveThreshold);
-
         int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
         int tilesY = (h + Settings::TILE_H - 1) / Settings::TILE_H;
         int currTileX = static_cast<int>((offset.x * zoom + w * 0.5f) / Settings::TILE_W);
@@ -131,48 +106,63 @@ void renderCudaFrame(
 
         int dynamicRadius = static_cast<int>(std::sqrt(zoom) * Settings::DYNAMIC_RADIUS_SCALE);
         dynamicRadius = std::clamp(dynamicRadius, Settings::DYNAMIC_RADIUS_MIN, Settings::DYNAMIC_RADIUS_MAX);
-        int searchRadius = dynamicRadius;
 
-        DEBUG_PRINT("Search Radius: %d", searchRadius);
+        DEBUG_PRINT("Search Radius: %d", dynamicRadius);
 
-        float bestScore = -1.0f;
+        float bestGradient = -1.0f;
         int bestIdx = -1;
 
-        for (int dy = -searchRadius; dy <= searchRadius; ++dy) {
-            for (int dx = -searchRadius; dx <= searchRadius; ++dx) {
-                if (dx * dx + dy * dy > searchRadius * searchRadius) continue;
+        for (int dy = -dynamicRadius; dy <= dynamicRadius; ++dy) {
+            for (int dx = -dynamicRadius; dx <= dynamicRadius; ++dx) {
+                if (dx * dx + dy * dy > dynamicRadius * dynamicRadius) continue;
                 int tx = currTileX + dx;
                 int ty = currTileY + dy;
                 if (tx >= 0 && ty >= 0 && tx < tilesX && ty < tilesY) {
                     int idx = ty * tilesX + tx;
                     float variance = h_complexity[idx];
+
+                    float neighborVariance = 0.0f;
+                    int neighborCount = 0;
+                    for (int ny = -1; ny <= 1; ++ny) {
+                        for (int nx = -1; nx <= 1; ++nx) {
+                            if (nx == 0 && ny == 0) continue;
+                            int ntx = tx + nx;
+                            int nty = ty + ny;
+                            if (ntx >= 0 && nty >= 0 && ntx < tilesX && nty < tilesY) {
+                                int nidx = nty * tilesX + ntx;
+                                neighborVariance += h_complexity[nidx];
+                                neighborCount++;
+                            }
+                        }
+                    }
+                    if (neighborCount > 0) neighborVariance /= neighborCount;
+
+                    float gradient = fabsf(variance - neighborVariance);
                     float dist2 = dx * dx + dy * dy + 1e-5f;
-                    float score = variance / dist2;
-                    if (score > bestScore) {
-                        bestScore = score;
+                    float score = gradient / dist2;
+
+                    if (score > bestGradient) {
+                        bestGradient = score;
                         bestIdx = idx;
                     }
                 }
             }
         }
 
-        if (bestIdx != -1) {
-            DEBUG_PRINT("Best Local Tile: %d | Score: %.6e", bestIdx, bestScore);
-            if (bestScore > lastBestVariance * 1.02f || lastBestVariance < 0.0f) {
-                lastBestVariance = bestScore;
-                int bx = bestIdx % tilesX;
-                int by = bestIdx / tilesX;
-                float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f;
-                float ty = (by + 0.5f) * Settings::TILE_H - h * 0.5f;
-                float newTargetX = offset.x + tx / zoom;
-                float newTargetY = offset.y + ty / zoom;
-                if (std::isfinite(newTargetX) && std::isfinite(newTargetY)) {
-                    targetOffset = { newTargetX, newTargetY };
-                    DEBUG_PRINT("New Target Offset: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
-                }
+        if (bestIdx != -1 && bestGradient > lastBestGradient * 1.02f) {
+            lastBestGradient = bestGradient;
+            int bx = bestIdx % tilesX;
+            int by = bestIdx / tilesX;
+            float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f;
+            float ty = (by + 0.5f) * Settings::TILE_H - h * 0.5f;
+            float newTargetX = offset.x + tx / zoom;
+            float newTargetY = offset.y + ty / zoom;
+            if (std::isfinite(newTargetX) && std::isfinite(newTargetY)) {
+                targetOffset = { newTargetX, newTargetY };
+                DEBUG_PRINT("New Target Offset: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
             }
         } else {
-            DEBUG_PRINT("No better local tile found — continuing with previous target.");
+            DEBUG_PRINT("No better tile found — continuing.");
         }
 
         offset.x += (targetOffset.x - offset.x) * Settings::LERP_FACTOR;
