@@ -5,9 +5,6 @@
 #include <vector>
 #include <cuda_gl_interop.h>
 
-// Minimal forward declaration
-typedef struct cudaGraphicsResource* cudaGraphicsResource_t;
-
 class Renderer {
 public:
     Renderer(int width, int height);

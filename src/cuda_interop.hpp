@@ -5,9 +5,6 @@
 #include <cuda_gl_interop.h>
 #include <GLFW/glfw3.h> // 🐭 Für Tasteneingaben
 
-// 🐭 Typalias für CUDA-OpenGL Interop-Handles
-using cudaGraphicsResource_t = struct cudaGraphicsResource*;
-
 // ----------------------------------------------------------------------
 // 🐭 Kernel-Wrappers
 

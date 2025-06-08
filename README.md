@@ -25,7 +25,7 @@ Ein schneller, moderner Mandelbrot-Renderer für Windows basierend auf CUDA und 
 - Windows 10/11
 - NVIDIA CUDA Toolkit (v12.9 empfohlen)
 - Visual Studio 2022 (mit C++ und CUDA Support)
-- CMake 3.24+ und Ninja
+- CMake **>4.0** und Ninja
 - vcpkg (für GLFW, GLEW)
 
 > **Hinweis:** Keine Dynamic Parallelism-Unterstützung erforderlich — der Renderer läuft auf GPUs ab Compute Capability 3.0.
@@ -50,3 +50,49 @@ cd vcpkg
 ./bootstrap-vcpkg.bat
 vcpkg integrate install
 vcpkg install glfw3 glew
+```
+
+---
+
+### Windows Build
+
+```bash
+git clone https://github.com/dein-benutzername/otterdream-mandelbrot.git
+cd otterdream-mandelbrot
+cmake --preset windows-msvc
+cmake --build --preset windows-msvc
+.\dist\mandelbrot_otterdream.exe
+```
+
+> **Hinweis:** PowerShell-Skript `build.ps1` vorhanden für komfortablen Build-Prozess.
+
+---
+
+### Linux Build
+
+> **Erforderlich**: CUDA Toolkit, GCC, CMake **>4.0**, Ninja, OpenGL-Treiber, GLFW und GLEW Dev-Pakete.
+
+Installiere benötigte Pakete:
+```bash
+sudo apt-get update
+sudo apt-get install build-essential cmake ninja-build libglfw3-dev libglew-dev
+```
+
+Build:
+```bash
+git clone https://github.com/dein-benutzername/otterdream-mandelbrot.git
+cd otterdream-mandelbrot
+cmake --preset linux-gcc
+cmake --build --preset linux-gcc
+./dist/mandelbrot_otterdream
+```
+
+---
+
+## Lizenz
+
+Dieses Projekt steht unter der MIT-Lizenz – siehe [LICENSE](LICENSE) für Details.
+
+---
+
+Happy Fractaling! 🚀🦦

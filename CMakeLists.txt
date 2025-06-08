@@ -115,4 +115,3 @@ set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --fmad=false --prec-div=true")
 # ---------------------------------------------------------
 # 📦 Install-Support
 install(TARGETS mandelbrot_otterdream RUNTIME DESTINATION bin)
-

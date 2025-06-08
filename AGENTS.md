@@ -1,53 +1,62 @@
-# OtterDream Mandelbrot – AGENTS.md
+# 👩‍💻 OtterDream Build Agents
+
+Diese Datei dokumentiert die automatisierten Prozesse und verwendeten Tools für den Build und die Pflege des OtterDream Mandelbrot-Renderers.
+
+---
 
 ## Overview
 
-This project is a CUDA-accelerated Mandelbrot fractal renderer using OpenGL for display.
+Das Projekt nutzt folgende Agents und Tools:
 
-It supports:
-- Automatic zoom into visually complex areas.
-- Real-time rendering with GPU acceleration (CUDA + OpenGL).
-- Smooth progressive refinement of fractal details.
-- Optional debug logging and frame metrics.
-
-> *Note: HUD overlay planned for future versions.*
+| Agent                | Zweck                            | Trigger            | Aktionen                         |
+|----------------------|----------------------------------|--------------------|----------------------------------|
+| GitHub Actions (CI)   | Build-Überprüfung bei Push/PR    | Push auf `main`    | CMake Konfiguration, Ninja Build |
+| Dependabot           | Abhängigkeits-Updates für vcpkg  | Wöchentlich        | Überwachung von `vcpkg.json`     |
 
 ---
 
-## Build Agents
+## Tools und Versionen
 
-| Agent               | Purpose                           | Trigger             | Actions                       |
-|---------------------|-----------------------------------|---------------------|-------------------------------|
-| GitHub Copilot       | Code suggestions                 | In-Editor           | Supports C++, CUDA, CMake     |
-| Dependabot          | Dependency management             | Weekly              | Monitors `vcpkg.json`         |
-| GitHub Actions (CI)  | Build validation (planned)        | Push, PR to `main`  | CMake configure, Ninja build  |
-
----
-
-## Tools and Versions
-
-| Tool            | Minimum Version | Notes                      |
-|-----------------|-----------------|----------------------------|
-| CUDA Toolkit    | 12.0+            | Required for GPU rendering |
-| OpenGL          | 4.3+             | Required for shaders       |
-| CMake           | 3.24+            | Modern CMake build         |
-| vcpkg           | Manifest mode    | Dependency management      |
-| Ninja           | Latest           | Fast parallel builds       |
+| Tool              | Mindestversion  | Hinweise                                 |
+|-------------------|-----------------|------------------------------------------|
+| CUDA Toolkit      | 12.0+            | Erforderlich für GPU-Rendering           |
+| OpenGL            | 4.3+             | Core Profile benötigt                   |
+| Visual Studio     | 2022             | Mit CUDA- und C++-Support                |
+| CMake             | >4.0             | Mindestversion laut Build Requirements   |
+| Ninja             | 1.10+            | Für schnellen Build-Prozess              |
+| vcpkg             | aktuell          | Abhängigkeitsmanagement für Libraries    |
 
 ---
 
-## GPU Compatibility
+## Lokaler Build
 
-- Requires Compute Capability **≥ 6.0** (Pascal generation and newer).
-- No need for Dynamic Parallelism.
-- Recommended: NVIDIA RTX 20xx or newer.
-
----
-
-## Local Build Instructions
+### Windows
 
 ```bash
-git clone <repo-url>
-cd mandelbrot_otterdream
-vcpkg install
-.\build.ps1
+cmake --preset windows-msvc
+cmake --build --preset windows-msvc
+```
+
+### Linux
+
+> **Voraussetzung:** Installiere CUDA Toolkit, CMake **>4.0**, Ninja, OpenGL-Treiber, GLFW und GLEW.
+
+```bash
+cmake --preset linux-gcc
+cmake --build --preset linux-gcc
+```
+
+Ergebnisse befinden sich im `./dist` Verzeichnis.
+
+---
+
+## Hinweise
+
+- **CI Builds** laufen bei jedem Push auf den `main` Branch.
+- **Abhängigkeitsüberwachung** erfolgt automatisch via Dependabot.
+- **Build-Presets** sind vordefiniert in `CMakePresets.json`.
+- **Keine** Dynamic Parallelism Anforderungen: Funktioniert mit GPUs ab Compute Capability 3.0.
+
+---
+
+Happy Building! 🦦🚀
