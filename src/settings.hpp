@@ -1,84 +1,57 @@
 #pragma once
 
-// settings.hpp — 🐭 Alle zentralen Konstanten kompakt & verständlich gesammelt
+// settings.hpp — 🐭 Alle zentralen Konstanten kompakt & verständlich kommentiert
+
+#include <algorithm>  // für std::max, std::clamp
+#include <cmath>      // für logf
 
 namespace Settings {
 
-// 🛠️ Debugging / Test-Modus
-inline constexpr bool debugGradient = false;   
-// Aktiviert ein einfaches Farb-Gradient-Testbild statt Mandelbrot (zur Fehleranalyse)
+// 🔧 Debugging / Test-Modus
+inline constexpr bool debugGradient = false;   // Testweise Farbverlauf anstelle von Mandelbrot anzeigen
+inline constexpr bool debugLogging  = true;    // Detaillierte Debug-Ausgaben aktivieren
 
-inline constexpr bool debugLogging  = true;    
-// Schreibt detaillierte Debug-Informationen während des Renderings in die Konsole
+// 💻 Fenster- und Bildkonfiguration
+inline constexpr int width        = 1024;      // Fensterbreite in Pixeln
+inline constexpr int height       = 768;       // Fensterhöhe in Pixeln
+inline constexpr int windowPosX   = 100;       // Initiale Fensterposition X
+inline constexpr int windowPosY   = 100;       // Initiale Fensterposition Y
 
-// 🖥️ Fenster und Bild
-inline constexpr int width        = 1024;       
-// Breite des Fensters in Pixeln
+// 🔎 Zoom- und Navigationsparameter
+inline constexpr float initialZoom    = 300.0f;  // Start-Zoomstufe — höher = tieferer Einstieg
+inline constexpr float zoomFactor     = 1.01f;   // Faktor pro Zoom-Schritt (>1.0 -> Vergrößerung)
+inline constexpr float initialOffsetX = -0.5f;   // Start-Offset auf der X-Achse
+inline constexpr float initialOffsetY =  0.0f;   // Start-Offset auf der Y-Achse
 
-inline constexpr int height       = 768;        
-// Höhe des Fensters in Pixeln
+inline constexpr float OFFSET_STEP_FACTOR = 0.5f;     // Faktor für Offset-Änderungen bei Verschieben
+inline constexpr float ZOOM_STEP_FACTOR   = 0.002f;    // Faktor für sanfte Zoom-Schritte (je Frame)
 
-inline constexpr int windowPosX   = 100;        
-inline constexpr int windowPosY   = 100;        
-// Fenster-Startposition auf dem Bildschirm
+inline constexpr float MIN_OFFSET_STEP = 1e-8f;        // Minimale Schrittweite beim Verschieben
+inline constexpr float MIN_ZOOM_STEP   = 1e-6f;        // Minimale Änderung beim Zoomen
 
-// 🔎 Zoom & Pan Einstellungen
-inline constexpr float initialZoom    = 300.0f;  
-// Start-Zoomstufe — höherer Wert bedeutet stärkerer initialer Zoom ins Fraktal
-
-inline constexpr float zoomFactor     = 1.01f;    
-// Multiplikator für Zoom-Increment pro Frame (bei manuellem Zoom)
-
-inline constexpr float initialOffsetX = -0.5f;    
-inline constexpr float initialOffsetY =  0.0f;    
-// Start-Offset im Fraktal — steuert den initialen Bildausschnitt
-
-inline constexpr float OFFSET_STEP_FACTOR = 0.5f;     
-// Schrittweite für Offset-Verschiebungen beim Pan (Tastatursteuerung)
-
-inline constexpr float ZOOM_STEP_FACTOR   = 0.002f;    
-// Prozentuale Erhöhung des Zooms pro Frame bei Auto-Zoom
-
-inline constexpr float MIN_OFFSET_STEP = 1e-8f;       
-inline constexpr float MIN_ZOOM_STEP   = 1e-6f;       
-// Untergrenzen für Offset- und Zoom-Änderungen (um "zitternde" Bewegungen zu verhindern)
-
-// 🧠 Auto-Zoom Steuerung
-inline constexpr float VARIANCE_THRESHOLD = 1e-12f;   
-// Basis-Schwelle für die Komplexität eines Bildausschnitts — niedrige Werte sind empfindlicher
+// 🧐 Auto-Zoom Steuerung — Variance
+inline constexpr float VARIANCE_THRESHOLD      = 1e-12f;  // Ausgangs-Schwelle für interessante Bildbereiche
+inline constexpr float MIN_VARIANCE_THRESHOLD  = 1e-10f;  // Verhindert, dass die Schwelle zu klein wird (sonst Blindflug)
 
 // Dynamischer Variance-Threshold in Abhängigkeit vom Zoom
+// 📈 Sinkt logarithmisch, bleibt aber über einem minimalen Wert
 inline float dynamicVarianceThreshold(float zoom) {
-    // Passt die Schwelle logarithmisch an den Zoom an: je höher der Zoom, desto kleiner der Schwellenwert
-    return VARIANCE_THRESHOLD / logf(zoom + 2.0f);
+    return std::max(VARIANCE_THRESHOLD / logf(zoom + 2.0f), MIN_VARIANCE_THRESHOLD);
 }
 
-// 🔢 Iterations-Steuerung
-inline constexpr int TILE_W             = 8;    
-inline constexpr int TILE_H             = 8;    
-// Breite und Höhe einer Kachel (Tile) zur lokalen Variabilitätsanalyse
+// 🔎 Auto-Zoom Steuerung — Suchradius
+inline constexpr float DYNAMIC_RADIUS_SCALE = 0.05f; // Skaliert den Suchradius basierend auf √Zoom
+inline constexpr int   DYNAMIC_RADIUS_MIN   = 20;    // Minimaler Suchradius in Tiles
+inline constexpr int   DYNAMIC_RADIUS_MAX   = 300;   // Maximaler Suchradius in Tiles
 
-inline constexpr int INITIAL_ITERATIONS = 100;  
-// Startanzahl der Iterationen für die Mandelbrot-Berechnung
+// 🔢 Iterationsparameter
+inline constexpr int TILE_W             = 8;     // Kachelbreite (Pixels pro Tile)
+inline constexpr int TILE_H             = 8;     // Kachelhöhe
+inline constexpr int INITIAL_ITERATIONS = 100;   // Startwert für Iterationen
+inline constexpr int MAX_ITERATIONS_CAP = 5000;  // Obergrenze für Iterationen
+inline constexpr int ITERATION_STEP     = 5;     // Erhöhungsschritte bei Progressiv-Rendern
 
-inline constexpr int MAX_ITERATIONS_CAP = 5000; 
-// Obergrenze für Iterationen — schützt vor extrem langen Berechnungen
-
-inline constexpr int ITERATION_STEP     = 5;    
-// Schrittweite, mit der die Iterationsanzahl erhöht wird, wenn sich der Zoom verstärkt
-
-// 🐭 Sanftes Gliding für Offset-Änderungen
-inline constexpr float LERP_FACTOR      = 0.02f;  
-// Interpolationsfaktor für weiches Nachführen des Offsets (für sanfte Bildbewegungen)
-
-// 📈 Dynamischer Suchradius für Auto-Zoom
-inline constexpr float DYNAMIC_RADIUS_SCALE = 1.5f;   
-// Skalierungsfaktor für den Suchradius basierend auf sqrt(Zoom) — höhere Werte durchsuchen ein größeres Gebiet
-
-inline constexpr int   DYNAMIC_RADIUS_MIN   = 30;     
-// Minimaler Radius für die Suche nach komplexen Bildbereichen
-
-inline constexpr int   DYNAMIC_RADIUS_MAX   = 2000;   
-// Maximaler Radius für die Suche — begrenzt die Rechenzeit und verhindert "Ausfransen"
+// 🐾 Sanftes Gliding für Offset-Animationen
+inline constexpr float LERP_FACTOR = 0.02f;      // Geschwindigkeit der Zielanpassung (kleiner = weicher)
 
 } // namespace Settings
