@@ -152,9 +152,8 @@ void renderCudaFrame(
         }
 
         // 🐭 Sanftes Offset-Gliding
-        constexpr float lerpFactor = 0.05f;
-        offset.x += (targetOffset.x - offset.x) * lerpFactor;
-        offset.y += (targetOffset.y - offset.y) * lerpFactor;
+        offset.x += (targetOffset.x - offset.x) * Settings::LERP_FACTOR;
+        offset.y += (targetOffset.y - offset.y) * Settings::LERP_FACTOR;
         DEBUG_PRINT("Smoothed Offset: (%.12f, %.12f)", offset.x, offset.y);
     }
 

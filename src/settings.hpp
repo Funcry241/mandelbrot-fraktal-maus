@@ -4,48 +4,44 @@
 
 namespace Settings {
 
-// ----------------------------------------------------------------------
 // 🛠️ Debugging / Test-Modus
-inline constexpr bool debugGradient = false;    // Testbild-Modus aktivieren
-inline constexpr bool debugLogging  = true;    // Viel Konsolenausgabe (Debug-Log)
+inline constexpr bool debugGradient = false;   
+inline constexpr bool debugLogging  = true;    
 
-// ----------------------------------------------------------------------
 // 🖥️ Fenster und Bild
-inline constexpr int width        = 1024;       // Fensterbreite
-inline constexpr int height       = 768;        // Fensterhöhe
-inline constexpr int windowPosX   = 100;        // Fenster-Startposition X
-inline constexpr int windowPosY   = 100;        // Fenster-Startposition Y
+inline constexpr int width        = 1024;       
+inline constexpr int height       = 768;        
+inline constexpr int windowPosX   = 100;        
+inline constexpr int windowPosY   = 100;        
 
-// ----------------------------------------------------------------------
 // 🔎 Zoom & Pan Einstellungen
-inline constexpr float initialZoom    = 300.0f;  // Anfangszoom
-inline constexpr float zoomFactor     = 1.01f;   // Zoom-Multiplikator pro Schritt
-inline constexpr float initialOffsetX = -0.5f;   // Startversatz X
-inline constexpr float initialOffsetY =  0.0f;   // Startversatz Y
+inline constexpr float initialZoom    = 3000.0f;  // 🐭 höherer Start-Zoom
+inline constexpr float zoomFactor     = 1.01f;    
+inline constexpr float initialOffsetX = -0.5f;    
+inline constexpr float initialOffsetY =  0.0f;    
 
-// Zoom- und Pan-Steuerung (dynamisch zur Zoomstufe angepasst)
-inline constexpr float OFFSET_STEP_FACTOR = 0.5f;     // Basis-Offset pro Frame (skaliert mit 1/Zoom)
-inline constexpr float ZOOM_STEP_FACTOR = 0.005f;    // Basis-Zoomrate pro Frame
+inline constexpr float OFFSET_STEP_FACTOR = 0.5f;     
+inline constexpr float ZOOM_STEP_FACTOR   = 0.002f;    // 🐭 sanftere Zoomrate
 
-inline constexpr float MIN_OFFSET_STEP = 1e-8f;       // Minimal erlaubter Pan-Schritt
-inline constexpr float MIN_ZOOM_STEP   = 1e-6f;       // Minimal erlaubter Zoom-Schritt
+inline constexpr float MIN_OFFSET_STEP = 1e-8f;       
+inline constexpr float MIN_ZOOM_STEP   = 1e-6f;       
 
-// ----------------------------------------------------------------------
 // 🧠 Auto-Zoom Steuerung
-inline constexpr float VARIANCE_THRESHOLD = 1e-12f;   // Basis-Schwelle für Varianz
+inline constexpr float VARIANCE_THRESHOLD = 1e-12f;   
 
 // Dynamischer Variance-Threshold in Abhängigkeit vom Zoom
 inline float dynamicVarianceThreshold(float zoom) {
-    // Maus-Kommentar: logarithmische Abhängigkeit für feinfühlige Schwelle
     return VARIANCE_THRESHOLD / logf(zoom + 2.0f);
 }
 
-// ----------------------------------------------------------------------
 // 🔢 Iterations-Steuerung
-inline constexpr int TILE_W             = 16;    // Kachelbreite für CUDA-Block
-inline constexpr int TILE_H             = 16;    // Kachelhöhe für CUDA-Block
-inline constexpr int INITIAL_ITERATIONS = 100;   // Startwert für progressive Iterationen
-inline constexpr int MAX_ITERATIONS_CAP = 5000;  // Obergrenze für Iterationen
-inline constexpr int ITERATION_STEP     = 5;     // Iterationszuwachs pro Frame
+inline constexpr int TILE_W             = 8;    // 🐭 feinere Kacheln
+inline constexpr int TILE_H             = 8;    
+inline constexpr int INITIAL_ITERATIONS = 100;  
+inline constexpr int MAX_ITERATIONS_CAP = 5000; 
+inline constexpr int ITERATION_STEP     = 5;    
+
+// 🐭 Sanftes Gliding für Offset-Änderungen
+inline constexpr float LERP_FACTOR      = 0.02f;  // 🐭 langsamere Zielanpassung
 
 } // namespace Settings
