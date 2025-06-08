@@ -20,6 +20,7 @@
 # Temporäre Dateien und Logs
 *.log
 Thumbs.db
+Desktop.ini
 
 # ----------------------------------------------------------------------
 # vcpkg-Ordner (Abhängigkeiten & Pakete)
@@ -33,6 +34,17 @@ vcpkg/
 *.dll
 *.exe
 *.pdb
+
+# ----------------------------------------------------------------------
+# CMake-Dateien
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# ----------------------------------------------------------------------
+# JetBrains IDE (CLion) Projektdateien
+.idea/
 
 # ----------------------------------------------------------------------
 # macOS-spezifisch
