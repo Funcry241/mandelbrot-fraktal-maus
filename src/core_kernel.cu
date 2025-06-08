@@ -1,4 +1,5 @@
-// 🐭 Maus-Kommentar: CUDA-Kernel für Mandelbrot mit Spread-Score und robuster Komplexitätsbewertung
+// Datei: src/core_kernel.cu
+// 🐭 Maus-Kommentar: Komplexitätsberechnung via Varianz – robuster, strukturbetonter Auto-Zoom
 
 #include <cstdio>
 #include "settings.hpp"
@@ -7,15 +8,12 @@
 #include <device_launch_parameters.h>
 #include "core_kernel.h"
 
-// 🐭 Device-Variable für dynamischen Threshold (nicht mehr genutzt, aber gelassen für Zukunft)
 __device__ float deviceVarianceThreshold = 1e-6f;
 
-// 🐭 Setter-Funktion für den Threshold (wird derzeit nicht verwendet)
 extern "C" void setDeviceVarianceThreshold(float threshold) {
     cudaMemcpyToSymbol(deviceVarianceThreshold, &threshold, sizeof(float));
 }
 
-// 🐭 Gradient-Testbild für Debug-Zwecke
 __global__ void testKernel(uchar4* img, int w, int h) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -28,13 +26,9 @@ extern "C" void launch_debugGradient(uchar4* img, int w, int h) {
     dim3 blocks((w + threads.x - 1) / threads.x, (h + threads.y - 1) / threads.y);
     printf("[INFO] DebugGradient Grid (%d, %d)\n", blocks.x, blocks.y);
     testKernel<<<blocks, threads>>>(img, w, h);
-    cudaError_t err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "[ERROR] launch_debugGradient failed: %s\n", cudaGetErrorString(err));
-    }
+    cudaDeviceSynchronize();
 }
 
-// 🐭 Farbkodierung für Mandelbrot
 __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy, float zoom) {
     if (iter >= maxIter) return make_uchar4(0, 0, 0, 255);
 
@@ -55,7 +49,6 @@ __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, floa
     return make_uchar4(fminf(r * 255.0f, 255.0f), fminf(g * 255.0f, 255.0f), fminf(b * 255.0f, 255.0f), 255);
 }
 
-// 🐭 Mandelbrot-Hybrid Kernel
 __global__ void mandelbrotHybrid(uchar4* img, int* iterations, int w, int h, float zoom, float2 offset, int maxIter) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -88,14 +81,9 @@ extern "C" void launch_mandelbrotHybrid(uchar4* img, int* iterations, int w, int
     }
 
     mandelbrotHybrid<<<blocks, threads>>>(img, iterations, w, h, zoom, offset, maxIter);
-
-    cudaError_t err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "[ERROR] launch_mandelbrotHybrid failed: %s\n", cudaGetErrorString(err));
-    }
+    cudaDeviceSynchronize();
 }
 
-// 🐭 Complexity Kernel mit Spread-Only Scoring
 __global__ void computeComplexity(const int* iterations, int w, int h, float* complexity) {
     int tileX = blockIdx.x;
     int tileY = blockIdx.y;
@@ -111,8 +99,8 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
 
     int localId = localY * blockDim.x + localX;
 
-    __shared__ int minIter[Settings::TILE_W * Settings::TILE_H];
-    __shared__ int maxIter[Settings::TILE_W * Settings::TILE_H];
+    __shared__ double sumIter[Settings::TILE_W * Settings::TILE_H];
+    __shared__ double sumSqIter[Settings::TILE_W * Settings::TILE_H];
     __shared__ int count[Settings::TILE_W * Settings::TILE_H];
 
     int iterValue = 0;
@@ -123,16 +111,15 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
         valid = 1; 
     }
 
-    minIter[localId] = iterValue;
-    maxIter[localId] = iterValue;
+    sumIter[localId] = (valid ? (double)iterValue : 0.0);
+    sumSqIter[localId] = (valid ? (double)iterValue * iterValue : 0.0);
     count[localId] = valid;
     __syncthreads();
 
-    // Parallel Reduction for Min/Max
     for (int stride = (blockDim.x * blockDim.y) / 2; stride > 0; stride >>= 1) {
         if (localId < stride) {
-            minIter[localId] = min(minIter[localId], minIter[localId + stride]);
-            maxIter[localId] = max(maxIter[localId], maxIter[localId + stride]);
+            sumIter[localId] += sumIter[localId + stride];
+            sumSqIter[localId] += sumSqIter[localId + stride];
             count[localId] += count[localId + stride];
         }
         __syncthreads();
@@ -141,14 +128,11 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
     if (localId == 0) {
         int n = count[0];
         if (n > 1) {
-            int minVal = minIter[0];
-            int maxVal = maxIter[0];
-            int spread = maxVal - minVal;
+            double mean = sumIter[0] / n;
+            double meanSq = sumSqIter[0] / n;
+            double variance = meanSq - (mean * mean);
 
-            // 🐭 Spread als Maß für Variabilität
-            float score = (float)spread;
-
-            // 🐭 Speichern ohne Filterung
+            float score = (float)variance;
             complexity[tileY * tilesX + tileX] = score;
         } else {
             complexity[tileY * tilesX + tileX] = 0.0f;
