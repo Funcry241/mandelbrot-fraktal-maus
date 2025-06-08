@@ -133,11 +133,10 @@ void renderCudaFrame(
         }
     }
 
-    if (autoZoomEnabled && !pauseZoom) {
-        if (std::isfinite(zoom) && zoom < 1e15f) {
-            zoom += Settings::ZOOM_STEP_FACTOR * zoom;
-            DEBUG_PRINT("Zoom updated: %.12f", zoom);
-        }
+    if (std::isfinite(zoom) && zoom < 1e15f) {
+        float zoomStep = fminf(2.0f, zoom * 0.0025f); // 🐭 maximal +2.0, aber max 0.25% des Zooms
+        zoom += zoomStep;
+        DEBUG_PRINT("Zoom updated: %.12f", zoom);
     }
 
     CHECK_CUDA_STEP(cudaGraphicsUnmapResources(1, &cudaPboRes), "UnmapResources");
