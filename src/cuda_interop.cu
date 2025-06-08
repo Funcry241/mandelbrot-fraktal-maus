@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: Implementation für CUDA-OpenGL Interop ohne #pragma once; Exception-basiertes Fehler-Handling; Auto-Zoom-Step Fix
+// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit vollständigem Debug-Logging
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -21,7 +21,7 @@
 
 namespace CudaInterop {
 
-// 🚀 Fehlerbehandlung: wirf Exception statt std::exit!
+// 🐭 Fehlerbehandlung: wirf Exception statt std::exit!
 #define CHECK_CUDA_STEP(call, msg) do { \
     if (cudaError_t err = (call); err != cudaSuccess) { \
         throw std::runtime_error(std::string("[CUDA ERROR] ") + msg + ": " + cudaGetErrorString(err)); \
@@ -36,6 +36,7 @@ namespace CudaInterop {
 void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoom, float2& offset,
                      int maxIter, float* d_complexity, std::vector<float>& h_complexity, int* d_iterations) {
     DEBUG_PRINT("Starting frame render");
+
     uchar4* d_img = nullptr;
     size_t imgSize = 0;
     CHECK_CUDA_STEP(cudaGraphicsMapResources(1, &cudaPboRes), "MapResources");
@@ -54,9 +55,33 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
         dim3 blockDim(Settings::TILE_W, Settings::TILE_H);
         dim3 gridDim((w + blockDim.x - 1) / blockDim.x, (h + blockDim.y - 1) / blockDim.y);
         DEBUG_PRINT("Launching complexity kernel Grid(%d, %d) Block(%d, %d)", gridDim.x, gridDim.y, blockDim.x, blockDim.y);
+
         computeComplexity<<<gridDim, blockDim>>>(d_iterations, w, h, d_complexity);
         CHECK_CUDA_STEP(cudaDeviceSynchronize(), "complexity sync");
         CHECK_CUDA_STEP(cudaMemcpy(h_complexity.data(), d_complexity, totalTiles * sizeof(float), cudaMemcpyDeviceToHost), "Memcpy complexity");
+
+        // 🐭 Debugging: Analyse der Komplexitäten
+        int nonzeroTiles = 0;
+        float maxComplexity = -1.0f;
+        float minComplexity = 1e30f;
+        float sumComplexity = 0.0f;
+
+        for (int i = 0; i < totalTiles; ++i) {
+            float val = h_complexity[i];
+            if (val > 0.0f) {
+                nonzeroTiles++;
+                if (val > maxComplexity) maxComplexity = val;
+                if (val < minComplexity) minComplexity = val;
+                sumComplexity += val;
+            }
+        }
+
+        float avgComplexity = (nonzeroTiles > 0) ? (sumComplexity / nonzeroTiles) : 0.0f;
+
+        std::printf(
+            "[DEBUG] Complexity Stats: Nonzero Tiles: %d / %d | Max: %.6e | Min: %.6e | Avg: %.6e\n",
+            nonzeroTiles, totalTiles, maxComplexity, minComplexity, avgComplexity
+        );
 
         DEBUG_PRINT("Searching best tile...");
         int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
@@ -65,7 +90,7 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
 
         // 🐭 Dynamischer Threshold basierend auf Zoom
         float dynamicThreshold = Settings::dynamicVarianceThreshold(zoom);
-        
+
         for (int i = 0; i < totalTiles; ++i) {
             if (h_complexity[i] > dynamicThreshold && h_complexity[i] > bestVariance) {
                 bestVariance = h_complexity[i];
@@ -73,8 +98,14 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
             }
         }
 
+        // 🐭 Logging ob ein Tile gefunden wurde
+        if (bestIdx == -1) {
+            std::printf("[DEBUG] No suitable tile found in current frame.\n");
+        } else {
+            std::printf("[DEBUG] Best Tile Index: %d | Variance Score: %.6e\n", bestIdx, bestVariance);
+        }
+
         if (bestIdx != -1) {
-            DEBUG_PRINT("Best variance: %.12f", bestVariance);
             int bx = bestIdx % tilesX;
             int by = bestIdx / tilesX;
             float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f;
@@ -86,7 +117,6 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
                 auto step = [](float delta, float factor, float zoom) {
                     float s = factor / zoom;
                     float dynamicMinStep = fmaxf(Settings::MIN_OFFSET_STEP, 1e-5f / zoom);
-                    // 🐭 Dynamisches Step-Limit: immer mindestens MinStep
                     s = fmaxf(s, dynamicMinStep);
 
                     if (std::fabs(delta) > s)
@@ -116,7 +146,5 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
     CHECK_CUDA_STEP(cudaGraphicsUnmapResources(1, &cudaPboRes), "UnmapResources");
     DEBUG_PRINT("Frame render complete");
 }
-
-// 🐭 Dynamic Parallelism Check entfernt — nicht mehr nötig!
 
 } // namespace CudaInterop
