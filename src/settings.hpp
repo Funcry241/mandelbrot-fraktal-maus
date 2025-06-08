@@ -7,7 +7,7 @@ namespace Settings {
 // ----------------------------------------------------------------------
 // 🛠️ Debugging / Test-Modus
 inline constexpr bool debugGradient = false;    // Testbild-Modus aktivieren
-inline constexpr bool debugLogging  = false;    // Viel Konsolenausgabe (Debug-Log)
+inline constexpr bool debugLogging  = true;    // Viel Konsolenausgabe (Debug-Log)
 
 // ----------------------------------------------------------------------
 // 🖥️ Fenster und Bild
@@ -24,7 +24,7 @@ inline constexpr float initialOffsetX = -0.5f;   // Startversatz X
 inline constexpr float initialOffsetY =  0.0f;   // Startversatz Y
 
 // Zoom- und Pan-Steuerung (dynamisch zur Zoomstufe angepasst)
-inline constexpr float OFFSET_STEP_FACTOR = 1.5f;     // Basis-Offset pro Frame (skaliert mit 1/Zoom)
+inline constexpr float OFFSET_STEP_FACTOR = 0.5f;     // Basis-Offset pro Frame (skaliert mit 1/Zoom)
 inline constexpr float ZOOM_STEP_FACTOR   = 0.15f;    // Basis-Zoomrate pro Frame
 
 inline constexpr float MIN_OFFSET_STEP = 1e-8f;       // Minimal erlaubter Pan-Schritt
