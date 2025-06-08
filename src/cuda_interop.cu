@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit kreisförmiger, zentrumsnaher Auto-Zoom-Optimierung
+// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit fixiertem Auto-Zoom + Drift-Fallback
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -159,6 +159,17 @@ void renderCudaFrame(
             }
         } else {
             DEBUG_PRINT("No suitable tile found locally.");
+            
+            // 🐭 Fix: Zufällige Drift wenn nix Gutes da ist
+            float angle = static_cast<float>(rand()) / RAND_MAX * 2.0f * 3.14159265f;
+            float distance = 1.0f / zoom * 10.0f; // kleiner Schritt bei großem Zoom
+            float dx = cosf(angle) * distance;
+            float dy = sinf(angle) * distance;
+
+            targetOffset.x = offset.x + dx;
+            targetOffset.y = offset.y + dy;
+
+            DEBUG_PRINT("Random Drift Target Offset: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
         }
 
         offset.x += (targetOffset.x - offset.x) * Settings::LERP_FACTOR;
