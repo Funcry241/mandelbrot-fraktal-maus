@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit fixiertem Auto-Zoom + Drift-Fallback + dynamischer Suchradius
+// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit fixiertem Auto-Zoom + Drift-Fallback + dynamischer Suchradius (linear)
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -121,8 +121,8 @@ void renderCudaFrame(
         int currTileY = static_cast<int>((offset.y * zoom + h * 0.5f) / Settings::TILE_H);
 
         int baseRadius = 5;
-        int dynamicRadius = static_cast<int>(baseRadius * std::sqrt(zoom / Settings::initialZoom));
-        dynamicRadius = std::min(dynamicRadius, 50);
+        int dynamicRadius = static_cast<int>(baseRadius * (zoom / Settings::initialZoom));
+        dynamicRadius = std::min(dynamicRadius, 300);
         int searchRadius = dynamicRadius;
 
         float bestScore = -1.0f;
@@ -163,7 +163,7 @@ void renderCudaFrame(
             }
         } else {
             DEBUG_PRINT("No suitable tile found locally.");
-            
+
             float angle = static_cast<float>(rand()) / RAND_MAX * 2.0f * 3.14159265f;
             float distance = 1.0f / zoom * 10.0f;
             float dx = cosf(angle) * distance;
