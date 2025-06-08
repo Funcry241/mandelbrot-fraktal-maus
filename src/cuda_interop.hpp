@@ -37,7 +37,8 @@ void renderCudaFrame(
     int maxIter,
     float* d_complexity,
     std::vector<float>& h_complexity,
-    int* d_iterations    // 🐭 Iteration Buffer
+    int* d_iterations,
+    bool autoZoomEnabled
 );
 
 }

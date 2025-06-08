@@ -14,15 +14,16 @@ public:
     ~Renderer();                               // 🐭 Automatisches Cleanup
 
     void initGL();                             // Initialisiert OpenGL & CUDA
-    void renderFrame();                        // Rendert einen Frame
+    void renderFrame(bool autoZoomEnabled = true);  // 🐭 Rendert einen Frame (Auto-Zoom optional)
     bool shouldClose() const;                  // Prüft, ob Fenster geschlossen werden soll
     void resize(int newWidth, int newHeight);  // Behandelt Fenstergrößenänderung
+    GLFWwindow* getWindow() const;             // 🐭 Zugriff auf das Fenster für Callbacks
 
 private:
     void initGL_impl();                        // OpenGL Context Setup intern
-    void renderFrame_impl();                   // Frame Render intern
-    void setupPBOAndTexture();                 // 🆕 PBO + Texture initialisieren
-    void setupBuffers();                       // 🆕 CUDA-Buffer initialisieren
+    void renderFrame_impl(bool autoZoomEnabled);    // 🐭 Frame Render intern mit Auto-Zoom
+    void setupPBOAndTexture();                 // PBO + Texture initialisieren
+    void setupBuffers();                       // CUDA-Buffer initialisieren
 
     int windowWidth, windowHeight;
     GLFWwindow* window;
