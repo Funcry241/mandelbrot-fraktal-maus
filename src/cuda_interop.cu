@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: Ultimative Variante mit dynamischem Radius & feinerem Drift
+// 🐭 Maus-Kommentar: Final mit ausgelagerten dynamischen Radius-Settings für maximale Kontrolle
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -129,8 +129,8 @@ void renderCudaFrame(
         int currTileX = static_cast<int>((offset.x * zoom + w * 0.5f) / Settings::TILE_W);
         int currTileY = static_cast<int>((offset.y * zoom + h * 0.5f) / Settings::TILE_H);
 
-        int dynamicRadius = static_cast<int>(std::sqrt(zoom) * 0.2f);
-        dynamicRadius = std::clamp(dynamicRadius, 5, 2000);
+        int dynamicRadius = static_cast<int>(std::sqrt(zoom) * Settings::DYNAMIC_RADIUS_SCALE);
+        dynamicRadius = std::clamp(dynamicRadius, Settings::DYNAMIC_RADIUS_MIN, Settings::DYNAMIC_RADIUS_MAX);
         int searchRadius = dynamicRadius;
 
         DEBUG_PRINT("Search Radius: %d", searchRadius);
@@ -182,7 +182,7 @@ void renderCudaFrame(
             }
         } else {
             float angle = static_cast<float>(rand()) / RAND_MAX * 2.0f * 3.14159265f;
-            float distance = 1.0f / zoom * 2.0f;  // 🐭 Noch kleinerer Drift bei hohem Zoom
+            float distance = 1.0f / zoom * 2.0f;
             float dx = cosf(angle) * distance;
             float dy = sinf(angle) * distance;
 
