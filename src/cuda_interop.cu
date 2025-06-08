@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit vollständigem Debug-Logging
+// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit sanftem Auto-Zoom und Fallback bei "keinem besten Tile"
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -12,7 +12,7 @@
 #include <cstdlib>
 #include <vector>
 #include <cmath>
-#include <stdexcept>  // 🐭 Exception für Fehler-Handling
+#include <stdexcept>
 
 #include "settings.hpp"
 #include "core_kernel.h"
@@ -21,7 +21,6 @@
 
 namespace CudaInterop {
 
-// 🐭 Fehlerbehandlung: wirf Exception statt std::exit!
 #define CHECK_CUDA_STEP(call, msg) do { \
     if (cudaError_t err = (call); err != cudaSuccess) { \
         throw std::runtime_error(std::string("[CUDA ERROR] ") + msg + ": " + cudaGetErrorString(err)); \
@@ -32,6 +31,11 @@ namespace CudaInterop {
     if (Settings::debugLogging) \
         std::fprintf(stdout, "[DEBUG] " fmt "\n", ##__VA_ARGS__); \
 } while (0)
+
+// 🐭 Hilfsfunktion für sanftes Gleiten (linear interpolation)
+inline float lerp(float a, float b, float t) {
+    return a + t * (b - a);
+}
 
 void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoom, float2& offset,
                      int maxIter, float* d_complexity, std::vector<float>& h_complexity, int* d_iterations) {
@@ -60,35 +64,33 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
         CHECK_CUDA_STEP(cudaDeviceSynchronize(), "complexity sync");
         CHECK_CUDA_STEP(cudaMemcpy(h_complexity.data(), d_complexity, totalTiles * sizeof(float), cudaMemcpyDeviceToHost), "Memcpy complexity");
 
-        // 🐭 Debugging: Analyse der Komplexitäten
-        int nonzeroTiles = 0;
-        float maxComplexity = -1.0f;
-        float minComplexity = 1e30f;
-        float sumComplexity = 0.0f;
+        if (Settings::debugLogging) {
+            int nonzeroTiles = 0;
+            float maxComplexity = -1.0f;
+            float minComplexity = 1e30f;
+            float sumComplexity = 0.0f;
 
-        for (int i = 0; i < totalTiles; ++i) {
-            float val = h_complexity[i];
-            if (val > 0.0f) {
-                nonzeroTiles++;
-                if (val > maxComplexity) maxComplexity = val;
-                if (val < minComplexity) minComplexity = val;
-                sumComplexity += val;
+            for (int i = 0; i < totalTiles; ++i) {
+                float val = h_complexity[i];
+                if (val > 0.0f) {
+                    nonzeroTiles++;
+                    maxComplexity = fmaxf(maxComplexity, val);
+                    minComplexity = fminf(minComplexity, val);
+                    sumComplexity += val;
+                }
             }
+
+            float avgComplexity = (nonzeroTiles > 0) ? (sumComplexity / nonzeroTiles) : 0.0f;
+
+            DEBUG_PRINT("Complexity Stats: Nonzero Tiles: %d / %d | Max: %.6e | Min: %.6e | Avg: %.6e",
+                        nonzeroTiles, totalTiles, maxComplexity, minComplexity, avgComplexity);
         }
-
-        float avgComplexity = (nonzeroTiles > 0) ? (sumComplexity / nonzeroTiles) : 0.0f;
-
-        std::printf(
-            "[DEBUG] Complexity Stats: Nonzero Tiles: %d / %d | Max: %.6e | Min: %.6e | Avg: %.6e\n",
-            nonzeroTiles, totalTiles, maxComplexity, minComplexity, avgComplexity
-        );
 
         DEBUG_PRINT("Searching best tile...");
         int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
         float bestVariance = -1.0f;
         int bestIdx = -1;
 
-        // 🐭 Dynamischer Threshold basierend auf Zoom
         float dynamicThreshold = Settings::dynamicVarianceThreshold(zoom);
 
         for (int i = 0; i < totalTiles; ++i) {
@@ -98,11 +100,15 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
             }
         }
 
-        // 🐭 Logging ob ein Tile gefunden wurde
-        if (bestIdx == -1) {
-            std::printf("[DEBUG] No suitable tile found in current frame.\n");
-        } else {
-            std::printf("[DEBUG] Best Tile Index: %d | Variance Score: %.6e\n", bestIdx, bestVariance);
+        float2 targetOffset = offset;
+        float targetZoom = zoom;
+
+        if (Settings::debugLogging) {
+            if (bestIdx == -1) {
+                DEBUG_PRINT("No suitable tile found in current frame.");
+            } else {
+                DEBUG_PRINT("Best Tile Index: %d | Variance Score: %.6e", bestIdx, bestVariance);
+            }
         }
 
         if (bestIdx != -1) {
@@ -110,38 +116,30 @@ void renderCudaFrame(cudaGraphicsResource_t cudaPboRes, int w, int h, float& zoo
             int by = bestIdx / tilesX;
             float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f;
             float ty = (by + 0.5f) * Settings::TILE_H - h * 0.5f;
-            float targetOffX = offset.x + tx / zoom;
-            float targetOffY = offset.y + ty / zoom;
+            targetOffset.x = offset.x + tx / zoom;
+            targetOffset.y = offset.y + ty / zoom;
 
-            if (std::isfinite(targetOffX) && std::isfinite(targetOffY)) {
-                auto step = [](float delta, float factor, float zoom) {
-                    float s = factor / zoom;
-                    float dynamicMinStep = fmaxf(Settings::MIN_OFFSET_STEP, 1e-5f / zoom);
-                    s = fmaxf(s, dynamicMinStep);
-
-                    if (std::fabs(delta) > s)
-                        delta = (delta > 0 ? s : -s);
-                    if (std::fabs(delta) < dynamicMinStep)
-                        delta = (delta > 0 ? dynamicMinStep : -dynamicMinStep);
-                    return delta;
-                };
-                offset.x += step(targetOffX - offset.x, Settings::OFFSET_STEP_FACTOR, zoom);
-                offset.y += step(targetOffY - offset.y, Settings::OFFSET_STEP_FACTOR, zoom);
-                DEBUG_PRINT("New offset: (%.12f, %.12f)", offset.x, offset.y);
+            if (!std::isfinite(targetOffset.x) || !std::isfinite(targetOffset.y)) {
+                targetOffset = offset;  // 🐭 Fallback auf alten Wert
             }
 
-            float targetZoom = zoom * Settings::zoomFactor;
-            if (std::isfinite(targetZoom) && targetZoom < 1e15f) {
-                float zoomDelta = targetZoom - zoom;
-                float maxStep = Settings::ZOOM_STEP_FACTOR * zoom;
-                if (std::fabs(zoomDelta) > maxStep)
-                    zoomDelta = (zoomDelta > 0 ? maxStep : -maxStep);
-                if (std::fabs(zoomDelta) < Settings::MIN_ZOOM_STEP)
-                    zoomDelta = (zoomDelta > 0 ? Settings::MIN_ZOOM_STEP : -Settings::MIN_ZOOM_STEP);
-                zoom += zoomDelta;
-                DEBUG_PRINT("New zoom: %.12f", zoom);
+            float newZoom = zoom * Settings::zoomFactor;
+            if (std::isfinite(newZoom) && newZoom < 1e15f) {
+                targetZoom = newZoom;
             }
+        } else {
+            // 🐭 Kein bestes Tile gefunden → trotzdem weiter reinzoomen
+            targetZoom = zoom * 1.01f;  // 1% reinzoomen, langsam
         }
+
+        // 🐭 Weiches Gleiten: 20% pro Frame Richtung Ziel
+        constexpr float LERP_FACTOR = 0.2f;
+        offset.x = lerp(offset.x, targetOffset.x, LERP_FACTOR);
+        offset.y = lerp(offset.y, targetOffset.y, LERP_FACTOR);
+        zoom     = lerp(zoom,     targetZoom,     LERP_FACTOR);
+
+        DEBUG_PRINT("New offset: (%.12f, %.12f)", offset.x, offset.y);
+        DEBUG_PRINT("New zoom: %.12f", zoom);
     }
     CHECK_CUDA_STEP(cudaGraphicsUnmapResources(1, &cudaPboRes), "UnmapResources");
     DEBUG_PRINT("Frame render complete");
