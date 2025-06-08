@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit lokalem Auto-Zoom um aktuelle Kamera-Position
+// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit kreisförmiger, zentrumsnaher Auto-Zoom-Optimierung
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -17,9 +17,9 @@
 #include <stdexcept>
 
 #include "settings.hpp"
-#include "core_kernel.h"     // Kernel-Wrapper
-#include "memory_utils.hpp"  // CUDA-Buffer-Management
-#include "progressive.hpp"   // Iterations-Management
+#include "core_kernel.h"
+#include "memory_utils.hpp"
+#include "progressive.hpp"
 
 namespace CudaInterop {
 
@@ -114,24 +114,28 @@ void renderCudaFrame(
 
         DEBUG_PRINT("Complexity Stats: Nonzero: %d / %d | Max: %.6e | Min: %.6e | Avg: %.6e", nonzeroTiles, totalTiles, maxComplexity, minComplexity, avgComplexity);
 
-        DEBUG_PRINT("Searching best tile locally...");
+        DEBUG_PRINT("Searching best tile locally with center focus...");
         int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
         int tilesY = (h + Settings::TILE_H - 1) / Settings::TILE_H;
         int currTileX = static_cast<int>((offset.x * zoom + w * 0.5f) / Settings::TILE_W);
         int currTileY = static_cast<int>((offset.y * zoom + h * 0.5f) / Settings::TILE_H);
 
         int searchRadius = 5;
-        float bestVariance = -1.0f;
+        float bestScore = -1.0f;
         int bestIdx = -1;
 
         for (int dy = -searchRadius; dy <= searchRadius; ++dy) {
             for (int dx = -searchRadius; dx <= searchRadius; ++dx) {
+                if (dx * dx + dy * dy > searchRadius * searchRadius) continue;
                 int tx = currTileX + dx;
                 int ty = currTileY + dy;
                 if (tx >= 0 && ty >= 0 && tx < tilesX && ty < tilesY) {
                     int idx = ty * tilesX + tx;
-                    if (h_complexity[idx] > bestVariance) {
-                        bestVariance = h_complexity[idx];
+                    float variance = h_complexity[idx];
+                    float dist2 = dx * dx + dy * dy + 1e-5f;
+                    float score = variance / dist2;
+                    if (score > bestScore) {
+                        bestScore = score;
                         bestIdx = idx;
                     }
                 }
@@ -139,9 +143,9 @@ void renderCudaFrame(
         }
 
         if (bestIdx != -1) {
-            DEBUG_PRINT("Best Local Tile: %d | Variance: %.6e", bestIdx, bestVariance);
-            if (bestVariance > lastBestVariance * 1.02f || lastBestVariance < 0.0f) {
-                lastBestVariance = bestVariance;
+            DEBUG_PRINT("Best Local Tile: %d | Score: %.6e", bestIdx, bestScore);
+            if (bestScore > lastBestVariance * 1.02f || lastBestVariance < 0.0f) {
+                lastBestVariance = bestScore;
                 int bx = bestIdx % tilesX;
                 int by = bestIdx / tilesX;
                 float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f;
