@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: Verbesserte Auto-Zoom-Strategie mit adaptivem Lerp basierend auf historischer Abweichung
+// 🐭 Maus-Kommentar: Verbesserte Auto-Zoom-Strategie – nur lokale Navigation, kein globaler Sprung, kein Zittern
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -75,8 +75,6 @@ void renderCudaFrame(
 
     static float2 targetOffset = offset;
     static float lastBestVariance = -1.0f;
-
-    static float historicalOffsetDiff = 0.0f;
 
     uchar4* d_img = nullptr;
     size_t imgSize = 0;
@@ -158,31 +156,7 @@ void renderCudaFrame(
             }
         }
 
-        if (bestIdx == -1) {
-            DEBUG_PRINT("No suitable tile found locally.");
-            float globalMaxVariance = -1.0f;
-            int globalMaxIdx = -1;
-            for (int idx = 0; idx < totalTiles; ++idx) {
-                if (h_complexity[idx] > globalMaxVariance) {
-                    globalMaxVariance = h_complexity[idx];
-                    globalMaxIdx = idx;
-                }
-            }
-            DEBUG_PRINT("Global max variance (fallback): %.6e", globalMaxVariance);
-
-            if (globalMaxIdx != -1) {
-                int bx = globalMaxIdx % tilesX;
-                int by = globalMaxIdx / tilesX;
-                float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f;
-                float ty = (by + 0.5f) * Settings::TILE_H - h * 0.5f;
-                float newTargetX = offset.x + tx / zoom;
-                float newTargetY = offset.y + ty / zoom;
-                if (std::isfinite(newTargetX) && std::isfinite(newTargetY)) {
-                    targetOffset = { newTargetX, newTargetY };
-                    DEBUG_PRINT("Global Target Offset: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
-                }
-            }
-        } else {
+        if (bestIdx != -1) {
             DEBUG_PRINT("Best Local Tile: %d | Score: %.6e", bestIdx, bestScore);
             if (bestScore > lastBestVariance * 1.02f || lastBestVariance < 0.0f) {
                 lastBestVariance = bestScore;
@@ -197,18 +171,13 @@ void renderCudaFrame(
                     DEBUG_PRINT("New Target Offset: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
                 }
             }
+        } else {
+            DEBUG_PRINT("No better local tile found — continuing with previous target.");
         }
 
-        float2 offsetDiff = { targetOffset.x - offset.x, targetOffset.y - offset.y };
-        float currentDiffMag = std::sqrt(offsetDiff.x * offsetDiff.x + offsetDiff.y * offsetDiff.y);
-
-        // Adaptiver Lerp-Faktor basierend auf historischer Abweichung
-        historicalOffsetDiff = 0.9f * historicalOffsetDiff + 0.1f * currentDiffMag;
-        float adaptiveLerp = std::clamp(0.05f * zoom / (historicalOffsetDiff + 1e-5f), 0.0001f, 0.2f);
-
-        offset.x += offsetDiff.x * adaptiveLerp;
-        offset.y += offsetDiff.y * adaptiveLerp;
-        DEBUG_PRINT("Smoothed Offset: (%.12f, %.12f) | Lerp: %.6f", offset.x, offset.y, adaptiveLerp);
+        offset.x += (targetOffset.x - offset.x) * Settings::LERP_FACTOR;
+        offset.y += (targetOffset.y - offset.y) * Settings::LERP_FACTOR;
+        DEBUG_PRINT("Smoothed Offset: (%.12f, %.12f)", offset.x, offset.y);
     }
 
     if (autoZoomEnabledParam && !pauseZoom) {
