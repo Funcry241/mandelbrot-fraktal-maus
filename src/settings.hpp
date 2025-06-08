@@ -25,7 +25,7 @@ inline constexpr float initialOffsetY =  0.0f;   // Startversatz Y
 
 // Zoom- und Pan-Steuerung (dynamisch zur Zoomstufe angepasst)
 inline constexpr float OFFSET_STEP_FACTOR = 0.5f;     // Basis-Offset pro Frame (skaliert mit 1/Zoom)
-inline constexpr float ZOOM_STEP_FACTOR   = 0.15f;    // Basis-Zoomrate pro Frame
+inline constexpr float ZOOM_STEP_FACTOR = 0.005f;    // Basis-Zoomrate pro Frame
 
 inline constexpr float MIN_OFFSET_STEP = 1e-8f;       // Minimal erlaubter Pan-Schritt
 inline constexpr float MIN_ZOOM_STEP   = 1e-6f;       // Minimal erlaubter Zoom-Schritt

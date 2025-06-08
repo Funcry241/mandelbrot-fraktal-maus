@@ -1,4 +1,5 @@
-// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit sanftem Zoom- und Offset-Gliding inkl. Pause-Funktion mit Leertaste + Ziel-Glättung gegen Zittern
+// Datei: src/cuda_interop.cu
+// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit sanftem Zoom- und Offset-Gliding, objektorientierte Pause- und Auto-Zoom-Funktion
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -16,33 +17,52 @@
 #include <stdexcept>
 
 #include "settings.hpp"
-#include "core_kernel.h"
-#include "memory_utils.hpp"
-#include "progressive.hpp"
+#include "core_kernel.h"     // Kernel-Wrapper
+#include "memory_utils.hpp"  // CUDA-Buffer-Management
+#include "progressive.hpp"   // Iterations-Management
 
 namespace CudaInterop {
 
+// 🐭 CUDA-Fehlerprüfung
 #define CHECK_CUDA_STEP(call, msg) do { \
     if (cudaError_t err = (call); err != cudaSuccess) { \
         throw std::runtime_error(std::string("[CUDA ERROR] ") + msg + ": " + cudaGetErrorString(err)); \
     } \
 } while (0)
 
+// 🐭 Debug-Ausgabe bei Bedarf
 #define DEBUG_PRINT(fmt, ...) do { \
     if (Settings::debugLogging) \
         std::fprintf(stdout, "[DEBUG] " fmt "\n", ##__VA_ARGS__); \
 } while (0)
 
 static bool pauseZoom = false;
+static bool autoZoomEnabled = true;
 
+// 🐭 Getter/Setter für Pause und Auto-Zoom
+void setPauseZoom(bool state) { pauseZoom = state; }
+bool getPauseZoom() { return pauseZoom; }
+bool getAutoZoomEnabled() { return autoZoomEnabled; }
+
+// 🐭 Tastatur-Callback zur Laufzeitsteuerung
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (key == GLFW_KEY_SPACE && action == GLFW_PRESS) {
-        pauseZoom = !pauseZoom;
-        if (Settings::debugLogging)
-            std::fprintf(stdout, "[DEBUG] Zoom %s\n", pauseZoom ? "paused" : "resumed");
+    if (action == GLFW_PRESS) {
+        switch (key) {
+            case GLFW_KEY_SPACE:
+                autoZoomEnabled = !autoZoomEnabled;
+                std::printf("[INFO] Auto-Zoom %s\n", autoZoomEnabled ? "ENABLED" : "DISABLED");
+                break;
+            case GLFW_KEY_P:
+                pauseZoom = !pauseZoom;
+                std::printf("[INFO] Zoom %s\n", pauseZoom ? "PAUSED" : "RESUMED");
+                break;
+            default:
+                break;
+        }
     }
 }
 
+// 🐭 CUDA-Frame-Rendering inklusive Auto-Zoom und sanftem Offset-Gliding
 void renderCudaFrame(
     cudaGraphicsResource_t cudaPboRes,
     int w,
@@ -53,12 +73,12 @@ void renderCudaFrame(
     float* d_complexity,
     std::vector<float>& h_complexity,
     int* d_iterations,
-    bool autoZoomEnabled
+    bool autoZoomEnabledParam
 ) {
     DEBUG_PRINT("Starting frame render");
 
-    static float2 targetOffset = offset; // 🐭 Sanftes Ziel
-    static float lastBestVariance = -1.0f; // 🐭 Letzte beste Varianz
+    static float2 targetOffset = offset;    // 🐭 Ziel-Koordinaten für Gliding
+    static float lastBestVariance = -1.0f;  // 🐭 Letzte gute Varianz (zum Stabilisieren)
 
     uchar4* d_img = nullptr;
     size_t imgSize = 0;
@@ -84,29 +104,25 @@ void renderCudaFrame(
         CHECK_CUDA_STEP(cudaMemcpy(h_complexity.data(), d_complexity, totalTiles * sizeof(float), cudaMemcpyDeviceToHost), "Memcpy complexity");
 
         int nonzeroTiles = 0;
-        float maxComplexity = -1.0f;
-        float minComplexity = 1e30f;
-        float sumComplexity = 0.0f;
+        float maxComplexity = -1.0f, minComplexity = 1e30f, sumComplexity = 0.0f;
 
-        for (int i = 0; i < totalTiles; ++i) {
-            float val = h_complexity[i];
+        for (float val : h_complexity) {
             if (val > 0.0f) {
                 nonzeroTiles++;
-                if (val > maxComplexity) maxComplexity = val;
-                if (val < minComplexity) minComplexity = val;
+                maxComplexity = std::max(maxComplexity, val);
+                minComplexity = std::min(minComplexity, val);
                 sumComplexity += val;
             }
         }
 
         float avgComplexity = (nonzeroTiles > 0) ? (sumComplexity / nonzeroTiles) : 0.0f;
 
-        DEBUG_PRINT("Complexity Stats: Nonzero Tiles: %d / %d | Max: %.6e | Min: %.6e | Avg: %.6e", nonzeroTiles, totalTiles, maxComplexity, minComplexity, avgComplexity);
+        DEBUG_PRINT("Complexity Stats: Nonzero: %d / %d | Max: %.6e | Min: %.6e | Avg: %.6e", nonzeroTiles, totalTiles, maxComplexity, minComplexity, avgComplexity);
 
         DEBUG_PRINT("Searching best tile...");
         int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
         float bestVariance = -1.0f;
         int bestIdx = -1;
-
         float dynamicThreshold = Settings::dynamicVarianceThreshold(zoom);
 
         for (int i = 0; i < totalTiles; ++i) {
@@ -116,40 +132,36 @@ void renderCudaFrame(
             }
         }
 
-        if (bestIdx == -1) {
-            DEBUG_PRINT("No suitable tile found in current frame.");
-        } else {
-            DEBUG_PRINT("Best Tile Index: %d | Variance Score: %.6e", bestIdx, bestVariance);
-
+        if (bestIdx != -1) {
+            DEBUG_PRINT("Best Tile: %d | Variance: %.6e", bestIdx, bestVariance);
             if (bestVariance > lastBestVariance * 1.02f || lastBestVariance < 0.0f) {
                 lastBestVariance = bestVariance;
-
                 int bx = bestIdx % tilesX;
                 int by = bestIdx / tilesX;
                 float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f;
                 float ty = (by + 0.5f) * Settings::TILE_H - h * 0.5f;
-
                 float newTargetX = offset.x + tx / zoom;
                 float newTargetY = offset.y + ty / zoom;
-
                 if (std::isfinite(newTargetX) && std::isfinite(newTargetY)) {
-                    targetOffset.x = newTargetX;
-                    targetOffset.y = newTargetY;
-                    DEBUG_PRINT("New target offset set: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
+                    targetOffset = { newTargetX, newTargetY };
+                    DEBUG_PRINT("New Target Offset: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
                 }
             }
+        } else {
+            DEBUG_PRINT("No suitable tile found.");
         }
 
-        float lerpFactor = 0.05f;
+        // 🐭 Sanftes Offset-Gliding
+        constexpr float lerpFactor = 0.05f;
         offset.x += (targetOffset.x - offset.x) * lerpFactor;
         offset.y += (targetOffset.y - offset.y) * lerpFactor;
-        DEBUG_PRINT("Smoothed offset: (%.12f, %.12f)", offset.x, offset.y);
+        DEBUG_PRINT("Smoothed Offset: (%.12f, %.12f)", offset.x, offset.y);
     }
 
-    if (autoZoomEnabled && !pauseZoom) {
+    if (autoZoomEnabledParam && !pauseZoom) {
         if (std::isfinite(zoom) && zoom < 1e15f) {
             zoom += Settings::ZOOM_STEP_FACTOR * zoom;
-            DEBUG_PRINT("Zoom updated: %.12f", zoom);
+            DEBUG_PRINT("Zoom Updated: %.12f", zoom);
         }
     }
 

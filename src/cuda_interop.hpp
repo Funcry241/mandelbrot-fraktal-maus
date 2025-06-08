@@ -3,16 +3,18 @@
 #include <vector>
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
+#include <GLFW/glfw3.h> // 🐭 Für Tasteneingaben
 
-// Typalias für bessere Lesbarkeit
+// 🐭 Typalias für CUDA-OpenGL Interop-Handles
 using cudaGraphicsResource_t = struct cudaGraphicsResource*;
 
 // ----------------------------------------------------------------------
-// Kernel-Wrappers
+// 🐭 Kernel-Wrappers
 
 extern "C" void launch_debugGradient(uchar4* img, int width, int height);
 
-// 🐭 NEU: KEIN extern "C" bei C++-Signaturen mit mehr Parametern (Iterationspuffer)!
+// 🐭 Mandelbrot-Hybrid-Renderer (Iteration Buffer wird mitgeführt)
+// Kein extern "C", da C++-Signatur!
 void launch_mandelbrotHybrid(
     uchar4* img,
     int* iterations,   // 🐭 Iteration Buffer
@@ -24,10 +26,10 @@ void launch_mandelbrotHybrid(
 );
 
 // ----------------------------------------------------------------------
-// Gesamte CUDA-Rendering-Pipeline
+// 🐭 Gesamte CUDA-Rendering-Pipeline (Namespace CudaInterop)
 namespace CudaInterop {
 
-/// Renders a CUDA frame into a mapped OpenGL PBO
+/// 🐭 Rendert einen CUDA-Frame in ein OpenGL-PBO mit optionalem Auto-Zoom.
 void renderCudaFrame(
     cudaGraphicsResource_t cudaPboRes,
     int width,
@@ -38,7 +40,16 @@ void renderCudaFrame(
     float* d_complexity,
     std::vector<float>& h_complexity,
     int* d_iterations,
-    bool autoZoomEnabled    
+    bool autoZoomEnabled    // 🐭 Auto-Zoom jetzt gesteuert über Parameter
 );
 
-}
+/// 🐭 Key-Callback zur Laufzeit-Steuerung (z.B. Leertaste für Pause/Resume)
+void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+
+/// 🐭 Setzt den Pause-Zustand für Zoom (true = pausiert)
+void setPauseZoom(bool pause);
+
+/// 🐭 Holt den aktuellen Pause-Zustand für Zoom
+bool getPauseZoom();
+
+} // namespace CudaInterop
