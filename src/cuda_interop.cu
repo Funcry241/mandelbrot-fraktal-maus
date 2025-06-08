@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: Verbesserte Auto-Zoom-Strategie – kein Zufallsdrift mehr, gezielte Sprünge auf global spannendste Regionen
+// 🐭 Maus-Kommentar: Verbesserte Auto-Zoom-Strategie mit adaptivem Lerp basierend auf historischer Abweichung
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -75,6 +75,8 @@ void renderCudaFrame(
 
     static float2 targetOffset = offset;
     static float lastBestVariance = -1.0f;
+
+    static float historicalOffsetDiff = 0.0f;
 
     uchar4* d_img = nullptr;
     size_t imgSize = 0;
@@ -197,9 +199,16 @@ void renderCudaFrame(
             }
         }
 
-        offset.x += (targetOffset.x - offset.x) * Settings::LERP_FACTOR;
-        offset.y += (targetOffset.y - offset.y) * Settings::LERP_FACTOR;
-        DEBUG_PRINT("Smoothed Offset: (%.12f, %.12f)", offset.x, offset.y);
+        float2 offsetDiff = { targetOffset.x - offset.x, targetOffset.y - offset.y };
+        float currentDiffMag = std::sqrt(offsetDiff.x * offsetDiff.x + offsetDiff.y * offsetDiff.y);
+
+        // Adaptiver Lerp-Faktor basierend auf historischer Abweichung
+        historicalOffsetDiff = 0.9f * historicalOffsetDiff + 0.1f * currentDiffMag;
+        float adaptiveLerp = std::clamp(0.05f * zoom / (historicalOffsetDiff + 1e-5f), 0.0001f, 0.2f);
+
+        offset.x += offsetDiff.x * adaptiveLerp;
+        offset.y += offsetDiff.y * adaptiveLerp;
+        DEBUG_PRINT("Smoothed Offset: (%.12f, %.12f) | Lerp: %.6f", offset.x, offset.y, adaptiveLerp);
     }
 
     if (autoZoomEnabledParam && !pauseZoom) {
