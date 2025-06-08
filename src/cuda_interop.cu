@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit fixiertem Auto-Zoom + Drift-Fallback + erweitertem Diagnose-Log
+// 🐭 Maus-Kommentar: Ultimative Variante mit dynamischem Radius & feinerem Drift
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -15,6 +15,7 @@
 #include <vector>
 #include <cmath>
 #include <stdexcept>
+#include <algorithm> 
 
 #include "settings.hpp"
 #include "core_kernel.h"
@@ -115,7 +116,7 @@ void renderCudaFrame(
         DEBUG_PRINT("Complexity Stats: Nonzero: %d / %d | Max: %.6e | Min: %.6e | Avg: %.6e", nonzeroTiles, totalTiles, maxComplexity, minComplexity, avgComplexity);
 
         int tilesAboveThreshold = 0;
-        float threshold = avgComplexity * 1.5f;
+        float threshold = avgComplexity * (1.0f + 0.3f * std::log10(zoom + 10.0f));
         for (float val : h_complexity) {
             if (val > threshold) {
                 tilesAboveThreshold++;
@@ -123,16 +124,16 @@ void renderCudaFrame(
         }
         DEBUG_PRINT("Tiles above threshold (%.6e): %d", threshold, tilesAboveThreshold);
 
-        DEBUG_PRINT("Searching best tile locally with center focus...");
         int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
         int tilesY = (h + Settings::TILE_H - 1) / Settings::TILE_H;
         int currTileX = static_cast<int>((offset.x * zoom + w * 0.5f) / Settings::TILE_W);
         int currTileY = static_cast<int>((offset.y * zoom + h * 0.5f) / Settings::TILE_H);
 
-        int baseRadius = 5;
-        int dynamicRadius = static_cast<int>(baseRadius * (zoom / Settings::initialZoom));
-        dynamicRadius = std::min(dynamicRadius, 300);
+        int dynamicRadius = static_cast<int>(std::sqrt(zoom) * 0.2f);
+        dynamicRadius = std::clamp(dynamicRadius, 5, 2000);
         int searchRadius = dynamicRadius;
+
+        DEBUG_PRINT("Search Radius: %d", searchRadius);
 
         float bestScore = -1.0f;
         int bestIdx = -1;
@@ -158,18 +159,10 @@ void renderCudaFrame(
         if (bestIdx == -1) {
             DEBUG_PRINT("No suitable tile found locally.");
             float localMaxVariance = 0.0f;
-            for (int dy = -searchRadius; dy <= searchRadius; ++dy) {
-                for (int dx = -searchRadius; dx <= searchRadius; ++dx) {
-                    if (dx * dx + dy * dy > searchRadius * searchRadius) continue;
-                    int tx = currTileX + dx;
-                    int ty = currTileY + dy;
-                    if (tx >= 0 && ty >= 0 && tx < tilesX && ty < tilesY) {
-                        int idx = ty * tilesX + tx;
-                        localMaxVariance = fmaxf(localMaxVariance, h_complexity[idx]);
-                    }
-                }
+            for (float val : h_complexity) {
+                localMaxVariance = fmaxf(localMaxVariance, val);
             }
-            DEBUG_PRINT("Local max variance in radius: %.6e", localMaxVariance);
+            DEBUG_PRINT("Global max variance (fallback): %.6e", localMaxVariance);
         }
 
         if (bestIdx != -1) {
@@ -189,7 +182,7 @@ void renderCudaFrame(
             }
         } else {
             float angle = static_cast<float>(rand()) / RAND_MAX * 2.0f * 3.14159265f;
-            float distance = 1.0f / zoom * 10.0f;
+            float distance = 1.0f / zoom * 2.0f;  // 🐭 Noch kleinerer Drift bei hohem Zoom
             float dx = cosf(angle) * distance;
             float dy = sinf(angle) * distance;
 
@@ -205,7 +198,7 @@ void renderCudaFrame(
     }
 
     if (autoZoomEnabledParam && !pauseZoom) {
-        if (std::isfinite(zoom) && zoom < 1e15f) {
+        if (std::isfinite(zoom) && zoom < 1e18f) {
             zoom += Settings::ZOOM_STEP_FACTOR * zoom;
             DEBUG_PRINT("Zoom Updated: %.12f", zoom);
         }
