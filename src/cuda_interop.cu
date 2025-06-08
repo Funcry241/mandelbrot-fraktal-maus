@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: Final mit ausgelagerten dynamischen Radius-Settings für maximale Kontrolle
+// 🐭 Maus-Kommentar: Verbesserte Auto-Zoom-Strategie – kein Zufallsdrift mehr, gezielte Sprünge auf global spannendste Regionen
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -15,7 +15,7 @@
 #include <vector>
 #include <cmath>
 #include <stdexcept>
-#include <algorithm> 
+#include <algorithm>
 
 #include "settings.hpp"
 #include "core_kernel.h"
@@ -158,14 +158,29 @@ void renderCudaFrame(
 
         if (bestIdx == -1) {
             DEBUG_PRINT("No suitable tile found locally.");
-            float localMaxVariance = 0.0f;
-            for (float val : h_complexity) {
-                localMaxVariance = fmaxf(localMaxVariance, val);
+            float globalMaxVariance = -1.0f;
+            int globalMaxIdx = -1;
+            for (int idx = 0; idx < totalTiles; ++idx) {
+                if (h_complexity[idx] > globalMaxVariance) {
+                    globalMaxVariance = h_complexity[idx];
+                    globalMaxIdx = idx;
+                }
             }
-            DEBUG_PRINT("Global max variance (fallback): %.6e", localMaxVariance);
-        }
+            DEBUG_PRINT("Global max variance (fallback): %.6e", globalMaxVariance);
 
-        if (bestIdx != -1) {
+            if (globalMaxIdx != -1) {
+                int bx = globalMaxIdx % tilesX;
+                int by = globalMaxIdx / tilesX;
+                float tx = (bx + 0.5f) * Settings::TILE_W - w * 0.5f;
+                float ty = (by + 0.5f) * Settings::TILE_H - h * 0.5f;
+                float newTargetX = offset.x + tx / zoom;
+                float newTargetY = offset.y + ty / zoom;
+                if (std::isfinite(newTargetX) && std::isfinite(newTargetY)) {
+                    targetOffset = { newTargetX, newTargetY };
+                    DEBUG_PRINT("Global Target Offset: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
+                }
+            }
+        } else {
             DEBUG_PRINT("Best Local Tile: %d | Score: %.6e", bestIdx, bestScore);
             if (bestScore > lastBestVariance * 1.02f || lastBestVariance < 0.0f) {
                 lastBestVariance = bestScore;
@@ -180,16 +195,6 @@ void renderCudaFrame(
                     DEBUG_PRINT("New Target Offset: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
                 }
             }
-        } else {
-            float angle = static_cast<float>(rand()) / RAND_MAX * 2.0f * 3.14159265f;
-            float distance = 1.0f / zoom * 2.0f;
-            float dx = cosf(angle) * distance;
-            float dy = sinf(angle) * distance;
-
-            targetOffset.x = offset.x + dx;
-            targetOffset.y = offset.y + dy;
-
-            DEBUG_PRINT("Random Drift Target Offset: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
         }
 
         offset.x += (targetOffset.x - offset.x) * Settings::LERP_FACTOR;
