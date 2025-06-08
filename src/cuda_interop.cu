@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit fixiertem Auto-Zoom + Drift-Fallback + dynamischer Suchradius (linear)
+// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit fixiertem Auto-Zoom + Drift-Fallback + erweitertem Diagnose-Log
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -114,6 +114,15 @@ void renderCudaFrame(
 
         DEBUG_PRINT("Complexity Stats: Nonzero: %d / %d | Max: %.6e | Min: %.6e | Avg: %.6e", nonzeroTiles, totalTiles, maxComplexity, minComplexity, avgComplexity);
 
+        int tilesAboveThreshold = 0;
+        float threshold = avgComplexity * 1.5f;
+        for (float val : h_complexity) {
+            if (val > threshold) {
+                tilesAboveThreshold++;
+            }
+        }
+        DEBUG_PRINT("Tiles above threshold (%.6e): %d", threshold, tilesAboveThreshold);
+
         DEBUG_PRINT("Searching best tile locally with center focus...");
         int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
         int tilesY = (h + Settings::TILE_H - 1) / Settings::TILE_H;
@@ -146,6 +155,23 @@ void renderCudaFrame(
             }
         }
 
+        if (bestIdx == -1) {
+            DEBUG_PRINT("No suitable tile found locally.");
+            float localMaxVariance = 0.0f;
+            for (int dy = -searchRadius; dy <= searchRadius; ++dy) {
+                for (int dx = -searchRadius; dx <= searchRadius; ++dx) {
+                    if (dx * dx + dy * dy > searchRadius * searchRadius) continue;
+                    int tx = currTileX + dx;
+                    int ty = currTileY + dy;
+                    if (tx >= 0 && ty >= 0 && tx < tilesX && ty < tilesY) {
+                        int idx = ty * tilesX + tx;
+                        localMaxVariance = fmaxf(localMaxVariance, h_complexity[idx]);
+                    }
+                }
+            }
+            DEBUG_PRINT("Local max variance in radius: %.6e", localMaxVariance);
+        }
+
         if (bestIdx != -1) {
             DEBUG_PRINT("Best Local Tile: %d | Score: %.6e", bestIdx, bestScore);
             if (bestScore > lastBestVariance * 1.02f || lastBestVariance < 0.0f) {
@@ -162,8 +188,6 @@ void renderCudaFrame(
                 }
             }
         } else {
-            DEBUG_PRINT("No suitable tile found locally.");
-
             float angle = static_cast<float>(rand()) / RAND_MAX * 2.0f * 3.14159265f;
             float distance = 1.0f / zoom * 10.0f;
             float dx = cosf(angle) * distance;
