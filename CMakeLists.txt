@@ -53,7 +53,7 @@ set_target_properties(mandelbrot_otterdream PROPERTIES
 
 # ---------------------------------------------------------
 # 🧠 Dynamische GPU-Erkennung
-set(DEFAULT_CUDA_ARCHITECTURES 60 70 75 80 86 89)
+set(DEFAULT_CUDA_ARCHITECTURES 75 80 86 89)
 option(USE_NATIVE_GPU "Detect GPU architecture natively at build time" OFF)
 
 if (USE_NATIVE_GPU)
