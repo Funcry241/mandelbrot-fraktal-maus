@@ -84,6 +84,7 @@ extern "C" void launch_mandelbrotHybrid(uchar4* img, int* iterations, int w, int
     cudaDeviceSynchronize();
 }
 
+// 🐭 Komplexitätsbewertung mit Standardabweichung (streuungsbasiert)
 __global__ void computeComplexity(const int* iterations, int w, int h, float* complexity) {
     int tileX = blockIdx.x;
     int tileY = blockIdx.y;
@@ -99,27 +100,28 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
 
     int localId = localY * blockDim.x + localX;
 
-    __shared__ double sumIter[Settings::TILE_W * Settings::TILE_H];
-    __shared__ double sumSqIter[Settings::TILE_W * Settings::TILE_H];
+    __shared__ float sumIter[Settings::TILE_W * Settings::TILE_H];
+    __shared__ float sumIterSq[Settings::TILE_W * Settings::TILE_H];
     __shared__ int count[Settings::TILE_W * Settings::TILE_H];
 
-    int iterValue = 0;
+    float iterValue = 0.0f;
     int valid = 0;
 
     if (x < w && y < h) { 
-        iterValue = iterations[y * w + x]; 
+        iterValue = (float)iterations[y * w + x]; 
         valid = 1; 
     }
 
-    sumIter[localId] = (valid ? (double)iterValue : 0.0);
-    sumSqIter[localId] = (valid ? (double)iterValue * iterValue : 0.0);
+    sumIter[localId] = iterValue;
+    sumIterSq[localId] = iterValue * iterValue;
     count[localId] = valid;
     __syncthreads();
 
+    // Parallel Reduction für Summe und Summe der Quadrate
     for (int stride = (blockDim.x * blockDim.y) / 2; stride > 0; stride >>= 1) {
         if (localId < stride) {
             sumIter[localId] += sumIter[localId + stride];
-            sumSqIter[localId] += sumSqIter[localId + stride];
+            sumIterSq[localId] += sumIterSq[localId + stride];
             count[localId] += count[localId + stride];
         }
         __syncthreads();
@@ -128,14 +130,16 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
     if (localId == 0) {
         int n = count[0];
         if (n > 1) {
-            double mean = sumIter[0] / n;
-            double meanSq = sumSqIter[0] / n;
-            double variance = meanSq - (mean * mean);
+            float mean = sumIter[0] / n;
+            float meanSq = sumIterSq[0] / n;
+            float variance = meanSq - mean * mean;
+            variance = variance > 0.0f ? variance : 0.0f; // 👈 Sicherheit gegen numerischen Fehler
+            float stddev = sqrtf(variance);
 
-            float score = (float)variance;
-            complexity[tileY * tilesX + tileX] = score;
+            complexity[tileY * tilesX + tileX] = stddev;
         } else {
             complexity[tileY * tilesX + tileX] = 0.0f;
         }
     }
 }
+
