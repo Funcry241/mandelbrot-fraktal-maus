@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit sanftem Zoom- und Offset-Gliding, objektorientierte Pause- und Auto-Zoom-Funktion
+// 🐭 Maus-Kommentar: CUDA-OpenGL Interop mit lokalem Auto-Zoom um aktuelle Kamera-Position
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -23,14 +23,12 @@
 
 namespace CudaInterop {
 
-// 🐭 CUDA-Fehlerprüfung
 #define CHECK_CUDA_STEP(call, msg) do { \
     if (cudaError_t err = (call); err != cudaSuccess) { \
         throw std::runtime_error(std::string("[CUDA ERROR] ") + msg + ": " + cudaGetErrorString(err)); \
     } \
 } while (0)
 
-// 🐭 Debug-Ausgabe bei Bedarf
 #define DEBUG_PRINT(fmt, ...) do { \
     if (Settings::debugLogging) \
         std::fprintf(stdout, "[DEBUG] " fmt "\n", ##__VA_ARGS__); \
@@ -39,12 +37,10 @@ namespace CudaInterop {
 static bool pauseZoom = false;
 static bool autoZoomEnabled = true;
 
-// 🐭 Getter/Setter für Pause und Auto-Zoom
 void setPauseZoom(bool state) { pauseZoom = state; }
 bool getPauseZoom() { return pauseZoom; }
 bool getAutoZoomEnabled() { return autoZoomEnabled; }
 
-// 🐭 Tastatur-Callback zur Laufzeitsteuerung
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (action == GLFW_PRESS) {
         switch (key) {
@@ -62,7 +58,6 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     }
 }
 
-// 🐭 CUDA-Frame-Rendering inklusive Auto-Zoom und sanftem Offset-Gliding
 void renderCudaFrame(
     cudaGraphicsResource_t cudaPboRes,
     int w,
@@ -77,8 +72,8 @@ void renderCudaFrame(
 ) {
     DEBUG_PRINT("Starting frame render");
 
-    static float2 targetOffset = offset;    // 🐭 Ziel-Koordinaten für Gliding
-    static float lastBestVariance = -1.0f;  // 🐭 Letzte gute Varianz (zum Stabilisieren)
+    static float2 targetOffset = offset;
+    static float lastBestVariance = -1.0f;
 
     uchar4* d_img = nullptr;
     size_t imgSize = 0;
@@ -119,21 +114,32 @@ void renderCudaFrame(
 
         DEBUG_PRINT("Complexity Stats: Nonzero: %d / %d | Max: %.6e | Min: %.6e | Avg: %.6e", nonzeroTiles, totalTiles, maxComplexity, minComplexity, avgComplexity);
 
-        DEBUG_PRINT("Searching best tile...");
+        DEBUG_PRINT("Searching best tile locally...");
         int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
+        int tilesY = (h + Settings::TILE_H - 1) / Settings::TILE_H;
+        int currTileX = static_cast<int>((offset.x * zoom + w * 0.5f) / Settings::TILE_W);
+        int currTileY = static_cast<int>((offset.y * zoom + h * 0.5f) / Settings::TILE_H);
+
+        int searchRadius = 5;
         float bestVariance = -1.0f;
         int bestIdx = -1;
-        float dynamicThreshold = Settings::dynamicVarianceThreshold(zoom);
 
-        for (int i = 0; i < totalTiles; ++i) {
-            if (h_complexity[i] > dynamicThreshold && h_complexity[i] > bestVariance) {
-                bestVariance = h_complexity[i];
-                bestIdx = i;
+        for (int dy = -searchRadius; dy <= searchRadius; ++dy) {
+            for (int dx = -searchRadius; dx <= searchRadius; ++dx) {
+                int tx = currTileX + dx;
+                int ty = currTileY + dy;
+                if (tx >= 0 && ty >= 0 && tx < tilesX && ty < tilesY) {
+                    int idx = ty * tilesX + tx;
+                    if (h_complexity[idx] > bestVariance) {
+                        bestVariance = h_complexity[idx];
+                        bestIdx = idx;
+                    }
+                }
             }
         }
 
         if (bestIdx != -1) {
-            DEBUG_PRINT("Best Tile: %d | Variance: %.6e", bestIdx, bestVariance);
+            DEBUG_PRINT("Best Local Tile: %d | Variance: %.6e", bestIdx, bestVariance);
             if (bestVariance > lastBestVariance * 1.02f || lastBestVariance < 0.0f) {
                 lastBestVariance = bestVariance;
                 int bx = bestIdx % tilesX;
@@ -148,10 +154,9 @@ void renderCudaFrame(
                 }
             }
         } else {
-            DEBUG_PRINT("No suitable tile found.");
+            DEBUG_PRINT("No suitable tile found locally.");
         }
 
-        // 🐭 Sanftes Offset-Gliding
         offset.x += (targetOffset.x - offset.x) * Settings::LERP_FACTOR;
         offset.y += (targetOffset.y - offset.y) * Settings::LERP_FACTOR;
         DEBUG_PRINT("Smoothed Offset: (%.12f, %.12f)", offset.x, offset.y);
