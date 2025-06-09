@@ -3,7 +3,7 @@
 // settings.hpp — 🐭 Alle zentralen Konstanten kompakt & verständlich kommentiert
 
 #include <algorithm>  // für std::max, std::clamp
-#include <cmath>      // für logf
+#include <cmath>      // für logf, log2f, sqrtf
 
 namespace Settings {
 
@@ -33,15 +33,10 @@ inline constexpr float MIN_ZOOM_STEP   = 1e-6f;        // Minimale Änderung bei
 inline constexpr float VARIANCE_THRESHOLD      = 1e-12f;  // Ausgangs-Schwelle für interessante Bildbereiche
 inline constexpr float MIN_VARIANCE_THRESHOLD  = 1e-10f;  // Verhindert, dass die Schwelle zu klein wird (sonst Blindflug)
 
-// Dynamischer Variance-Threshold in Abhängigkeit vom Zoom
-inline float dynamicVarianceThreshold(float zoom) {
-    return std::max(VARIANCE_THRESHOLD / logf(zoom + 2.0f), MIN_VARIANCE_THRESHOLD);
-}
-
 // 🔎 Auto-Zoom Steuerung — Suchradius
-inline constexpr float DYNAMIC_RADIUS_SCALE = 0.05f; // Skaliert den Suchradius basierend auf √Zoom
-inline constexpr int   DYNAMIC_RADIUS_MIN   = 20;    // Minimaler Suchradius in Tiles
-inline constexpr int   DYNAMIC_RADIUS_MAX   = 300;   // Maximaler Suchradius in Tiles
+inline constexpr float DYNAMIC_RADIUS_SCALE = 1.0f;   // Skaliert den Suchradius basierend auf √Zoom
+inline constexpr int   DYNAMIC_RADIUS_MIN   = 20;     // Minimaler Suchradius in Tiles
+inline constexpr int   DYNAMIC_RADIUS_MAX   = 300;    // Maximaler Suchradius in Tiles
 
 // 🔢 Iterationsparameter
 inline constexpr int INITIAL_ITERATIONS = 100;   // Startwert für Iterationen
@@ -87,5 +82,23 @@ inline int dynamicTileSize(float zoom) {
     return bestSize;
 }
 
+// 🚀 Dynamischer Variance-Threshold basierend auf Zoom
+inline float dynamicVarianceThreshold(float zoom) {
+    float scaled = VARIANCE_THRESHOLD * (1.0f + 0.02f * log2f(zoom + 1.0f));
+    return std::clamp(scaled, VARIANCE_THRESHOLD, MIN_VARIANCE_THRESHOLD * 10.0f);
+}
+
+// 🚀 Dynamischer Suchradius basierend auf Zoom
+inline int dynamicSearchRadius(float zoom) {
+    float radius = DYNAMIC_RADIUS_SCALE * sqrtf(zoom);
+    return std::clamp(static_cast<int>(radius), DYNAMIC_RADIUS_MIN, DYNAMIC_RADIUS_MAX);
+}
+
+// 🚀 Dynamisches Iterationslimit basierend auf Zoom
+inline int dynamicIterationLimit(float zoom) {
+    float boost = 1.0f + 0.001f * zoom;
+    int iterations = static_cast<int>(INITIAL_ITERATIONS * boost);
+    return std::min(iterations, MAX_ITERATIONS_CAP);
+}
 
 } // namespace Settings

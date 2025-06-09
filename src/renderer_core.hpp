@@ -2,10 +2,8 @@
 #define RENDERER_CORE_HPP
 
 #include <vector>
-#include <cuda_gl_interop.h>   // cudaGraphicsResource_t
-#ifndef __CUDACC__
-#include <GL/glew.h>           // GLuint (nur für CPU-Seite relevant)
-#endif
+#include <cuda_gl_interop.h>   // für cudaGraphicsResource_t
+#include <GL/glew.h>           // für GLuint
 
 struct GLFWwindow;             // 🐭 Forward Declaration spart Include-Zeit
 
