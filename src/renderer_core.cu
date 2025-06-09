@@ -22,6 +22,7 @@ inline void CUDA_CHECK(cudaError_t err) {
         std::exit(EXIT_FAILURE);
     }
 }
+
 inline void GL_CHECK() {
     if (GLenum err = glGetError(); err != GL_NO_ERROR) {
         std::cerr << "OpenGL error: 0x" << std::hex << err << std::dec << '\n';
@@ -65,7 +66,7 @@ Renderer::~Renderer() {
     if (pbo) glDeleteBuffers(1, &pbo);
     if (tex) glDeleteTextures(1, &tex);
     if (program) glDeleteProgram(program);
-    OpenGLUtils::deleteFullscreenQuad(&VAO, &VBO, &EBO); // ✅ Namespace fix
+    OpenGLUtils::deleteFullscreenQuad(&VAO, &VBO, &EBO);
     Hud::cleanup();
     if (window) {
         glfwDestroyWindow(window);
@@ -132,11 +133,11 @@ void Renderer::initGL_impl() {
     cudaGLSetGLDevice(0);
 
     setupPBOAndTexture();
-    program = OpenGLUtils::createProgramFromSource(vertexShaderSrc, fragmentShaderSrc); // ✅ Namespace fix
+    program = OpenGLUtils::createProgramFromSource(vertexShaderSrc, fragmentShaderSrc);
     glUseProgram(program);
     glUniform1i(glGetUniformLocation(program, "uTex"), 0);
     glUseProgram(0);
-    OpenGLUtils::createFullscreenQuad(&VAO, &VBO, &EBO); // ✅ Namespace fix
+    OpenGLUtils::createFullscreenQuad(&VAO, &VBO, &EBO);
     GL_CHECK();
     setupBuffers();
     lastTime = glfwGetTime();
@@ -147,22 +148,37 @@ void Renderer::initGL_impl() {
 }
 
 void Renderer::renderFrame_impl(bool autoZoomEnabled) {
+    static int lastTileSize = -1;  // 🐭 Merkt sich letzte Tile-Size pro Frame
+    
     double frameStart = glfwGetTime();
     frameCount++;
+
     if (frameStart - lastTime >= 1.0) {
         currentFPS = static_cast<float>(frameCount) / static_cast<float>(frameStart - lastTime);
         frameCount = 0;
         lastTime = frameStart;
     }
 
+    // Dynamische Tile-Größe anhand des Zoom-Levels
+    int currentTileSize = Settings::dynamicTileSize(zoom);
+    if (currentTileSize != lastTileSize) {
+        if (Settings::debugLogging) {
+            std::printf("[DEBUG] TileSize changed to %d\n", currentTileSize);
+        }
+        lastTileSize = currentTileSize;
+    }
+
+    // CUDA Frame Rendering
     CudaInterop::renderCudaFrame(cudaPboRes, windowWidth, windowHeight, zoom, offset,
         Progressive::getCurrentIterations(), d_complexity, h_complexity, d_iterations, autoZoomEnabled);
 
+    // OpenGL: PBO → Texture
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, windowWidth, windowHeight, GL_RGBA, GL_UNSIGNED_BYTE, 0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
+    // OpenGL: Render Frame
     glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(program);
     glBindVertexArray(VAO);
@@ -170,12 +186,14 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     glBindVertexArray(0);
     glUseProgram(0);
 
-    lastFrameTime = static_cast<float>((glfwGetTime() - frameStart) * 1000.0);
+    lastFrameTime = static_cast<float>((glfwGetTime() - frameStart) * 1000.0);  // ms
     Hud::draw(currentFPS, lastFrameTime, zoom, offset.x, offset.y, windowWidth, windowHeight);
 
     glfwSwapBuffers(window);
     glfwPollEvents();
 }
+
+
 
 void Renderer::setupPBOAndTexture() {
     glGenBuffers(1, &pbo);
@@ -193,8 +211,6 @@ void Renderer::setupPBOAndTexture() {
 }
 
 void Renderer::setupBuffers() {
-    if (d_complexity) CUDA_CHECK(cudaFree(d_complexity));
-    if (d_iterations) CUDA_CHECK(cudaFree(d_iterations));
     int totalTiles = ((windowWidth + Settings::TILE_W - 1) / Settings::TILE_W) *
                      ((windowHeight + Settings::TILE_H - 1) / Settings::TILE_H);
     d_complexity = MemoryUtils::allocComplexityBuffer(totalTiles);
