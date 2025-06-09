@@ -211,9 +211,11 @@ void Renderer::setupPBOAndTexture() {
 }
 
 void Renderer::setupBuffers() {
-    int totalTiles = ((windowWidth + Settings::TILE_W - 1) / Settings::TILE_W) *
-                     ((windowHeight + Settings::TILE_H - 1) / Settings::TILE_H);
+    constexpr int minTileSize = Settings::MIN_TILE_SIZE;
+    int totalTiles = ((windowWidth + minTileSize - 1) / minTileSize) *
+                     ((windowHeight + minTileSize - 1) / minTileSize);
     d_complexity = MemoryUtils::allocComplexityBuffer(totalTiles);
     h_complexity.resize(totalTiles);
     CUDA_CHECK(cudaMalloc(&d_iterations, windowWidth * windowHeight * sizeof(int)));
 }
+
