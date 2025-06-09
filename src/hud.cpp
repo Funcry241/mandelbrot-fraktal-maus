@@ -3,22 +3,21 @@
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
 #include "hud.hpp"
+
 #include <vector>
+#include <string>
+#include <cstdio>
 
 #ifndef __CUDACC__
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #endif
 
-#include <cstdio>
-#include <string>
-
 namespace Hud {
 
-static GLuint hudVAO = 0;
-static GLuint hudVBO = 0;
-static GLuint hudProgram = 0;
-
+// ------------------------------------------------------------
+// 🖥️ HUD Shader Sources
+// ------------------------------------------------------------
 static const char* vertexShaderSrc = R"GLSL(
 #version 430 core
 layout(location = 0) in vec2 aPos;
@@ -33,11 +32,21 @@ static const char* fragmentShaderSrc = R"GLSL(
 #version 430 core
 out vec4 FragColor;
 void main() {
-    FragColor = vec4(1.0, 1.0, 1.0, 1.0); // White text with alpha
+    FragColor = vec4(1.0, 1.0, 1.0, 1.0); // Weißes HUD mit voller Deckkraft
 }
 )GLSL";
 
-GLuint compileShader(GLenum type, const char* src) {
+// ------------------------------------------------------------
+// 🧩 Interne HUD OpenGL State
+// ------------------------------------------------------------
+static GLuint hudVAO = 0;
+static GLuint hudVBO = 0;
+static GLuint hudProgram = 0;
+
+// ------------------------------------------------------------
+// 🛠️ Shader Compilation & Linking
+// ------------------------------------------------------------
+static GLuint compileShader(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, nullptr);
     glCompileShader(shader);
@@ -47,24 +56,29 @@ GLuint compileShader(GLenum type, const char* src) {
     if (!success) {
         char infoLog[512];
         glGetShaderInfoLog(shader, 512, nullptr, infoLog);
-        fprintf(stderr, "[SHADER ERROR] %s\n", infoLog);
+        fprintf(stderr, "[HUD SHADER ERROR]\n%s\n", infoLog);
     }
 
     return shader;
 }
 
-GLuint createHUDProgram() {
+static GLuint createHUDProgram() {
     GLuint vs = compileShader(GL_VERTEX_SHADER, vertexShaderSrc);
     GLuint fs = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSrc);
-    GLuint prog = glCreateProgram();
-    glAttachShader(prog, vs);
-    glAttachShader(prog, fs);
-    glLinkProgram(prog);
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vs);
+    glAttachShader(program, fs);
+    glLinkProgram(program);
+
     glDeleteShader(vs);
     glDeleteShader(fs);
-    return prog;
+
+    return program;
 }
 
+// ------------------------------------------------------------
+// 🎯 Öffentliche API
+// ------------------------------------------------------------
 void init() {
     glGenVertexArrays(1, &hudVAO);
     glGenBuffers(1, &hudVBO);
@@ -77,6 +91,7 @@ void init() {
 void drawText(const std::string& text, float x, float y, float width, float height) {
     if (text.empty()) return;
 
+    // 📝 STB-Easy-Font Mesh
     char buffer[99999];
     int num_quads = stb_easy_font_print(x, y, const_cast<char*>(text.c_str()), nullptr, buffer, sizeof(buffer));
 
@@ -85,7 +100,7 @@ void drawText(const std::string& text, float x, float y, float width, float heig
     };
 
     std::vector<Vertex> vertices;
-    vertices.reserve(num_quads * 6);
+    vertices.reserve(num_quads * 6); // 2 Triangles = 6 vertices per quad
 
     for (int i = 0; i < num_quads; ++i) {
         unsigned char* quad = reinterpret_cast<unsigned char*>(buffer) + i * 64;
@@ -107,7 +122,7 @@ void drawText(const std::string& text, float x, float y, float width, float heig
     glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
 
     glUseProgram(hudProgram);
     glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
@@ -122,8 +137,11 @@ void drawText(const std::string& text, float x, float y, float width, float heig
 void draw(float fps, float frameTimeMs, float zoom, float offsetX, float offsetY, int width, int height) {
     char hudText1[256];
     char hudText2[256];
-    std::snprintf(hudText1, sizeof(hudText1), "FPS: %.1f | Zoom: %.2f | Offset: (%.3f, %.3f)", fps, zoom, offsetX, offsetY);
-    std::snprintf(hudText2, sizeof(hudText2), "Frame Time: %.2f ms", frameTimeMs);
+    std::snprintf(hudText1, sizeof(hudText1),
+                  "FPS: %.1f | Zoom: %.2f | Offset: (%.3f, %.3f)",
+                  fps, zoom, offsetX, offsetY);
+    std::snprintf(hudText2, sizeof(hudText2),
+                  "Frame Time: %.2f ms", frameTimeMs);
 
     drawText(hudText1, 10.0f, 20.0f, static_cast<float>(width), static_cast<float>(height));
     drawText(hudText2, 10.0f, 50.0f, static_cast<float>(width), static_cast<float>(height));

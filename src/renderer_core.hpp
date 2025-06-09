@@ -1,30 +1,38 @@
 #ifndef RENDERER_CORE_HPP
 #define RENDERER_CORE_HPP
 
-#include <GLFW/glfw3.h>
 #include <vector>
-#include <cuda_gl_interop.h>
+#include <cuda_gl_interop.h>   // für cudaGraphicsResource_t
+#include <GL/glew.h>           // für GLuint
+
+struct GLFWwindow;             // 🐭 Forward Declaration spart Include-Zeit
 
 class Renderer {
 public:
-    Renderer(int width, int height);
-    ~Renderer();                               // 🐭 Automatisches Cleanup
+    __host__ Renderer(int width, int height);                 // 🐭 Konstruktor für CPU
+    __host__ ~Renderer();                                      // 🐭 Destruktor für CPU
 
-    void initGL();                             // Initialisiert OpenGL & CUDA
-    void renderFrame(bool autoZoomEnabled = true);  // 🐭 Rendert einen Frame (Auto-Zoom optional)
-    bool shouldClose() const;                  // Prüft, ob Fenster geschlossen werden soll
-    void resize(int newWidth, int newHeight);  // Behandelt Fenstergrößenänderung
-    GLFWwindow* getWindow() const;             // 🐭 Zugriff auf das Fenster für Callbacks
+    __host__ void initGL();                                    // OpenGL & CUDA initialisieren
+    __host__ void renderFrame(bool autoZoomEnabled);           // Frame Rendern (Auto-Zoom optional)
+    __host__ bool shouldClose() const;                         // Prüfen, ob Fenster geschlossen werden soll
+    __host__ void resize(int newWidth, int newHeight);         // Fenstergrößenänderung behandeln
+    __host__ GLFWwindow* getWindow() const;                    // Zugriff auf GLFW Fenster (z.B. für Callbacks)
 
 private:
-    void initGL_impl();                        // OpenGL Context Setup intern
-    void renderFrame_impl(bool autoZoomEnabled);    // 🐭 Frame Render intern mit Auto-Zoom
-    void setupPBOAndTexture();                 // PBO + Texture initialisieren
-    void setupBuffers();                       // CUDA-Buffer initialisieren
+    __host__ void initGL_impl();                               // OpenGL Context Setup intern
+    __host__ void renderFrame_impl(bool autoZoomEnabled);      // 🐭 Internes Frame Rendering
+    __host__ void setupPBOAndTexture();                        // PBO + Textur Setup
+    __host__ void setupBuffers();                              // CUDA-Buffer Setup
 
-    int windowWidth, windowHeight;
+    int windowWidth;
+    int windowHeight;
     GLFWwindow* window;
-    GLuint pbo, tex, program, VAO, VBO, EBO;
+    GLuint pbo;
+    GLuint tex;
+    GLuint program;
+    GLuint VAO;
+    GLuint VBO;
+    GLuint EBO;
     cudaGraphicsResource_t cudaPboRes;
     float* d_complexity;
     int* d_iterations;
@@ -33,7 +41,8 @@ private:
     float2 offset;
     double lastTime;
     int frameCount;
-    float currentFPS, lastFrameTime;
+    float currentFPS;
+    float lastFrameTime;
 };
 
 #endif // RENDERER_CORE_HPP

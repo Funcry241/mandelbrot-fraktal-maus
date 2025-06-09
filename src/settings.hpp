@@ -34,7 +34,6 @@ inline constexpr float VARIANCE_THRESHOLD      = 1e-12f;  // Ausgangs-Schwelle f
 inline constexpr float MIN_VARIANCE_THRESHOLD  = 1e-10f;  // Verhindert, dass die Schwelle zu klein wird (sonst Blindflug)
 
 // Dynamischer Variance-Threshold in Abhängigkeit vom Zoom
-// 📈 Sinkt logarithmisch, bleibt aber über einem minimalen Wert
 inline float dynamicVarianceThreshold(float zoom) {
     return std::max(VARIANCE_THRESHOLD / logf(zoom + 2.0f), MIN_VARIANCE_THRESHOLD);
 }
@@ -45,13 +44,28 @@ inline constexpr int   DYNAMIC_RADIUS_MIN   = 20;    // Minimaler Suchradius in 
 inline constexpr int   DYNAMIC_RADIUS_MAX   = 300;   // Maximaler Suchradius in Tiles
 
 // 🔢 Iterationsparameter
-inline constexpr int TILE_W             = 8;     // Kachelbreite (Pixels pro Tile)
-inline constexpr int TILE_H             = 8;     // Kachelhöhe
 inline constexpr int INITIAL_ITERATIONS = 100;   // Startwert für Iterationen
 inline constexpr int MAX_ITERATIONS_CAP = 5000;  // Obergrenze für Iterationen
 inline constexpr int ITERATION_STEP     = 5;     // Erhöhungsschritte bei Progressiv-Rendern
 
 // 🐾 Sanftes Gliding für Offset-Animationen
 inline constexpr float LERP_FACTOR = 0.02f;      // Geschwindigkeit der Zielanpassung (kleiner = weicher)
+
+// 🧩 Dynamische Tile-Größe (adaptive Kacheln)
+inline constexpr int BASE_TILE_SIZE = 8;     // Basisgröße für Tiles
+inline constexpr int MIN_TILE_SIZE  = 4;     // Minimale Tile-Größe
+inline constexpr int MAX_TILE_SIZE  = 32;    // Maximale Tile-Größe
+
+// 🧩 Feste Tile-Größen für statische CUDA-Grid-Berechnung
+inline constexpr int TILE_W = 16;            // CUDA Blockbreite
+inline constexpr int TILE_H = 16;            // CUDA Blockhöhe
+
+// 🚀 Adaptive Tile-Berechnung basierend auf dem Zoom
+inline int dynamicTileSize(float zoom) {
+    float logZoom = log10f(zoom + 1.0f); // Vermeidet log(0)
+    int size = static_cast<int>(BASE_TILE_SIZE * (8.0f / (logZoom + 1.0f)));
+    size = std::clamp(size, MIN_TILE_SIZE, MAX_TILE_SIZE);
+    return size;
+}
 
 } // namespace Settings

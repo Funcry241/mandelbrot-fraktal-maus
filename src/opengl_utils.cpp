@@ -1,18 +1,25 @@
-// Datei: src/opengl_utils.cpp
-
 #include "opengl_utils.hpp"
 #include <iostream>
-#include <GL/glew.h>  // Sicherstellen, dass GLEW eingebunden ist
+
+#ifndef __CUDACC__
+#include <GL/glew.h>
+#endif
+
+namespace OpenGLUtils {
 
 // Globale VAO-ID für das Fullscreen-Quad
+#ifndef __CUDACC__
 GLuint gFullscreenVAO = 0;
+#endif
 
 // Hilfsfunktion: Shader kompilieren
+#ifndef __CUDACC__
 static GLuint compileShader(GLenum type, const char* src) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
     glCompileShader(s);
-    GLint ok; glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+    GLint ok;
+    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
     if (!ok) {
         char buf[512];
         glGetShaderInfoLog(s, 512, nullptr, buf);
@@ -29,7 +36,8 @@ GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) {
     glAttachShader(prog, v);
     glAttachShader(prog, f);
     glLinkProgram(prog);
-    GLint ok; glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+    GLint ok;
+    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
     if (!ok) {
         char buf[512];
         glGetProgramInfoLog(prog, 512, nullptr, buf);
@@ -40,6 +48,8 @@ GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) {
     glDeleteShader(f);
     return prog;
 }
+
+#endif // __CUDACC__
 
 void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) {
     float quad[] = {
@@ -55,25 +65,29 @@ void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) {
     glGenBuffers(1, outEBO);
 
     glBindVertexArray(*outVAO);
-      glBindBuffer(GL_ARRAY_BUFFER, *outVBO);
-      glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, *outVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
 
-      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *outEBO);
-      glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(idx), idx, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *outEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(idx), idx, GL_STATIC_DRAW);
 
-      glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-      glEnableVertexAttribArray(0);
-      glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-      glEnableVertexAttribArray(1);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
     glBindVertexArray(0);
 
-    gFullscreenVAO = *outVAO; // Speichere das VAO global für drawFullscreenQuad
+#ifndef __CUDACC__
+    gFullscreenVAO = *outVAO;
+#endif
 }
 
 void drawFullscreenQuad() {
+#ifndef __CUDACC__
     glBindVertexArray(gFullscreenVAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
+#endif
 }
 
 void deleteFullscreenQuad(GLuint* inVAO, GLuint* inVBO, GLuint* inEBO) {
@@ -81,3 +95,5 @@ void deleteFullscreenQuad(GLuint* inVAO, GLuint* inVBO, GLuint* inEBO) {
     glDeleteBuffers(1, inEBO);
     glDeleteVertexArrays(1, inVAO);
 }
+
+} // namespace OpenGLUtils

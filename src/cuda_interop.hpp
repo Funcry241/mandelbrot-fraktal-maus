@@ -3,50 +3,39 @@
 #include <vector>
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
-#include <GLFW/glfw3.h> // 🐭 Für Tasteneingaben
+#include <GLFW/glfw3.h> // 🐭 Für Tasteneingaben (Space: Auto-Zoom, P: Pause)
 
 // ----------------------------------------------------------------------
-// 🐭 Kernel-Wrappers
-
-extern "C" void launch_debugGradient(uchar4* img, int width, int height);
-
-// 🐭 Mandelbrot-Hybrid-Renderer (Iteration Buffer wird mitgeführt)
-// Kein extern "C", da C++-Signatur!
-void launch_mandelbrotHybrid(
-    uchar4* img,
-    int* iterations,   // 🐭 Iteration Buffer
-    int width,
-    int height,
-    float zoom,
-    float2 offset,
-    int maxIter
-);
-
-// ----------------------------------------------------------------------
-// 🐭 Gesamte CUDA-Rendering-Pipeline (Namespace CudaInterop)
+// 🎯 CUDA-Rendering- und Auto-Zoom-Controller (Namespace CudaInterop)
 namespace CudaInterop {
 
-/// 🐭 Rendert einen CUDA-Frame in ein OpenGL-PBO mit optionalem Auto-Zoom.
+/// 🖼️ Rendert ein Frame in ein OpenGL-PBO (optional mit Auto-Zoom auf interessante Bereiche)
 void renderCudaFrame(
-    cudaGraphicsResource_t cudaPboRes,
+    cudaGraphicsResource_t cudaPboRes, // 🐭 OpenGL PBO Resource
     int width,
     int height,
-    float& zoom,
-    float2& offset,
-    int maxIter,
-    float* d_complexity,
-    std::vector<float>& h_complexity,
-    int* d_iterations,
-    bool autoZoomEnabled    // 🐭 Auto-Zoom jetzt gesteuert über Parameter
+    float& zoom,                       // 🔍 Aktueller Zoomfaktor (wird ggf. modifiziert)
+    float2& offset,                    // 🎯 Aktueller Offset (Mitte des Bildes im Fraktalraum)
+    int maxIter,                       // ⏳ Max Iterationen pro Pixel
+    float* d_complexity,               // 🐭 CUDA-Buffer für Tile-Komplexitäten (Device)
+    std::vector<float>& h_complexity,  // 🐭 Host-Speicher für Komplexitätsanalyse
+    int* d_iterations,                 // 🐭 CUDA-Buffer für Iterationstiefe je Pixel
+    bool autoZoomEnabled               // 🐭 Steuerung: Auto-Zoom aktivieren/deaktivieren
 );
 
-/// 🐭 Key-Callback zur Laufzeit-Steuerung (z.B. Leertaste für Pause/Resume)
-void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+/// ⌨️ Key-Callback für Laufzeitsteuerung (Space: Auto-Zoom an/aus, P: Pause/Resume)
+void keyCallback(
+    GLFWwindow* window,
+    int key,
+    int scancode,
+    int action,
+    int mods
+);
 
-/// 🐭 Setzt den Pause-Zustand für Zoom (true = pausiert)
+/// ⏸️ Setzt den Pause-Modus für den Auto-Zoom (true = Pause)
 void setPauseZoom(bool pause);
 
-/// 🐭 Holt den aktuellen Pause-Zustand für Zoom
+/// ⏯️ Fragt ab, ob der Auto-Zoom aktuell pausiert ist
 bool getPauseZoom();
 
 } // namespace CudaInterop

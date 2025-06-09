@@ -1,9 +1,13 @@
-// Datei: src/memory_utils.hpp
-
 #pragma once
+#ifndef MEMORY_UTILS_HPP
+#define MEMORY_UTILS_HPP
 
-// ------------------------------------------------------------
-// Speicher-Utilities für CUDA-Buffer
-// ------------------------------------------------------------
+#include <cuda_runtime.h>
 
-extern "C" float* allocComplexityBuffer(int totalTiles);
+namespace MemoryUtils {
+
+float* allocComplexityBuffer(int totalTiles);
+
+} // namespace MemoryUtils
+
+#endif // MEMORY_UTILS_HPP

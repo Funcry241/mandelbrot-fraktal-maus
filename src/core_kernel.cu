@@ -1,36 +1,46 @@
 // Datei: src/core_kernel.cu
-// 🐭 Maus-Kommentar: Komplexitätsberechnung via Varianz – robuster, strukturbetonter Auto-Zoom
+// 🐭 Maus-Kommentar: Mandelbrot-Renderer & adaptive Komplexitätsbewertung — mit dynamischen Kachelgrößen
 
 #include <cstdio>
-#include "settings.hpp"
 #include <cuda_runtime.h>
 #include <vector_types.h>
 #include <device_launch_parameters.h>
+#include "settings.hpp"
 #include "core_kernel.h"
 
+// 🐭 Device-Konstante für Variance Threshold (für spätere dynamische Anpassungen)
 __device__ float deviceVarianceThreshold = 1e-6f;
 
+// 🐭 Host-Funktion zum Setzen des Variance Thresholds
 extern "C" void setDeviceVarianceThreshold(float threshold) {
     cudaMemcpyToSymbol(deviceVarianceThreshold, &threshold, sizeof(float));
 }
 
+// 🐭 Debug-Testbild: Farbverlauf statt Mandelbrot
 __global__ void testKernel(uchar4* img, int w, int h) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= w || y >= h) return;
+
     img[y * w + x] = make_uchar4((x * 255) / w, (y * 255) / h, 128, 255);
 }
 
-extern "C" void launch_debugGradient(uchar4* img, int w, int h) {
-    dim3 threads(Settings::TILE_W, Settings::TILE_H);
+// 🐭 Wrapper zum Starten des Testbilds (Zoom-Parameter für spätere Erweiterung vorbereitet)
+extern "C" void launch_debugGradient(uchar4* img, int w, int h, float zoom) {
+    (void)zoom;  // 🐭 Aktuell unbenutzt — später evtl. Zoom-abhängige Farbmodulation
+
+    dim3 threads(Settings::BASE_TILE_SIZE, Settings::BASE_TILE_SIZE);  // 🐭 Feste Threads für Debug
     dim3 blocks((w + threads.x - 1) / threads.x, (h + threads.y - 1) / threads.y);
+
     printf("[INFO] DebugGradient Grid (%d, %d)\n", blocks.x, blocks.y);
+
     testKernel<<<blocks, threads>>>(img, w, h);
     cudaDeviceSynchronize();
 }
 
+// 🖌️ Mandelbrot-Color-Mapping (Sanfte Farbverläufe)
 __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy, float zoom) {
-    if (iter >= maxIter) return make_uchar4(0, 0, 0, 255);
+    if (iter >= maxIter) return make_uchar4(0, 0, 0, 255);  // Schwarz für Punkte innerhalb der Menge
 
     float log_zn = logf(zx * zx + zy * zy) * 0.5f;
     float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
@@ -49,7 +59,16 @@ __device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, floa
     return make_uchar4(fminf(r * 255.0f, 255.0f), fminf(g * 255.0f, 255.0f), fminf(b * 255.0f, 255.0f), 255);
 }
 
-__global__ void mandelbrotHybrid(uchar4* img, int* iterations, int w, int h, float zoom, float2 offset, int maxIter) {
+// 🌀 Mandelbrot-Berechnung pro Pixel + Iterationspuffer schreiben
+__global__ void mandelbrotHybrid(
+    uchar4* img,
+    int* iterations,
+    int w,
+    int h,
+    float zoom,
+    float2 offset,
+    int maxIter
+) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= w || y >= h) return;
@@ -70,9 +89,18 @@ __global__ void mandelbrotHybrid(uchar4* img, int* iterations, int w, int h, flo
     iterations[y * w + x] = iter;
 }
 
-extern "C" void launch_mandelbrotHybrid(uchar4* img, int* iterations, int w, int h, float zoom, float2 offset, int maxIter) {
+// 🐭 Host-Wrapper für Mandelbrot-Rendering
+extern "C" void launch_mandelbrotHybrid(
+    uchar4* img,
+    int* iterations,
+    int w,
+    int h,
+    float zoom,
+    float2 offset,
+    int maxIter
+) {
     static bool firstLaunch = true;
-    dim3 threads(Settings::TILE_W, Settings::TILE_H);
+    dim3 threads(Settings::BASE_TILE_SIZE, Settings::BASE_TILE_SIZE);
     dim3 blocks((w + threads.x - 1) / threads.x, (h + threads.y - 1) / threads.y);
 
     if (firstLaunch) {
@@ -84,14 +112,20 @@ extern "C" void launch_mandelbrotHybrid(uchar4* img, int* iterations, int w, int
     cudaDeviceSynchronize();
 }
 
-// 🐭 Komplexitätsbewertung mit Standardabweichung (streuungsbasiert)
-__global__ void computeComplexity(const int* iterations, int w, int h, float* complexity) {
+// 🧮 Komplexitätsbewertung mit adaptiver Tile-Size
+extern "C" __global__ void computeComplexity(
+    const int* iterations,
+    int w,
+    int h,
+    float* complexity,
+    int tileSize   // 🐭 Adaptiv!
+) {
     int tileX = blockIdx.x;
     int tileY = blockIdx.y;
-    int tilesX = (w + Settings::TILE_W - 1) / Settings::TILE_W;
+    int tilesX = (w + tileSize - 1) / tileSize;
 
-    int startX = tileX * Settings::TILE_W;
-    int startY = tileY * Settings::TILE_H;
+    int startX = tileX * tileSize;
+    int startY = tileY * tileSize;
 
     int localX = threadIdx.x;
     int localY = threadIdx.y;
@@ -100,9 +134,10 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
 
     int localId = localY * blockDim.x + localX;
 
-    __shared__ float sumIter[Settings::TILE_W * Settings::TILE_H];
-    __shared__ float sumIterSq[Settings::TILE_W * Settings::TILE_H];
-    __shared__ int count[Settings::TILE_W * Settings::TILE_H];
+    extern __shared__ float sharedData[];
+    float* sumIter   = sharedData;
+    float* sumIterSq = sharedData + blockDim.x * blockDim.y;
+    int*   count     = (int*)(sharedData + 2 * blockDim.x * blockDim.y);
 
     float iterValue = 0.0f;
     int valid = 0;
@@ -115,9 +150,10 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
     sumIter[localId] = iterValue;
     sumIterSq[localId] = iterValue * iterValue;
     count[localId] = valid;
+
     __syncthreads();
 
-    // Parallel Reduction für Summe und Summe der Quadrate
+    // 🛠️ Parallel Reduction für Summe und Summe der Quadrate
     for (int stride = (blockDim.x * blockDim.y) / 2; stride > 0; stride >>= 1) {
         if (localId < stride) {
             sumIter[localId] += sumIter[localId + stride];
@@ -133,7 +169,7 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
             float mean = sumIter[0] / n;
             float meanSq = sumIterSq[0] / n;
             float variance = meanSq - mean * mean;
-            variance = variance > 0.0f ? variance : 0.0f; // 👈 Sicherheit gegen numerischen Fehler
+            variance = variance > 0.0f ? variance : 0.0f; // 🐭 Sicherheit gegen numerischen Fehler
             float stddev = sqrtf(variance);
 
             complexity[tileY * tilesX + tileX] = stddev;
@@ -142,4 +178,3 @@ __global__ void computeComplexity(const int* iterations, int w, int h, float* co
         }
     }
 }
-

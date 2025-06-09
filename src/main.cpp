@@ -1,4 +1,9 @@
 // Datei: src/main.cpp
+
+#define GLEW_STATIC
+#include <GL/glew.h>   // 🐭 GANZ WICHTIG: Erst GLEW!
+#include <GLFW/glfw3.h> // Danach GLF
+
 #include "renderer_core.hpp"
 #include "settings.hpp"
 #include "cuda_interop.hpp"
@@ -14,10 +19,11 @@ int main() {
 
     while (!renderer.shouldClose()) {
         GLFWwindow* window = renderer.getWindow();
-        int spaceState = glfwGetKey(window, GLFW_KEY_SPACE);
-        int pState     = glfwGetKey(window, GLFW_KEY_P); // 🐭 Taste P zum Pausieren
 
-        // 🐭 Toggle Auto-Zoom mit SPACE
+        int spaceState = glfwGetKey(window, GLFW_KEY_SPACE);
+        int pState     = glfwGetKey(window, GLFW_KEY_P); // 🐭 Taste P für Pause/Resume
+
+        // 🐾 Auto-Zoom toggeln (Space)
         if (spaceState == GLFW_PRESS && !spaceWasPressed) {
             autoZoomEnabled = !autoZoomEnabled;
             spaceWasPressed = true;
@@ -27,7 +33,7 @@ int main() {
             spaceWasPressed = false;
         }
 
-        // 🐭 Toggle Pause/Resume Zoom mit P
+        // 🐾 Pause/Resume toggeln (P)
         if (pState == GLFW_PRESS && !pauseWasPressed) {
             bool currentPauseState = CudaInterop::getPauseZoom();
             CudaInterop::setPauseZoom(!currentPauseState);
@@ -38,10 +44,11 @@ int main() {
             pauseWasPressed = false;
         }
 
+        // 🖼️ Render Frame mit (de)aktiviertem Auto-Zoom
         renderer.renderFrame(autoZoomEnabled);
 
-        // 🐭 Iterationen immer erhöhen, egal ob Zoom aktiv
-        incrementIterations();
+        // 🧠 Iterationstiefe progressiv erhöhen
+        Progressive::incrementIterations(); // <--- Fix hier!
     }
 
     return 0;

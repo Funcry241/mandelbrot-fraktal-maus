@@ -5,8 +5,10 @@
 #include <cstdlib>   // ✨ Fix: für std::exit()
 #include "memory_utils.hpp"
 
+namespace MemoryUtils { // <--- 🐾 Namespace öffnen!
+
 // Device-Speicher für Complexity-Buffer
-extern "C" float* allocComplexityBuffer(int totalTiles) {
+float* allocComplexityBuffer(int totalTiles) {
     float* d_complexity = nullptr;
     cudaError_t err = cudaMalloc(&d_complexity, totalTiles * sizeof(float));
     if (err != cudaSuccess) {
@@ -15,3 +17,5 @@ extern "C" float* allocComplexityBuffer(int totalTiles) {
     }
     return d_complexity;
 }
+
+} // namespace MemoryUtils  // <--- 🐾 Namespace schließen!

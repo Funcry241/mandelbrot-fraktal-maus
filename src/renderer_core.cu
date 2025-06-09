@@ -65,7 +65,7 @@ Renderer::~Renderer() {
     if (pbo) glDeleteBuffers(1, &pbo);
     if (tex) glDeleteTextures(1, &tex);
     if (program) glDeleteProgram(program);
-    deleteFullscreenQuad(&VAO, &VBO, &EBO);
+    OpenGLUtils::deleteFullscreenQuad(&VAO, &VBO, &EBO); // ✅ Namespace fix
     Hud::cleanup();
     if (window) {
         glfwDestroyWindow(window);
@@ -132,11 +132,11 @@ void Renderer::initGL_impl() {
     cudaGLSetGLDevice(0);
 
     setupPBOAndTexture();
-    program = createProgramFromSource(vertexShaderSrc, fragmentShaderSrc);
+    program = OpenGLUtils::createProgramFromSource(vertexShaderSrc, fragmentShaderSrc); // ✅ Namespace fix
     glUseProgram(program);
     glUniform1i(glGetUniformLocation(program, "uTex"), 0);
     glUseProgram(0);
-    createFullscreenQuad(&VAO, &VBO, &EBO);
+    OpenGLUtils::createFullscreenQuad(&VAO, &VBO, &EBO); // ✅ Namespace fix
     GL_CHECK();
     setupBuffers();
     lastTime = glfwGetTime();
@@ -156,7 +156,7 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     }
 
     CudaInterop::renderCudaFrame(cudaPboRes, windowWidth, windowHeight, zoom, offset,
-        getCurrentIterations(), d_complexity, h_complexity, d_iterations, autoZoomEnabled);
+        Progressive::getCurrentIterations(), d_complexity, h_complexity, d_iterations, autoZoomEnabled);
 
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -197,7 +197,7 @@ void Renderer::setupBuffers() {
     if (d_iterations) CUDA_CHECK(cudaFree(d_iterations));
     int totalTiles = ((windowWidth + Settings::TILE_W - 1) / Settings::TILE_W) *
                      ((windowHeight + Settings::TILE_H - 1) / Settings::TILE_H);
-    d_complexity = allocComplexityBuffer(totalTiles);
+    d_complexity = MemoryUtils::allocComplexityBuffer(totalTiles);
     h_complexity.resize(totalTiles);
     CUDA_CHECK(cudaMalloc(&d_iterations, windowWidth * windowHeight * sizeof(int)));
 }
