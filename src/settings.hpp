@@ -62,10 +62,30 @@ inline constexpr int TILE_H = 16;            // CUDA Blockhöhe
 
 // 🚀 Adaptive Tile-Berechnung basierend auf dem Zoom
 inline int dynamicTileSize(float zoom) {
-    float logZoom = log10f(zoom + 1.0f); // Vermeidet log(0)
-    int size = static_cast<int>(BASE_TILE_SIZE * (8.0f / (logZoom + 1.0f)));
-    size = std::clamp(size, MIN_TILE_SIZE, MAX_TILE_SIZE);
-    return size;
+    static int lastSize = -1;  // 🐭 Merkt sich letzte TileSize
+
+    float logZoom = log10f(zoom + 1.0f);
+    float rawSize = BASE_TILE_SIZE * (8.0f / (logZoom + 1.0f));
+
+    constexpr int allowedSizes[] = {32, 16, 8, 4};
+
+    int bestSize = allowedSizes[0];
+    for (int size : allowedSizes) {
+        if (rawSize >= size) {
+            bestSize = size;
+            break;
+        }
+    }
+
+    if (bestSize != lastSize) {
+#if defined(DEBUG) || defined(_DEBUG) || Settings::debugLogging
+        std::printf("[DEBUG] TileSize changed to %d\n", bestSize);
+#endif
+        lastSize = bestSize;
+    }
+
+    return bestSize;
 }
+
 
 } // namespace Settings
