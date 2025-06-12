@@ -94,5 +94,6 @@
       "xtree": "cpp",
       "xutility": "cpp"
     },
-    "files.insertFinalNewline": true
+    "files.insertFinalNewline": true,
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/${buildKit}/compile_commands.json"
 }
