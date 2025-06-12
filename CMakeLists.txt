@@ -46,7 +46,7 @@ add_executable(mandelbrot_otterdream
 target_include_directories(mandelbrot_otterdream PRIVATE
     "${CUDA_TOOLKIT_ROOT_DIR}/include"
     "${CMAKE_SOURCE_DIR}/src"
-    "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/include"
+    "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/include"
 )
 
 # ---------------------------------------------------------
