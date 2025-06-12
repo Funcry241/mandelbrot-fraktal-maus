@@ -132,7 +132,7 @@ if (Test-Path $exe) {
 }
 
 foreach ($dll in 'glfw3.dll','glew32.dll') {
-    $src = Get-ChildItem "$vcpkgRoot\installed\x64-windows\bin" -Filter $dll -ErrorAction SilentlyContinue | Select-Object -First 1
+    $src = Get-ChildItem "$PSScriptRoot\vcpkg_installed\x64-windows\bin" -Filter $dll -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($src) {
         Copy-Item $src.FullName -Destination dist -Force
         Write-Host "[COPY] $dll → dist" -ForegroundColor Green
