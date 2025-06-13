@@ -116,9 +116,11 @@ void Renderer::resize(int newWidth, int newHeight) {
     if (newWidth <= 0 || newHeight <= 0) return;
     windowWidth = newWidth;
     windowHeight = newHeight;
+
     if (cudaPboRes) CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboRes));
     if (pbo) glDeleteBuffers(1, &pbo);
     if (tex) glDeleteTextures(1, &tex);
+
     setupPBOAndTexture();
     setupBuffers();
     glViewport(0, 0, windowWidth, windowHeight);
@@ -225,12 +227,22 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
 
 // 🔧 Setup für PBO + Texture + CUDA Interop
 void Renderer::setupPBOAndTexture() {
+    // 🧹 Vorherige CUDA-Registrierung sicher entfernen
+    if (cudaPboRes) {
+        CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboRes));
+        cudaPboRes = nullptr;
+    }
+
+    // 🎯 PBO (Pixel Buffer Object) erzeugen und initialisieren
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, windowWidth * windowHeight * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+    // 🔗 CUDA <-> OpenGL Interop: Registrierung des PBO
     CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPboRes, pbo, cudaGraphicsMapFlagsWriteDiscard));
 
+    // 🎨 Textur erstellen, die vom Shader angezeigt wird
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, windowWidth, windowHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
