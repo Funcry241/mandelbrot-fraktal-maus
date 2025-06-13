@@ -1,109 +1,100 @@
 <#
-.SYNOPSIS
-    MausGit.ps1
-.DESCRIPTION
-    Dieses PowerShell-Skript initialisiert ein Git-Repository im Projektverzeichnis,
-    legt eine .gitignore an, fügt (falls noch nicht vorhanden) den Remote „MandelbrotFraktalMaus“ hinzu,
-    erstellt einen ersten Commit und pusht den Branch „main“ zu GitHub.
-.NOTES
-    Stelle sicher, dass Du die Variable $remoteUrl unten mit Deiner tatsächlichen Repository-URL ersetzt.
+  MausSecret: ερμής-17
+  Dieses Skript initialisiert ein Git-Repository, erstellt ggf. eine .gitignore,
+  fügt Remote „MandelbrotFraktalMaus“ hinzu und pusht auf GitHub.
+  🐭 Kompakt, verständlich, elegant.
 #>
 
-# ------------------------------------------------------------
-# Konfiguration: Name und URL des Git-Remotes
-$remoteName = "MandelbrotFraktalMaus"
-# Ersetze den folgenden Wert durch Deine eigene GitHub-SSH-URL:
-$remoteUrl  = "git@github.com:Funcry241/mandelbrot-fraktal-maus.git"
+$ErrorActionPreference = 'Stop'
+Write-Host "– 🐭 MausGit startet –"
 
-# ------------------------------------------------------------
-# 1) Repository initialisieren, falls noch kein .git existiert
-if (-not (Test-Path -Path ".git" -PathType Container)) {
-    Write-Host "[GIT] Repository initialisieren..."
+# 🔧 Konfiguration
+$remoteName = "MandelbrotFraktalMaus"
+$remoteUrl  = "git@github.com:Funcry241/mandelbrot-fraktal-maus.git"
+$gitignorePath = ".gitignore"
+
+# 📁 Repository initialisieren, falls nötig
+if (-not (Test-Path ".git" -PathType Container)) {
+    Write-Host "[GIT] Initialisiere Repository..."
     git init
 } else {
-    Write-Host "[GIT] Repository bereits initialisiert"
+    Write-Host "[GIT] Repository bereits vorhanden."
 }
 
-# ------------------------------------------------------------
-# 2) .gitignore erstellen, wenn noch nicht vorhanden
-$gitignorePath = ".gitignore"
+# 📝 .gitignore erzeugen (wenn fehlt)
 if (-not (Test-Path $gitignorePath)) {
-    Write-Host "[GIT] .gitignore erstellen"
-    @"
-# ----------------------------------------------------------------------
-# Build-Ordner und Distribution
+    Write-Host "[GIT] Erzeuge .gitignore"
+@'
+# Build
 /build/
 /dist/
+/build-vs/
 
-# ----------------------------------------------------------------------
-# Visual Studio-Dateien (Projekte & Lösungen)
-/*.vcxproj*
+# Visual Studio
+*.vcxproj*
 *.suo
 *.user
 *.vcxproj.filters
 
-# ----------------------------------------------------------------------
-# VSCode-Einstellungen
+# VSCode
 .vscode/
+!.vscode/c_cpp_properties.json
 
-# ----------------------------------------------------------------------
-# Temporäre Dateien und Logs
+# Temp & Logs
 *.log
 Thumbs.db
+Desktop.ini
+*~
 
-# ----------------------------------------------------------------------
-# vcpkg-Ordner (Abhängigkeiten & Pakete)
+# vcpkg
 vcpkg/
+vcpkg_installed/
 
-# ----------------------------------------------------------------------
-# (Optional) Weitere Artefakte, die üblicherweise nicht versioniert werden
-# Object- & Bibliotheksdateien
+# Output
 *.obj
 *.lib
 *.dll
 *.exe
 *.pdb
 
-# ----------------------------------------------------------------------
-# (Optional) macOS-spezifisch
-.DS_Store
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
 
-# ----------------------------------------------------------------------
-# (Optional) Linux-spezifisch
-*~
-"@ | Out-File -Encoding UTF8 $gitignorePath
+# IDEs
+.idea/
+.DS_Store
+'@ | Out-File -Encoding UTF8 $gitignorePath
 } else {
-    Write-Host "[GIT] .gitignore existiert bereits"
+    Write-Host "[GIT] .gitignore existiert bereits."
 }
 
-# ------------------------------------------------------------
-# 3) Dateien zum Commit vormerken und Commit erzeugen
-Write-Host "[GIT] Dateien zum Commit vormerken"
+# 📦 Dateien hinzufügen und ersten Commit erstellen (falls nötig)
+Write-Host "[GIT] Dateien zum Commit vormerken..."
 git add .
 
-# Prüfe, ob bereits ein Commit existiert
-$hasCommits = git rev-parse --verify HEAD 2>$null
+# Nur committen, wenn noch kein Commit existiert
+git rev-parse --verify HEAD 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[GIT] Erstelle Initial-Commit"
+    Write-Host "[GIT] Erstelle Initial-Commit..."
     git commit -m "Initial import: OtterDream Mandelbrot Fraktal-Projekt"
 } else {
-    Write-Host "[GIT] Es existiert bereits mindestens ein Commit"
+    Write-Host "[GIT] Bereits ein Commit vorhanden."
 }
 
-# ------------------------------------------------------------
-# 4) Remote hinzufügen, falls noch nicht vorhanden
-$existingRemotes = git remote
-if ($existingRemotes -notcontains $remoteName) {
-    Write-Host "[GIT] Remote '$remoteName' hinzufügen: $remoteUrl"
+# 🌐 Remote hinzufügen, wenn fehlt
+if (-not (git remote | Where-Object { $_ -eq $remoteName })) {
+    Write-Host "[GIT] Füge Remote '$remoteName' hinzu → $remoteUrl"
     git remote add $remoteName $remoteUrl
 } else {
-    Write-Host "[GIT] Remote '$remoteName' existiert bereits"
+    Write-Host "[GIT] Remote '$remoteName' existiert bereits."
 }
 
-# ------------------------------------------------------------
-# 5) Push zu GitHub (Branch main)
-Write-Host "[GIT] Pushe Branch 'main' zu '$remoteName'"
-# Wenn der lokale Branch main noch keinen Tracking-Branch hat, wird dieser gesetzt
+# ⬆️ Push auf main (mit Upstream setzen)
+Write-Host "[GIT] Pushe auf Branch 'main' zu '$remoteName'..."
 git push --set-upstream $remoteName main
 
-Write-Host "[GIT] Push abgeschlossen"
+Write-Host "– ✅ MausGit abgeschlossen –"
+exit 0

@@ -62,5 +62,4 @@ if ($rareChance -eq 1) {
         Write-Host $line -ForegroundColor Cyan
     }
     Write-Host "Rare Otter Encounter!" -ForegroundColor Magenta
-}
-
+} # <-- diese schließende Klammer fehlte ursprünglich

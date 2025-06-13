@@ -1,25 +1,52 @@
-<#  
-  MausSecret: σείριος-7  
-  (Nur ich weiß: Dieses Skript entfernt temporäre, Backup- und Log-Dateien, lässt Quellcode unberührt.)  
+<#
+  MausSecret: σείριος-7
+  Dieses Skript löscht temporäre Build-, Debug- und Log-Dateien im Mandelbrot-Projekt.
+  Optimiert: Eine rekursive Traversierung, Prüfung per Datei- und Ordnername.
+  Nur "Dreck" wird entfernt – Sourcecode bleibt sicher!
 #>
 
-# Stoppe bei Fehlern
 $ErrorActionPreference = 'Stop'
-Write-Host "– MausDelete startet –"
+Write-Host "– 🚮 MausDelete startet –"
 
-# Liste der Muster, die gelöscht werden dürfen
-$delPatterns = @('*.obj','*.o','*.ilk','*.pdb','*.log','*.tmp','*~','CMakeFiles','CMakeCache.txt','build')
+# 🔍 Dateierweiterungen, die gelöscht werden sollen
+$fileExtensions = @('.obj', '.o', '.ilk', '.pdb', '.log', '.tmp')
 
-foreach ($pat in $delPatterns) {
-    Get-ChildItem -Recurse -Force -Filter $pat | ForEach-Object {
-        try {
-            Remove-Item $_.FullName -Recurse -Force
-            Write-Host "  Entfernt: $($_.FullName)"
-        } catch {
-            Write-Warning "  Fehler beim Löschen: $($_.FullName)"
+# 🔍 Spezifische Dateinamenmuster (mit Wildcards)
+$filenamePatterns = @('CMakeCache.txt', '*~')
+
+# 🗂️ Ordnernamen, die gelöscht werden sollen
+$folderNames = @('CMakeFiles', 'build')
+
+# 📁 Alle Dateien & Verzeichnisse im Projekt durchsuchen (rekursiv)
+$allItems = Get-ChildItem -Recurse -Force
+
+foreach ($item in $allItems) {
+    try {
+        $shouldDelete = $false
+
+        # 📄 Prüfung für Dateien
+        if (-not $item.PSIsContainer) {
+            if ($fileExtensions -contains $item.Extension) {
+                $shouldDelete = $true
+            } elseif ($filenamePatterns | Where-Object { $item.Name -like $_ }) {
+                $shouldDelete = $true
+            }
         }
+
+        # 📁 Prüfung für Ordner
+        if ($item.PSIsContainer -and ($folderNames -contains $item.Name)) {
+            $shouldDelete = $true
+        }
+
+        # 🚮 Löschung, wenn markiert
+        if ($shouldDelete) {
+            Remove-Item $item.FullName -Recurse -Force
+            Write-Host "  Entfernt: $($item.FullName)"
+        }
+    } catch {
+        Write-Warning "  Fehler beim Löschen: $($item.FullName)"
     }
 }
 
-Write-Host "– MausDelete abgeschlossen –"
+Write-Host "– ✅ MausDelete abgeschlossen –"
 exit 0
