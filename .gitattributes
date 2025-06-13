@@ -1,0 +1,48 @@
+# 🧠 Maus-Kommentar: Einheitliche Line Endings, Syntax-Hervorhebung, saubere Diffs – für Mandelbrot-Otterdream
+
+# --------------------------------------------------------
+# Standardtextdateien: automatisch LF
+* text=auto eol=lf
+
+# --------------------------------------------------------
+# Quellcode – explizit Unix-LF, unabhängig vom OS
+*.cpp     text eol=lf
+*.c       text eol=lf
+*.cu      text eol=lf
+*.hpp     text eol=lf
+*.h       text eol=lf
+*.glsl    text eol=lf
+*.vert    text eol=lf
+*.frag    text eol=lf
+*.cmake   text eol=lf
+CMakeLists.txt text eol=lf
+
+# --------------------------------------------------------
+# Batch- und Shell-Skripte
+*.sh      text eol=lf
+*.bat     text eol=crlf
+*.ps1     text eol=crlf
+
+# --------------------------------------------------------
+# Markdown und Doku
+*.md      text eol=lf
+*.txt     text eol=lf
+
+# --------------------------------------------------------
+# Binary files – nicht diffbar
+*.exe     binary
+*.dll     binary
+*.lib     binary
+*.pdb     binary
+*.obj     binary
+*.zip     binary
+*.png     binary
+*.jpg     binary
+
+# --------------------------------------------------------
+# VS Code settings (json = normal text)
+*.json    text eol=lf
+
+# --------------------------------------------------------
+# Unicode safe fallback (z. B. für UTF-8-BOM-Warnungen)
+*.ini     text eol=lf

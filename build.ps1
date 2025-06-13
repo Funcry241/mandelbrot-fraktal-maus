@@ -122,8 +122,13 @@ if (Test-Path $exe) {
     exit 1
 }
 
+$dllSearchRoots = Get-ChildItem "$PSScriptRoot\vcpkg_installed" -Recurse -Directory | Where-Object { $_.Name -eq "bin" }
+
 foreach ($dll in 'glfw3.dll','glew32.dll') {
-    $src = Get-ChildItem "$PSScriptRoot\vcpkg_installed\x64-windows\bin" -Filter $dll -ErrorAction SilentlyContinue | Select-Object -First 1
+    $src = $dllSearchRoots | ForEach-Object {
+        Get-ChildItem $_.FullName -Filter $dll -ErrorAction SilentlyContinue
+    } | Select-Object -First 1
+
     if ($src) {
         Copy-Item $src.FullName -Destination dist -Force
         Write-Host "[COPY] $dll → dist" -ForegroundColor Green
@@ -132,6 +137,7 @@ foreach ($dll in 'glfw3.dll','glew32.dll') {
         exit 1
     }
 }
+
 
 $cudaDlls = Get-ChildItem $cudaBin -Filter 'cudart64_*.dll'
 if ($cudaDlls) {

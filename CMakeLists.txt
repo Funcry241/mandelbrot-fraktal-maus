@@ -42,11 +42,10 @@ add_executable(mandelbrot_otterdream
 )
 
 # ---------------------------------------------------------
-# 📚 Include-Pfade
+# 📚 Include-Pfade (Vcpkg wird über Toolchain verwaltet)
 target_include_directories(mandelbrot_otterdream PRIVATE
     "${CUDA_TOOLKIT_ROOT_DIR}/include"
     "${CMAKE_SOURCE_DIR}/src"
-    "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/include"
 )
 
 # ---------------------------------------------------------

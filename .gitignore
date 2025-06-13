@@ -1,34 +1,37 @@
 # ----------------------------------------------------------------------
-# Build-Ordner und Distribution
+# 🛠️ Build-Ordner & Distribution
 /build/
-/build-vs/
+/build-*/
 /dist/
 
 # ----------------------------------------------------------------------
-# Visual Studio-Dateien (Projekte & Lösungen)
-/*.vcxproj*
+# 📁 Visual Studio-Dateien
+*.sln
+*.vcxproj*
 *.suo
 *.user
 *.vcxproj.filters
 
 # ----------------------------------------------------------------------
-# VSCode-Einstellungen
+# 🧠 VSCode Einstellungen
 .vscode/*
 !.vscode/c_cpp_properties.json
 
 # ----------------------------------------------------------------------
-# Temporäre Dateien und Logs
+# 🧹 Temporäre Dateien & Logs
 *.log
+*.tmp
+*.bak
 Thumbs.db
 Desktop.ini
 
 # ----------------------------------------------------------------------
-# vcpkg-Ordner (Abhängigkeiten & Pakete)
+# 📦 vcpkg
 vcpkg/
-/vcpkg_installed/
+vcpkg_installed/
 
 # ----------------------------------------------------------------------
-# Object- & Bibliotheksdateien
+# 🧱 Build-Artefakte
 *.obj
 *.lib
 *.dll
@@ -36,29 +39,30 @@ vcpkg/
 *.pdb
 
 # ----------------------------------------------------------------------
-# CMake-Dateien
+# ⚙️ CMake
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
+compile_commands.json
 
 # ----------------------------------------------------------------------
-# JetBrains IDE (CLion) Projektdateien
+# 🧠 JetBrains (CLion)
 .idea/
 
 # ----------------------------------------------------------------------
-# macOS-spezifisch
+# 🍏 macOS
 .DS_Store
 
 # ----------------------------------------------------------------------
-# Linux-spezifisch
+# 🐧 Linux
 *~
 
 # ----------------------------------------------------------------------
-# ZIP-Archive und Exporte
+# 📦 ZIP & Exporte
 *.zip
 OtterDream_Project.zip
 
 # ----------------------------------------------------------------------
-# User-Settings-Dateien (lokal)
+# 👤 Benutzerabhängige Konfigurationen
 /imgui.ini
