@@ -64,8 +64,7 @@ Renderer::Renderer(int width, int height)
       lastTime(0.0), frameCount(0), currentFPS(0.0f), lastFrameTime(0.0f) {}
 
 Renderer::~Renderer() {
-    if (d_complexity) CUDA_CHECK(cudaFree(d_complexity));
-    if (d_iterations) CUDA_CHECK(cudaFree(d_iterations));
+    freeDeviceBuffers();
     CudaInterop::unregisterPBO();
     if (pbo) glDeleteBuffers(1, &pbo);
     if (tex) glDeleteTextures(1, &tex);
@@ -75,6 +74,14 @@ Renderer::~Renderer() {
     if (window) {
         glfwDestroyWindow(window);
         glfwTerminate();
+    }
+}
+
+void Renderer::freeDeviceBuffers() {
+    MemoryUtils::freeComplexityBuffer(d_complexity);  // statt cudaFree
+    if (d_iterations) {
+        CUDA_CHECK(cudaFree(d_iterations));
+        d_iterations = nullptr;
     }
 }
 
@@ -114,32 +121,16 @@ void Renderer::resize(int newWidth, int newHeight) {
     windowWidth = newWidth;
     windowHeight = newHeight;
 
-    // 🔌 CUDA-Interop: alte Ressource deregistrieren (falls vorhanden)
     if (pbo) {
-        CudaInterop::unregisterPBO(); // Muss vor glDeleteBuffers erfolgen!
-        glDeleteBuffers(1, &pbo);     // 🧹 PBO freigeben (OpenGL)
+        CudaInterop::unregisterPBO();
+        glDeleteBuffers(1, &pbo);
         pbo = 0;
     }
-
-    // 🧹 Alte Textur löschen
     if (tex) {
         glDeleteTextures(1, &tex);
         tex = 0;
     }
-
-    // 🧠 Iterationsbuffer freigeben (GPU → CUDA)
-    if (d_iterations) {
-        CUDA_CHECK(cudaFree(d_iterations));
-        d_iterations = nullptr;
-    }
-
-    // 📊 Komplexitätspuffer freigeben (GPU → CUDA)
-    if (d_complexity) {
-        CUDA_CHECK(cudaFree(d_complexity));
-        d_complexity = nullptr;
-    }
-
-    // 🔄 Neue OpenGL- & CUDA-Ressourcen anlegen
+    freeDeviceBuffers();
     setupPBOAndTexture();
     setupBuffers();
     glViewport(0, 0, windowWidth, windowHeight);
@@ -194,7 +185,7 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     bool shouldZoom;
 
     CudaInterop::renderCudaFrame(
-        nullptr,  // pointer wird innerhalb von renderCudaFrame() gemappt
+        nullptr,
         d_iterations,
         d_complexity,
         nullptr,
@@ -239,7 +230,7 @@ void Renderer::setupPBOAndTexture() {
     glBufferData(GL_PIXEL_UNPACK_BUFFER, windowWidth * windowHeight * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    CudaInterop::registerPBO(pbo); // 🟢 Neue Registrierung
+    CudaInterop::registerPBO(pbo);
 
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);

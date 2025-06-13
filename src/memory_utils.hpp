@@ -6,7 +6,11 @@
 
 namespace MemoryUtils {
 
+// 🧠 Allokiert Device-Puffer für Komplexitätsanalyse
 float* allocComplexityBuffer(int totalTiles);
+
+// 🧹 Gibt Device-Puffer für Komplexitätsanalyse frei (idempotent)
+void freeComplexityBuffer(float*& d_buffer);
 
 } // namespace MemoryUtils
 

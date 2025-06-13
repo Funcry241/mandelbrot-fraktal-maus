@@ -23,6 +23,7 @@ private:
     __host__ void renderFrame_impl(bool autoZoomEnabled);      // 🐭 Internes Frame Rendering
     __host__ void setupPBOAndTexture();                        // PBO + Textur Setup
     __host__ void setupBuffers();                              // CUDA-Buffer Setup
+    __host__ void freeDeviceBuffers();                         // CUDA-Buffer Freigabes
 
     int windowWidth;
     int windowHeight;

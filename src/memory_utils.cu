@@ -5,9 +5,9 @@
 #include <cstdlib>   // ✨ Fix: für std::exit()
 #include "memory_utils.hpp"
 
-namespace MemoryUtils { // <--- 🐾 Namespace öffnen!
+namespace MemoryUtils {
 
-// Device-Speicher für Complexity-Buffer
+// Device-Speicher für Complexity-Buffer allokieren
 float* allocComplexityBuffer(int totalTiles) {
     float* d_complexity = nullptr;
     cudaError_t err = cudaMalloc(&d_complexity, totalTiles * sizeof(float));
@@ -18,4 +18,12 @@ float* allocComplexityBuffer(int totalTiles) {
     return d_complexity;
 }
 
-} // namespace MemoryUtils  // <--- 🐾 Namespace schließen!
+// Device-Speicher freigeben (idempotent)
+void freeComplexityBuffer(float*& d_buffer) {
+    if (d_buffer) {
+        cudaFree(d_buffer);  // Fehler werden bewusst ignoriert
+        d_buffer = nullptr;
+    }
+}
+
+} // namespace MemoryUtils
