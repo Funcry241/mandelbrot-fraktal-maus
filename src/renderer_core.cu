@@ -109,12 +109,37 @@ bool Renderer::shouldClose() const {
 
 void Renderer::resize(int newWidth, int newHeight) {
     if (newWidth <= 0 || newHeight <= 0) return;
+
+    // 🔄 Neue Fenstergröße speichern
     windowWidth = newWidth;
     windowHeight = newHeight;
 
-    if (pbo) glDeleteBuffers(1, &pbo);
-    if (tex) glDeleteTextures(1, &tex);
+    // 🔌 CUDA-Interop: alte Ressource deregistrieren (falls vorhanden)
+    if (pbo) {
+        CudaInterop::unregisterPBO(); // Muss vor glDeleteBuffers erfolgen!
+        glDeleteBuffers(1, &pbo);     // 🧹 PBO freigeben (OpenGL)
+        pbo = 0;
+    }
 
+    // 🧹 Alte Textur löschen
+    if (tex) {
+        glDeleteTextures(1, &tex);
+        tex = 0;
+    }
+
+    // 🧠 Iterationsbuffer freigeben (GPU → CUDA)
+    if (d_iterations) {
+        CUDA_CHECK(cudaFree(d_iterations));
+        d_iterations = nullptr;
+    }
+
+    // 📊 Komplexitätspuffer freigeben (GPU → CUDA)
+    if (d_complexity) {
+        CUDA_CHECK(cudaFree(d_complexity));
+        d_complexity = nullptr;
+    }
+
+    // 🔄 Neue OpenGL- & CUDA-Ressourcen anlegen
     setupPBOAndTexture();
     setupBuffers();
     glViewport(0, 0, windowWidth, windowHeight);
