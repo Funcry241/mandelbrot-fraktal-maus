@@ -184,9 +184,10 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         currentTileSize
     );
 
-    if (autoZoomEnabled && shouldZoom) {
-        offset = newOffset;
-        zoom *= Settings::AUTOZOOM_SPEED;
+   if (autoZoomEnabled && shouldZoom) {
+        offset.x = offset.x + Settings::LERP_FACTOR * (newOffset.x - offset.x);
+        offset.y = offset.y + Settings::LERP_FACTOR * (newOffset.y - offset.y);
+        zoom *= (1.0f + Settings::ZOOM_STEP_FACTOR);
     }
 
     glBindTexture(GL_TEXTURE_2D, tex);
