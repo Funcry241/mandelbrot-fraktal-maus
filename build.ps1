@@ -100,15 +100,6 @@ New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 Write-Host "[BUILD] Configuring CMake..."
 $env:Path += ";C:\ProgramData\chocolatey\bin"
 
-# ✨ Dynamisch -DUSE_NATIVE_GPU=ON setzen, falls Parameter aktiv
-$gpuOption = ""
-if ($UseNativeGpu) {
-    Write-Host "[GPU] Native GPU Architecture Detection ENABLED." -ForegroundColor Cyan
-    $gpuOption = "-DUSE_NATIVE_GPU=ON"
-} else {
-    Write-Host "[GPU] Default GPU Architectures ENABLED." -ForegroundColor Cyan
-}
-
 cmake -S . -B build -G Ninja `
     "-DCMAKE_TOOLCHAIN_FILE=$PSScriptRoot/vcpkg/scripts/buildsystems/vcpkg.cmake" `
     "-DCMAKE_BUILD_TYPE=$Configuration" `
