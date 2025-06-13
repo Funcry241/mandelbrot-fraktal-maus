@@ -11,16 +11,19 @@ namespace CudaInterop {
 
 /// 🖼️ Rendert ein Frame in ein OpenGL-PBO (optional mit Auto-Zoom auf interessante Bereiche)
 void renderCudaFrame(
-    cudaGraphicsResource_t cudaPboRes, // 🐭 OpenGL PBO Resource
-    int width,
-    int height,
-    float& zoom,                       // 🔍 Aktueller Zoomfaktor (wird ggf. modifiziert)
-    float2& offset,                    // 🎯 Aktueller Offset (Mitte des Bildes im Fraktalraum)
-    int maxIter,                       // ⏳ Max Iterationen pro Pixel
-    float* d_complexity,               // 🐭 CUDA-Buffer für Tile-Komplexitäten (Device)
-    std::vector<float>& h_complexity,  // 🐭 Host-Speicher für Komplexitätsanalyse
-    int* d_iterations,                 // 🐭 CUDA-Buffer für Iterationstiefe je Pixel
-    bool autoZoomEnabled               // 🐭 Steuerung: Auto-Zoom aktivieren/deaktivieren
+    uchar4* pbo,                        // 🧵 OpenGL-PBO (mapped CUDA-Pointer)
+    int* d_iterations,                 // 🔁 Iterationen je Pixel (CUDA-Buffer)
+    float* d_stddev,                   // σ Tile-Komplexität (Standardabweichung je Tile)
+    float* d_mean,                     // μ Durchschnittliche Iterationen je Tile
+    int width,                         // 📐 Bildbreite
+    int height,                        // 📐 Bildhöhe
+    float zoom,                        // 🔍 Aktueller Zoomfaktor
+    float2 offset,                     // 🎯 Bildmittelpunkt im Fraktalraum
+    int maxIterations,                 // ⏳ Max Iterationen pro Pixel
+    std::vector<float>& h_complexity,  // 📊 Host-Puffer für Komplexitätsanalyse
+    float2& outNewOffset,              // ⛳ Ziel-Koordinate für nächsten Zoom
+    bool& shouldZoom,                  // 🚦 Zoom auslösen?
+    int tileSize  // ⬅️ ❗️Dieser Parameter fehlte!
 );
 
 /// ⌨️ Key-Callback für Laufzeitsteuerung (Space: Auto-Zoom an/aus, P: Pause/Resume)

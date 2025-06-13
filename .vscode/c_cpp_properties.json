@@ -4,7 +4,7 @@
       "name": "Windows",
       "includePath": [
         "${workspaceFolder}/src",
-        "${env:VCPKG_ROOT}/installed/x64-windows/include",
+        "${workspaceFolder}/vcpkg_installed/x64-windows/include",
         "${env:CUDA_PATH}/include"
       ],
       "defines": [
@@ -14,13 +14,13 @@
       "windowsSdkVersion": "10.0.19041.0",
       "compilerPath": "cl.exe",
       "cStandard": "c11",
-      "cppStandard": "c++17",
+      "cppStandard": "c++23",
       "intelliSenseMode": "windows-msvc-x64",
       "compileCommands": "${workspaceFolder}/build/compile_commands.json",
       "browse": {
         "path": [
           "${workspaceFolder}/src",
-          "${env:VCPKG_ROOT}/installed/x64-windows/include",
+          "${workspaceFolder}/vcpkg_installed/x64-windows/include",
           "${env:CUDA_PATH}/include"
         ],
         "limitSymbolsToIncludedHeaders": true,

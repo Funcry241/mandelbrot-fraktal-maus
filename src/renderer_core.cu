@@ -1,4 +1,4 @@
-// Datei: src/renderer_core.cu
+// 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, HUD und Auto-Zoom.
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -16,6 +16,7 @@
 #include <iostream>
 #include <vector>
 
+// 🔐 CUDA-Fehlerprüfung
 inline void CUDA_CHECK(cudaError_t err) {
     if (err != cudaSuccess) {
         std::cerr << "CUDA error: " << cudaGetErrorString(err) << '\n';
@@ -23,6 +24,7 @@ inline void CUDA_CHECK(cudaError_t err) {
     }
 }
 
+// 🔐 OpenGL-Fehlerprüfung
 inline void GL_CHECK() {
     if (GLenum err = glGetError(); err != GL_NO_ERROR) {
         std::cerr << "OpenGL error: 0x" << std::hex << err << std::dec << '\n';
@@ -30,6 +32,7 @@ inline void GL_CHECK() {
     }
 }
 
+// 🎨 Vertex-Shader: einfache Fullscreen-Quad-Pipeline
 static constexpr const char* vertexShaderSrc = R"GLSL(
 #version 430 core
 layout(location=0) in vec2 aPos;
@@ -41,6 +44,7 @@ void main() {
 }
 )GLSL";
 
+// 🎨 Fragment-Shader: Textur direkt anzeigen
 static constexpr const char* fragmentShaderSrc = R"GLSL(
 #version 430 core
 in vec2 vTex;
@@ -51,6 +55,7 @@ void main() {
 }
 )GLSL";
 
+// 🧱 Konstruktor: Initialwerte setzen
 Renderer::Renderer(int width, int height)
     : windowWidth(width), windowHeight(height), window(nullptr),
       pbo(0), tex(0), program(0), VAO(0), VBO(0), EBO(0),
@@ -59,6 +64,7 @@ Renderer::Renderer(int width, int height)
       offset{Settings::initialOffsetX, Settings::initialOffsetY},
       lastTime(0.0), frameCount(0), currentFPS(0.0f), lastFrameTime(0.0f) {}
 
+// 🚿 Aufräumen und Speicher freigeben
 Renderer::~Renderer() {
     if (d_complexity) CUDA_CHECK(cudaFree(d_complexity));
     if (d_iterations) CUDA_CHECK(cudaFree(d_iterations));
@@ -74,6 +80,7 @@ Renderer::~Renderer() {
     }
 }
 
+// 🪟 GLFW- und OpenGL-Kontext initialisieren
 void Renderer::initGL() {
     if (!glfwInit()) {
         std::cerr << "GLFW init failed\n";
@@ -90,7 +97,7 @@ void Renderer::initGL() {
         std::exit(EXIT_FAILURE);
     }
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
+    glfwSwapInterval(1); // vsync
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int newW, int newH) {
         if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w)))
@@ -99,14 +106,12 @@ void Renderer::initGL() {
     initGL_impl();
 }
 
-void Renderer::renderFrame(bool autoZoomEnabled) {
-    renderFrame_impl(autoZoomEnabled);
-}
-
+// 🚪 GLFW-Fensterschließabfrage
 bool Renderer::shouldClose() const {
     return (window && glfwWindowShouldClose(window));
 }
 
+// 📏 Reaktion auf Fenstergrößenänderung
 void Renderer::resize(int newWidth, int newHeight) {
     if (newWidth <= 0 || newHeight <= 0) return;
     windowWidth = newWidth;
@@ -119,10 +124,12 @@ void Renderer::resize(int newWidth, int newHeight) {
     glViewport(0, 0, windowWidth, windowHeight);
 }
 
+// 👁️ GLFW-Handle abrufen
 GLFWwindow* Renderer::getWindow() const {
     return window;
 }
 
+// ⚙️ OpenGL-Initialisierung (Shader, VAO, Texture etc.)
 void Renderer::initGL_impl() {
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
@@ -147,9 +154,10 @@ void Renderer::initGL_impl() {
     Hud::init();
 }
 
+// 🖼️ Kompletter Frame-Durchlauf inkl. CUDA-Rendering, Texture-Update, HUD
 void Renderer::renderFrame_impl(bool autoZoomEnabled) {
-    static int lastTileSize = -1;  // 🐭 Merkt sich letzte Tile-Size pro Frame
-    
+    static int lastTileSize = -1;
+
     double frameStart = glfwGetTime();
     frameCount++;
 
@@ -159,26 +167,49 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         lastTime = frameStart;
     }
 
-    // Dynamische Tile-Größe anhand des Zoom-Levels
+    // 📦 Dynamische Tile-Größe anhand des Zooms
     int currentTileSize = Settings::dynamicTileSize(zoom);
-    if (currentTileSize != lastTileSize) {
-        if (Settings::debugLogging) {
-            std::printf("[DEBUG] TileSize changed to %d\n", currentTileSize);
-        }
-        lastTileSize = currentTileSize;
+    if (currentTileSize != lastTileSize && Settings::debugLogging)
+        std::printf("[DEBUG] TileSize changed to %d\n", currentTileSize);
+    lastTileSize = currentTileSize;
+
+    // 🔁 CUDA-basierte Fraktal-Generierung + Analyse
+    uchar4* d_output = nullptr;
+    size_t size = 0;
+    CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboRes));
+    CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&d_output, &size, cudaPboRes));
+
+    float2 newOffset;
+    bool shouldZoom;
+    CudaInterop::renderCudaFrame(
+        d_output,
+        d_iterations,
+        d_complexity,
+        nullptr, // d_mean optional
+        windowWidth,
+        windowHeight,
+        zoom,
+        offset,
+        Progressive::getCurrentIterations(),
+        h_complexity,
+        newOffset,
+        shouldZoom,
+        currentTileSize // ✅ 🧩 TILESIZE hinzugefügt
+    );
+    CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboRes));
+
+    if (autoZoomEnabled && shouldZoom) {
+        offset = newOffset;
+        zoom *= 1.05f;
     }
 
-    // CUDA Frame Rendering
-    CudaInterop::renderCudaFrame(cudaPboRes, windowWidth, windowHeight, zoom, offset,
-        Progressive::getCurrentIterations(), d_complexity, h_complexity, d_iterations, autoZoomEnabled);
-
-    // OpenGL: PBO → Texture
+    // 🔁 Texture aktualisieren
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, windowWidth, windowHeight, GL_RGBA, GL_UNSIGNED_BYTE, 0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    // OpenGL: Render Frame
+    // 🖼️ Bildschirm zeichnen
     glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(program);
     glBindVertexArray(VAO);
@@ -186,15 +217,13 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     glBindVertexArray(0);
     glUseProgram(0);
 
-    lastFrameTime = static_cast<float>((glfwGetTime() - frameStart) * 1000.0);  // ms
+    lastFrameTime = static_cast<float>((glfwGetTime() - frameStart) * 1000.0); // ms
     Hud::draw(currentFPS, lastFrameTime, zoom, offset.x, offset.y, windowWidth, windowHeight);
-
     glfwSwapBuffers(window);
     glfwPollEvents();
 }
 
-
-
+// 🔧 Setup für PBO + Texture + CUDA Interop
 void Renderer::setupPBOAndTexture() {
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -210,6 +239,7 @@ void Renderer::setupPBOAndTexture() {
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+// 📦 CUDA-Buffer für Iterationen & Komplexitätsanalyse anlegen
 void Renderer::setupBuffers() {
     constexpr int minTileSize = Settings::MIN_TILE_SIZE;
     int totalTiles = ((windowWidth + minTileSize - 1) / minTileSize) *
@@ -219,3 +249,7 @@ void Renderer::setupBuffers() {
     CUDA_CHECK(cudaMalloc(&d_iterations, windowWidth * windowHeight * sizeof(int)));
 }
 
+// 🔁 Public API: delegiert an die interne Implementation
+void Renderer::renderFrame(bool autoZoomEnabled) {
+    renderFrame_impl(autoZoomEnabled);
+}
