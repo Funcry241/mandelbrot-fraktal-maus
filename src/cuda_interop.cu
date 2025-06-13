@@ -169,9 +169,13 @@ void renderCudaFrame(
             }
         }
 
+        static int noChangeFrames = 0;
+
         // 🎯 Ziel-Offset aktualisieren, falls besserer Bereich gefunden
-        if (bestIdx != -1 && bestGradient > lastBestGradient * 1.02f) {
+        float threshold = std::max(Settings::VARIANCE_THRESHOLD, lastBestGradient * 0.98f);
+        if (bestIdx != -1 && bestGradient > threshold) {
             lastBestGradient = bestGradient;
+            noChangeFrames = 0;
             int bx = bestIdx % tilesX;
             int by = bestIdx / tilesX;
             float tx = (bx + 0.5f) * tileSize - w * 0.5f;
@@ -183,6 +187,11 @@ void renderCudaFrame(
                 DEBUG_PRINT("New Target Offset: (%.12f, %.12f)", targetOffset.x, targetOffset.y);
             }
         } else {
+            noChangeFrames++;
+            if (noChangeFrames > 100) {
+                lastBestGradient = 0.0f;  // 🧹 Reset zum Freimachen
+                DEBUG_PRINT("Resetting lastBestGradient after %d frames", noChangeFrames);
+            }
             DEBUG_PRINT("No better tile found — continuing.");
         }
 
