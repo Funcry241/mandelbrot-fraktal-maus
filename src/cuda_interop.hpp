@@ -5,8 +5,13 @@
 #include <cuda_gl_interop.h>
 #include <GLFW/glfw3.h> // 🐭 Für Tasteneingaben (Space: Auto-Zoom, P: Pause)
 
-// ----------------------------------------------------------------------
-// 🎯 CUDA-Rendering- und Auto-Zoom-Controller (Namespace CudaInterop)
+// 🐭 Maus-Kommentar:
+// Diese Header-Datei deklariert alle öffentlichen Schnittstellen zum CUDA-Teil:
+// - `renderCudaFrame(...)` rendert ein Fraktalbild und analysiert die Komplexität.
+// - `keyCallback(...)` verarbeitet Tastendrücke.
+// - `setPauseZoom(...)` / `getPauseZoom()` kontrollieren Auto-Zoom-Logik.
+// - `registerPBO(...)` / `unregisterPBO()` kümmern sich um die Registrierung des PBO bei CUDA.
+
 namespace CudaInterop {
 
 /// 🖼️ Rendert ein Frame in ein OpenGL-PBO (optional mit Auto-Zoom auf interessante Bereiche)
@@ -23,10 +28,10 @@ void renderCudaFrame(
     std::vector<float>& h_complexity,  // 📊 Host-Puffer für Komplexitätsanalyse
     float2& outNewOffset,              // ⛳ Ziel-Koordinate für nächsten Zoom
     bool& shouldZoom,                  // 🚦 Zoom auslösen?
-    int tileSize  // ⬅️ ❗️Dieser Parameter fehlte!
+    int tileSize                       // 📦 Tile-Größe für dynamische Analyse
 );
 
-/// ⌨️ Key-Callback für Laufzeitsteuerung (Space: Auto-Zoom an/aus, P: Pause/Resume)
+/// ⌨️ Tasteneingaben (Space: Auto-Zoom an/aus, P: Pause)
 void keyCallback(
     GLFWwindow* window,
     int key,
@@ -35,10 +40,16 @@ void keyCallback(
     int mods
 );
 
-/// ⏸️ Setzt den Pause-Modus für den Auto-Zoom (true = Pause)
+/// ⏸️ Aktiviert oder deaktiviert Auto-Zoom-Pause
 void setPauseZoom(bool pause);
 
-/// ⏯️ Fragt ab, ob der Auto-Zoom aktuell pausiert ist
+/// ⏯️ Prüft, ob Auto-Zoom pausiert ist
 bool getPauseZoom();
+
+/// 🔌 PBO bei CUDA registrieren
+void registerPBO(GLuint pbo);
+
+/// 🧹 PBO von CUDA deregistrieren
+void unregisterPBO();
 
 } // namespace CudaInterop

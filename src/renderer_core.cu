@@ -55,20 +55,18 @@ void main() {
 }
 )GLSL";
 
-// 🧱 Konstruktor: Initialwerte setzen
 Renderer::Renderer(int width, int height)
     : windowWidth(width), windowHeight(height), window(nullptr),
       pbo(0), tex(0), program(0), VAO(0), VBO(0), EBO(0),
-      cudaPboRes(nullptr), d_complexity(nullptr), d_iterations(nullptr),
+      d_complexity(nullptr), d_iterations(nullptr),
       zoom(Settings::initialZoom),
       offset{Settings::initialOffsetX, Settings::initialOffsetY},
       lastTime(0.0), frameCount(0), currentFPS(0.0f), lastFrameTime(0.0f) {}
 
-// 🚿 Aufräumen und Speicher freigeben
 Renderer::~Renderer() {
     if (d_complexity) CUDA_CHECK(cudaFree(d_complexity));
     if (d_iterations) CUDA_CHECK(cudaFree(d_iterations));
-    if (cudaPboRes) CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboRes));
+    CudaInterop::unregisterPBO();
     if (pbo) glDeleteBuffers(1, &pbo);
     if (tex) glDeleteTextures(1, &tex);
     if (program) glDeleteProgram(program);
@@ -80,7 +78,6 @@ Renderer::~Renderer() {
     }
 }
 
-// 🪟 GLFW- und OpenGL-Kontext initialisieren
 void Renderer::initGL() {
     if (!glfwInit()) {
         std::cerr << "GLFW init failed\n";
@@ -97,7 +94,7 @@ void Renderer::initGL() {
         std::exit(EXIT_FAILURE);
     }
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1); // vsync
+    glfwSwapInterval(1);
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int newW, int newH) {
         if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w)))
@@ -106,18 +103,15 @@ void Renderer::initGL() {
     initGL_impl();
 }
 
-// 🚪 GLFW-Fensterschließabfrage
 bool Renderer::shouldClose() const {
     return (window && glfwWindowShouldClose(window));
 }
 
-// 📏 Reaktion auf Fenstergrößenänderung
 void Renderer::resize(int newWidth, int newHeight) {
     if (newWidth <= 0 || newHeight <= 0) return;
     windowWidth = newWidth;
     windowHeight = newHeight;
 
-    if (cudaPboRes) CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboRes));
     if (pbo) glDeleteBuffers(1, &pbo);
     if (tex) glDeleteTextures(1, &tex);
 
@@ -126,12 +120,10 @@ void Renderer::resize(int newWidth, int newHeight) {
     glViewport(0, 0, windowWidth, windowHeight);
 }
 
-// 👁️ GLFW-Handle abrufen
 GLFWwindow* Renderer::getWindow() const {
     return window;
 }
 
-// ⚙️ OpenGL-Initialisierung (Shader, VAO, Texture etc.)
 void Renderer::initGL_impl() {
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
@@ -156,7 +148,6 @@ void Renderer::initGL_impl() {
     Hud::init();
 }
 
-// 🖼️ Kompletter Frame-Durchlauf inkl. CUDA-Rendering, Texture-Update, HUD
 void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     static int lastTileSize = -1;
 
@@ -169,25 +160,19 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         lastTime = frameStart;
     }
 
-    // 📦 Dynamische Tile-Größe anhand des Zooms
     int currentTileSize = Settings::dynamicTileSize(zoom);
     if (currentTileSize != lastTileSize && Settings::debugLogging)
         std::printf("[DEBUG] TileSize changed to %d\n", currentTileSize);
     lastTileSize = currentTileSize;
 
-    // 🔁 CUDA-basierte Fraktal-Generierung + Analyse
-    uchar4* d_output = nullptr;
-    size_t size = 0;
-    CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboRes));
-    CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&d_output, &size, cudaPboRes));
-
     float2 newOffset;
     bool shouldZoom;
+
     CudaInterop::renderCudaFrame(
-        d_output,
+        nullptr,  // pointer wird innerhalb von renderCudaFrame() gemappt
         d_iterations,
         d_complexity,
-        nullptr, // d_mean optional
+        nullptr,
         windowWidth,
         windowHeight,
         zoom,
@@ -196,22 +181,19 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         h_complexity,
         newOffset,
         shouldZoom,
-        currentTileSize // ✅ 🧩 TILESIZE hinzugefügt
+        currentTileSize
     );
-    CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboRes));
 
     if (autoZoomEnabled && shouldZoom) {
         offset = newOffset;
         zoom *= 1.05f;
     }
 
-    // 🔁 Texture aktualisieren
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, windowWidth, windowHeight, GL_RGBA, GL_UNSIGNED_BYTE, 0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    // 🖼️ Bildschirm zeichnen
     glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(program);
     glBindVertexArray(VAO);
@@ -219,30 +201,20 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     glBindVertexArray(0);
     glUseProgram(0);
 
-    lastFrameTime = static_cast<float>((glfwGetTime() - frameStart) * 1000.0); // ms
+    lastFrameTime = static_cast<float>((glfwGetTime() - frameStart) * 1000.0);
     Hud::draw(currentFPS, lastFrameTime, zoom, offset.x, offset.y, windowWidth, windowHeight);
     glfwSwapBuffers(window);
     glfwPollEvents();
 }
 
-// 🔧 Setup für PBO + Texture + CUDA Interop
 void Renderer::setupPBOAndTexture() {
-    // 🧹 Vorherige CUDA-Registrierung sicher entfernen
-    if (cudaPboRes) {
-        CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboRes));
-        cudaPboRes = nullptr;
-    }
-
-    // 🎯 PBO (Pixel Buffer Object) erzeugen und initialisieren
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, windowWidth * windowHeight * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    // 🔗 CUDA <-> OpenGL Interop: Registrierung des PBO
-    CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPboRes, pbo, cudaGraphicsMapFlagsWriteDiscard));
+    CudaInterop::registerPBO(pbo); // 🟢 Neue Registrierung
 
-    // 🎨 Textur erstellen, die vom Shader angezeigt wird
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, windowWidth, windowHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -251,7 +223,6 @@ void Renderer::setupPBOAndTexture() {
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-// 📦 CUDA-Buffer für Iterationen & Komplexitätsanalyse anlegen
 void Renderer::setupBuffers() {
     constexpr int minTileSize = Settings::MIN_TILE_SIZE;
     int totalTiles = ((windowWidth + minTileSize - 1) / minTileSize) *
@@ -261,7 +232,6 @@ void Renderer::setupBuffers() {
     CUDA_CHECK(cudaMalloc(&d_iterations, windowWidth * windowHeight * sizeof(int)));
 }
 
-// 🔁 Public API: delegiert an die interne Implementation
 void Renderer::renderFrame(bool autoZoomEnabled) {
     renderFrame_impl(autoZoomEnabled);
 }
