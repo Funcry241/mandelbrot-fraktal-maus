@@ -2,45 +2,52 @@
 #define RENDERER_CORE_HPP
 
 #include <vector>
-#include <cuda_gl_interop.h>   // für cudaGraphicsResource_t
+#include <cuda_gl_interop.h>   // für CUDA/OpenGL Interop
 #include <GL/glew.h>           // für GLuint
 
 struct GLFWwindow;             // 🐭 Forward Declaration spart Include-Zeit
 
+// 🐭 Renderer-Klasse: Steuert Fenster, OpenGL-Setup, CUDA-Pipeline & Auto-Zoom
 class Renderer {
 public:
-    __host__ Renderer(int width, int height);                 // 🐭 Konstruktor für CPU
-    __host__ ~Renderer();                                      // 🐭 Destruktor für CPU
+    __host__ Renderer(int width, int height);                // 🏗️ Konstruktor
+    __host__ ~Renderer();                                    // 🧹 Destruktor
 
-    __host__ void initGL();                                    // OpenGL & CUDA initialisieren
-    __host__ void renderFrame(bool autoZoomEnabled);           // Frame Rendern (Auto-Zoom optional)
-    __host__ bool shouldClose() const;                         // Prüfen, ob Fenster geschlossen werden soll
-    __host__ void resize(int newWidth, int newHeight);         // Fenstergrößenänderung behandeln
-    __host__ GLFWwindow* getWindow() const;                    // Zugriff auf GLFW Fenster (z.B. für Callbacks)
+    __host__ void initGL();                                  // 🌐 OpenGL-Init (VAO, PBO, Texture)
+    __host__ void renderFrame(bool autoZoomEnabled);         // 🎥 Frame Rendern mit optionalem Auto-Zoom
+    __host__ bool shouldClose() const;                       // 🚪 Fenster schließen?
+    __host__ void resize(int newWidth, int newHeight);       // ↔️ Resize behandeln
+    __host__ GLFWwindow* getWindow() const;                  // 🪟 Zugriff auf GLFW-Handle
 
 private:
-    __host__ void initGL_impl();                               // OpenGL Context Setup intern
-    __host__ void renderFrame_impl(bool autoZoomEnabled);      // 🐭 Internes Frame Rendering
-    __host__ void setupPBOAndTexture();                        // PBO + Textur Setup
-    __host__ void setupBuffers();                              // CUDA-Buffer Setup
-    __host__ void freeDeviceBuffers();                         // CUDA-Buffer Freigabes
+    __host__ void initGL_impl();                             // 🔧 OpenGL Context Setup
+    __host__ void renderFrame_impl(bool autoZoomEnabled);    // 🌀 Rendering Loop
+    __host__ void setupPBOAndTexture();                      // 📦 PBO + Texture konfigurieren
+    __host__ void setupBuffers();                            // 📊 CUDA-Buffer anlegen
+    __host__ void freeDeviceBuffers();                       // 🧽 CUDA-Buffer freigeben (d_stddev, d_iterations, ...)
 
-    int windowWidth;
-    int windowHeight;
-    GLFWwindow* window;
-    GLuint pbo;
-    GLuint tex;
-    GLuint program;
-    GLuint VAO;
-    GLuint VBO;
-    GLuint EBO;
-    cudaGraphicsResource_t cudaPboRes;
-    float* d_complexity;
-    int* d_iterations;
-    std::vector<float> h_complexity;
-    float zoom;
-    float2 offset;
-    double lastTime;
+    int windowWidth;     // 📐 Fensterbreite
+    int windowHeight;    // 📐 Fensterhöhe
+    GLFWwindow* window;  // 🪟 GLFW-Fenster
+
+    // OpenGL Objekte
+    GLuint pbo;          // 🎞️ Pixel Buffer Object
+    GLuint tex;          // 🖼️ Texture
+    GLuint program;      // 🧠 Shader-Programm
+    GLuint VAO, VBO, EBO; // 🔩 Geometrieobjekte
+
+    // CUDA-Buffer
+    float* d_complexity = nullptr;       // σ Komplexität je Tile (Device)
+    float* d_stddev = nullptr;           // σ Standardabweichung je Tile (Device)
+    int* d_iterations = nullptr;         // 🔁 Iterationen je Pixel (Device)
+
+    // Host-Buffer
+    std::vector<float> h_complexity;     // σ Kopie für Auswertung (Host)
+
+    // Frame-Metadaten
+    float zoom;           // 🔍 Zoom-Level
+    float2 offset;        // 🎯 Mittelpunkt im Fraktalraum
+    double lastTime;      // ⏲️ Zeittracking
     int frameCount;
     float currentFPS;
     float lastFrameTime;

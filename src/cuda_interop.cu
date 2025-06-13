@@ -1,5 +1,5 @@
 // 🍝 Maus-Kommentar: CUDA-Interop für Mandelbrot-Renderer –
-// verwaltet PBO-Mapping, Fraktal-Rendering und adaptive Auto-Zoom-Logik.
+// verwaltet PBO-Mapping, Fraktal-Rendering, adaptive Komplexitätsbewertung & Auto-Zoom-Logik.
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -25,9 +25,10 @@
 
 namespace CudaInterop {
 
-static cudaGraphicsResource_t cudaResource = nullptr;
-static bool pauseZoom = false;
+static cudaGraphicsResource_t cudaResource = nullptr;  // 🔗 CUDA ↔ OpenGL Interop-Handle
+static bool pauseZoom = false;                         // ⏸️ Auto-Zoom pausiert?
 
+// 🧼 Deregistriert PBO aus CUDA
 void unregisterPBO() {
     if (cudaResource) {
         CUDA_CHECK(cudaGraphicsUnregisterResource(cudaResource));
@@ -35,6 +36,7 @@ void unregisterPBO() {
     }
 }
 
+// 🧼 Registriert OpenGL-PBO für CUDA-Zugriff
 void registerPBO(GLuint pbo) {
     if (cudaResource) {
         unregisterPBO();
@@ -42,28 +44,44 @@ void registerPBO(GLuint pbo) {
     CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsMapFlagsWriteDiscard));
 }
 
-void renderCudaFrame(uchar4* pbo, int* d_iterations, float* d_stddev, float* d_mean,
-                     int width, int height, float zoom, float2 offset, int maxIterations,
-                     std::vector<float>& h_complexity, float2& outNewOffset, bool& shouldZoom,
-                     int tileSize) {
+// 🖼️ Rendert CUDA-Fraktal-Frame & analysiert Komplexität (Auto-Zoom)
+void renderCudaFrame(uchar4* pbo,
+                     int* d_iterations,
+                     float* d_complexity,
+                     float* d_stddev,
+                     int width,
+                     int height,
+                     float zoom,
+                     float2 offset,
+                     int maxIterations,
+                     const std::vector<float>& h_complexity,
+                     float2& outNewOffset,
+                     bool& shouldZoom,
+                     int tileSize)
+{
     if (!cudaResource) {
         std::fprintf(stderr, "[ERROR] CUDA resource not registered!\n");
         return;
     }
 
+    // 📥 CUDA-Pointer auf OpenGL-PBO holen
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaResource, 0));
     uchar4* devPtr;
     size_t size;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource));
 
+    // 🎨 CUDA-Fraktal berechnen
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations);
 
+    // 📊 Komplexitätsanalyse je Tile
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     int totalTiles = tilesX * tilesY;
-    computeComplexity(d_iterations, d_mean, d_stddev, width, height, tileSize);
-    CUDA_CHECK(cudaMemcpy(h_complexity.data(), d_stddev, totalTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
+    computeComplexity(d_iterations, d_stddev, width, height, tileSize);  // 🔬 GPU
+    CUDA_CHECK(cudaMemcpy((void*)h_complexity.data(), d_stddev, totalTiles * sizeof(float), cudaMemcpyDeviceToHost));  // ⬇️ Host
+
+    // 🔍 Scoring zur Auswahl des besten Tiles
     float bestScore = -1.0f;
     float2 bestTileOffset = {0.0f, 0.0f};
     shouldZoom = false;
@@ -103,14 +121,17 @@ void renderCudaFrame(uchar4* pbo, int* d_iterations, float* d_stddev, float* d_m
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaResource, 0));
 }
 
+// 🔍 Getter für Auto-Zoom-Pause
 bool getPauseZoom() {
     return pauseZoom;
 }
 
+// 📝 Setter für Auto-Zoom-Pause
 void setPauseZoom(bool paused) {
     pauseZoom = paused;
 }
 
+// ⌨️ Callback für Tastendruck (SPACE/P toggelt Auto-Zoom)
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (action != GLFW_PRESS) return;
 

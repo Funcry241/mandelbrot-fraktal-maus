@@ -1,3 +1,4 @@
+// Datei: src/renderer_core.cu
 // 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, HUD und Auto-Zoom.
 
 #include <GL/glew.h>
@@ -18,7 +19,7 @@
 #include "common.hpp"  // ✅ für CUDA_CHECK
 
 namespace {
-// 🔐 OpenGL-Fehlerprüfung
+// 🔐 OpenGL-Fehlerprüfung (Inline-Lambda zur Laufzeitprüfung)
 const auto GL_CHECK = [] {
     if (GLenum err = glGetError(); err != GL_NO_ERROR) {
         std::cerr << "OpenGL error: 0x" << std::hex << err << std::dec << '\n';
@@ -53,7 +54,7 @@ void main() {
 Renderer::Renderer(int width, int height)
     : windowWidth(width), windowHeight(height), window(nullptr),
       pbo(0), tex(0), program(0), VAO(0), VBO(0), EBO(0),
-      d_complexity(nullptr), d_iterations(nullptr),
+      d_complexity(nullptr), d_stddev(nullptr), d_iterations(nullptr),
       zoom(Settings::initialZoom),
       offset{Settings::initialOffsetX, Settings::initialOffsetY},
       lastTime(0.0), frameCount(0), currentFPS(0.0f), lastFrameTime(0.0f) {}
@@ -73,10 +74,14 @@ Renderer::~Renderer() {
 }
 
 void Renderer::freeDeviceBuffers() {
-    MemoryUtils::freeComplexityBuffer(d_complexity);  // statt cudaFree
+    MemoryUtils::freeComplexityBuffer(d_complexity);
     if (d_iterations) {
         CUDA_CHECK(cudaFree(d_iterations));
         d_iterations = nullptr;
+    }
+    if (d_stddev) {
+        CUDA_CHECK(cudaFree(d_stddev));
+        d_stddev = nullptr;
     }
 }
 
@@ -112,7 +117,6 @@ bool Renderer::shouldClose() const {
 void Renderer::resize(int newWidth, int newHeight) {
     if (newWidth <= 0 || newHeight <= 0) return;
 
-    // 🔄 Neue Fenstergröße speichern
     windowWidth = newWidth;
     windowHeight = newHeight;
 
@@ -180,10 +184,10 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     bool shouldZoom;
 
     CudaInterop::renderCudaFrame(
-        nullptr,
+        nullptr,              // aktuell keine Ausgabe in Image-Buffer
         d_iterations,
         d_complexity,
-        nullptr,
+        d_stddev,
         windowWidth,
         windowHeight,
         zoom,
@@ -242,6 +246,7 @@ void Renderer::setupBuffers() {
     d_complexity = MemoryUtils::allocComplexityBuffer(totalTiles);
     h_complexity.resize(totalTiles);
     CUDA_CHECK(cudaMalloc(&d_iterations, windowWidth * windowHeight * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_stddev, totalTiles * sizeof(float)));
 }
 
 void Renderer::renderFrame(bool autoZoomEnabled) {

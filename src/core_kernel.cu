@@ -1,5 +1,5 @@
-// Datei: src/core_kernel.cu
 // 🐭 Maus-Kommentar: Mandelbrot-Kernel mit Farbverlauf + Komplexitätsanalyse je Tile
+// Bereinigung: `mean`-Puffer entfernt, da ungenutzt
 
 #include <cstdio>
 #include <cuda_runtime.h>
@@ -148,7 +148,6 @@ __global__ void computeComplexityKernel(
 
 void computeComplexity(
     const int* iterations,
-    float* mean,
     float* stddev,
     int width,
     int height,
@@ -163,7 +162,4 @@ void computeComplexity(
     );
 
     cudaDeviceSynchronize();
-
-    // 🐭 Aktuell wird `mean` nicht gefüllt – vorbereitend leer lassen:
-    if (mean) cudaMemset(mean, 0, blocks.x * blocks.y * sizeof(float));
 }

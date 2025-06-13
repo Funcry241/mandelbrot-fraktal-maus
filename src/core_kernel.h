@@ -32,15 +32,13 @@ void launch_debugGradient(
 
 // ----------------------------------------------------------------------
 // 3) 🧠 Komplexitätsanalyse (pro Kachel / Tile)
-//     → Berechnet Mittelwert (mean) & Standardabweichung (stddev)
-//     → Jeweils 1 Wert pro Tile (nicht pro Pixel!)
+//     → Berechnet Standardabweichung je Tile (nicht pro Pixel!)
 void computeComplexity(
     const int* iterations,  // 🧠 Iterationswerte aller Pixel
-    float* mean,            // μ Mittelwert je Tile (device-Buffer)
     float* stddev,          // σ Standardabweichung je Tile (device-Buffer)
     int width,              // 📐 Bildbreite in Pixel
-    int height,              // 📐 Bildhöhe in Pixel
-    int tileSize 
+    int height,             // 📐 Bildhöhe in Pixel
+    int tileSize            // 🧩 Größe eines Tiles (z. B. 8x8, 16x16)
 );
 
 // ----------------------------------------------------------------------
