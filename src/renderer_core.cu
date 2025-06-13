@@ -15,21 +15,16 @@
 #include "stb_easy_font.h"
 #include <iostream>
 #include <vector>
+#include "common.hpp"  // ✅ für CUDA_CHECK
 
-// 🔐 CUDA-Fehlerprüfung
-inline void CUDA_CHECK(cudaError_t err) {
-    if (err != cudaSuccess) {
-        std::cerr << "CUDA error: " << cudaGetErrorString(err) << '\n';
-        std::exit(EXIT_FAILURE);
-    }
-}
-
+namespace {
 // 🔐 OpenGL-Fehlerprüfung
-inline void GL_CHECK() {
+const auto GL_CHECK = [] {
     if (GLenum err = glGetError(); err != GL_NO_ERROR) {
         std::cerr << "OpenGL error: 0x" << std::hex << err << std::dec << '\n';
         std::exit(EXIT_FAILURE);
     }
+};
 }
 
 // 🎨 Vertex-Shader: einfache Fullscreen-Quad-Pipeline
@@ -200,7 +195,7 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         currentTileSize
     );
 
-   if (autoZoomEnabled && shouldZoom) {
+    if (autoZoomEnabled && shouldZoom) {
         offset.x = offset.x + Settings::LERP_FACTOR * (newOffset.x - offset.x);
         offset.y = offset.y + Settings::LERP_FACTOR * (newOffset.y - offset.y);
         zoom *= (1.0f + Settings::ZOOM_STEP_FACTOR);
