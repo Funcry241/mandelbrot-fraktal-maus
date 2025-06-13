@@ -33,6 +33,9 @@ inline constexpr float MIN_ZOOM_STEP   = 1e-6f;        // Minimale Änderung bei
 inline constexpr float VARIANCE_THRESHOLD      = 1e-12f;  // Ausgangs-Schwelle für interessante Bildbereiche
 inline constexpr float MIN_VARIANCE_THRESHOLD  = 1e-10f;  // Verhindert, dass die Schwelle zu klein wird (sonst Blindflug)
 
+// 🧐 Auto-Zoom Steuerung — Zoom-Geschwindigkeit
+inline constexpr float AUTOZOOM_SPEED = 1.01f;  // ⬅️ Neu: Zoom-Faktor bei Auto-Zoom
+
 // 🔎 Auto-Zoom Steuerung — Suchradius
 inline constexpr float DYNAMIC_RADIUS_SCALE = 1.0f;   // Skaliert den Suchradius basierend auf √Zoom
 inline constexpr int   DYNAMIC_RADIUS_MIN   = 20;     // Minimaler Suchradius in Tiles

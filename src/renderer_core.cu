@@ -186,7 +186,7 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
 
     if (autoZoomEnabled && shouldZoom) {
         offset = newOffset;
-        zoom *= 1.05f;
+        zoom *= Settings::AUTOZOOM_SPEED;
     }
 
     glBindTexture(GL_TEXTURE_2D, tex);
