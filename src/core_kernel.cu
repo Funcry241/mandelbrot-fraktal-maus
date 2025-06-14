@@ -1,6 +1,6 @@
 // 🐭 Maus-Kommentar: CUDA-Kernel für Mandelbrot-Fraktal und Entropieanalyse pro Tile
-// - `launch_mandelbrotHybrid`: rendert Fraktalbild + Iterationen
-// - `computeTileEntropy`: misst Entropie je Tile zur Bewertung der Bildstruktur (für Auto-Zoom)
+// - launch_mandelbrotHybrid: rendert Fraktalbild + Iterationen
+// - computeTileEntropy: misst Entropie je Tile zur Bewertung der Bildstruktur (für Auto-Zoom)
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -8,12 +8,13 @@
 #include "settings.hpp"
 #include "core_kernel.h"
 
-// 🧾 Vorwärtsdeklaration notwendig, da Kernel unterhalb verwendet wird
+// Vorwärtsdeklaration des Mandelbrot-Kernels
 __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  int width, int height,
                                  float zoom, float2 offset,
                                  int maxIterations);
 
+// 🔢 Berechnet Iterationsanzahl für einen Punkt in der komplexen Ebene
 __device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
     float x = 0.0f, y = 0.0f;
     int iter = 0;
@@ -26,7 +27,7 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
     return iter;
 }
 
-// 🚀 Fraktalrendering mit Iterationspuffer (für spätere Analyse)
+// 🚀 Host-Funktion zum Start des Mandelbrot-Kernels
 extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
                                         int width, int height,
                                         float zoom, float2 offset,
@@ -42,7 +43,7 @@ extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
     cudaDeviceSynchronize();
 }
 
-// 🧠 CUDA-Kernel für Mandelbrot-Iteration pro Pixel
+// 🌈 CUDA-Kernel für Pixel-Rendering mit Iterationsausgabe
 __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  int width, int height,
                                  float zoom, float2 offset,
@@ -63,7 +64,7 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     output[y * width + x] = color;
 }
 
-// 📊 Berechnet Entropie pro Tile auf Basis der Iterationsvielfalt
+// 📊 CUDA-Kernel zur Entropieberechnung pro Tile
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
                               int width, int height, int tileSize,
                               int maxIter) {
@@ -94,22 +95,22 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     }
     __syncthreads();
 
-    if (threadIdx.x == 0) {
+    if (threadIdx.x == 0 && count > 0) {
         float entropy = 0.0f;
-
-        if (count > 0) {
-            for (int i = 0; i < 256; ++i) {
-                float p = histo[i] / (float)count;
-                if (p > 0.0f)
-                    entropy -= p * log2f(p);
-            }
-        } else {
-            // 🚨 Tile ist komplett leer – damit ignorierbar machen
-            entropy = -1.0f;
+        for (int i = 0; i < 256; ++i) {
+            float p = histo[i] / (float)count;
+            if (p > 0.0f)
+                entropy -= p * log2f(p);
         }
 
         int tileIndex = tileY * gridDim.x + tileX;
         entropyOut[tileIndex] = entropy;
+
+        // 🔍 Nur loggen, wenn Entropie über Schwelle liegt
+        if (entropy > 3.0f && Settings::debugLogging) {
+            printf("[ENTROPY] tile (%d,%d) idx %d -> H=%.4f\n",
+                   tileX, tileY, tileIndex, entropy);
+        }
     }
 }
 
@@ -122,14 +123,10 @@ extern "C" void computeTileEntropy(const int* d_iterations,
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     dim3 grid(tilesX, tilesY);
-    dim3 block(64);  // ⚠️ Mind. 32 Threads für parallele Histogramm-Init
+    dim3 block(64);  // ausreichend Threads zur Histogramminit.
 
     entropyKernel<<<grid, block>>>(d_iterations, d_entropyOut,
                                    width, height,
                                    tileSize, maxIter);
     cudaDeviceSynchronize();
-
-#if defined(DEBUG) || Settings::debugLogging
-    printf("[DEBUG] computeTileEntropy: gestartet mit %d x %d Tiles (tileSize %d)\n", tilesX, tilesY, tileSize);
-#endif
 }
