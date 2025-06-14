@@ -252,14 +252,19 @@ void Renderer::setupPBOAndTexture() {
 }
 
 void Renderer::setupBuffers() {
-    constexpr int minTileSize = Settings::MIN_TILE_SIZE;
-    int totalTiles = ((windowWidth + minTileSize - 1) / minTileSize) *
-                     ((windowHeight + minTileSize - 1) / minTileSize);
+    int currentTileSize = Settings::dynamicTileSize(zoom);  // 🛠️ Echt verwendete Tile-Größe
+    int totalTiles = ((windowWidth + currentTileSize - 1) / currentTileSize) *
+                     ((windowHeight + currentTileSize - 1) / currentTileSize);
+
+    std::printf("[DEBUG] setupBuffers: TileSize=%d → totalTiles=%d\n", currentTileSize, totalTiles);
+
     d_complexity = MemoryUtils::allocComplexityBuffer(totalTiles);
     h_complexity.resize(totalTiles);
+
     CUDA_CHECK(cudaMalloc(&d_iterations, windowWidth * windowHeight * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&d_stddev, totalTiles * sizeof(float)));
 }
+
 
 void Renderer::renderFrame(bool autoZoomEnabled) {
     renderFrame_impl(autoZoomEnabled);
