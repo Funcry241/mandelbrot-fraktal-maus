@@ -1,4 +1,3 @@
-// Datei: src/renderer_core.cu
 // 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, Auto-Zoom und Bildausgabe
 
 #include <GL/glew.h>
@@ -16,12 +15,12 @@
 #include "stb_easy_font.h"
 #include <iostream>
 #include <vector>
-#include "common.hpp"  // ✅ für CUDA_CHECK
+#include "common.hpp"
 
 namespace {
 const auto GL_CHECK = [] {
     if (GLenum err = glGetError(); err != GL_NO_ERROR) {
-        std::cerr << "[ERROR] OpenGL: 0x" << std::hex << err << std::dec << '\n';
+        std::cerr << "OpenGL error: 0x" << std::hex << err << std::dec << '\n';
         std::exit(EXIT_FAILURE);
     }
 };
@@ -84,7 +83,7 @@ void Renderer::freeDeviceBuffers() {
 
 void Renderer::initGL() {
     if (!glfwInit()) {
-        std::cerr << "[ERROR] GLFW init failed\n";
+        std::cerr << "GLFW init failed\n";
         std::exit(EXIT_FAILURE);
     }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -93,7 +92,7 @@ void Renderer::initGL() {
 
     window = glfwCreateWindow(windowWidth, windowHeight, "OtterDream Mandelbrot", nullptr, nullptr);
     if (!window) {
-        std::cerr << "[ERROR] Window creation failed\n";
+        std::cerr << "Window creation failed\n";
         glfwTerminate();
         std::exit(EXIT_FAILURE);
     }
@@ -139,7 +138,7 @@ GLFWwindow* Renderer::getWindow() const {
 void Renderer::initGL_impl() {
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
-        std::cerr << "[ERROR] GLEW init failed\n";
+        std::cerr << "GLEW init failed\n";
         std::exit(EXIT_FAILURE);
     }
     cudaSetDevice(0);
@@ -179,11 +178,6 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     float2 newOffset;
     bool shouldZoom;
 
-    if (!pbo || !d_iterations || !d_complexity || !d_stddev) {
-        std::fprintf(stderr, "[ERROR] Renderer: Einer der Puffer ist null – PBO: %u, d_iter: %p, d_comp: %p, d_std: %p\n",
-            pbo, d_iterations, d_complexity, d_stddev);
-    }
-
     if (Settings::debugLogging) {
         std::printf("[DEBUG] renderer_core: renderCudaFrame\n");
         std::printf("         zoom: %.10f\n", zoom);
@@ -193,8 +187,9 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         std::printf("         image: %d x %d\n", windowWidth, windowHeight);
     }
 
+    // 🔒 Kein Cast auf uchar4* nötig – Mapping erfolgt intern in renderCudaFrame()
     CudaInterop::renderCudaFrame(
-        nullptr,
+        nullptr,  // ✅ korrekt: PBO wird intern über CUDA-Mapping geholt
         d_iterations,
         d_complexity,
         d_stddev,
