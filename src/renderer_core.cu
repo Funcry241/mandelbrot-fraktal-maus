@@ -19,16 +19,14 @@
 #include "common.hpp"  // ✅ für CUDA_CHECK
 
 namespace {
-// 🔐 OpenGL-Fehlerprüfung (Inline-Lambda zur Laufzeitprüfung)
 const auto GL_CHECK = [] {
     if (GLenum err = glGetError(); err != GL_NO_ERROR) {
-        std::cerr << "OpenGL error: 0x" << std::hex << err << std::dec << '\n';
+        std::cerr << "[ERROR] OpenGL: 0x" << std::hex << err << std::dec << '\n';
         std::exit(EXIT_FAILURE);
     }
 };
 }
 
-// 🎨 Vertex-Shader: einfache Fullscreen-Quad-Pipeline
 static constexpr const char* vertexShaderSrc = R"GLSL(
 #version 430 core
 layout(location=0) in vec2 aPos;
@@ -40,7 +38,6 @@ void main() {
 }
 )GLSL";
 
-// 🎨 Fragment-Shader: Textur direkt anzeigen
 static constexpr const char* fragmentShaderSrc = R"GLSL(
 #version 430 core
 in vec2 vTex;
@@ -87,7 +84,7 @@ void Renderer::freeDeviceBuffers() {
 
 void Renderer::initGL() {
     if (!glfwInit()) {
-        std::cerr << "GLFW init failed\n";
+        std::cerr << "[ERROR] GLFW init failed\n";
         std::exit(EXIT_FAILURE);
     }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -96,7 +93,7 @@ void Renderer::initGL() {
 
     window = glfwCreateWindow(windowWidth, windowHeight, "OtterDream Mandelbrot", nullptr, nullptr);
     if (!window) {
-        std::cerr << "Window creation failed\n";
+        std::cerr << "[ERROR] Window creation failed\n";
         glfwTerminate();
         std::exit(EXIT_FAILURE);
     }
@@ -142,7 +139,7 @@ GLFWwindow* Renderer::getWindow() const {
 void Renderer::initGL_impl() {
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
-        std::cerr << "GLEW init failed\n";
+        std::cerr << "[ERROR] GLEW init failed\n";
         std::exit(EXIT_FAILURE);
     }
     cudaSetDevice(0);
@@ -181,6 +178,11 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
 
     float2 newOffset;
     bool shouldZoom;
+
+    if (!pbo || !d_iterations || !d_complexity || !d_stddev) {
+        std::fprintf(stderr, "[ERROR] Renderer: Einer der Puffer ist null – PBO: %u, d_iter: %p, d_comp: %p, d_std: %p\n",
+            pbo, d_iterations, d_complexity, d_stddev);
+    }
 
     if (Settings::debugLogging) {
         std::printf("[DEBUG] renderer_core: renderCudaFrame\n");
@@ -252,7 +254,7 @@ void Renderer::setupPBOAndTexture() {
 }
 
 void Renderer::setupBuffers() {
-    int currentTileSize = Settings::dynamicTileSize(zoom);  // 🛠️ Echt verwendete Tile-Größe
+    int currentTileSize = Settings::dynamicTileSize(zoom);
     int totalTiles = ((windowWidth + currentTileSize - 1) / currentTileSize) *
                      ((windowHeight + currentTileSize - 1) / currentTileSize);
 
@@ -264,7 +266,6 @@ void Renderer::setupBuffers() {
     CUDA_CHECK(cudaMalloc(&d_iterations, windowWidth * windowHeight * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&d_stddev, totalTiles * sizeof(float)));
 }
-
 
 void Renderer::renderFrame(bool autoZoomEnabled) {
     renderFrame_impl(autoZoomEnabled);

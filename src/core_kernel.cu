@@ -73,7 +73,11 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     int startX = tileX * tileSize;
     int startY = tileY * tileSize;
 
-    int histo[256] = {};  // Histogramm für Iterationswerte (vereinfachend)
+    __shared__ int histo[256];
+    for (int i = threadIdx.x; i < 256; i += blockDim.x)
+        histo[i] = 0;
+    __syncthreads();
+
     int count = 0;
 
     for (int dy = 0; dy < tileSize; ++dy) {
@@ -83,22 +87,24 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
             if (x >= width || y >= height) continue;
 
             int iter = iterations[y * width + x];
-            int bin = min(iter * 256 / (maxIter + 1), 255);  // Skaliert in 256-Bin Histogramm
+            int bin = min(iter * 256 / (maxIter + 1), 255);
             atomicAdd(&histo[bin], 1);
             ++count;
         }
     }
+    __syncthreads();
 
-    // 🔢 Entropie berechnen
-    float entropy = 0.0f;
-    for (int i = 0; i < 256; ++i) {
-        float p = histo[i] / (float)count;
-        if (p > 0.0f)
-            entropy -= p * log2f(p);
+    if (threadIdx.x == 0) {
+        float entropy = 0.0f;
+        for (int i = 0; i < 256; ++i) {
+            float p = histo[i] / (float)count;
+            if (p > 0.0f)
+                entropy -= p * log2f(p);
+        }
+
+        int tileIndex = tileY * gridDim.x + tileX;
+        entropyOut[tileIndex] = entropy;
     }
-
-    int tileIndex = tileY * gridDim.x + tileX;
-    entropyOut[tileIndex] = entropy;
 }
 
 // 🔧 Host-Funktion zum Starten des Entropie-Kernels
@@ -110,7 +116,7 @@ extern "C" void computeTileEntropy(const int* d_iterations,
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     dim3 grid(tilesX, tilesY);
-    dim3 block(1);  // Keine Threads im Block notwendig
+    dim3 block(64);  // ⚠️ Muss >= 32 sein, damit Threads parallel initialisieren können
 
     entropyKernel<<<grid, block>>>(d_iterations, d_entropyOut,
                                    width, height,
