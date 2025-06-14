@@ -187,9 +187,8 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         std::printf("         image: %d x %d\n", windowWidth, windowHeight);
     }
 
-    // 🔒 Kein Cast auf uchar4* nötig – Mapping erfolgt intern in renderCudaFrame()
     CudaInterop::renderCudaFrame(
-        nullptr,  // ✅ korrekt: PBO wird intern über CUDA-Mapping geholt
+        nullptr,
         d_iterations,
         d_complexity,
         d_stddev,
