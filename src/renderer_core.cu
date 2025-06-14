@@ -186,11 +186,11 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     // 🐭 Debug vor CUDA-Render-Call: zeigt aktuelle Zoomdaten, Offset und Auflösung zur Fehleranalyse
     if (Settings::debugLogging) {
         std::printf("[DEBUG] renderer_core: renderCudaFrame\n");
-        std::printf("         → zoom: %.10f\n", zoom);
-        std::printf("         → offset: (%.10f, %.10f)\n", offset.x, offset.y);
-        std::printf("         → iterations: %d\n", Progressive::getCurrentIterations());
-        std::printf("         → tileSize: %d\n", currentTileSize);
-        std::printf("         → image: %d x %d\n", windowWidth, windowHeight);
+        std::printf("         zoom: %.10f\n", zoom);
+        std::printf("         offset: (%.10f, %.10f)\n", offset.x, offset.y);
+        std::printf("         iterations: %d\n", Progressive::getCurrentIterations());
+        std::printf("         tileSize: %d\n", currentTileSize);
+        std::printf("         image: %d x %d\n", windowWidth, windowHeight);
     }
 
     CudaInterop::renderCudaFrame(

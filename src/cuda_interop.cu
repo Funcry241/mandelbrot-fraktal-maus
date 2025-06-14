@@ -64,22 +64,37 @@ void renderCudaFrame(uchar4* pbo,
         return;
     }
 
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] cuda_interop: renderCudaFrame\n");
+        std::printf("         ├─ zoom: %.10f\n", zoom);
+        std::printf("         ├─ offset: (%.10f, %.10f)\n", offset.x, offset.y);
+        std::printf("         ├─ iterations: %d\n", maxIterations);
+        std::printf("         ├─ tileSize: %d\n", tileSize);
+        std::printf("         └─ image: %d x %d\n", width, height);
+    }
+
     // 📥 CUDA-Pointer auf OpenGL-PBO holen
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaResource, 0));
+    if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: PBO mapped.");
+
     uchar4* devPtr;
     size_t size;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource));
 
     // 🎨 CUDA-Fraktal berechnen
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations);
+    if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: Mandelbrot kernel launched.");
 
     // 📊 Entropieanalyse je Tile (ersetzt computeComplexity)
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     int totalTiles = tilesX * tilesY;
 
-    computeTileEntropy(d_iterations, d_stddev, width, height, tileSize, maxIterations);  // 🔬 GPU
-    CUDA_CHECK(cudaMemcpy((void*)h_complexity.data(), d_stddev, totalTiles * sizeof(float), cudaMemcpyDeviceToHost));  // ⬇️ Host
+    computeTileEntropy(d_iterations, d_stddev, width, height, tileSize, maxIterations);
+    if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: Entropy kernel launched.");
+
+    CUDA_CHECK(cudaMemcpy((void*)h_complexity.data(), d_stddev, totalTiles * sizeof(float), cudaMemcpyDeviceToHost));
+    if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: Entropy copied to host.");
 
     // 🔍 Scoring zur Auswahl des besten Tiles
     float bestScore = -1.0f;
@@ -116,9 +131,18 @@ void renderCudaFrame(uchar4* pbo,
 
     if (shouldZoom) {
         outNewOffset = bestTileOffset;
+        if (Settings::debugLogging) {
+            std::puts("[DEBUG] Zoom decision: YES");
+            std::printf("         └─ newOffset: (%.10f, %.10f)\n", outNewOffset.x, outNewOffset.y);
+        }
+    } else {
+        if (Settings::debugLogging) {
+            std::puts("[DEBUG] Zoom decision: NO");
+        }
     }
 
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaResource, 0));
+    if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: PBO unmapped.");
 }
 
 // 🔍 Getter für Auto-Zoom-Pause
