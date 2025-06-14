@@ -203,11 +203,12 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         zoom,
         offset,
         Progressive::getCurrentIterations(),
-        h_complexity,
+        h_complexity,              // <──── hier liegt das Problem: const passt nicht
         newOffset,
         shouldZoom,
         currentTileSize
     );
+
 
     if (autoZoomEnabled && shouldZoom) {
         offset.x = offset.x + Settings::LERP_FACTOR * (newOffset.x - offset.x);

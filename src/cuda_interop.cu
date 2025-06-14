@@ -54,10 +54,11 @@ void renderCudaFrame(uchar4* pbo,
                      float zoom,
                      float2 offset,
                      int maxIterations,
-                     const std::vector<float>& h_complexity,
+                     std::vector<float>& h_complexity,  // ✅ Fix
                      float2& outNewOffset,
                      bool& shouldZoom,
                      int tileSize)
+
 {
     if (!cudaResource) {
         std::fprintf(stderr, "[ERROR] CUDA resource not registered!\n");
@@ -91,7 +92,7 @@ void renderCudaFrame(uchar4* pbo,
     if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: Entropy kernel launched.");
 
     if (h_complexity.size() != static_cast<size_t>(totalTiles)) {
-        std::fprintf(stderr, "[WARN] h_complexity resize: %zu → %d\n", h_complexity.size(), totalTiles);
+        std::fprintf(stderr, "[WARN] h_complexity resize: %zu -> %d\n", h_complexity.size(), totalTiles);
         const_cast<std::vector<float>&>(h_complexity).resize(totalTiles);
     }
 
