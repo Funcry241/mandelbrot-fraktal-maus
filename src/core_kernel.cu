@@ -96,10 +96,16 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
 
     if (threadIdx.x == 0) {
         float entropy = 0.0f;
-        for (int i = 0; i < 256; ++i) {
-            float p = histo[i] / (float)count;
-            if (p > 0.0f)
-                entropy -= p * log2f(p);
+
+        if (count > 0) {
+            for (int i = 0; i < 256; ++i) {
+                float p = histo[i] / (float)count;
+                if (p > 0.0f)
+                    entropy -= p * log2f(p);
+            }
+        } else {
+            // 🚨 Tile ist komplett leer – damit ignorierbar machen
+            entropy = -1.0f;
         }
 
         int tileIndex = tileY * gridDim.x + tileX;
@@ -116,10 +122,14 @@ extern "C" void computeTileEntropy(const int* d_iterations,
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     dim3 grid(tilesX, tilesY);
-    dim3 block(64);  // ⚠️ Muss >= 32 sein, damit Threads parallel initialisieren können
+    dim3 block(64);  // ⚠️ Mind. 32 Threads für parallele Histogramm-Init
 
     entropyKernel<<<grid, block>>>(d_iterations, d_entropyOut,
                                    width, height,
                                    tileSize, maxIter);
     cudaDeviceSynchronize();
+
+#if defined(DEBUG) || Settings::debugLogging
+    printf("[DEBUG] computeTileEntropy: gestartet mit %d x %d Tiles (tileSize %d)\n", tilesX, tilesY, tileSize);
+#endif
 }
