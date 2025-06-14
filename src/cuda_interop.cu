@@ -66,14 +66,13 @@ void renderCudaFrame(uchar4* pbo,
 
     if (Settings::debugLogging) {
         std::printf("[DEBUG] cuda_interop: renderCudaFrame\n");
-        std::printf("         ├─ zoom: %.10f\n", zoom);
-        std::printf("         ├─ offset: (%.10f, %.10f)\n", offset.x, offset.y);
-        std::printf("         ├─ iterations: %d\n", maxIterations);
-        std::printf("         ├─ tileSize: %d\n", tileSize);
-        std::printf("         └─ image: %d x %d\n", width, height);
+        std::printf("         zoom: %.10f\n", zoom);
+        std::printf("         offset: (%.10f, %.10f)\n", offset.x, offset.y);
+        std::printf("         iterations: %d\n", maxIterations);
+        std::printf("         tileSize: %d\n", tileSize);
+        std::printf("         image: %d x %d\n", width, height);
     }
 
-    // 📥 CUDA-Pointer auf OpenGL-PBO holen
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaResource, 0));
     if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: PBO mapped.");
 
@@ -81,11 +80,9 @@ void renderCudaFrame(uchar4* pbo,
     size_t size;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource));
 
-    // 🎨 CUDA-Fraktal berechnen
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations);
     if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: Mandelbrot kernel launched.");
 
-    // 📊 Entropieanalyse je Tile (ersetzt computeComplexity)
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     int totalTiles = tilesX * tilesY;
@@ -93,10 +90,14 @@ void renderCudaFrame(uchar4* pbo,
     computeTileEntropy(d_iterations, d_stddev, width, height, tileSize, maxIterations);
     if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: Entropy kernel launched.");
 
+    if (h_complexity.size() != static_cast<size_t>(totalTiles)) {
+        std::fprintf(stderr, "[WARN] h_complexity resize: %zu → %d\n", h_complexity.size(), totalTiles);
+        const_cast<std::vector<float>&>(h_complexity).resize(totalTiles);
+    }
+
     CUDA_CHECK(cudaMemcpy((void*)h_complexity.data(), d_stddev, totalTiles * sizeof(float), cudaMemcpyDeviceToHost));
     if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: Entropy copied to host.");
 
-    // 🔍 Scoring zur Auswahl des besten Tiles
     float bestScore = -1.0f;
     float2 bestTileOffset = {0.0f, 0.0f};
     shouldZoom = false;
@@ -145,17 +146,14 @@ void renderCudaFrame(uchar4* pbo,
     if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: PBO unmapped.");
 }
 
-// 🔍 Getter für Auto-Zoom-Pause
 bool getPauseZoom() {
     return pauseZoom;
 }
 
-// 📝 Setter für Auto-Zoom-Pause
 void setPauseZoom(bool paused) {
     pauseZoom = paused;
 }
 
-// ⌨️ Callback für Tastendruck (SPACE/P toggelt Auto-Zoom)
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (action != GLFW_PRESS) return;
 
