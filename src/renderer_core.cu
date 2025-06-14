@@ -1,5 +1,5 @@
 // Datei: src/renderer_core.cu
-// 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, HUD und Auto-Zoom.
+// 🐽 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, HUD und Auto-Zoom.
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -183,7 +183,7 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     float2 newOffset;
     bool shouldZoom;
 
-    // 🐭 Debug vor CUDA-Render-Call: zeigt aktuelle Zoomdaten, Offset und Auflösung zur Fehleranalyse
+    // 🐽 Debug vor CUDA-Render-Call: zeigt aktuelle Zoomdaten, Offset und Auflösung zur Fehleranalyse
     if (Settings::debugLogging) {
         std::printf("[DEBUG] renderer_core: renderCudaFrame\n");
         std::printf("         zoom: %.10f\n", zoom);
