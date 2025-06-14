@@ -1,5 +1,5 @@
 // Datei: src/renderer_core.cu
-// 🐽 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, HUD und Auto-Zoom.
+// 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, Auto-Zoom und Bildausgabe
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -165,7 +165,6 @@ void Renderer::initGL_impl() {
 
 void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     static int lastTileSize = -1;
-
     double frameStart = glfwGetTime();
     frameCount++;
 
@@ -183,7 +182,6 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     float2 newOffset;
     bool shouldZoom;
 
-    // 🐽 Debug vor CUDA-Render-Call: zeigt aktuelle Zoomdaten, Offset und Auflösung zur Fehleranalyse
     if (Settings::debugLogging) {
         std::printf("[DEBUG] renderer_core: renderCudaFrame\n");
         std::printf("         zoom: %.10f\n", zoom);
@@ -203,16 +201,15 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         zoom,
         offset,
         Progressive::getCurrentIterations(),
-        h_complexity,              // <──── hier liegt das Problem: const passt nicht
+        h_complexity,
         newOffset,
         shouldZoom,
         currentTileSize
     );
 
-
     if (autoZoomEnabled && shouldZoom) {
-        offset.x = offset.x + Settings::LERP_FACTOR * (newOffset.x - offset.x);
-        offset.y = offset.y + Settings::LERP_FACTOR * (newOffset.y - offset.y);
+        offset.x += Settings::LERP_FACTOR * (newOffset.x - offset.x);
+        offset.y += Settings::LERP_FACTOR * (newOffset.y - offset.y);
         zoom *= (1.0f + Settings::ZOOM_STEP_FACTOR);
     }
 
@@ -232,6 +229,10 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     Hud::draw(currentFPS, lastFrameTime, zoom, offset.x, offset.y, windowWidth, windowHeight);
     glfwSwapBuffers(window);
     glfwPollEvents();
+
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] Frame complete (FPS: %.2f | ms: %.2f)\n", currentFPS, lastFrameTime);
+    }
 }
 
 void Renderer::setupPBOAndTexture() {
