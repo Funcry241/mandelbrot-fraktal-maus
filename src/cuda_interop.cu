@@ -71,47 +71,34 @@ void renderCudaFrame(uchar4* pbo,
     }
 
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaResource, 0));
-    if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: PBO mapped.");
-
     uchar4* devPtr;
     size_t size;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource));
 
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations);
-    if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: Mandelbrot kernel launched.");
+    computeTileEntropy(d_iterations, d_stddev, width, height, tileSize, maxIterations);
 
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     int totalTiles = tilesX * tilesY;
 
-    computeTileEntropy(d_iterations, d_stddev, width, height, tileSize, maxIterations);
-    if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: Entropy kernel launched.");
-
     if (h_complexity.size() != static_cast<size_t>(totalTiles)) {
-        std::fprintf(stderr, "[WARN] h_complexity resize: %zu -> %d\n", h_complexity.size(), totalTiles);
         const_cast<std::vector<float>&>(h_complexity).resize(totalTiles);
     }
 
     CUDA_CHECK(cudaMemcpy((void*)h_complexity.data(), d_stddev, totalTiles * sizeof(float), cudaMemcpyDeviceToHost));
-    if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: Entropy copied to host.");
 
     float bestScore = -1.0f;
     float2 bestTileOffset = {0.0f, 0.0f};
     shouldZoom = false;
-    int validTileCount = 0; // 🔁
+    int validTileCount = 0;
 
     for (int tileY = 0; tileY < tilesY; ++tileY) {
         for (int tileX = 0; tileX < tilesX; ++tileX) {
             int tileIndex = tileY * tilesX + tileX;
             float entropy = h_complexity[tileIndex];
 
-            float threshold = Settings::dynamicVarianceThreshold(zoom);
-            if (Settings::debugLogging) {
-                std::printf("  [ENTROPY] tile (%d, %d) = %.6e (threshold: %.6e)\n",
-                            tileX, tileY, entropy, threshold);
-            }
-
-            if (entropy < threshold) continue;
+            if (entropy < Settings::dynamicVarianceThreshold(zoom)) continue;
             validTileCount++;
 
             float pixelX = (tileX + 0.5f) * tileSize;
@@ -127,10 +114,6 @@ void renderCudaFrame(uchar4* pbo,
             float centralityBoost = 1.0f / (distToCenter + 0.1f);
             float score = entropy * centralityBoost / (tileDist + 1.0f);
 
-            if (Settings::debugLogging) {
-                std::printf("    [SCORE] %.6e (tileDist: %.4f, centerBoost: %.4f)\n", score, tileDist, centralityBoost);
-            }
-
             if (score > bestScore) {
                 bestScore = score;
                 bestTileOffset = tileOffset;
@@ -140,24 +123,18 @@ void renderCudaFrame(uchar4* pbo,
     }
 
     if (Settings::debugLogging) {
-        std::printf("[DEBUG] Entropie-Auswertung: %d Tiles über Threshold\n", validTileCount);
-        std::printf("[DEBUG] BestScore: %.6f\n", bestScore);
+        std::printf("[DEBUG] ZoomTiles: %d | MaxScore: %.4e\n", validTileCount, bestScore);
+        if (shouldZoom)
+            std::printf("[DEBUG] → newOffset: (%.10f, %.10f)\n", bestTileOffset.x, bestTileOffset.y);
+        else
+            std::puts("[DEBUG] → Kein Zoomziel gefunden.");
     }
 
     if (shouldZoom) {
         outNewOffset = bestTileOffset;
-        if (Settings::debugLogging) {
-            std::puts("[DEBUG] Zoom decision: YES");
-            std::printf("         └─ newOffset: (%.10f, %.10f)\n", outNewOffset.x, outNewOffset.y);
-        }
-    } else {
-        if (Settings::debugLogging) {
-            std::puts("[DEBUG] Zoom decision: NO");
-        }
     }
 
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaResource, 0));
-    if (Settings::debugLogging) std::puts("[DEBUG] cuda_interop: PBO unmapped.");
 }
 
 bool getPauseZoom() {
