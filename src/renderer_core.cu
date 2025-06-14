@@ -184,7 +184,7 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     bool shouldZoom;
 
     CudaInterop::renderCudaFrame(
-        nullptr,              // aktuell keine Ausgabe in Image-Buffer
+        nullptr,
         d_iterations,
         d_complexity,
         d_stddev,

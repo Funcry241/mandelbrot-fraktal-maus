@@ -1,165 +1,119 @@
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit Farbverlauf + Komplexitätsanalyse je Tile
-// Bereinigung: `mean`-Puffer entfernt, da ungenutzt
+// 🐭 Maus-Kommentar: CUDA-Kernel für Mandelbrot-Fraktal und Entropieanalyse pro Tile
+// - `launch_mandelbrotHybrid`: rendert Fraktalbild + Iterationen
+// - `computeTileEntropy`: misst Entropie je Tile zur Bewertung der Bildstruktur (für Auto-Zoom)
 
-#include <cstdio>
 #include <cuda_runtime.h>
-#include <vector_types.h>
 #include <device_launch_parameters.h>
+#include <math_constants.h>
 #include "settings.hpp"
 #include "core_kernel.h"
 
-// 🎯 Variance-Schwelle für Auto-Zoom (vom Host gesetzt, auf Device genutzt)
-__device__ float deviceVarianceThreshold = 1e-6f;
+// 🧾 Vorwärtsdeklaration notwendig, da Kernel unterhalb verwendet wird
+__global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
+                                 int width, int height,
+                                 float zoom, float2 offset,
+                                 int maxIterations);
 
-extern "C" void setDeviceVarianceThreshold(float threshold) {
-    cudaMemcpyToSymbol(deviceVarianceThreshold, &threshold, sizeof(float));
-}
-
-// 🌈 Testkernel: einfacher RGB-Verlauf
-__global__ void testKernel(uchar4* img, int w, int h) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= w || y >= h) return;
-    img[y * w + x] = make_uchar4((x * 255) / w, (y * 255) / h, 128, 255);
-}
-
-extern "C" void launch_debugGradient(uchar4* img, int w, int h, float zoom) {
-    (void)zoom;
-    dim3 threads(Settings::BASE_TILE_SIZE, Settings::BASE_TILE_SIZE);
-    dim3 blocks((w + threads.x - 1) / threads.x, (h + threads.y - 1) / threads.y);
-    printf("[INFO] DebugGradient Grid (%d, %d)\n", blocks.x, blocks.y);
-    testKernel<<<blocks, threads>>>(img, w, h);
-    cudaDeviceSynchronize();
-}
-
-// 🎨 Smooth Color Mapping
-__device__ __forceinline__ uchar4 colorMap(int iter, int maxIter, float zx, float zy, float zoom) {
-    if (iter >= maxIter) return make_uchar4(0, 0, 0, 255);
-    float log_zn = logf(zx * zx + zy * zy) * 0.5f;
-    float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
-    float t = (iter + 1.0f - nu) / maxIter;
-    float zoomShift = fmodf(logf(zoom + 2.0f) * 0.07f, 1.0f);
-
-    float r = powf(0.8f + 0.2f * cosf(6.28318f * (t + zoomShift)), 1.5f);
-    float g = powf(0.6f + 0.4f * cosf(6.28318f * (t + zoomShift + 0.3f)), 1.5f);
-    float b = powf(0.4f + 0.6f * cosf(6.28318f * (t + zoomShift + 0.6f)), 1.5f);
-    return make_uchar4(fminf(r * 255, 255), fminf(g * 255, 255), fminf(b * 255, 255), 255);
-}
-
-// 🌀 Hybrid-Renderer: schreibt Farbe + Iterationen
-__global__ void mandelbrotHybrid(uchar4* img, int* iterations, int w, int h, float zoom, float2 offset, int maxIter) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= w || y >= h) return;
-
-    float cx = (x - w * 0.5f) / zoom + offset.x;
-    float cy = (y - h * 0.5f) / zoom + offset.y;
-    float zx = 0.0f, zy = 0.0f;
+__device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
+    float x = 0.0f, y = 0.0f;
     int iter = 0;
-
-    while (zx * zx + zy * zy < 4.0f && iter < maxIter) {
-        float xt = zx * zx - zy * zy + cx;
-        zy = 2.0f * zx * zy + cy;
-        zx = xt;
+    while (x * x + y * y <= 4.0f && iter < maxIter) {
+        float xtemp = x * x - y * y + x0;
+        y = 2.0f * x * y + y0;
+        x = xtemp;
         ++iter;
     }
-
-    img[y * w + x] = colorMap(iter, maxIter, zx, zy, zoom);
-    iterations[y * w + x] = iter;
+    return iter;
 }
 
-extern "C" void launch_mandelbrotHybrid(uchar4* img, int* iterations, int w, int h, float zoom, float2 offset, int maxIter) {
-    static bool firstLaunch = true;
-    dim3 threads(Settings::BASE_TILE_SIZE, Settings::BASE_TILE_SIZE);
-    dim3 blocks((w + threads.x - 1) / threads.x, (h + threads.y - 1) / threads.y);
+// 🚀 Fraktalrendering mit Iterationspuffer (für spätere Analyse)
+extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
+                                        int width, int height,
+                                        float zoom, float2 offset,
+                                        int maxIterations) {
+    dim3 block(Settings::TILE_W, Settings::TILE_H);
+    dim3 grid((width + block.x - 1) / block.x,
+              (height + block.y - 1) / block.y);
 
-    if (firstLaunch) {
-        printf("[INFO] Launch mandelbrotHybrid: Grid (%d, %d)\n", blocks.x, blocks.y);
-        firstLaunch = false;
-    }
-
-    mandelbrotHybrid<<<blocks, threads>>>(img, iterations, w, h, zoom, offset, maxIter);
+    mandelbrotKernel<<<grid, block>>>(output, d_iterations,
+                                      width, height,
+                                      zoom, offset,
+                                      maxIterations);
     cudaDeviceSynchronize();
 }
 
-// 🧠 Komplexitätsbewertung (pro Tile: Standardabweichung)
-__global__ void computeComplexityKernel(
-    const int* iterations,
-    int w,
-    int h,
-    float* complexity,
-    int tileSize
-) {
+// 🧠 CUDA-Kernel für Mandelbrot-Iteration pro Pixel
+__global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
+                                 int width, int height,
+                                 float zoom, float2 offset,
+                                 int maxIterations) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x >= width || y >= height) return;
+
+    float jx = (x - width  / 2.0f) / zoom + offset.x;
+    float jy = (y - height / 2.0f) / zoom + offset.y;
+
+    int iter = mandelbrotIterations(jx, jy, maxIterations);
+    iterationsOut[y * width + x] = iter;
+
+    float t = iter / (float)maxIterations;
+    uchar4 color = make_uchar4(255 * t, 180 * t, 255 * (1.0f - t), 255);
+    output[y * width + x] = color;
+}
+
+// 📊 Berechnet Entropie pro Tile auf Basis der Iterationsvielfalt
+__global__ void entropyKernel(const int* iterations, float* entropyOut,
+                              int width, int height, int tileSize,
+                              int maxIter) {
     int tileX = blockIdx.x;
     int tileY = blockIdx.y;
-    int tilesX = (w + tileSize - 1) / tileSize;
 
     int startX = tileX * tileSize;
     int startY = tileY * tileSize;
 
-    int localX = threadIdx.x;
-    int localY = threadIdx.y;
-    int x = startX + localX;
-    int y = startY + localY;
+    int histo[256] = {};  // Histogramm für Iterationswerte (vereinfachend)
+    int count = 0;
 
-    int localId = localY * blockDim.x + localX;
+    for (int dy = 0; dy < tileSize; ++dy) {
+        for (int dx = 0; dx < tileSize; ++dx) {
+            int x = startX + dx;
+            int y = startY + dy;
+            if (x >= width || y >= height) continue;
 
-    extern __shared__ float sharedData[];
-    float* sumIter   = sharedData;
-    float* sumIterSq = sharedData + blockDim.x * blockDim.y;
-    int*   count     = (int*)(sharedData + 2 * blockDim.x * blockDim.y);
-
-    float iterValue = 0.0f;
-    int valid = 0;
-
-    if (x < w && y < h) {
-        iterValue = (float)iterations[y * w + x];
-        valid = 1;
-    }
-
-    sumIter[localId] = iterValue;
-    sumIterSq[localId] = iterValue * iterValue;
-    count[localId] = valid;
-
-    __syncthreads();
-
-    for (int stride = (blockDim.x * blockDim.y) / 2; stride > 0; stride >>= 1) {
-        if (localId < stride) {
-            sumIter[localId] += sumIter[localId + stride];
-            sumIterSq[localId] += sumIterSq[localId + stride];
-            count[localId] += count[localId + stride];
-        }
-        __syncthreads();
-    }
-
-    if (localId == 0) {
-        int n = count[0];
-        if (n > 1) {
-            float mean = sumIter[0] / n;
-            float meanSq = sumIterSq[0] / n;
-            float variance = meanSq - mean * mean;
-            float stddev = sqrtf(variance > 0.0f ? variance : 0.0f);
-            complexity[tileY * tilesX + tileX] = stddev;
-        } else {
-            complexity[tileY * tilesX + tileX] = 0.0f;
+            int iter = iterations[y * width + x];
+            int bin = min(iter * 256 / (maxIter + 1), 255);  // Skaliert in 256-Bin Histogramm
+            atomicAdd(&histo[bin], 1);
+            ++count;
         }
     }
+
+    // 🔢 Entropie berechnen
+    float entropy = 0.0f;
+    for (int i = 0; i < 256; ++i) {
+        float p = histo[i] / (float)count;
+        if (p > 0.0f)
+            entropy -= p * log2f(p);
+    }
+
+    int tileIndex = tileY * gridDim.x + tileX;
+    entropyOut[tileIndex] = entropy;
 }
 
-void computeComplexity(
-    const int* iterations,
-    float* stddev,
-    int width,
-    int height,
-    int tileSize
-) {
-    dim3 threads(tileSize, tileSize);
-    dim3 blocks((width + tileSize - 1) / tileSize, (height + tileSize - 1) / tileSize);
-    size_t sharedMemSize = 2 * tileSize * tileSize * sizeof(float) + tileSize * tileSize * sizeof(int);
+// 🔧 Host-Funktion zum Starten des Entropie-Kernels
+extern "C" void computeTileEntropy(const int* d_iterations,
+                                   float* d_entropyOut,
+                                   int width, int height,
+                                   int tileSize,
+                                   int maxIter) {
+    int tilesX = (width + tileSize - 1) / tileSize;
+    int tilesY = (height + tileSize - 1) / tileSize;
+    dim3 grid(tilesX, tilesY);
+    dim3 block(1);  // Keine Threads im Block notwendig
 
-    computeComplexityKernel<<<blocks, threads, sharedMemSize>>>(
-        iterations, width, height, stddev, tileSize
-    );
-
+    entropyKernel<<<grid, block>>>(d_iterations, d_entropyOut,
+                                   width, height,
+                                   tileSize, maxIter);
     cudaDeviceSynchronize();
 }

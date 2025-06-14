@@ -73,12 +73,12 @@ void renderCudaFrame(uchar4* pbo,
     // 🎨 CUDA-Fraktal berechnen
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations);
 
-    // 📊 Komplexitätsanalyse je Tile
+    // 📊 Entropieanalyse je Tile (ersetzt computeComplexity)
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     int totalTiles = tilesX * tilesY;
 
-    computeComplexity(d_iterations, d_stddev, width, height, tileSize);  // 🔬 GPU
+    computeTileEntropy(d_iterations, d_stddev, width, height, tileSize, maxIterations);  // 🔬 GPU
     CUDA_CHECK(cudaMemcpy((void*)h_complexity.data(), d_stddev, totalTiles * sizeof(float), cudaMemcpyDeviceToHost));  // ⬇️ Host
 
     // 🔍 Scoring zur Auswahl des besten Tiles
@@ -89,9 +89,9 @@ void renderCudaFrame(uchar4* pbo,
     for (int tileY = 0; tileY < tilesY; ++tileY) {
         for (int tileX = 0; tileX < tilesX; ++tileX) {
             int tileIndex = tileY * tilesX + tileX;
-            float gradient = h_complexity[tileIndex];
+            float entropy = h_complexity[tileIndex];
 
-            if (gradient < Settings::dynamicVarianceThreshold(zoom)) continue;
+            if (entropy < Settings::dynamicVarianceThreshold(zoom)) continue;
 
             float pixelX = (tileX + 0.5f) * tileSize;
             float pixelY = (tileY + 0.5f) * tileSize;
@@ -104,7 +104,7 @@ void renderCudaFrame(uchar4* pbo,
             float tileDist = std::hypot(tileOffset.x - offset.x, tileOffset.y - offset.y);
             float distToCenter = std::hypot(tileOffset.x + 0.75f, tileOffset.y);
             float centralityBoost = 1.0f / (distToCenter + 0.1f);
-            float score = gradient * centralityBoost / (tileDist + 1.0f);
+            float score = entropy * centralityBoost / (tileDist + 1.0f);
 
             if (score > bestScore) {
                 bestScore = score;
