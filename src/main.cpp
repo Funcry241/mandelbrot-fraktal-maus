@@ -1,9 +1,9 @@
 // Datei: src/main.cpp
-// 🐭 Maus-Kommentar: Hauptschleife für OpenGL + CUDA Mandelbrot-Renderer mit Auto-Zoom & Tastenevents
+// 🐭 Maus-Kommentar: Startpunkt des OtterDream-Renderers – steuert Hauptschleife, Tastenevents und Auto-Zoom
 
 #define GLEW_STATIC
-#include <GL/glew.h>       // GLEW zuerst initialisieren
-#include <GLFW/glfw3.h>    // danach GLFW
+#include <GL/glew.h>        // GLEW zuerst, wegen OpenGL Extensions
+#include <GLFW/glfw3.h>     // dann GLFW für Fenster + Eingabe
 
 #include "renderer_core.hpp"
 #include "settings.hpp"
@@ -11,56 +11,52 @@
 #include "progressive.hpp"
 
 int main() {
+    // 🎬 Renderer initialisieren mit Fenstergröße aus Settings
     Renderer renderer(Settings::width, Settings::height);
     renderer.initGL();
 
-    bool autoZoomEnabled = true;
-    bool spaceWasPressed = false;
-    bool pauseWasPressed = false;
+    bool autoZoomEnabled = true;     // 🔍 Auto-Zoom aktiv?
+    bool spaceWasPressed = false;    // ⌨️ Space-Debounce
+    bool pauseWasPressed = false;    // ⌨️ P-Debounce
 
-    std::printf("[INIT] Renderer initialized – entering main loop\n");
+    std::puts("[INIT] Renderer initialized – entering main loop");
 
+    // 🌀 Haupt-Renderloop: läuft bis Fenster geschlossen wird
     while (!renderer.shouldClose()) {
         GLFWwindow* window = renderer.getWindow();
 
-        // ⌨️ Tastenzustände lesen
-        int spaceState = glfwGetKey(window, GLFW_KEY_SPACE);
-        int pState     = glfwGetKey(window, GLFW_KEY_P); // 🐭 Taste P für Pause/Resume
+        // ⌨️ Eingabe abfragen
+        int spaceState = glfwGetKey(window, GLFW_KEY_SPACE);  // Space → Auto-Zoom an/aus
+        int pState     = glfwGetKey(window, GLFW_KEY_P);      // P → Pause/Resume
 
-        // 🐾 Auto-Zoom toggeln (Space)
+        // 🔁 Space: Auto-Zoom toggeln
         if (spaceState == GLFW_PRESS && !spaceWasPressed) {
             autoZoomEnabled = !autoZoomEnabled;
             spaceWasPressed = true;
             std::printf("[INPUT] Auto-Zoom %s\n", autoZoomEnabled ? "ENABLED" : "DISABLED");
         }
-        if (spaceState == GLFW_RELEASE) {
-            spaceWasPressed = false;
-        }
+        if (spaceState == GLFW_RELEASE) spaceWasPressed = false;
 
-        // 🐾 Pause/Resume toggeln (P)
+        // 🔁 P: Pause-Status toggeln
         if (pState == GLFW_PRESS && !pauseWasPressed) {
-            bool currentPauseState = CudaInterop::getPauseZoom();
-            CudaInterop::setPauseZoom(!currentPauseState);
+            bool isPaused = CudaInterop::getPauseZoom();
+            CudaInterop::setPauseZoom(!isPaused);
             pauseWasPressed = true;
-            std::printf("[INPUT] Zoom %s\n", !currentPauseState ? "PAUSED" : "RESUMED");
+            std::printf("[INPUT] Zoom %s\n", isPaused ? "RESUMED" : "PAUSED");
         }
-        if (pState == GLFW_RELEASE) {
-            pauseWasPressed = false;
-        }
+        if (pState == GLFW_RELEASE) pauseWasPressed = false;
 
-        // 🖼️ CUDA + OpenGL Frame rendern
+        // 🎨 Frame rendern (CUDA → OpenGL)
         renderer.renderFrame(autoZoomEnabled);
 
-        // 🧠 Iterationstiefe dynamisch erhöhen
+        // ⏫ Iterationen langsam steigern (Detailschärfe wächst)
         Progressive::incrementIterations();
 
-        // 📤 Fenster aktualisieren (Swap Buffer)
-        glfwSwapBuffers(window);       // 💡 Ohne das bleibt das Bild weiß!
-
-        // 🕹️ Ereignisse verarbeiten (Tastatur, Maus, etc.)
-        glfwPollEvents();              // 💡 Ohne das wird ESC & Close-Button ignoriert
+        // 🔃 OpenGL-Fenster aktualisieren
+        glfwSwapBuffers(window);    // 💡 Muss vor `pollEvents` kommen!
+        glfwPollEvents();           // 🧠 Eingabe & Close-Verarbeitung
     }
 
-    std::printf("[SHUTDOWN] Application exited cleanly.\n");
+    std::puts("[SHUTDOWN] Application exited cleanly.");
     return 0;
 }

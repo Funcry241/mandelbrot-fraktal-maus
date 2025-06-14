@@ -2,31 +2,38 @@
 #ifndef PROGRESSIVE_HPP
 #define PROGRESSIVE_HPP
 
-// 🐭 progressive.hpp – Steuerung der progressiven Mandelbrot-Iterationen (CUDA Managed Memory)
+// 🐭 progressive.hpp – Kontrolliert die schrittweise Erhöhung der Mandelbrot-Iterationstiefe
+// ⚙️ Verwendet __managed__-Speicher für synchronisierten Zugriff zwischen Host & Device
 
-// ----------------------------------------------------------------------
-// Device-Managed globale Variablen (nur CUDA, Forward-Deklaration)
-#ifdef __CUDACC__
-extern __device__ __managed__ int currentMaxIter;   // Aktuelle Iterationsgrenze
-extern __device__ __managed__ bool justResetFlag;   // Reset-Flag
-#endif
+// -----------------------------------------------------------------------------
+// CUDA-Managed globale Zustandsvariablen
+// -----------------------------------------------------------------------------
+#ifdef __CUDACC__  // Nur verfügbar, wenn CUDA-Code kompiliert wird
 
-// ----------------------------------------------------------------------
-// Progressive Iteration Control (thread-safe via managed memory)
+// 📌 Aktuelle maximale Iterationen für Mandelbrot-Berechnung (wird progressiv erhöht)
+extern __device__ __managed__ int currentMaxIter;
 
+// 🔄 Flag für „gerade zurückgesetzt“ (nur für einen Frame gültig)
+extern __device__ __managed__ bool justResetFlag;
+
+#endif // __CUDACC__
+
+// -----------------------------------------------------------------------------
+// CPU-seitige Schnittstelle zur Steuerung (wird vom Hauptprogramm verwendet)
+// -----------------------------------------------------------------------------
 namespace Progressive {
 
-/// Setzt Iterationen auf Startwert zurück und aktiviert Reset-Flag.
-void resetIterations();
+    /// 🔁 Setzt Iterationen zurück auf Startwert und markiert Reset-Flag.
+    void resetIterations();
 
-/// Liefert aktuelle Iterationszahl (ohne Erhöhung).
-int getCurrentIterations();
+    /// 🔍 Liefert aktuelle maximale Iterationstiefe (ohne Veränderung).
+    int getCurrentIterations();
 
-/// Erhöht Iterationszahl schrittweise (bis Maximalgrenze).
-void incrementIterations();
+    /// ⏫ Erhöht Iterationstiefe schrittweise bis zur Maximalgrenze.
+    void incrementIterations();
 
-/// Gibt true zurück, wenn zuletzt ein Reset stattfand (einmalig pro Reset).
-bool wasJustReset();
+    /// 🕵️‍♂️ Gibt einmalig true zurück, wenn gerade ein Reset erfolgte (setzt Flag zurück).
+    bool wasJustReset();
 
 } // namespace Progressive
 
