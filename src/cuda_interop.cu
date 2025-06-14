@@ -127,6 +127,10 @@ void renderCudaFrame(uchar4* pbo,
             float centralityBoost = 1.0f / (distToCenter + 0.1f);
             float score = entropy * centralityBoost / (tileDist + 1.0f);
 
+            if (Settings::debugLogging) {
+                std::printf("    [SCORE] %.6e (tileDist: %.4f, centerBoost: %.4f)\n", score, tileDist, centralityBoost);
+            }
+
             if (score > bestScore) {
                 bestScore = score;
                 bestTileOffset = tileOffset;
