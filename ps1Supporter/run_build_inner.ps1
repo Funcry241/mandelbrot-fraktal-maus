@@ -1,9 +1,11 @@
 # Dateiname: run_build_inner.ps1
-# Maus-Kommentar: MC|ft=PS|role=innerBuild|env=any|core=no
+# Maus-Kommentar: Baut nur den inneren Teil via CMake & kopiert Executable nach /dist.
+# MC|ft=PS|role=innerBuild|env=any|core=no
 
 <#+
-  MausID: κρυπτό-42
-  (Nur für die Maus: Dieses Skript baut nur den „inneren“ Teil via CMake und kopiert das Ergebnis ins dist-Verzeichnis.)
+  MausID: krypto-42
+  Dieses Skript baut das Projekt (ohne Neu-Konfiguration) aus dem bestehenden Build-Ordner
+  und kopiert die erzeugte EXE ins /dist-Verzeichnis – bereit zum Ausführen.
 #>
 
 param(
@@ -11,31 +13,37 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Write-Host "`n-- [MAUS-INNERBUILD] startet --`n"
 
-# 0) Skript- und Projektpfad ermitteln
+# Pfade setzen
 $scriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
 $buildDir    = Join-Path $projectRoot 'build'
 $distDir     = Join-Path $projectRoot 'dist'
 
-Write-Host "[INNER] Projekt-Root: $projectRoot"
+Write-Host "[INNER] Projekt-Root:      $projectRoot"
 Write-Host "[INNER] Build-Verzeichnis: $buildDir"
-Write-Host "[INNER] Dist-Verzeichnis: $distDir"
+Write-Host "[INNER] Dist-Verzeichnis:  $distDir`n"
 
-# 1) Inneren Build Schritt ausführen
-Write-Host "[INNER] Starte CMake-Build"
+# 1) CMake-Build starten
+Write-Host "[INNER] Starte CMake-Build (Konfiguration: '$Configuration')..."
 cmake --build $buildDir --config $Configuration --parallel
 
-# 2) Exe kopieren
+# 2) Executable ermitteln und kopieren
 $exePath = Join-Path $buildDir "$Configuration\mandelbrot_otterdream.exe"
 if (-not (Test-Path $exePath)) {
-    $exePath = Join-Path $buildDir 'mandelbrot_otterdream.exe'
-}
-if (Test-Path $exePath) {
-    Copy-Item $exePath -Destination $distDir -Force
-    Write-Host "[INNER] Kopiere: $exePath → $distDir"
-} else {
-    Write-Warning "[INNER] Exe nicht gefunden: $exePath"
+    $exePath = Join-Path $buildDir "mandelbrot_otterdream.exe"
 }
 
-Write-Host "[INNER] Innerer Build-Schritt abgeschlossen."
+if (Test-Path $exePath) {
+    if (-not (Test-Path $distDir)) {
+        New-Item -ItemType Directory -Path $distDir | Out-Null
+    }
+    Copy-Item $exePath -Destination $distDir -Force
+    Write-Host "[INNER] Executable kopiert: $exePath -> $distDir"
+} else {
+    Write-Warning "[INNER] Executable nicht gefunden! Erwartet unter: $exePath"
+}
+
+Write-Host "`n-- [MAUS-INNERBUILD] abgeschlossen --`n"
+exit 0

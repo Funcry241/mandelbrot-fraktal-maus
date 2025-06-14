@@ -1,47 +1,54 @@
 <#
-  MausSecret: ερμής-17
-  Dieses Skript initialisiert ein Git-Repository, erstellt ggf. eine .gitignore,
-  fügt Remote „MandelbrotFraktalMaus“ hinzu und pusht auf GitHub.
-  🐭 Kompakt, verständlich, elegant.
+  MausSecret: ermis-17
+  Dieses Skript initialisiert ein Git-Repository, erzeugt bei Bedarf eine .gitignore,
+  richtet den Remote „MandelbrotFraktalMaus“ ein und pusht auf GitHub.
+  Fokus: robust, wiederholbar, mausfein.
 #>
 
 $ErrorActionPreference = 'Stop'
-Write-Host "– 🐭 MausGit startet –"
+Write-Host "`n-- [MAUS-GIT] Initialisiere --`n"
 
-# 🔧 Konfiguration
+# Konfiguration
 $remoteName = "MandelbrotFraktalMaus"
 $remoteUrl  = "git@github.com:Funcry241/mandelbrot-fraktal-maus.git"
 $gitignorePath = ".gitignore"
 
-# 📁 Repository initialisieren, falls nötig
+# Repository initialisieren, falls nötig
 if (-not (Test-Path ".git" -PathType Container)) {
-    Write-Host "[GIT] Initialisiere Repository..."
-    git init
+    Write-Host "[GIT] Initialisiere Git-Repository..."
+    git init | Out-Null
 } else {
-    Write-Host "[GIT] Repository bereits vorhanden."
+    Write-Host "[GIT] Git-Repository bereits vorhanden."
 }
 
-# 📝 .gitignore erzeugen (wenn fehlt)
+# .gitignore erzeugen (falls nicht vorhanden)
 if (-not (Test-Path $gitignorePath)) {
     Write-Host "[GIT] Erzeuge .gitignore"
 @'
-# Build
+# Build-Ordner
 /build/
-/dist/
 /build-vs/
+/dist/
+/x64/
+/Debug/
+/Release/
 
-# Visual Studio
+# Visual Studio Dateien
 *.vcxproj*
 *.suo
 *.user
 *.vcxproj.filters
+*.VC.db
+*.VC.opendb
 
 # VSCode
 .vscode/
 !.vscode/c_cpp_properties.json
 
-# Temp & Logs
+# Temporäre Dateien & Logs
 *.log
+*.tmp
+*.tlog
 Thumbs.db
 Desktop.ini
 *~
@@ -50,20 +57,21 @@ Desktop.ini
 vcpkg/
 vcpkg_installed/
 
-# Output
+# Binary Output
 *.obj
 *.lib
 *.dll
 *.exe
 *.pdb
+*.ilk
 
-# CMake
+# CMake-Artefakte
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
 
-# IDEs
+# IDE-Projekte (CLion, Rider, Xcode, JetBrains)
 .idea/
 .DS_Store
 '@ | Out-File -Encoding UTF8 $gitignorePath
@@ -71,30 +79,30 @@ Makefile
     Write-Host "[GIT] .gitignore existiert bereits."
 }
 
-# 📦 Dateien hinzufügen und ersten Commit erstellen (falls nötig)
-Write-Host "[GIT] Dateien zum Commit vormerken..."
-git add .
+# Git-Add & Commit (nur bei leerem Repo)
+Write-Host "[GIT] Füge Dateien hinzu..."
+git add . | Out-Null
 
-# Nur committen, wenn noch kein Commit existiert
-git rev-parse --verify HEAD 2>$null | Out-Null
+$headExists = git rev-parse --verify HEAD 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[GIT] Erstelle Initial-Commit..."
-    git commit -m "Initial import: OtterDream Mandelbrot Fraktal-Projekt"
+    git commit -m "Initial import: OtterDream Mandelbrot Fraktal-Projekt" | Out-Null
 } else {
     Write-Host "[GIT] Bereits ein Commit vorhanden."
 }
 
-# 🌐 Remote hinzufügen, wenn fehlt
-if (-not (git remote | Where-Object { $_ -eq $remoteName })) {
-    Write-Host "[GIT] Füge Remote '$remoteName' hinzu → $remoteUrl"
+# Remote hinzufügen, falls nicht vorhanden
+$existingRemotes = git remote
+if ($existingRemotes -notcontains $remoteName) {
+    Write-Host "[GIT] Füge Remote '$remoteName' hinzu -> $remoteUrl"
     git remote add $remoteName $remoteUrl
 } else {
     Write-Host "[GIT] Remote '$remoteName' existiert bereits."
 }
 
-# ⬆️ Push auf main (mit Upstream setzen)
+# Push auf main (mit Upstream setzen)
 Write-Host "[GIT] Pushe auf Branch 'main' zu '$remoteName'..."
 git push --set-upstream $remoteName main
 
-Write-Host "– ✅ MausGit abgeschlossen –"
+Write-Host "`n-- [MAUS-GIT] Abgeschlossen --`n"
 exit 0

@@ -1,52 +1,46 @@
 <#
   MausSecret: σείριος-7
   Dieses Skript löscht temporäre Build-, Debug- und Log-Dateien im Mandelbrot-Projekt.
-  Optimiert: Eine rekursive Traversierung, Prüfung per Datei- und Ordnername.
-  Nur "Dreck" wird entfernt – Sourcecode bleibt sicher!
+  Maus-Prinzip: Keine Source-Datei wird angerührt. Nur echter Müll fliegt raus.
 #>
 
 $ErrorActionPreference = 'Stop'
-Write-Host "– 🚮 MausDelete startet –"
+Write-Host "`n– 🚮 MausDelete startet –`n"
 
-# 🔍 Dateierweiterungen, die gelöscht werden sollen
-$fileExtensions = @('.obj', '.o', '.ilk', '.pdb', '.log', '.tmp')
+# 🎯 Ziel: Müll-Extensions, bekannte Trash-Dateien und Build-Ordner
+$fileExtensions   = @('.obj', '.o', '.ilk', '.pdb', '.log', '.tmp', '.tlog')
+$filenamePatterns = @('CMakeCache.txt', 'CMakeGenerate.stamp', '*.VC.db', '*~')
+$folderNames      = @('CMakeFiles', 'build', 'Debug', 'Release', 'x64', '.vs', '.idea')
 
-# 🔍 Spezifische Dateinamenmuster (mit Wildcards)
-$filenamePatterns = @('CMakeCache.txt', '*~')
-
-# 🗂️ Ordnernamen, die gelöscht werden sollen
-$folderNames = @('CMakeFiles', 'build')
-
-# 📁 Alle Dateien & Verzeichnisse im Projekt durchsuchen (rekursiv)
-$allItems = Get-ChildItem -Recurse -Force
+# 🔍 Schneller rekursiver Scan
+$allItems = Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue
 
 foreach ($item in $allItems) {
     try {
-        $shouldDelete = $false
+        $isTrash = $false
 
-        # 📄 Prüfung für Dateien
         if (-not $item.PSIsContainer) {
-            if ($fileExtensions -contains $item.Extension) {
-                $shouldDelete = $true
-            } elseif ($filenamePatterns | Where-Object { $item.Name -like $_ }) {
-                $shouldDelete = $true
+            $ext = $item.Extension.ToLowerInvariant()
+
+            if ($fileExtensions -contains $ext) {
+                $isTrash = $true
+            }
+            elseif ($filenamePatterns | Where-Object { $item.Name -like $_ }) {
+                $isTrash = $true
             }
         }
-
-        # 📁 Prüfung für Ordner
-        if ($item.PSIsContainer -and ($folderNames -contains $item.Name)) {
-            $shouldDelete = $true
+        elseif ($folderNames -contains $item.Name) {
+            $isTrash = $true
         }
 
-        # 🚮 Löschung, wenn markiert
-        if ($shouldDelete) {
-            Remove-Item $item.FullName -Recurse -Force
-            Write-Host "  Entfernt: $($item.FullName)"
+        if ($isTrash) {
+            Remove-Item $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "  🗑️ Entfernt: $($item.FullName)"
         }
     } catch {
-        Write-Warning "  Fehler beim Löschen: $($item.FullName)"
+        Write-Warning "  ⚠️ Fehler beim Löschen: $($item.FullName)"
     }
 }
 
-Write-Host "– ✅ MausDelete abgeschlossen –"
+Write-Host "`n– ✅ MausDelete abgeschlossen –"
 exit 0
