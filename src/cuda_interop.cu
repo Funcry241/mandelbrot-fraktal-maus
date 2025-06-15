@@ -42,7 +42,10 @@ void renderCudaFrame(uchar4*, int* d_iterations, float* d_entropy, float* d_stdd
                      int width, int height, float zoom, float2 offset, int maxIter,
                      std::vector<float>& h_entropy, float2& newOffset, bool& shouldZoom, int tileSize) {
 
-    if (!cudaResource) { std::fprintf(stderr, "[ERROR] CUDA resource not registered!\n"); return; }
+    if (!cudaResource) {
+        std::fprintf(stderr, "[ERROR] CUDA resource not registered!\n");
+        return;
+    }
 
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaResource, 0));
     uchar4* devPtr;
@@ -61,14 +64,17 @@ void renderCudaFrame(uchar4*, int* d_iterations, float* d_entropy, float* d_stdd
 
     float threshold = Settings::dynamicVarianceThreshold(zoom);
     float bestScore = -1.0f;
+    float bestEntropy = -1.0f;
     float2 bestOffset = {};
     shouldZoom = false;
 
+    int passed = 0;
     for (int y = 0; y < tilesY; ++y) {
         for (int x = 0; x < tilesX; ++x) {
             int idx = y * tilesX + x;
             float entropy = h_entropy[idx];
             if (entropy < threshold) continue;
+            ++passed;
 
             float2 cand = {
                 offset.x + ((x + 0.5f) * tileSize - width * 0.5f) / zoom,
@@ -81,18 +87,22 @@ void renderCudaFrame(uchar4*, int* d_iterations, float* d_entropy, float* d_stdd
 
             if (score > bestScore) {
                 bestScore = score;
+                bestEntropy = entropy;
                 bestOffset = cand;
                 shouldZoom = true;
             }
         }
     }
 
-    if (shouldZoom) {
 #if defined(DEBUG) || Settings::debugLogging
-        std::printf("[ZOOM] Tile selected with entropy %.10f (threshold: %.10f)\n", bestScore, threshold);
-#endif
-        newOffset = bestOffset;
+    std::printf("[ZOOM] %d/%d tiles above entropy threshold %.4f\n", passed, totalTiles, threshold);
+    if (shouldZoom) {
+        std::printf("[ZOOM] Best entropy %.6f (threshold %.6f), score %.6f\n",
+                    bestEntropy, threshold, bestScore);
     }
+#endif
+
+    if (shouldZoom) newOffset = bestOffset;
 
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaResource, 0));
 }
