@@ -8,7 +8,7 @@
 #include "settings.hpp"
 #include "core_kernel.h"
 
-// Farbverlauf
+// Farbverlauf für elegante Darstellung basierend auf Iterationswerten
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     float tSharp = sqrtf(t);
     float r = 1.0f - tSharp;
@@ -23,7 +23,7 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  float zoom, float2 offset,
                                  int maxIterations);
 
-// 🔢 Berechnet Iterationsanzahl für einen Punkt in der komplexen Ebene
+// Berechnet Iterationsanzahl für einen Punkt in der komplexen Ebene
 __device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
     float x = 0.0f, y = 0.0f;
     int iter = 0;
@@ -36,7 +36,7 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
     return iter;
 }
 
-// 🚀 Host-Funktion zum Start des Mandelbrot-Kernels
+// Host-Funktion zum Start des Mandelbrot-Kernels
 extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
                                         int width, int height,
                                         float zoom, float2 offset,
@@ -52,7 +52,7 @@ extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
     cudaDeviceSynchronize();
 }
 
-// 🌈 CUDA-Kernel für Pixel-Rendering mit Iterationsausgabe
+// CUDA-Kernel für Pixel-Rendering mit Iterationsausgabe
 __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  int width, int height,
                                  float zoom, float2 offset,
@@ -72,7 +72,7 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     output[y * width + x] = elegantColor(t);
 }
 
-// 📊 CUDA-Kernel zur Entropieberechnung pro Tile
+// CUDA-Kernel zur Entropieberechnung pro Tile
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
                               int width, int height, int tileSize,
                               int maxIter) {
@@ -123,7 +123,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     }
 }
 
-// 🔧 Host-Funktion zum Starten des Entropie-Kernels
+// Host-Funktion zum Starten des Entropie-Kernels
 extern "C" void computeTileEntropy(const int* d_iterations,
                                    float* d_entropyOut,
                                    int width, int height,
