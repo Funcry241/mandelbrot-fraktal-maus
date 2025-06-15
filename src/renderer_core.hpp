@@ -1,3 +1,4 @@
+// Datei: src/renderer_core.hpp
 #ifndef RENDERER_CORE_HPP
 #define RENDERER_CORE_HPP
 
@@ -51,6 +52,8 @@ private:
     int frameCount;
     float currentFPS;
     float lastFrameTime;
+
+    int lastTileSize = -1; // 🧠 Letzter verwendeter Tile-Size (zur Auto-Zoom-Erkennung)
 };
 
 #endif // RENDERER_CORE_HPP

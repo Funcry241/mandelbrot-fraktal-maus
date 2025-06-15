@@ -53,7 +53,8 @@ Renderer::Renderer(int width, int height)
       d_complexity(nullptr), d_stddev(nullptr), d_iterations(nullptr),
       zoom(Settings::initialZoom),
       offset{Settings::initialOffsetX, Settings::initialOffsetY},
-      lastTime(0.0), frameCount(0), currentFPS(0.0f), lastFrameTime(0.0f) {
+      lastTime(0.0), frameCount(0), currentFPS(0.0f), lastFrameTime(0.0f),
+      lastTileSize(-1) {
     CudaInterop::setPauseZoom(false);
     std::printf("[DEBUG] Auto-Zoom ist aktuell: %s\n", CudaInterop::getPauseZoom() ? "PAUSIERT" : "AKTIV");
 }
@@ -163,7 +164,6 @@ void Renderer::initGL_impl() {
 }
 
 void Renderer::renderFrame_impl(bool autoZoomEnabled) {
-    static int lastTileSize = -1;
     double frameStart = glfwGetTime();
     frameCount++;
 
@@ -174,9 +174,13 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     }
 
     int currentTileSize = Settings::dynamicTileSize(zoom);
-    if (currentTileSize != lastTileSize && Settings::debugLogging)
-        std::printf("[DEBUG] TileSize changed to %d\n", currentTileSize);
-    lastTileSize = currentTileSize;
+    if (currentTileSize != lastTileSize) {
+        if (Settings::debugLogging)
+            std::printf("[DEBUG] TileSize changed to %d\n", currentTileSize);
+        freeDeviceBuffers();
+        setupBuffers();
+        lastTileSize = currentTileSize;
+    }
 
     float2 newOffset;
     bool shouldZoom;
