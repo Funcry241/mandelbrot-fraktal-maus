@@ -1,18 +1,21 @@
 <#
   MausSecret: σείριος-7
-  Dieses Skript löscht temporäre Build-, Debug- und Log-Dateien im Mandelbrot-Projekt.
-  Maus-Prinzip: Keine Source-Datei wird angerührt. Nur echter Müll fliegt raus.
+  Zweck: Löscht temporäre Build-, Debug- und Log-Dateien im Mandelbrot-Projekt.
+  🐭 Prinzip: Keine .cu/.cpp/.hpp/.h/.toml/.md/.ps1-Dateien werden angefasst. Nur echter Müll fliegt raus.
+  Hinweis: Debug-Modus via $dryRun = $true aktivierbar.
 #>
 
 $ErrorActionPreference = 'Stop'
+$dryRun = $false  # 🐭 Debug-Modus: true = zeigt nur an, löscht aber nicht
+
 Write-Host "`n– 🚮 MausDelete startet –`n"
 
-# 🎯 Ziel: Müll-Extensions, bekannte Trash-Dateien und Build-Ordner
+# 🎯 Zieldefinition: temporäre Dateierweiterungen, Dateinamenmuster, Build-Ordner
 $fileExtensions   = @('.obj', '.o', '.ilk', '.pdb', '.log', '.tmp', '.tlog')
 $filenamePatterns = @('CMakeCache.txt', 'CMakeGenerate.stamp', '*.VC.db', '*~')
 $folderNames      = @('CMakeFiles', 'build', 'Debug', 'Release', 'x64', '.vs', '.idea')
 
-# 🔍 Schneller rekursiver Scan
+# 🔍 Rekursiver Suchlauf ab Projektwurzel
 $allItems = Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue
 
 foreach ($item in $allItems) {
@@ -21,7 +24,6 @@ foreach ($item in $allItems) {
 
         if (-not $item.PSIsContainer) {
             $ext = $item.Extension.ToLowerInvariant()
-
             if ($fileExtensions -contains $ext) {
                 $isTrash = $true
             }
@@ -34,8 +36,12 @@ foreach ($item in $allItems) {
         }
 
         if ($isTrash) {
-            Remove-Item $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "  🗑️ Entfernt: $($item.FullName)"
+            if ($dryRun) {
+                Write-Host "  💡 (DRY) Würde löschen: $($item.FullName)"
+            } else {
+                Remove-Item $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host "  🗑️ Entfernt: $($item.FullName)"
+            }
         }
     } catch {
         Write-Warning "  ⚠️ Fehler beim Löschen: $($item.FullName)"
