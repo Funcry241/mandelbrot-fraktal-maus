@@ -53,7 +53,10 @@ Renderer::Renderer(int width, int height)
       d_complexity(nullptr), d_stddev(nullptr), d_iterations(nullptr),
       zoom(Settings::initialZoom),
       offset{Settings::initialOffsetX, Settings::initialOffsetY},
-      lastTime(0.0), frameCount(0), currentFPS(0.0f), lastFrameTime(0.0f) {}
+      lastTime(0.0), frameCount(0), currentFPS(0.0f), lastFrameTime(0.0f) {
+    CudaInterop::setPauseZoom(false);
+    std::printf("[DEBUG] Auto-Zoom ist aktuell: %s\n", CudaInterop::getPauseZoom() ? "PAUSIERT" : "AKTIV");
+}
 
 Renderer::~Renderer() {
     freeDeviceBuffers();
@@ -203,7 +206,7 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         currentTileSize
     );
 
-    if (autoZoomEnabled && shouldZoom) {
+    if (autoZoomEnabled && shouldZoom && !CudaInterop::getPauseZoom()) {
         offset.x += Settings::LERP_FACTOR * (newOffset.x - offset.x);
         offset.y += Settings::LERP_FACTOR * (newOffset.y - offset.y);
         zoom *= (1.0f + Settings::ZOOM_STEP_FACTOR);

@@ -8,7 +8,7 @@
 $ErrorActionPreference = 'Stop'
 $dryRun = $false  # 🐭 Debug-Modus: true = zeigt nur an, löscht aber nicht
 
-Write-Host "`n– 🚮 MausDelete startet –`n"
+Write-Host "`n--- MausDelete gestartet ---`n"
 
 # 🎯 Zieldefinition: temporäre Dateierweiterungen, Dateinamenmuster, Build-Ordner
 $fileExtensions   = @('.obj', '.o', '.ilk', '.pdb', '.log', '.tmp', '.tlog')
@@ -37,16 +37,16 @@ foreach ($item in $allItems) {
 
         if ($isTrash) {
             if ($dryRun) {
-                Write-Host "  💡 (DRY) Würde löschen: $($item.FullName)"
+                Write-Host "  (DRY RUN) Würde löschen: $($item.FullName)"
             } else {
                 Remove-Item $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Host "  🗑️ Entfernt: $($item.FullName)"
+                Write-Host "  Entfernt: $($item.FullName)"
             }
         }
     } catch {
-        Write-Warning "  ⚠️ Fehler beim Löschen: $($item.FullName)"
+        Write-Warning "  Fehler beim Löschen: $($item.FullName)"
     }
 }
 
-Write-Host "`n– ✅ MausDelete abgeschlossen –"
+Write-Host "`n--- MausDelete abgeschlossen ---"
 exit 0
