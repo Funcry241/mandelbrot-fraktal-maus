@@ -8,7 +8,6 @@
 #include "settings.hpp"
 #include "core_kernel.h"
 
-// Farbverlauf für elegante Darstellung basierend auf Iterationswerten
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     float tSharp = sqrtf(t);
     float r = 1.0f - tSharp;
@@ -17,13 +16,6 @@ __device__ __forceinline__ uchar4 elegantColor(float t) {
     return make_uchar4(r * 255, g * 255, b * 255, 255);
 }
 
-// Vorwärtsdeklaration des Mandelbrot-Kernels
-__global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
-                                 int width, int height,
-                                 float zoom, float2 offset,
-                                 int maxIterations);
-
-// Berechnet Iterationsanzahl für einen Punkt in der komplexen Ebene
 __device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
     float x = 0.0f, y = 0.0f;
     int iter = 0;
@@ -36,23 +28,6 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
     return iter;
 }
 
-// Host-Funktion zum Start des Mandelbrot-Kernels
-extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
-                                        int width, int height,
-                                        float zoom, float2 offset,
-                                        int maxIterations) {
-    dim3 block(Settings::TILE_W, Settings::TILE_H);
-    dim3 grid((width + block.x - 1) / block.x,
-              (height + block.y - 1) / block.y);
-
-    mandelbrotKernel<<<grid, block>>>(output, d_iterations,
-                                      width, height,
-                                      zoom, offset,
-                                      maxIterations);
-    cudaDeviceSynchronize();
-}
-
-// CUDA-Kernel für Pixel-Rendering mit Iterationsausgabe
 __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  int width, int height,
                                  float zoom, float2 offset,
@@ -72,7 +47,6 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     output[y * width + x] = elegantColor(t);
 }
 
-// CUDA-Kernel zur Entropieberechnung pro Tile
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
                               int width, int height, int tileSize,
                               int maxIter) {
@@ -87,26 +61,38 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         histo[i] = 0;
     __syncthreads();
 
-    int count = 0;
+    int localCount = 0;
 
-    for (int dy = 0; dy < tileSize; ++dy) {
-        for (int dx = 0; dx < tileSize; ++dx) {
-            int x = startX + dx;
-            int y = startY + dy;
-            if (x >= width || y >= height) continue;
+    int tid = threadIdx.x;
+    int threads = blockDim.x;
+    int total = tileSize * tileSize;
 
-            int iter = iterations[y * width + x];
-            int bin = min(iter * 256 / (maxIter + 1), 255);
-            atomicAdd(&histo[bin], 1);
-            ++count;
-        }
+    for (int idx = tid; idx < total; idx += threads) {
+        int dx = idx % tileSize;
+        int dy = idx / tileSize;
+        int x = startX + dx;
+        int y = startY + dy;
+
+        if (x >= width || y >= height) continue;
+
+        int iter = iterations[y * width + x];
+        int bin = min(iter * 256 / (maxIter + 1), 255);
+        atomicAdd(&histo[bin], 1);
+        localCount++;
     }
     __syncthreads();
 
-    if (threadIdx.x == 0 && count > 0) {
+    __shared__ int totalCount;
+    if (threadIdx.x == 0) totalCount = 0;
+    __syncthreads();
+
+    atomicAdd(&totalCount, localCount);
+    __syncthreads();
+
+    if (threadIdx.x == 0 && totalCount > 0) {
         float entropy = 0.0f;
         for (int i = 0; i < 256; ++i) {
-            float p = histo[i] / (float)count;
+            float p = histo[i] / (float)totalCount;
             if (p > 0.0f)
                 entropy -= p * log2f(p);
         }
@@ -123,7 +109,21 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     }
 }
 
-// Host-Funktion zum Starten des Entropie-Kernels
+extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
+                                        int width, int height,
+                                        float zoom, float2 offset,
+                                        int maxIterations) {
+    dim3 block(Settings::TILE_W, Settings::TILE_H);
+    dim3 grid((width + block.x - 1) / block.x,
+              (height + block.y - 1) / block.y);
+
+    mandelbrotKernel<<<grid, block>>>(output, d_iterations,
+                                      width, height,
+                                      zoom, offset,
+                                      maxIterations);
+    cudaDeviceSynchronize();
+}
+
 extern "C" void computeTileEntropy(const int* d_iterations,
                                    float* d_entropyOut,
                                    int width, int height,
@@ -132,7 +132,7 @@ extern "C" void computeTileEntropy(const int* d_iterations,
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     dim3 grid(tilesX, tilesY);
-    dim3 block(64);  // ausreichend Threads zur Histogramminit.
+    dim3 block(128);  // erhöhte Parallelität pro Tile
 
     entropyKernel<<<grid, block>>>(d_iterations, d_entropyOut,
                                    width, height,

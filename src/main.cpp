@@ -15,6 +15,9 @@ int main() {
     Renderer renderer(Settings::width, Settings::height);
     renderer.initGL();
 
+    // 🔗 Registrierung des KeyCallbacks für direkte Reaktion auf Tastenereignisse
+    glfwSetKeyCallback(renderer.getWindow(), CudaInterop::keyCallback);
+
     bool autoZoomEnabled = true;     // 🔍 Auto-Zoom aktiv?
     bool spaceWasPressed = false;    // ⌨️ Space-Debounce
     bool pauseWasPressed = false;    // ⌨️ P-Debounce
@@ -52,9 +55,8 @@ int main() {
         // ⏫ Iterationen langsam steigern (Detailschärfe wächst)
         Progressive::incrementIterations();
 
-        // 🔃 OpenGL-Fenster aktualisieren
-        glfwSwapBuffers(window);    // 💡 Muss vor `pollEvents` kommen!
-        glfwPollEvents();           // 🧠 Eingabe & Close-Verarbeitung
+        // ⚠️ Kein glfwSwapBuffers / glfwPollEvents hier!
+        // Diese Aufrufe passieren intern in renderer.renderFrame()
     }
 
     std::puts("[SHUTDOWN] Application exited cleanly.");
