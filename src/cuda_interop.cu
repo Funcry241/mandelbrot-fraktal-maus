@@ -1,4 +1,4 @@
-// 🍝 Maus-Kommentar: CUDA-Interop für Mandelbrot-Renderer – PBO-Mapping, Fraktal-Rendering & Auto-Zoom.
+// ASCII-Only CUDA-Interop für Mandelbrot-Renderer – PBO-Mapping, Fraktal-Rendering & Auto-Zoom mit Entropieanalyse
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -38,9 +38,9 @@ void registerPBO(GLuint pbo) {
     CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsMapFlagsWriteDiscard));
 }
 
-void renderCudaFrame(uchar4*, int* d_iterations, float* d_complexity, float* d_stddev,
+void renderCudaFrame(uchar4*, int* d_iterations, float* d_entropy, float* d_stddev,
                      int width, int height, float zoom, float2 offset, int maxIter,
-                     std::vector<float>& h_complexity, float2& newOffset, bool& shouldZoom, int tileSize) {
+                     std::vector<float>& h_entropy, float2& newOffset, bool& shouldZoom, int tileSize) {
 
     if (!cudaResource) { std::fprintf(stderr, "[ERROR] CUDA resource not registered!\n"); return; }
 
@@ -50,14 +50,14 @@ void renderCudaFrame(uchar4*, int* d_iterations, float* d_complexity, float* d_s
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource));
 
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIter);
-    computeTileEntropy(d_iterations, d_stddev, width, height, tileSize, maxIter);
+    computeTileEntropy(d_iterations, d_entropy, width, height, tileSize, maxIter);
 
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     int totalTiles = tilesX * tilesY;
 
-    h_complexity.resize(totalTiles);
-    CUDA_CHECK(cudaMemcpy(h_complexity.data(), d_stddev, totalTiles * sizeof(float), cudaMemcpyDeviceToHost));
+    h_entropy.resize(totalTiles);
+    CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, totalTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
     float threshold = Settings::dynamicVarianceThreshold(zoom);
     float bestScore = -1.0f;
@@ -67,7 +67,7 @@ void renderCudaFrame(uchar4*, int* d_iterations, float* d_complexity, float* d_s
     for (int y = 0; y < tilesY; ++y) {
         for (int x = 0; x < tilesX; ++x) {
             int idx = y * tilesX + x;
-            float entropy = h_complexity[idx];
+            float entropy = h_entropy[idx];
             if (entropy < threshold) continue;
 
             float2 cand = {
@@ -87,7 +87,13 @@ void renderCudaFrame(uchar4*, int* d_iterations, float* d_complexity, float* d_s
         }
     }
 
-    if (shouldZoom) newOffset = bestOffset;
+    if (shouldZoom) {
+#if defined(DEBUG) || Settings::debugLogging
+        std::printf("[ZOOM] Tile selected with entropy %.10f (threshold: %.10f)\n", bestScore, threshold);
+#endif
+        newOffset = bestOffset;
+    }
+
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaResource, 0));
 }
 

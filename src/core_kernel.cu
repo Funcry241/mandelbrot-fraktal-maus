@@ -114,11 +114,12 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         int tileIndex = tileY * gridDim.x + tileX;
         entropyOut[tileIndex] = entropy;
 
-        // 🔍 Nur loggen, wenn Entropie über Schwelle liegt
-        if (entropy > 3.0f && Settings::debugLogging) {
+#if defined(DEBUG) || Settings::debugLogging
+        if (entropy > 3.0f) {
             printf("[ENTROPY] tile (%d,%d) idx %d -> H=%.4f\n",
                    tileX, tileY, tileIndex, entropy);
         }
+#endif
     }
 }
 
