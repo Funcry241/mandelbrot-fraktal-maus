@@ -8,6 +8,15 @@
 #include "settings.hpp"
 #include "core_kernel.h"
 
+// Farbverlauf
+__device__ __forceinline__ uchar4 elegantColor(float t) {
+    float tSharp = sqrtf(t);
+    float r = 1.0f - tSharp;
+    float g = 0.6f * tSharp;
+    float b = 0.4f + 0.5f * tSharp;
+    return make_uchar4(r * 255, g * 255, b * 255, 255);
+}
+
 // Vorwärtsdeklaration des Mandelbrot-Kernels
 __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  int width, int height,
@@ -60,8 +69,7 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     iterationsOut[y * width + x] = iter;
 
     float t = iter / (float)maxIterations;
-    uchar4 color = make_uchar4(255 * t, 180 * t, 255 * (1.0f - t), 255);
-    output[y * width + x] = color;
+    output[y * width + x] = elegantColor(t);
 }
 
 // 📊 CUDA-Kernel zur Entropieberechnung pro Tile

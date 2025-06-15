@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.25)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)  # 🧠 Für IntelliSense und Clang-basierte Tools
 
-project(OtterDreamMandelbrot LANGUAGES CXX CUDA)
+# 🔧 CUDA separat aktivieren (Workaround für CMake 4.x)
+enable_language(CUDA)
+project(OtterDreamMandelbrot LANGUAGES CXX)
 
 # ---------------------------------------------------------
 # 📦 Vcpkg Integration
@@ -19,7 +21,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
 # 🧠 ARCHITEKTUR FIX
-# CUDA: setze explizite Architektur – CMake 4.x braucht das!
 set(CMAKE_CUDA_ARCHITECTURES 86)
 
 # ---------------------------------------------------------
@@ -78,6 +79,8 @@ set_source_files_properties(
     PROPERTIES LANGUAGE CUDA
 )
 
+# ---------------------------------------------------------
+# 🧱 Build-Konfigurationen
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
@@ -88,4 +91,6 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 set(CMAKE_CUDA_FLAGS_DEBUG "-G -g")
 set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --fmad=false --prec-div=true")
 
+# ---------------------------------------------------------
+# 📦 Install-Ziel
 install(TARGETS mandelbrot_otterdream RUNTIME DESTINATION bin)

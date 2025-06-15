@@ -7,7 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Write-Host "\n=== Build started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===\n"
+Write-Host "`n=== Build started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===`n"
 
 # 1) SSH agent setup
 if ((Get-Service ssh-agent -ErrorAction SilentlyContinue).Status -ne 'Running') {
@@ -15,7 +15,7 @@ if ((Get-Service ssh-agent -ErrorAction SilentlyContinue).Status -ne 'Running') 
     Write-Host "[SSH] ssh-agent started."
 }
 if (-not (ssh-add -l 2>&1) -match "SHA256") {
-    $keyPath = "$Env:USERPROFILE\.ssh\id_ed25519"
+    $keyPath = "$Env:USERPROFILE\\.ssh\\id_ed25519"
     if (Test-Path $keyPath) {
         ssh-add $keyPath | Out-Null
         Write-Host "[SSH] Key loaded."
@@ -53,14 +53,14 @@ try {
 }
 
 # 5) MSVC setup
-$vswhere = "${Env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$vswhere = "${Env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe"
 $vsInstall = & "$vswhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vsInstall) {
     Write-Error "[MSVC] Visual Studio not found."
     exit 1
 }
 $vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
-& cmd /c "\"$vcvars\" && set" | ForEach-Object {
+cmd /c "`"$vcvars`" && set" | ForEach-Object {
     if ($_ -match '^([\w]+)=(.*)$') {
         [Environment]::SetEnvironmentVariable($matches[1], $matches[2])
     }
@@ -81,7 +81,7 @@ if (Test-Path .env) {
 try {
     $vcpkg = (Get-Command vcpkg.exe -ErrorAction Stop).Source
     $vcpkgRoot = Split-Path $vcpkg -Parent
-    $toolchain = "$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
+    $toolchain = "$vcpkgRoot\\scripts\\buildsystems\\vcpkg.cmake"
     Write-Host "[VCPKG] Toolchain: $toolchain"
 } catch {
     Write-Error "[VCPKG] Not found."
@@ -95,23 +95,26 @@ New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 $cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=86"
 Write-Host "[CUDA] Forcing architecture: 86 (Ampere)"
 
-# 10) CMake configure
+# 10) CMake configure (clean call)
 Write-Host "[BUILD] Configuring project..."
-cmake -S . -B build -G Ninja `
-    "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
-    "-DCMAKE_BUILD_TYPE=$Configuration" `
-    "-DCMAKE_CUDA_COMPILER=$nvcc" `
-    "-DCMAKE_CUDA_TOOLKIT_ROOT_DIR=$($cudaBin)\.." `
-    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON `
+$cmakeArgs = @(
+    "-S", ".", "-B", "build", "-G", "Ninja",
+    "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
+    "-DCMAKE_BUILD_TYPE=$Configuration",
+    "-DCMAKE_CUDA_COMPILER=$nvcc",
+    "-DCMAKE_CUDA_TOOLKIT_ROOT_DIR=$($cudaBin)\\..",
+    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     $cudaArch
+)
+cmake @cmakeArgs
 
 # 11) CMake build
 Write-Host "[BUILD] Starting build..."
 cmake --build build --config $Configuration --parallel
 
 # 12) Copy executable
-$exe = "build\$Configuration\mandelbrot_otterdream.exe"
-if (-not (Test-Path $exe)) { $exe = "build\mandelbrot_otterdream.exe" }
+$exe = "build\\$Configuration\\mandelbrot_otterdream.exe"
+if (-not (Test-Path $exe)) { $exe = "build\\mandelbrot_otterdream.exe" }
 if (Test-Path $exe) {
     Copy-Item $exe -Destination dist -Force
     Write-Host "[COPY] Executable to dist"
@@ -121,7 +124,7 @@ if (Test-Path $exe) {
 }
 
 # 13) Copy GLEW/GLFW DLLs
-$dllSearchRoots = Get-ChildItem "$PSScriptRoot\vcpkg_installed" -Recurse -Directory | Where-Object { $_.Name -eq "bin" }
+$dllSearchRoots = Get-ChildItem "$PSScriptRoot\\vcpkg_installed" -Recurse -Directory | Where-Object { $_.Name -eq "bin" }
 foreach ($dll in 'glfw3.dll','glew32.dll') {
     $src = $dllSearchRoots | ForEach-Object {
         Get-ChildItem $_.FullName -Filter $dll -ErrorAction SilentlyContinue
@@ -160,5 +163,5 @@ foreach ($script in 'run_build_inner.ps1','MausDelete.ps1','MausGitAutoCommit.ps
 }
 
 # Build finished
-Write-Host "\nBuild completed successfully."
+Write-Host "`nBuild completed successfully."
 exit 0
