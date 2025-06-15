@@ -1,8 +1,7 @@
 // Datei: src/hud.hpp
+// 🐭 Maus-Kommentar: HUD-Schnittstelle – zeigt FPS, Zoom und Offsets via STB-Easy-Font
 
 #pragma once
-#ifndef HUD_HPP
-#define HUD_HPP
 
 #include <string>
 
@@ -25,7 +24,7 @@ namespace Hud {
 
     /// 🖼️ Rendert das HUD mit den aktuellen Werten (FPS, Frame Time, Zoom, Offset)
     void draw(float fps,
-              float frameTimeMs,  ///< Framezeit in Millisekunden
+              float frameTimeMs,
               float zoom,
               float offsetX,
               float offsetY,
@@ -36,5 +35,3 @@ namespace Hud {
     void cleanup();
 
 } // namespace Hud
-
-#endif // HUD_HPP

@@ -1,9 +1,8 @@
-#include "opengl_utils.hpp"
-#include <iostream>
+// Datei: src/opengl_utils.cpp
+// 🐭 Maus-Kommentar: Hilfsfunktionen für Shader, VAO/VBO-Einrichtung und Fullscreen-Quad
 
-#ifndef __CUDACC__
-#include <GL/glew.h>
-#endif
+#include "pch.hpp"
+#include "opengl_utils.hpp"
 
 namespace OpenGLUtils {
 
@@ -48,7 +47,6 @@ GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) {
     glDeleteShader(f);
     return prog;
 }
-
 #endif // __CUDACC__
 
 void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) {

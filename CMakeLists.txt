@@ -44,6 +44,9 @@ add_executable(mandelbrot_otterdream
     src/progressive.cu
 )
 
+# 🧠 Precompiled Header
+target_precompile_headers(mandelbrot_otterdream PRIVATE src/pch.hpp)
+
 target_include_directories(mandelbrot_otterdream PRIVATE
     "${CUDA_TOOLKIT_ROOT_DIR}/include"
     "${CMAKE_SOURCE_DIR}/src"

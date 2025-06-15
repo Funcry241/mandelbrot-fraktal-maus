@@ -1,17 +1,11 @@
 // Datei: src/hud.cpp
+// 🐭 Maus-Kommentar: HUD-Overlay mit Textanzeige via STB-Easy-Font und GLSL-Shadern
+
+#include "pch.hpp"
 
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
 #include "hud.hpp"
-
-#include <vector>
-#include <string>
-#include <cstdio>
-
-#ifndef __CUDACC__
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
-#endif
 
 namespace Hud {
 

@@ -96,6 +96,7 @@ $cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=86"
 Write-Host "[CUDA] Forcing architecture: 86 (Ampere)"
 
 # 10) CMake configure (clean call)
+Write-Host "[INFO] CMake version: $(cmake --version | Select-String -Pattern 'cmake version')"
 Write-Host "[BUILD] Configuring project..."
 $cmakeArgs = @(
     "-S", ".", "-B", "build", "-G", "Ninja",
@@ -119,7 +120,7 @@ if (Test-Path $exe) {
     Copy-Item $exe -Destination dist -Force
     Write-Host "[COPY] Executable to dist"
 } else {
-    Write-Error "[COPY] Executable not found!"
+    Write-Error "[BUILD] Build probably failed. Check output above!"
     exit 1
 }
 
@@ -162,6 +163,5 @@ foreach ($script in 'run_build_inner.ps1','MausDelete.ps1','MausGitAutoCommit.ps
     }
 }
 
-# Build finished
 Write-Host "`nBuild completed successfully."
 exit 0

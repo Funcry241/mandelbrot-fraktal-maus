@@ -1,43 +1,41 @@
-#pragma once
+// Datei: src/cuda_interop.hpp
+// 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL Interop – inkl. PBO-Handling und Auto-Zoom-Logik
 
-#include <vector>
+#ifndef CUDA_INTEROP_HPP
+#define CUDA_INTEROP_HPP
+
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
-#include <GLFW/glfw3.h>  // 🐭 Für Tasteneingaben (Space: Auto-Zoom, P: Pause)
+#include <vector>
+#include <GLFW/glfw3.h>
 
 namespace CudaInterop {
 
-/// 🖼️ Rendert ein Frame in ein OpenGL-PBO und analysiert die Komplexität für Auto-Zoom.
-/// Der Host-Puffer `h_complexity` wird ggf. resized – daher NICHT const!
-void renderCudaFrame(
-    uchar4* pbo,                          // 🧠 CUDA-gemapptes OpenGL-PBO
-    int* d_iterations,                   // 🔁 Iterationen je Pixel (CUDA-Buffer)
-    float* d_complexity,                 // 📊 Komplexitätsdaten (pro Tile)
-    float* d_stddev,                     // σ Tile-Komplexität (Standardabweichung je Tile)
-    int width,                           // 📐 Bildbreite
-    int height,                          // 📐 Bildhöhe
-    float zoom,                          // 🔍 Aktueller Zoomfaktor
-    float2 offset,                       // 🎯 Bildmittelpunkt im Fraktalraum
-    int maxIterations,                   // ⏳ Max. Iterationen pro Pixel
-    std::vector<float>& h_complexity,    // 📊 Host-Puffer für Komplexitätsanalyse (modifizierbar!)
-    float2& outNewOffset,                // ⛳ Ziel-Koordinate für nächsten Zoom
-    bool& shouldZoom,                    // 🚦 Auto-Zoom auslösen?
-    int tileSize                         // 📦 Tile-Größe für Analyse
-);
-
-/// 🎹 Callback für Tastatureingaben (z. B. Space = Pause)
-void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
-
-/// ⏸️ Setzt den Auto-Zoom pausiert/aktiv
-void setPauseZoom(bool pause);
-
-/// 🕹️ Fragt den aktuellen Zoom-Pausenstatus ab
-bool getPauseZoom();
-
-/// 🔗 Registriert ein OpenGL-PBO zur Verwendung mit CUDA
-void registerPBO(GLuint pbo);
-
-/// 🔌 Deregistriert das aktuell gebundene OpenGL-PBO aus CUDA
+void registerPBO(unsigned int pbo);
 void unregisterPBO();
 
-}  // namespace CudaInterop
+void renderCudaFrame(
+    uchar4* output,
+    int* d_iterations,
+    float* d_complexity,
+    float* d_stddev,
+    int width,
+    int height,
+    float zoom,
+    float2 offset,
+    int maxIterations,
+    std::vector<float>& h_complexity,
+    float2& newOffset,
+    bool& shouldZoom,
+    int tileSize
+);
+
+void setPauseZoom(bool pause);
+bool getPauseZoom();
+
+// 🧠 Neu: Tastatureingabe-Handler für Auto-Zoom Pause (Taste P)
+void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+
+} // namespace CudaInterop
+
+#endif // CUDA_INTEROP_HPP

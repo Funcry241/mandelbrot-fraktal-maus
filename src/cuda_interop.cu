@@ -1,20 +1,11 @@
-// ASCII-Only CUDA-Interop für Mandelbrot-Renderer – PBO-Mapping, Fraktal-Rendering & Auto-Zoom mit Entropieanalyse
+// Datei: src/cuda_interop.cu
 
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
 #endif
 
-#include <GL/gl.h>
-#include <GLFW/glfw3.h>
-#include <cuda_runtime.h>
-#include <cuda_gl_interop.h>
-#include <cstdio>
-#include <cstdlib>
-#include <vector>
-#include <cmath>
-#include <algorithm>
-
+#include "pch.hpp"  // 🧠 Vorab-Header: Windows, OpenGL, CUDA, Standard-C++
 #include "settings.hpp"
 #include "core_kernel.h"
 #include "memory_utils.hpp"
@@ -23,8 +14,8 @@
 
 namespace CudaInterop {
 
-static cudaGraphicsResource_t cudaResource = nullptr;
-static bool pauseZoom = false;
+static cudaGraphicsResource_t cudaResource = nullptr;  // 🔗 CUDA-Handle zum OpenGL-PBO
+static bool pauseZoom = false;                         // ⏸️ Zoom-Steuerung durch Nutzer
 
 // ✂️ Deregistriert PBO von CUDA – notwendig bei Resize oder Shutdown
 void unregisterPBO() {
@@ -68,7 +59,7 @@ void renderCudaFrame(uchar4*, int* d_iterations, float* d_entropy, float* d_stdd
     h_entropy.resize(totalTiles);
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, totalTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
-    // 📉 Entropie-Diagnose
+    // 📉 Entropie-Diagnose (optional bei Debug)
 #if defined(DEBUG) || Settings::debugLogging
     float minE = 1e10f, maxE = -1.0f, sumE = 0.0f;
     for (int i = 0; i < totalTiles; ++i) {
@@ -102,8 +93,8 @@ void renderCudaFrame(uchar4*, int* d_iterations, float* d_entropy, float* d_stdd
             };
 
             float dist = std::hypot(cand.x - offset.x, cand.y - offset.y);
-            float cent = std::hypot(cand.x + 0.75f, cand.y);
-            float score = entropy / (dist + 1.0f) / (cent + 0.1f);
+            float cent = std::hypot(cand.x + 0.75f, cand.y);  // Bias: Zentrumsnähe
+            float score = entropy / (dist + 1.0f) / (cent + 0.1f);  // Heuristik
 
             if (score > bestScore) {
                 bestScore = score;

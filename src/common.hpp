@@ -1,9 +1,15 @@
-// Datei: src/common.hpp
+// Datei: common.hpp
 #pragma once
-#include <stdexcept>
 #include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
 
-inline void CUDA_CHECK(cudaError_t err) {
-    if (err != cudaSuccess)
-        throw std::runtime_error(std::string("CUDA error: ") + cudaGetErrorString(err));
-}
+#define CUDA_CHECK(call)                                                       \
+    do {                                                                       \
+        cudaError_t err = (call);                                              \
+        if (err != cudaSuccess) {                                              \
+            fprintf(stderr, "[CUDA ERROR] %s:%d: %s\n",                        \
+                    __FILE__, __LINE__, cudaGetErrorString(err));             \
+            std::exit(EXIT_FAILURE);                                           \
+        }                                                                      \
+    } while (0)

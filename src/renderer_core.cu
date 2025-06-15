@@ -1,9 +1,7 @@
 // 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, Auto-Zoom und Bildausgabe
 
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
-#include <cuda_gl_interop.h>
-#include <cuda_runtime.h>
+#include "pch.hpp"
+
 #include "settings.hpp"
 #include "core_kernel.h"
 #include "cuda_interop.hpp"
@@ -13,8 +11,6 @@
 #include "memory_utils.hpp"
 #include "progressive.hpp"
 #include "stb_easy_font.h"
-#include <iostream>
-#include <vector>
 #include "common.hpp"
 
 namespace {
@@ -107,6 +103,9 @@ void Renderer::initGL() {
         if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w)))
             self->resize(newW, newH);
     });
+
+    glfwSetKeyCallback(window, CudaInterop::keyCallback);  // ⌨️ Auto-Zoom Pause per Taste (SPACE / P)
+
     initGL_impl();
 }
 
