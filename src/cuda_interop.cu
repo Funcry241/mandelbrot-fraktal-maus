@@ -79,6 +79,15 @@ void renderCudaFrame(
                 offset.y + (by + 0.5f) * tileSize * scaleY
             };
 
+#if defined(DEBUG) || defined(_DEBUG)
+            float2 delta = { tileCenter.x - offset.x, tileCenter.y - offset.y };
+            float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+            std::cout << "[Zoom DEBUG] Entropy max at tile (" << bx << "," << by << ")\n";
+            std::cout << "[Zoom DEBUG] Current offset: (" << offset.x << ", " << offset.y << ")\n";
+            std::cout << "[Zoom DEBUG] New offset:     (" << tileCenter.x << ", " << tileCenter.y << ")\n";
+            std::cout << "[Zoom DEBUG] Shift distance: " << dist << "\n";
+#endif
+
             newOffset = tileCenter;
             shouldZoom = true;
         } else {
