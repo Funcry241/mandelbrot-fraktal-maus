@@ -1,5 +1,6 @@
 // Datei: src/renderer_core.cu
-// 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, Auto-Zoom und Bildausgabe
+// Zeilen: 389
+// 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, Auto-Zoom und Bildausgabe. Fix: Auto-Zoom-Ergebnisse (newOffset, shouldZoom) werden übernommen – ganz ohne lerp(), dafür explizit interpoliert. Maus bleibt minimal.
 
 #include "pch.hpp"
 
@@ -204,6 +205,16 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         shouldZoom,
         currentTileSize
     );
+
+    if (shouldZoom) {
+        offset.x += Settings::LERP_FACTOR * (newOffset.x - offset.x);
+        offset.y += Settings::LERP_FACTOR * (newOffset.y - offset.y);
+        zoom *= Settings::AUTOZOOM_SPEED;
+
+        if (Settings::debugLogging) {
+            std::printf("[AutoZoom] New target: (%.10f, %.10f), zoom: %.10f\n", offset.x, offset.y, zoom);
+        }
+    }
 
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
