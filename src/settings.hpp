@@ -19,11 +19,7 @@ inline constexpr float initialZoom    = 300.0f;
 inline constexpr float initialOffsetX = -0.5f;
 inline constexpr float initialOffsetY =  0.0f;
 
-inline constexpr float OFFSET_STEP_FACTOR = 0.5f;
 inline constexpr float ZOOM_STEP_FACTOR   = 0.002f;
-
-inline constexpr float MIN_OFFSET_STEP = 1e-8f;
-inline constexpr float MIN_ZOOM_STEP   = 1e-6f;
 
 inline constexpr float VARIANCE_THRESHOLD      = 1e-12f;
 inline constexpr float MIN_VARIANCE_THRESHOLD  = 1e-10f;

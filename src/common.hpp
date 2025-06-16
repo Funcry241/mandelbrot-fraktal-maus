@@ -3,18 +3,26 @@
 
 #pragma once
 
-// 🔧 Windows-Makros beschneiden
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
+// 🔧 Windows-spezifische Makros und Header
+#ifdef _WIN32
+  #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+  #endif
+  #ifndef NOMINMAX
+    #define NOMINMAX
+  #endif
+  #include <windows.h>
+#endif
 
-// 🔧 GLEW ohne gl.h, kein GLU
-#define GL_DO_NOT_INCLUDE_GL_H
-#define GLEW_NO_GLU
+// 🎨 OpenGL: GLEW vor gl.h, kein GLU
+#ifndef GL_DO_NOT_INCLUDE_GL_H
+  #define GL_DO_NOT_INCLUDE_GL_H
+#endif
 
-// 🪟 Windows-API
-#include <windows.h>
+#ifndef GLEW_NO_GLU
+  #define GLEW_NO_GLU
+#endif
 
-// 🎨 OpenGL
 #include <GL/glew.h>
 
 // ⚡ CUDA

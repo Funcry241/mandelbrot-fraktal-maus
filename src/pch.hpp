@@ -2,10 +2,15 @@
 
 #pragma once
 
-// Wichtig: Windows-API zuerst, minimal halten
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
+#ifdef _WIN32
+  #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+  #endif
+  #ifndef NOMINMAX
+    #define NOMINMAX
+  #endif
+  #include <windows.h>
+#endif
 
 // GLEW vor GLFW, um GL.h-Header-Konflikte zu vermeiden
 #include <GL/glew.h>
