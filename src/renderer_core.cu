@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 389
-// 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, Auto-Zoom und Bildausgabe. Fix: Auto-Zoom-Ergebnisse (newOffset, shouldZoom) werden übernommen – ganz ohne lerp(), dafür explizit interpoliert. Maus bleibt minimal.
+// Zeilen: 388
+// 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, Auto-Zoom und Bildausgabe. Fix: Zoom-Ziel wird nicht doppelt interpoliert. Neu: Iterationen steigen nur bei aktivem Auto-Zoom (Progressive::incrementIterations). Schneefuchs hätte gesagt: „Die Details kommen nur, wenn das Otterauge wirklich hinsieht.“
 
 #include "pch.hpp"
 
@@ -162,7 +162,6 @@ void Renderer::initGL_impl() {
 
 void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     double frameStart = glfwGetTime();
-    Progressive::incrementIterations();
     frameCount++;
 
     if (frameStart - lastTime >= 1.0) {
@@ -206,15 +205,10 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         currentTileSize
     );
 
-    if (shouldZoom) {
-        offset.x += Settings::LERP_FACTOR * (newOffset.x - offset.x);
-        offset.y += Settings::LERP_FACTOR * (newOffset.y - offset.y);
-        zoom *= Settings::AUTOZOOM_SPEED;
-
-        if (Settings::debugLogging) {
-            std::printf("[AutoZoom] New target: (%.10f, %.10f), zoom: %.10f\n", offset.x, offset.y, zoom);
-        }
+    if (shouldZoom && !CudaInterop::getPauseZoom()) {
+        Progressive::incrementIterations();
     }
+
 
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
