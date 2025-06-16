@@ -4,6 +4,7 @@
 
 // Wichtig: Windows-API zuerst, minimal halten
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 
 // GLEW vor GLFW, um GL.h-Header-Konflikte zu vermeiden

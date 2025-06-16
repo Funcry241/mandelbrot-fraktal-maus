@@ -100,7 +100,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         int tileIndex = tileY * gridDim.x + tileX;
         entropyOut[tileIndex] = entropy;
 
-#if defined(DEBUG) || Settings::debugLogging
+#ifdef DEBUG
         if (entropy > 3.0f) {
             printf("[ENTROPY] tile (%d,%d) idx %d -> H=%.4f\n",
                    tileX, tileY, tileIndex, entropy);

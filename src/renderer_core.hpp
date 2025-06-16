@@ -5,7 +5,6 @@
 
 #include <vector>
 #include <cuda_gl_interop.h>  // Für CUDA/OpenGL Interop
-#include <GL/glew.h>          // Für GLuint
 
 struct GLFWwindow;  // 🪟 Forward Declaration spart Header-Ballast
 
@@ -38,12 +37,11 @@ private:
     GLuint VAO = 0, VBO = 0, EBO = 0;
 
     // CUDA Device Buffer
-    float* d_complexity = nullptr;
-    float* d_stddev = nullptr;
-    int* d_iterations = nullptr;
+    float* d_entropy = nullptr;      // 🧠 Entropie pro Tile (statt „Komplexität“)
+    int*   d_iterations = nullptr;   // 🔁 Iterationswerte pro Pixel
 
     // Host-Side Auswertung
-    std::vector<float> h_complexity;
+    std::vector<float> h_entropy;    // 🖥️ Entropie-Ergebnisse
 
     // Rendering-Zustand
     float zoom = 1.0f;

@@ -14,26 +14,25 @@ namespace CudaInterop {
 void registerPBO(unsigned int pbo);
 void unregisterPBO();
 
-void renderCudaFrame(
-    uchar4* output,
+void renderCudaFrame(    
     int* d_iterations,
-    float* d_complexity,
-    float* d_stddev,
+    float* d_entropy,    
     int width,
     int height,
     float zoom,
     float2 offset,
     int maxIterations,
-    std::vector<float>& h_complexity,
+    std::vector<float>& h_entropy,
     float2& newOffset,
     bool& shouldZoom,
     int tileSize
 );
 
+
 void setPauseZoom(bool pause);
 bool getPauseZoom();
 
-// 🧠 Neu: Tastatureingabe-Handler für Auto-Zoom Pause (Taste P)
+// 🧠 Tastatureingabe-Handler für Auto-Zoom Pause (Taste P)
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 
 } // namespace CudaInterop

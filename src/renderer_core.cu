@@ -1,3 +1,4 @@
+// Datei: src/renderer_core.cu
 // 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, Auto-Zoom und Bildausgabe
 
 #include "pch.hpp"
@@ -46,7 +47,7 @@ void main() {
 Renderer::Renderer(int width, int height)
     : windowWidth(width), windowHeight(height), window(nullptr),
       pbo(0), tex(0), program(0), VAO(0), VBO(0), EBO(0),
-      d_complexity(nullptr), d_stddev(nullptr), d_iterations(nullptr),
+      d_entropy(nullptr), d_iterations(nullptr),
       zoom(Settings::initialZoom),
       offset{Settings::initialOffsetX, Settings::initialOffsetY},
       lastTime(0.0), frameCount(0), currentFPS(0.0f), lastFrameTime(0.0f),
@@ -70,14 +71,13 @@ Renderer::~Renderer() {
 }
 
 void Renderer::freeDeviceBuffers() {
-    MemoryUtils::freeComplexityBuffer(d_complexity);
+    if (d_entropy) {
+        CUDA_CHECK(cudaFree(d_entropy));
+        d_entropy = nullptr;
+    }
     if (d_iterations) {
         CUDA_CHECK(cudaFree(d_iterations));
         d_iterations = nullptr;
-    }
-    if (d_stddev) {
-        CUDA_CHECK(cudaFree(d_stddev));
-        d_stddev = nullptr;
     }
 }
 
@@ -103,19 +103,17 @@ void Renderer::initGL() {
         if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(w)))
             self->resize(newW, newH);
     });
-
-    glfwSetKeyCallback(window, CudaInterop::keyCallback);  // ⌨️ Auto-Zoom Pause per Taste (SPACE / P)
+    glfwSetKeyCallback(window, CudaInterop::keyCallback);
 
     initGL_impl();
 }
 
 bool Renderer::shouldClose() const {
-    return (window && glfwWindowShouldClose(window));
+    return window && glfwWindowShouldClose(window);
 }
 
 void Renderer::resize(int newWidth, int newHeight) {
     if (newWidth <= 0 || newHeight <= 0) return;
-
     windowWidth = newWidth;
     windowHeight = newHeight;
 
@@ -164,10 +162,11 @@ void Renderer::initGL_impl() {
 
 void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     double frameStart = glfwGetTime();
+    Progressive::incrementIterations();
     frameCount++;
 
     if (frameStart - lastTime >= 1.0) {
-        currentFPS = static_cast<float>(frameCount) / static_cast<float>(frameStart - lastTime);
+        currentFPS = frameCount / static_cast<float>(frameStart - lastTime);
         frameCount = 0;
         lastTime = frameStart;
     }
@@ -194,16 +193,14 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     }
 
     CudaInterop::renderCudaFrame(
-        nullptr,
         d_iterations,
-        d_complexity,
-        d_stddev,
+        d_entropy,
         windowWidth,
         windowHeight,
         zoom,
         offset,
         Progressive::getCurrentIterations(),
-        h_complexity,
+        h_entropy,
         newOffset,
         shouldZoom,
         currentTileSize
@@ -231,13 +228,17 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     Hud::draw(currentFPS, lastFrameTime, zoom, offset.x, offset.y, windowWidth, windowHeight);
     glfwSwapBuffers(window);
     glfwPollEvents();
-
-    if (Settings::debugLogging) {
-        std::printf("[DEBUG] Frame complete (FPS: %.2f | ms: %.2f)\n", currentFPS, lastFrameTime);
-    }
 }
 
 void Renderer::setupPBOAndTexture() {
+    if (pbo) {
+        CudaInterop::unregisterPBO();
+        glDeleteBuffers(1, &pbo);
+    }
+    if (tex) {
+        glDeleteTextures(1, &tex);
+    }
+
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, windowWidth * windowHeight * sizeof(uchar4), nullptr, GL_DYNAMIC_DRAW);
@@ -255,16 +256,15 @@ void Renderer::setupPBOAndTexture() {
 
 void Renderer::setupBuffers() {
     int currentTileSize = Settings::dynamicTileSize(zoom);
-    int totalTiles = ((windowWidth + currentTileSize - 1) / currentTileSize) *
-                     ((windowHeight + currentTileSize - 1) / currentTileSize);
+    int totalTiles = ((windowWidth + currentTileSize - 1) / currentTileSize)
+                     * ((windowHeight + currentTileSize - 1) / currentTileSize);
 
     std::printf("[DEBUG] setupBuffers: TileSize=%d → totalTiles=%d\n", currentTileSize, totalTiles);
 
-    d_complexity = MemoryUtils::allocComplexityBuffer(totalTiles);
-    h_complexity.resize(totalTiles);
+    CUDA_CHECK(cudaMalloc(&d_entropy, totalTiles * sizeof(float)));
+    h_entropy.resize(totalTiles);
 
     CUDA_CHECK(cudaMalloc(&d_iterations, windowWidth * windowHeight * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_stddev, totalTiles * sizeof(float)));
 }
 
 void Renderer::renderFrame(bool autoZoomEnabled) {

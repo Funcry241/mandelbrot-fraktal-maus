@@ -1,3 +1,5 @@
+# 🐭 Maus-Kommentar: Haupt-CMake-Datei für das Mandelbrot-Projekt (CUDA + OpenGL)
+
 cmake_minimum_required(VERSION 3.25)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)  # 🧠 Für IntelliSense und Clang-basierte Tools
@@ -15,13 +17,18 @@ set(VCPKG_MANIFEST_MODE ON)
 # ⚙️ Standards
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
-# 🧠 ARCHITEKTUR FIX
-set(CMAKE_CUDA_ARCHITECTURES 86)
+# ---------------------------------------------------------
+# 🧠 CUDA-Architekturen
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  message(WARNING "CMAKE_CUDA_ARCHITECTURES ist nicht definiert. "
+    "Idealerweise per Preset oder via -DCMAKE_CUDA_ARCHITECTURES gesetzt (z.B. 75;80;86;89)")
+endif()
 
 # ---------------------------------------------------------
 # 📚 Pakete
