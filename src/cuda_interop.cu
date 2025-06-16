@@ -1,7 +1,8 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: CUDA/OpenGL-Interop, Auto-Zoom via Entropieanalyse, PBO-Mapping, Key-Handling
+// Zeilen: 123
+// 🐭 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Auto-Zoom via Entropieanalyse (pro Tile), bestes Tile wird ermittelt, Zoom-Ziel sanft interpoliert (LERP), Zoom nur bei Mindestdistanz. Pause-Funktion steuerbar via Tastendruck (P/Leertaste). Schneefuchs hätte auf `std::sqrt()` bestanden.
 
-#include "pch.hpp" // 💡 Muss als erstes stehen!
+#include "pch.hpp"  // 💡 Muss als erstes stehen!
 
 #include "cuda_interop.hpp"
 #include "core_kernel.h"
@@ -37,26 +38,20 @@ void renderCudaFrame(
     bool& shouldZoom,
     int tileSize
 ) {
-    // PBO an CUDA binden
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
     uchar4* devPtr = nullptr;
     size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
-    // CUDA-Kernel starten
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations);
-
-    // Entropie berechnen
     computeTileEntropy(d_iterations, d_entropy, width, height, tileSize, maxIterations);
 
-    // Analyse zurück an Host
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     int numTiles = tilesX * tilesY;
     h_entropy.resize(numTiles);
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
-    // Auto-Zoom nur wenn nicht pausiert
     if (!pauseZoom) {
         int bestIndex = -1;
         float bestScore = -1.0f;
@@ -67,6 +62,12 @@ void renderCudaFrame(
                 bestIndex = i;
             }
         }
+
+#if defined(DEBUG) || defined(_DEBUG)
+        if (Settings::debugLogging) {
+            std::printf("[DEBUG] Best tile entropy: %.8f\n", bestScore);
+        }
+#endif
 
         if (bestIndex >= 0) {
             int bx = bestIndex % tilesX;
@@ -79,17 +80,20 @@ void renderCudaFrame(
                 offset.y + (by + 0.5f) * tileSize * scaleY
             };
 
-#if defined(DEBUG) || defined(_DEBUG)
-            float2 delta = { tileCenter.x - offset.x, tileCenter.y - offset.y };
-            float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-            std::cout << "[Zoom DEBUG] Entropy max at tile (" << bx << "," << by << ")\n";
-            std::cout << "[Zoom DEBUG] Current offset: (" << offset.x << ", " << offset.y << ")\n";
-            std::cout << "[Zoom DEBUG] New offset:     (" << tileCenter.x << ", " << tileCenter.y << ")\n";
-            std::cout << "[Zoom DEBUG] Shift distance: " << dist << "\n";
-#endif
+            float2 delta = {
+                tileCenter.x - offset.x,
+                tileCenter.y - offset.y
+            };
 
-            newOffset = tileCenter;
-            shouldZoom = true;
+            float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+
+            if (dist > Settings::MIN_JUMP_DISTANCE) {
+                newOffset.x = offset.x + delta.x * Settings::LERP_FACTOR;
+                newOffset.y = offset.y + delta.y * Settings::LERP_FACTOR;
+                shouldZoom = true;
+            } else {
+                shouldZoom = false;
+            }
         } else {
             shouldZoom = false;
         }
@@ -97,7 +101,6 @@ void renderCudaFrame(
         shouldZoom = false;
     }
 
-    // PBO unmap
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
 }
 

@@ -1,5 +1,6 @@
 // Datei: src/renderer_core.hpp
-// 🐭 Maus-Kommentar: Renderer-Schnittstelle – steuert GL-Fenster, CUDA-Interop und Auto-Zoom
+// Zeilen: 60
+// 🐭 Maus-Kommentar: Öffentliche Steuerzentrale für Rendering, Fenster und Auto-Zoom. Die Klasse `Renderer` kapselt die OpenGL-Initialisierung, CUDA-Interop-Setup, PBO/Texture-Bindung und das adaptive Zoomverhalten. Diese Header-Datei ist vollständig unabhängig von Implementierungsdetails und trennt klar die API von der Logik. Schneefuchs hätte hier auf das klare Interface mit `initGL()` und `renderFrame()` bestanden.
 
 #pragma once
 

@@ -1,7 +1,6 @@
-// 🐭 Maus-Kommentar: Header für CUDA-Kernel & Host-Launcher
-// Definiert:
-// - `launch_mandelbrotHybrid`: Fraktalberechnung + Iterationsspeicherung
-// - `computeTileEntropy`: misst Entropie je Tile (zur Auto-Zoom-Steuerung)
+// Datei: src/core_kernel.h
+// Zeilen: 30
+// 🐭 Maus-Kommentar: Schnittstelle zwischen CPU und CUDA-Kernel. Enthält Deklarationen für das Haupt-Fraktal-Rendering (`launch_mandelbrotHybrid`) und die Entropieanalyse (`computeTileEntropy`). Wird von `cuda_interop.cu` verwendet. Alle Funktionen extern "C", damit CUDA/C++ sauber zusammenarbeiten. Schneefuchs meinte einst: "Trenne klar Interface und Implementierung."
 
 #pragma once
 

@@ -1,5 +1,6 @@
 // Datei: src/common.hpp
-// 🐭 Maus-Kommentar: Zentrale Header-Schutzmauer für CUDA, OpenGL, Windows, C++
+// Zeilen: 50
+// 🐭 Maus-Kommentar: Zentrale Header-Schutzmauer für CUDA, OpenGL, Windows und C++-Standard. Enthält essentielle Makros, pragmatische Includes und die `CUDA_CHECK`-Macro für robuste Fehlerbehandlung. Schneefuchs hätte darauf bestanden, dass kein `GLU` reinkriecht und der Fehler sauber mit Datei+Zeile rauskommt.
 
 #pragma once
 

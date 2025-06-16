@@ -1,3 +1,7 @@
+// Datei: src/progressive.hpp
+// Zeilen: 50
+// 🐭 Maus-Kommentar: Steuerungszentrale für schrittweise Iterationserhöhung im Mandelbrot-Renderer. Nutzt CUDA __managed__ Speicher für Host–Device-Synchronisation. Schneefuchs wollte es ursprünglich per Host-Callback – ich hab’s effizienter gemacht.
+
 #pragma once
 #ifndef PROGRESSIVE_HPP
 #define PROGRESSIVE_HPP

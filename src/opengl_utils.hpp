@@ -1,3 +1,7 @@
+// Datei: src/opengl_utils.hpp
+// Zeilen: 35
+// 🐭 Maus-Kommentar: Header für OpenGL-Hilfsfunktionen – VAO für Fullscreen-Rendering, Shader-Erzeugung aus Quelltext. GLEW wird nur eingebunden, wenn **nicht** im CUDA-Compiler, sonst gibt es Symbolkonflikte. Schneefuchs hätte den CUDA-Ausschluss beim VAO geliebt – sonst kracht's bei `nvcc`.
+
 #pragma once
 #ifndef OPENGL_UTILS_HPP
 #define OPENGL_UTILS_HPP

@@ -1,5 +1,6 @@
 // Datei: src/hud.hpp
-// 🐭 Maus-Kommentar: HUD-Schnittstelle – zeigt FPS, Zoom und Offsets via STB-Easy-Font
+// Zeilen: 41
+// 🐭 Maus-Kommentar: HUD-Schnittstelle – zeigt FPS, Zoom und Offsets via STB-Easy-Font. Wird über OpenGL-Overlay gezeichnet. Kein ImGui, keine Abhängigkeiten, dafür pures ASCII mit 1ms Genauigkeit. Schneefuchs hätte es „effiziente Eleganz“ genannt.
 
 #pragma once
 

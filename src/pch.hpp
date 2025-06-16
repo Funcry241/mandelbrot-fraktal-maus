@@ -1,4 +1,6 @@
-// 🐭 Maus-Kommentar: Precompiled Header für Windows + OpenGL + CUDA – sorgt für stabile Symboldefinitionen & Reihenfolge
+// Datei: src/pch.hpp
+// Zeilen: 31
+// 🐭 Maus-Kommentar: Precompiled Header – strikt sortiert für Windows-Header, OpenGL, GLEW, CUDA und Standardbibliothek. Diese Datei muss **immer als erste** included werden, um Konflikte bei Win32-Defines (`NOMINMAX`) und GL-Konflikten zu vermeiden. Schneefuchs hätte bestanden auf `#ifndef NOMINMAX` vor `windows.h`, damit Visual Studio nicht stirbt.
 
 #pragma once
 
