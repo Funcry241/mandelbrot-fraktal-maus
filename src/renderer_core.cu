@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 388
-// 🐭 Maus-Kommentar: Zentrale Steuerung für OpenGL-Rendering, CUDA-Pipeline, Auto-Zoom und Bildausgabe. Fix: Zoom-Ziel wird nicht doppelt interpoliert. Neu: Iterationen steigen nur bei aktivem Auto-Zoom (Progressive::incrementIterations). Schneefuchs hätte gesagt: „Die Details kommen nur, wenn das Otterauge wirklich hinsieht.“
+// Zeilen: 274
+// 🐭 Maus-Kommentar: Alpha 4.2 – Auto-Zoom korrigiert: Kamera zoomt und bewegt sich zu interessanter Region. Offset & Zoomfaktor werden übernommen. Kommentarzeile aktualisiert. Schneefuchs würde sagen: „Endlich bewegt sich das Universum, nicht nur der Blick.“
 
 #include "pch.hpp"
 
@@ -182,15 +182,6 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     float2 newOffset;
     bool shouldZoom;
 
-    if (Settings::debugLogging) {
-        std::printf("[DEBUG] renderer_core: renderCudaFrame\n");
-        std::printf("         zoom: %.10f\n", zoom);
-        std::printf("         offset: (%.10f, %.10f)\n", offset.x, offset.y);
-        std::printf("         iterations: %d\n", Progressive::getCurrentIterations());
-        std::printf("         tileSize: %d\n", currentTileSize);
-        std::printf("         image: %d x %d\n", windowWidth, windowHeight);
-    }
-
     CudaInterop::renderCudaFrame(
         d_iterations,
         d_entropy,
@@ -206,9 +197,11 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     );
 
     if (shouldZoom && !CudaInterop::getPauseZoom()) {
+        zoom *= Settings::zoomFactor;
+        offset.x += (newOffset.x - offset.x) * Settings::lerpFactor;
+        offset.y += (newOffset.y - offset.y) * Settings::lerpFactor;
         Progressive::incrementIterations();
     }
-
 
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);

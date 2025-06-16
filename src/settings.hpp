@@ -25,6 +25,9 @@ inline constexpr float initialZoom    = 300.0f;  // Anfangszoom
 inline constexpr float initialOffsetX = -0.5f;   // X-Verschiebung (Start im Mandelbrot-Set)
 inline constexpr float initialOffsetY =  0.0f;   // Y-Verschiebung
 
+inline constexpr float zoomFactor = 0.975f;      // Wie stark gezoomt wird pro Frame
+inline constexpr float lerpFactor = 0.08f;       // Interpolationsfaktor für Offset-Anpassung
+
 // 🔍 Manueller Zoom per Mausrad oder Tastatur
 inline constexpr float ZOOM_STEP_FACTOR = 0.002f; // Zoomänderung pro Scrollschritt
 
