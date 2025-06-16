@@ -72,9 +72,11 @@ void renderCudaFrame(
             int bx = bestIndex % tilesX;
             int by = bestIndex / tilesX;
 
+            float scaleX = 1.0f / (zoom * width);
+            float scaleY = 1.0f / (zoom * height);
             float2 tileCenter = {
-                offset.x + (bx + 0.5f) * tileSize / width / zoom * 2.0f - 1.0f,
-                offset.y + (by + 0.5f) * tileSize / height / zoom * 2.0f - 1.0f
+                offset.x + (bx + 0.5f) * tileSize * scaleX,
+                offset.y + (by + 0.5f) * tileSize * scaleY
             };
 
             newOffset = tileCenter;
