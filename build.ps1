@@ -91,9 +91,6 @@ try {
 # 8) Create directories
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
-# 9) Force CUDA architecture 86 (Ampere workaround)
-$cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=86"
-Write-Host "[CUDA] Forcing architecture: 86 (Ampere)"
 
 # 10) CMake configure (clean call)
 Write-Host "[INFO] CMake version: $(cmake --version | Select-String -Pattern 'cmake version')"
