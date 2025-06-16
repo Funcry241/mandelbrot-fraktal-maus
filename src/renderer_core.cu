@@ -205,12 +205,6 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         currentTileSize
     );
 
-    if (autoZoomEnabled && shouldZoom && !CudaInterop::getPauseZoom()) {
-        offset.x += Settings::LERP_FACTOR * (newOffset.x - offset.x);
-        offset.y += Settings::LERP_FACTOR * (newOffset.y - offset.y);
-        zoom *= (1.0f + Settings::ZOOM_STEP_FACTOR);
-    }
-
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, windowWidth, windowHeight, GL_RGBA, GL_UNSIGNED_BYTE, 0);

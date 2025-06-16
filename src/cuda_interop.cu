@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 123
-// 🐭 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Auto-Zoom via Entropieanalyse (pro Tile), bestes Tile wird ermittelt, Zoom-Ziel sanft interpoliert (LERP), Zoom nur bei Mindestdistanz. Pause-Funktion steuerbar via Tastendruck (P/Leertaste). Schneefuchs hätte auf `std::sqrt()` bestanden.
+// Zeilen: 126
+// 🐭 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Auto-Zoom via Entropieanalyse (pro Tile), bestes Tile wird ermittelt, Zoom-Ziel korrekt in Fraktalkoordinaten umgerechnet (inkl. Mittelpunktabzug wie im Kernel). Schneefuchs hätte gesagt: „Jetzt stimmen beide Räume überein.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 
@@ -73,11 +73,13 @@ void renderCudaFrame(
             int bx = bestIndex % tilesX;
             int by = bestIndex / tilesX;
 
-            float scaleX = 1.0f / (zoom * width);
-            float scaleY = 1.0f / (zoom * height);
+            // 🧠 Korrekte Koordinatenberechnung: Analog zum CUDA-Kernel!
+            float centerX = (bx + 0.5f) * tileSize;
+            float centerY = (by + 0.5f) * tileSize;
+
             float2 tileCenter = {
-                offset.x + (bx + 0.5f) * tileSize * scaleX,
-                offset.y + (by + 0.5f) * tileSize * scaleY
+                (centerX - width  / 2.0f) / zoom + offset.x,
+                (centerY - height / 2.0f) / zoom + offset.y
             };
 
             float2 delta = {
@@ -88,8 +90,7 @@ void renderCudaFrame(
             float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
 
             if (dist > Settings::MIN_JUMP_DISTANCE) {
-                newOffset.x = offset.x + delta.x * Settings::LERP_FACTOR;
-                newOffset.y = offset.y + delta.y * Settings::LERP_FACTOR;
+                newOffset = tileCenter;
                 shouldZoom = true;
             } else {
                 shouldZoom = false;
