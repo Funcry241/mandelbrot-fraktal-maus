@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 126
+// Zeilen: 132
 // 🐭 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Auto-Zoom via Entropieanalyse (pro Tile), bestes Tile wird ermittelt, Zoom-Ziel korrekt in Fraktalkoordinaten umgerechnet (inkl. Mittelpunktabzug wie im Kernel). Schneefuchs hätte gesagt: „Jetzt stimmen beide Räume überein.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
@@ -20,7 +20,7 @@ void registerPBO(unsigned int pbo) {
 
 void unregisterPBO() {
     if (cudaPboResource) {
-        CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboResource));
+        CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboResource)); // ✅ Fix: Kein &-Operator
         cudaPboResource = nullptr;
     }
 }
@@ -73,7 +73,6 @@ void renderCudaFrame(
             int bx = bestIndex % tilesX;
             int by = bestIndex / tilesX;
 
-            // 🧠 Korrekte Koordinatenberechnung: Analog zum CUDA-Kernel!
             float centerX = (bx + 0.5f) * tileSize;
             float centerY = (by + 0.5f) * tileSize;
 

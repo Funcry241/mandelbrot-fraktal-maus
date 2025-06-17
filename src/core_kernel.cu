@@ -1,6 +1,6 @@
-// 🐭 Maus-Kommentar: CUDA-Kernel für Mandelbrot-Fraktal und Entropieanalyse pro Tile
-// - launch_mandelbrotHybrid: rendert Fraktalbild + Iterationen
-// - computeTileEntropy: misst Entropie je Tile zur Bewertung der Bildstruktur (für Auto-Zoom)
+// Datei: src/core_kernel.cu
+// Zeilen: 129
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel & Entropieanalyse. Hier erfolgt die Bildberechnung, Farbgebung und Strukturwertung pro Tile. Schwester wünscht korrekte Schwarz-Darstellung für Innenpunkte und konstante Farbübergänge trotz Zoom.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -9,6 +9,7 @@
 #include "core_kernel.h"
 
 __device__ __forceinline__ uchar4 elegantColor(float t) {
+    if (t < 0.0f) return make_uchar4(0, 0, 0, 255);  // Schwarz für Innenpunkte
     float tSharp = sqrtf(t);
     float r = 1.0f - tSharp;
     float g = 0.6f * tSharp;
@@ -43,7 +44,7 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     int iter = mandelbrotIterations(jx, jy, maxIterations);
     iterationsOut[y * width + x] = iter;
 
-    float t = iter / (float)maxIterations;
+    float t = (iter == maxIterations) ? -1.0f : (iter + 1.0f - log2f(log2f(x * x + y * y))) / maxIterations;
     output[y * width + x] = elegantColor(t);
 }
 

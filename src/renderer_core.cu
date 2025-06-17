@@ -197,9 +197,9 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     );
 
     if (shouldZoom && !CudaInterop::getPauseZoom()) {
-        zoom *= Settings::zoomFactor;
-        offset.x += (newOffset.x - offset.x) * Settings::lerpFactor;
-        offset.y += (newOffset.y - offset.y) * Settings::lerpFactor;
+        zoom *= Settings::AUTOZOOM_SPEED;
+        offset.x += (newOffset.x - offset.x) * Settings::LERP_FACTOR;
+        offset.y += (newOffset.y - offset.y) * Settings::LERP_FACTOR;
         Progressive::incrementIterations();
     }
 

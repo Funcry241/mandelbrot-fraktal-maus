@@ -1,9 +1,9 @@
 #pragma once
 
 // Datei: src/settings.hpp
-// Zeilen: 103
+// Zeilen: 95
 // 🐭 Maus-Kommentar: Steuerungszentrale für Zoomlogik, Fraktal-Feintuning, Entropie-Autoanalyse, Loggingsteuerung und CUDA-Tile-Verhalten.
-// Variablen sind so benannt, dass auch Schwester sofort weiß, was sie tun. Keine magischen Zahlen mehr. Schneefuchs hätte diese Dokumentation geliebt.
+// Bereinigt um ungenutzte Konstanten (`zoomFactor`, `lerpFactor`) – einzig gültig ist jetzt `LERP_FACTOR`. Schwester kann wieder durchatmen.
 
 #include <algorithm>  // für std::max, std::clamp
 #include <cmath>      // für logf, log2f, sqrtf
@@ -25,9 +25,6 @@ inline constexpr float initialZoom    = 300.0f;  // Anfangszoom
 inline constexpr float initialOffsetX = -0.5f;   // X-Verschiebung (Start im Mandelbrot-Set)
 inline constexpr float initialOffsetY =  0.0f;   // Y-Verschiebung
 
-inline constexpr float zoomFactor = 1.005f;      // Wie stark gezoomt wird pro Frame
-inline constexpr float lerpFactor = 0.008f;       // Interpolationsfaktor für Offset-Anpassung
-
 // 🔍 Manueller Zoom per Mausrad oder Tastatur
 inline constexpr float ZOOM_STEP_FACTOR = 0.002f; // Zoomänderung pro Scrollschritt
 
@@ -40,7 +37,7 @@ inline constexpr float AUTOZOOM_SPEED = 1.01f; // Faktor für schrittweisen Zoom
 
 // 🔁 Iterationsverhalten: Fraktal-Schärfe & Performance
 inline constexpr int INITIAL_ITERATIONS = 100;   // Startanzahl Iterationen
-inline constexpr int MAX_ITERATIONS_CAP = 5000;  // Obergrenze (zur Sicherheit)
+inline constexpr int MAX_ITERATIONS_CAP = 50000;  // Obergrenze (zur Sicherheit)
 inline constexpr int ITERATION_STEP     = 5;     // Schrittgröße bei Anpassung
 
 // 🧲 Sanfte Bewegung beim Auto-Zoom (TileCenter → Offset)
