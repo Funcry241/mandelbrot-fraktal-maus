@@ -27,7 +27,6 @@
 #include <GL/glew.h>
 
 // ⚡ CUDA
-#include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 
 // 🧠 C++ Standardbibliothek

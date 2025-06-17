@@ -1,6 +1,6 @@
 // Datei: src/pch.hpp
-// Zeilen: 31
-// 🐭 Maus-Kommentar: Precompiled Header – strikt sortiert für Windows-Header, OpenGL, GLEW, CUDA und Standardbibliothek. Diese Datei muss **immer als erste** included werden, um Konflikte bei Win32-Defines (`NOMINMAX`) und GL-Konflikten zu vermeiden. Schneefuchs hätte bestanden auf `#ifndef NOMINMAX` vor `windows.h`, damit Visual Studio nicht stirbt.
+// Zeilen: 32
+// 🐭 Maus-Kommentar: Precompiled Header – klar strukturiert: Windows-Header mit WIN32-Defines, dann OpenGL (GLEW+GLFW), dann CUDA-Runtime, dann STL. Achtung: `windows.h` nur mit `NOMINMAX`, `GLEW` nur vor `GLFW`. Schneefuchs bestand darauf, dass CUDA *nur* Runtime einbindet – nie `cuda.h` – sonst PCH-Krater.
 
 #pragma once
 
@@ -14,15 +14,15 @@
   #include <windows.h>
 #endif
 
-// GLEW vor GLFW, um GL.h-Header-Konflikte zu vermeiden
-#include <GL/glew.h>
+// OpenGL: Reihenfolge essenziell
+#include <GL/glew.h>         // Muss **vor** glfw3.h kommen
 #include <GLFW/glfw3.h>
 
-// CUDA Runtime – aber **nicht** driver_api.h
+// CUDA: nur Runtime/Interop – kein cuda.h, kein driver_api
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 
-// C++ Standardbibliothek
+// Standardbibliothek
 #include <iostream>
 #include <sstream>
 #include <stdexcept>

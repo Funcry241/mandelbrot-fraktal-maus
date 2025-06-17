@@ -20,8 +20,8 @@
       }
     },
     {
-      "name": "linux-gcc",
-      "displayName": "Linux (GCC, CUDA)",
+      "name": "linux-gcc13",
+      "displayName": "Linux (GCC 13+, CUDA)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/linux",
       "cacheVariables": {
@@ -33,7 +33,9 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_CUDA_STANDARD": "20",
         "CMAKE_CUDA_EXTENSIONS": "OFF",
-        "CMAKE_CUDA_ARCHITECTURES": "80;86;89"
+        "CMAKE_CUDA_ARCHITECTURES": "80;86;89",
+        "CMAKE_CXX_COMPILER": "/usr/bin/g++-13",
+        "CMAKE_C_COMPILER": "/usr/bin/gcc-13"
       }
     }
   ],
@@ -45,8 +47,8 @@
     },
     {
       "name": "linux-build",
-      "displayName": "Build (Linux)",
-      "configurePreset": "linux-gcc"
+      "displayName": "Build (Linux, GCC 13)",
+      "configurePreset": "linux-gcc13"
     }
   ]
 }

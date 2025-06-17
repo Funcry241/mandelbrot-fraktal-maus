@@ -1,12 +1,18 @@
 // Datei: src/core_kernel.h
-// Zeilen: 30
-// 🐭 Maus-Kommentar: Schnittstelle zwischen CPU und CUDA-Kernel. Enthält Deklarationen für das Haupt-Fraktal-Rendering (`launch_mandelbrotHybrid`) und die Entropieanalyse (`computeTileEntropy`). Wird von `cuda_interop.cu` verwendet. Alle Funktionen extern "C", damit CUDA/C++ sauber zusammenarbeiten. Schneefuchs meinte einst: "Trenne klar Interface und Implementierung."
+// Zeilen: 33
+// 🐭 Maus-Kommentar: Schnittstelle zwischen CPU und CUDA-Kernel. Deklariert `launch_mandelbrotHybrid` (Fraktalrendering) und `computeTileEntropy` (Entropieanalyse pro Tile). Entfernt direkte CUDA-Includes, um Build-Probleme mit PCH und IntelliSense zu vermeiden. Schneefuchs sagte einst: „Die saubere Trennung macht den Unterschied.“
 
 #pragma once
 
 #include <vector_types.h>  // für float2
-#include <cuda_runtime.h>  // für __host__, __device__
-#include <cuda.h>
+
+// 🧠 Kompatibilität für Host/Device-Makros in Nicht-CUDA-Kontexten
+#ifndef __host__
+#define __host__
+#endif
+#ifndef __device__
+#define __device__
+#endif
 
 #ifdef __cplusplus
 extern "C" {

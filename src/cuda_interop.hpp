@@ -1,14 +1,16 @@
 // Datei: src/cuda_interop.hpp
-// Zeilen: 42
-// 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL Interop – PBO-Registrierung, Rendering-Bridge, Auto-Zoom-Steuerung mit Entropieanalyse. Der `keyCallback` steuert via SPACE/P das Pausieren des Zooms – Schneefuchs war Fan von Tastenkombis mit Logik dahinter.
+// Zeilen: 45
+// 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL Interop – PBO-Registrierung, CUDA-Render-Bridge, Auto-Zoom mit Entropieanalyse. Entfernt direkte CUDA-Includes zur Vermeidung von PCH-Fehlern. `keyCallback` erlaubt Zoom-Pause per Tastatur. Schneefuchs sagte: „Ein Interface soll nie stolpern.“
 
 #ifndef CUDA_INTEROP_HPP
 #define CUDA_INTEROP_HPP
 
-#include <cuda_runtime.h>
-#include <cuda_gl_interop.h>
 #include <vector>
 #include <GLFW/glfw3.h>
+#include <vector_types.h>  // float2
+
+// 🧠 Vorwärtsdeklaration – CUDA-Typen nicht direkt inkludieren
+struct cudaGraphicsResource;
 
 namespace CudaInterop {
 

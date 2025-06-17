@@ -1,6 +1,6 @@
 <!-- Datei: README.md -->
-<!-- Zeilen: 107 -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 4.1 – aktuell mit korrekter Zoom-/Iter-Logik. Schneefuchs würde nickend zustimmen. -->
+<!-- Zeilen: 109 -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 4.3 – korrekte Zoom-/Iter-Logik, CI-Status, kein CC 3.0 mehr, alles auf Ampere+ getrimmt. Schneefuchs hätte die 3.0 ausradiert und „realistisch“ gemurmelt. -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
@@ -34,11 +34,13 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 ## 🖥️ Systemvoraussetzungen
 
 - Windows 10 oder 11
-- **NVIDIA GPU** mit CUDA (Compute Capability **3.0+**, empfohlen **8.6+**)
+- **NVIDIA GPU** mit CUDA (Compute Capability **8.0+**, empfohlen **8.6+**)
 - CUDA Toolkit (empfohlen: **v12.9**)
 - Visual Studio 2022 mit C++ & CUDA-Komponenten
 - CMake (Version **≥3.25**), Ninja
 - vcpkg (für GLFW, GLEW)
+
+> ⚠️ Hinweis: GPUs unter Compute Capability 8.0 (z. B. Kepler, Maxwell) werden **nicht unterstützt**.
 
 ---
 
