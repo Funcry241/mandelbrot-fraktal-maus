@@ -53,55 +53,61 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
     if (!pauseZoom) {
-        int bestIndex = -1;
-        float bestScore = -1.0f;
+    int bestIndex = -1;
+    float bestScore = -1.0f;
 
-        for (int i = 0; i < numTiles; ++i) {
-            if (h_entropy[i] > bestScore) {
-                bestScore = h_entropy[i];
-                bestIndex = i;
-            }
+    for (int i = 0; i < numTiles; ++i) {
+        if (h_entropy[i] > bestScore) {
+            bestScore = h_entropy[i];
+            bestIndex = i;
         }
+    }
 
 #if defined(DEBUG) || defined(_DEBUG)
-        if (Settings::debugLogging) {
-            std::printf("[DEBUG] Best tile entropy: %.8f\n", bestScore);
-        }
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] Best tile entropy: %.8f\n", bestScore);
+    }
 #endif
 
-        if (bestIndex >= 0) {
-            int bx = bestIndex % tilesX;
-            int by = bestIndex / tilesX;
+    if (bestIndex >= 0) {
+        int bx = bestIndex % tilesX;
+        int by = bestIndex / tilesX;
 
-            // 🧠 Korrekte Koordinatenberechnung: Analog zum CUDA-Kernel!
-            float centerX = (bx + 0.5f) * tileSize;
-            float centerY = (by + 0.5f) * tileSize;
+        // 🧠 Korrekte Koordinatenberechnung: Analog zum CUDA-Kernel!
+        float centerX = (bx + 0.5f) * tileSize;
+        float centerY = (by + 0.5f) * tileSize;
 
-            float2 tileCenter = {
-                (centerX - width  / 2.0f) / zoom + offset.x,
-                (centerY - height / 2.0f) / zoom + offset.y
-            };
+        float2 tileCenter = {
+            (centerX - width  / 2.0f) / zoom + offset.x,
+            (centerY - height / 2.0f) / zoom + offset.y
+        };
 
-            float2 delta = {
-                tileCenter.x - offset.x,
-                tileCenter.y - offset.y
-            };
+        float2 delta = {
+            tileCenter.x - offset.x,
+            tileCenter.y - offset.y
+        };
 
-            float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+        float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
 
-            if (dist > Settings::MIN_JUMP_DISTANCE) {
-                newOffset = tileCenter;
-                shouldZoom = true;
-            } else {
-                shouldZoom = false;
-            }
+        if (dist > Settings::MIN_JUMP_DISTANCE) {
+            newOffset = tileCenter;
+            shouldZoom = true;
         } else {
             shouldZoom = false;
+        }
+    } else if (Settings::allowFallbackZoom) {
+        // 🐭 Kein besserer Tile – aber Fallback-Zoom erlaubt:
+        shouldZoom = true;
+        newOffset = offset;  // 👈 Bleibt gleich, Zoom erfolgt einfach auf aktuelle Position
+        if (Settings::debugLogging) {
+            std::printf("[DEBUG] No tile improvement – fallback zoom applied.\n");
         }
     } else {
         shouldZoom = false;
     }
-
+} else {
+    shouldZoom = false;
+}
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
 }
 

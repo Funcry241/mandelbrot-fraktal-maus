@@ -9,10 +9,13 @@
 #include "core_kernel.h"
 
 __device__ __forceinline__ uchar4 elegantColor(float t) {
-    t = fmodf(t, 1.0f);  // t ∈ [0,1)
-    float r = 0.5f + 0.5f * __cosf(6.28318f * (t + 0.0f));
-    float g = 0.5f + 0.5f * __cosf(6.28318f * (t + 0.33f));
-    float b = 0.5f + 0.5f * __cosf(6.28318f * (t + 0.66f));
+    t = fmodf(t, 1.0f);  // t ∈ [0, 1)
+    float s = sinf(3.14159f * t);  // sanfter Verlauf
+
+    float r = 0.8f * s;
+    float g = 0.5f + 0.4f * cosf(2.0f * 3.14159f * t);
+    float b = 0.6f + 0.3f * sinf(4.0f * 3.14159f * t);
+
     return make_uchar4(r * 255, g * 255, b * 255, 255);
 }
 

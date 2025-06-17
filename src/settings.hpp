@@ -46,6 +46,8 @@ inline constexpr int ITERATION_STEP     = 5;     // Schrittgröße bei Anpassung
 // 🧲 Sanfte Bewegung beim Auto-Zoom (TileCenter → Offset)
 inline constexpr float LERP_FACTOR = 0.02f; // Interpolationsfaktor – 0.0 = kein Zoomsprung, 1.0 = harter Sprung
 
+inline constexpr bool allowFallbackZoom = true;
+
 // 🚫 Mindestdistanz für Offset-Änderung (verhindert "Zoomzittern")
 inline constexpr float MIN_JUMP_DISTANCE = 1e-4f; // Verhindert Bewegung, wenn TileCenter ≈ Offset
 
@@ -57,6 +59,7 @@ inline constexpr int MAX_TILE_SIZE  = 32; // Obergrenze
 // 📐 Zusätzliche Tile-Maße für HUD oder Grid-Overlays (optional)
 inline constexpr int TILE_W = 16;
 inline constexpr int TILE_H = 16;
+
 
 // 📏 Dynamische Tile-Größe abhängig vom Zoom-Level
 inline int dynamicTileSize(float zoom) {
