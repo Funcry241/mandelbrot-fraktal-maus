@@ -10,25 +10,11 @@
 
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     t = fmodf(t, 1.0f);  // t ∈ [0, 1)
-    float s = sinf(3.14159f * t);  // sanfter Verlauf
-
-    float r = 0.8f * s;
-    float g = 0.5f + 0.4f * cosf(2.0f * 3.14159f * t);
-    float b = 0.6f + 0.3f * sinf(4.0f * 3.14159f * t);
+    float r = 0.5f + 0.5f * cosf(6.28318f * (t));
+    float g = 0.5f + 0.5f * cosf(6.28318f * (t + 0.33f));
+    float b = 0.5f + 0.5f * cosf(6.28318f * (t + 0.66f));
 
     return make_uchar4(r * 255, g * 255, b * 255, 255);
-}
-
-__device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
-    float x = 0.0f, y = 0.0f;
-    int iter = 0;
-    while (x * x + y * y <= 4.0f && iter < maxIter) {
-        float xtemp = x * x - y * y + x0;
-        y = 2.0f * x * y + y0;
-        x = xtemp;
-        ++iter;
-    }
-    return iter;
 }
 
 __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
@@ -43,10 +29,27 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     float jx = (x - width  / 2.0f) / zoom + offset.x;
     float jy = (y - height / 2.0f) / zoom + offset.y;
 
-    int iter = mandelbrotIterations(jx, jy, maxIterations);
+    float zx = 0.0f, zy = 0.0f;
+    float zx2 = 0.0f, zy2 = 0.0f;
+    int iter = 0;
+    while (zx2 + zy2 <= 4.0f && iter < maxIterations) {
+        zy = 2.0f * zx * zy + jy;
+        zx = zx2 - zy2 + jx;
+        zx2 = zx * zx;
+        zy2 = zy * zy;
+        ++iter;
+    }
+
     iterationsOut[y * width + x] = iter;
 
-    float t = iter / (float)maxIterations;
+    float smooth = (float)iter;
+    if (iter < maxIterations) {
+        float log_zn = logf(zx2 + zy2) / 2.0f;
+        float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
+        smooth = iter + 1 - nu;
+    }
+
+    float t = smooth / (float)maxIterations;
     output[y * width + x] = elegantColor(t);
 }
 

@@ -25,8 +25,8 @@ inline constexpr float initialZoom    = 300.0f;  // Anfangszoom
 inline constexpr float initialOffsetX = -0.5f;   // X-Verschiebung (Start im Mandelbrot-Set)
 inline constexpr float initialOffsetY =  0.0f;   // Y-Verschiebung
 
-inline constexpr float zoomFactor = 1.005f;      // Wie stark gezoomt wird pro Frame
-inline constexpr float lerpFactor = 0.015f;       // Interpolationsfaktor für Offset-Anpassung
+inline constexpr float zoomFactor = 1.002f;      // Wie stark gezoomt wird pro Frame (langsamer)
+inline constexpr float lerpFactor = 0.008f;       // Interpolationsfaktor für Offset-Anpassung
 
 // 🔍 Manueller Zoom per Mausrad oder Tastatur
 inline constexpr float ZOOM_STEP_FACTOR = 0.002f; // Zoomänderung pro Scrollschritt
@@ -40,7 +40,7 @@ inline constexpr float AUTOZOOM_SPEED = 1.01f; // Faktor für schrittweisen Zoom
 
 // 🔁 Iterationsverhalten: Fraktal-Schärfe & Performance
 inline constexpr int INITIAL_ITERATIONS = 100;   // Startanzahl Iterationen
-inline constexpr int MAX_ITERATIONS_CAP = 5000;  // Obergrenze (zur Sicherheit)
+inline constexpr int MAX_ITERATIONS_CAP = 20000; // Obergrenze (erlaubt tieferes Zoomen)
 inline constexpr int ITERATION_STEP     = 5;     // Schrittgröße bei Anpassung
 
 // 🧲 Sanfte Bewegung beim Auto-Zoom (TileCenter → Offset)
@@ -49,7 +49,7 @@ inline constexpr float LERP_FACTOR = 0.02f; // Interpolationsfaktor – 0.0 = ke
 inline constexpr bool allowFallbackZoom = true;
 
 // 🚫 Mindestdistanz für Offset-Änderung (verhindert "Zoomzittern")
-inline constexpr float MIN_JUMP_DISTANCE = 1e-4f; // Verhindert Bewegung, wenn TileCenter ≈ Offset
+inline constexpr float MIN_JUMP_DISTANCE = 5e-4f; // Verhindert Bewegung, wenn TileCenter ≈ Offset
 
 // 🔲 Tile-Größen (für CUDA-Aufteilung & Entropieanalyse)
 inline constexpr int BASE_TILE_SIZE = 8;  // Richtgröße vor Berechnung
