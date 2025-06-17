@@ -26,7 +26,7 @@ inline constexpr float initialOffsetX = -0.5f;   // X-Verschiebung (Start im Man
 inline constexpr float initialOffsetY =  0.0f;   // Y-Verschiebung
 
 inline constexpr float zoomFactor = 1.005f;      // Wie stark gezoomt wird pro Frame
-inline constexpr float lerpFactor = 0.08f;       // Interpolationsfaktor für Offset-Anpassung
+inline constexpr float lerpFactor = 0.015f;       // Interpolationsfaktor für Offset-Anpassung
 
 // 🔍 Manueller Zoom per Mausrad oder Tastatur
 inline constexpr float ZOOM_STEP_FACTOR = 0.002f; // Zoomänderung pro Scrollschritt
