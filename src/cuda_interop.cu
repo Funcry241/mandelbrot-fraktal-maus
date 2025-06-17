@@ -88,12 +88,9 @@ void renderCudaFrame(
 
             float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
 
-            if (dist > Settings::MIN_JUMP_DISTANCE) {
-                newOffset = tileCenter;
-                shouldZoom = true;
-            } else {
-                shouldZoom = false;
-            }
+            newOffset = tileCenter;
+            shouldZoom = true; // ← wird nicht mehr gebraucht, aber Struktur bleibt konsistent
+
         } else {
             shouldZoom = false;
         }

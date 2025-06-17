@@ -196,7 +196,7 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         currentTileSize
     );
 
-    if (shouldZoom && !CudaInterop::getPauseZoom()) {
+    if (!CudaInterop::getPauseZoom()) {
         zoom *= Settings::AUTOZOOM_SPEED;
         offset.x += (newOffset.x - offset.x) * Settings::LERP_FACTOR;
         offset.y += (newOffset.y - offset.y) * Settings::LERP_FACTOR;

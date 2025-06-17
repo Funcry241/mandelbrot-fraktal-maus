@@ -1,61 +1,61 @@
 #pragma once
 
 // Datei: src/settings.hpp
-// Zeilen: 95
-// 🐭 Maus-Kommentar: Steuerungszentrale für Zoomlogik, Fraktal-Feintuning, Entropie-Autoanalyse, Loggingsteuerung und CUDA-Tile-Verhalten.
-// Bereinigt um ungenutzte Konstanten (`zoomFactor`, `lerpFactor`) – einzig gültig ist jetzt `LERP_FACTOR`. Schwester kann wieder durchatmen.
+// Zeilen: 92
+// 🐅 Maus-Kommentar: Steuerungszentrale für Auto-Zoom, Fraktal-Feintuning, Entropieanalyse und CUDA-Tile-Verhalten.
+// MIN_JUMP_DISTANCE wurde deaktiviert – Zoom läuft jetzt dauerhaft, LERP bleibt. Schwester kann jetzt mit gutem Gewissen loslassen.
 
 #include <algorithm>  // für std::max, std::clamp
 #include <cmath>      // für logf, log2f, sqrtf
 
 namespace Settings {
 
-// 🔍 Debug-Modi: visuelle Darstellung & Konsolen-Ausgabe
-inline constexpr bool debugGradient = false; // Zeige Gradient-Vorschau statt Farben
-inline constexpr bool debugLogging  = true;  // Aktiviere DEBUG-Ausgaben in Konsole (z. B. bei Zoomwechseln)
+// 🔍 Debug-Modi: visuelle Darstellung & Konsolen-Ausgabe aktivieren
+inline constexpr bool debugGradient = false; // Zeige nur den Entropie-Gradienten (statt Farben)
+inline constexpr bool debugLogging  = true;  // Zusätzliche Debug-Ausgaben im Terminal anzeigen
 
-// 🖥️ Fenstergröße & -position
+// 🖥️ Fensterkonfiguration (Initialgröße und Position auf dem Bildschirm)
 inline constexpr int width        = 1024;  // Fensterbreite in Pixel
 inline constexpr int height       = 768;   // Fensterhöhe in Pixel
-inline constexpr int windowPosX   = 100;   // Startposition X
-inline constexpr int windowPosY   = 100;   // Startposition Y
+inline constexpr int windowPosX   = 100;   // X-Startposition
+inline constexpr int windowPosY   = 100;   // Y-Startposition
 
-// 🔭 Anfangszustand für Zoom und Fraktalposition
-inline constexpr float initialZoom    = 300.0f;  // Anfangszoom
-inline constexpr float initialOffsetX = -0.5f;   // X-Verschiebung (Start im Mandelbrot-Set)
-inline constexpr float initialOffsetY =  0.0f;   // Y-Verschiebung
+// 🔭 Initialer Fraktal-Ausschnitt (Zoom und Position)
+inline constexpr float initialZoom    = 300.0f; // Anfangszoom-Stufe (Skalierungsfaktor)
+inline constexpr float initialOffsetX = -0.5f;  // Startverschiebung X-Achse
+inline constexpr float initialOffsetY =  0.0f;  // Startverschiebung Y-Achse
 
-// 🔍 Manueller Zoom per Mausrad oder Tastatur
-inline constexpr float ZOOM_STEP_FACTOR = 0.002f; // Zoomänderung pro Scrollschritt
+// 🔍 Manueller Zoom (z. B. per Mausrad) pro Schritt
+inline constexpr float ZOOM_STEP_FACTOR = 0.002f; // Kleinere Werte = feinere Zoomkontrolle
 
-// 🎯 Entropie-Schwelle für Auto-Zoom-Entscheidung
-inline constexpr float VARIANCE_THRESHOLD     = 1e-12f; // Standard-Schwelle (Startwert)
-inline constexpr float MIN_VARIANCE_THRESHOLD = 1e-10f; // Harte Untergrenze
+// 🌟 Schwelle zur Erkennung "interessanter" Tiles via Entropie
+inline constexpr float VARIANCE_THRESHOLD     = 1e-12f; // Standard-Sensitivität für Tile-Komplexität
+inline constexpr float MIN_VARIANCE_THRESHOLD = 1e-10f; // Untergrenze der Schwelle
 
-// 🌀 Auto-Zoom Geschwindigkeit: größer = schnelleres Hineinzoomen
-inline constexpr float AUTOZOOM_SPEED = 1.01f; // Faktor für schrittweisen Zoomanstieg
+// 🌀 Wie schnell zoomt das Bild automatisch pro Frame
+inline constexpr float AUTOZOOM_SPEED = 1.01f; // Jeder Frame: zoom *= AUTOZOOM_SPEED
 
-// 🔁 Iterationsverhalten: Fraktal-Schärfe & Performance
-inline constexpr int INITIAL_ITERATIONS = 100;   // Startanzahl Iterationen
-inline constexpr int MAX_ITERATIONS_CAP = 50000;  // Obergrenze (zur Sicherheit)
-inline constexpr int ITERATION_STEP     = 5;     // Schrittgröße bei Anpassung
+// ♻️ Steuerung der Fraktaldarstellung durch Iterationsanzahl
+inline constexpr int INITIAL_ITERATIONS = 100;     // Startwert für Iterationen
+inline constexpr int MAX_ITERATIONS_CAP = 50000;   // Harte Obergrenze für Qualität / Performance
+inline constexpr int ITERATION_STEP     = 5;       // Schrittweite bei Progression
 
-// 🧲 Sanfte Bewegung beim Auto-Zoom (TileCenter → Offset)
-inline constexpr float LERP_FACTOR = 0.02f; // Interpolationsfaktor – 0.0 = kein Zoomsprung, 1.0 = harter Sprung
+// 🪞 Glättung der Kamerabewegung zum Ziel-Tile (statt harten Sprung)
+inline constexpr float LERP_FACTOR = 0.02f; // Zwischen 0.0 (sanft) und 1.0 (sofort)
 
-// 🚫 Mindestdistanz für Offset-Änderung (verhindert "Zoomzittern")
-inline constexpr float MIN_JUMP_DISTANCE = 1e-4f; // Verhindert Bewegung, wenn TileCenter ≈ Offset
+// ❌ Mindestdistanz für Bewegung (nicht mehr aktiv genutzt)
+// inline constexpr float MIN_JUMP_DISTANCE = 1e-4f;
 
-// 🔲 Tile-Größen (für CUDA-Aufteilung & Entropieanalyse)
-inline constexpr int BASE_TILE_SIZE = 8;  // Richtgröße vor Berechnung
-inline constexpr int MIN_TILE_SIZE  = 4;  // Untergrenze
-inline constexpr int MAX_TILE_SIZE  = 32; // Obergrenze
+// 💚 CUDA-Tile-Einstellungen (wichtig für Parallelisierung & Analyse)
+inline constexpr int BASE_TILE_SIZE = 8;
+inline constexpr int MIN_TILE_SIZE  = 4;
+inline constexpr int MAX_TILE_SIZE  = 32;
 
-// 📐 Zusätzliche Tile-Maße für HUD oder Grid-Overlays (optional)
+// 📏 Feste Tile-Maße (optional für Grid-Overlays oder Debug-Darstellung)
 inline constexpr int TILE_W = 16;
 inline constexpr int TILE_H = 16;
 
-// 📏 Dynamische Tile-Größe abhängig vom Zoom-Level
+// 📊 Tile-Größe passt sich dynamisch dem Zoom-Level an
 inline int dynamicTileSize(float zoom) {
     static int lastSize = -1;
 
@@ -84,7 +84,7 @@ inline int dynamicTileSize(float zoom) {
     return bestSize;
 }
 
-// 📉 Skaliere VARIANCE_THRESHOLD mit dem Zoom-Level (für adaptive Empfindlichkeit)
+// 📈 Variance-Schwelle wird mit Zoom mitskaliert (empfindlicher bei großem Zoom)
 inline float dynamicVarianceThreshold(float zoom) {
     float scaled = VARIANCE_THRESHOLD * (1.0f + 0.02f * log2f(zoom + 1.0f));
     return std::clamp(scaled, VARIANCE_THRESHOLD, MIN_VARIANCE_THRESHOLD * 10.0f);
