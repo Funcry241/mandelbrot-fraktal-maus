@@ -33,7 +33,7 @@ inline constexpr float VARIANCE_THRESHOLD     = 1e-12f; // Standard-Sensitivitä
 inline constexpr float MIN_VARIANCE_THRESHOLD = 1e-10f; // Untergrenze der Schwelle
 
 // 🌀 Wie schnell zoomt das Bild automatisch pro Frame
-inline constexpr float AUTOZOOM_SPEED = 1.01f; // Jeder Frame: zoom *= AUTOZOOM_SPEED
+inline constexpr float AUTOZOOM_SPEED = 1.005f; // Jeder Frame: zoom *= AUTOZOOM_SPEED
 
 // ♻️ Steuerung der Fraktaldarstellung durch Iterationsanzahl
 inline constexpr int INITIAL_ITERATIONS = 100;     // Startwert für Iterationen
