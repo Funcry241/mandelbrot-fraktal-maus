@@ -13,7 +13,7 @@
 namespace Hud {
 
 // ------------------------------------------------------------
-// 🖥️ HUD Shader Sources
+// 💻 HUD Shader Sources
 // ------------------------------------------------------------
 static const char* vertexShaderSrc = R"GLSL(
 #version 430 core
@@ -34,7 +34,7 @@ void main() {
 )GLSL";
 
 // ------------------------------------------------------------
-// 🧩 Interne HUD OpenGL State
+// 🧹 Interne HUD OpenGL State
 // ------------------------------------------------------------
 static GLuint hudVAO = 0;
 static GLuint hudVBO = 0;
@@ -136,7 +136,7 @@ void draw(float fps, float frameTimeMs, float zoom, float offsetX, float offsetY
     char hudText2[256];
 
     // 🧮 Wissenschaftliche Schreibweise: Zoom = 10^x
-    float logZoom = std::log10(1.0f / zoom); // z. B. zoom=1e-7 → logZoom = 7
+    float logZoom = std::log10(1.0f / zoom); // z.​ B. zoom=1e-7 → logZoom = 7
 
     std::snprintf(hudText1, sizeof(hudText1),
                   "FPS: %.1f | Zoom: 1e%.1f | Offset: (%.3f, %.3f)",
