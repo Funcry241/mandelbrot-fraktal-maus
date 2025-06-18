@@ -196,10 +196,15 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         currentTileSize
     );
 
+    // 🚜 Zielpunkt glätten, damit Zoombewegung ruhig bleibt
+    static float2 smoothedTarget = newOffset;
+    smoothedTarget.x += (newOffset.x - smoothedTarget.x) * 0.1f;
+    smoothedTarget.y += (newOffset.y - smoothedTarget.y) * 0.1f;
+
     if (!CudaInterop::getPauseZoom()) {
         zoom *= Settings::AUTOZOOM_SPEED;
-        offset.x += (newOffset.x - offset.x) * Settings::LERP_FACTOR;
-        offset.y += (newOffset.y - offset.y) * Settings::LERP_FACTOR;
+        offset.x += (smoothedTarget.x - offset.x) * Settings::LERP_FACTOR;
+        offset.y += (smoothedTarget.y - offset.y) * Settings::LERP_FACTOR;
         Progressive::incrementIterations();
     }
 

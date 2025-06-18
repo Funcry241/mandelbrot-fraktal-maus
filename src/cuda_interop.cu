@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 132
-// 🐭 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Auto-Zoom via Entropieanalyse (pro Tile), bestes Tile wird ermittelt, Zoom-Ziel korrekt in Fraktalkoordinaten umgerechnet (inkl. Mittelpunktabzug wie im Kernel). Schneefuchs hätte gesagt: „Jetzt stimmen beide Räume überein.“
+// Zeilen: 151
+// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Auto-Zoom via Entropieanalyse (pro Tile), bestes Tile wird ermittelt, Zoom-Ziel korrekt in Fraktalkoordinaten umgerechnet (inkl. Mittelpunktabzug wie im Kernel). Jetzt mit "SmoothZoom + NearbyBias" zur Vermeidung von Flattern. Schneefuchs hätte gesagt: „Sanft wie ein Gleitflug zum Entropie-Hotspot.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 
@@ -20,7 +20,7 @@ void registerPBO(unsigned int pbo) {
 
 void unregisterPBO() {
     if (cudaPboResource) {
-        CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboResource)); // ✅ Fix: Kein &-Operator
+        CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboResource));
         cudaPboResource = nullptr;
     }
 }
@@ -57,21 +57,8 @@ void renderCudaFrame(
         float bestScore = -1.0f;
 
         for (int i = 0; i < numTiles; ++i) {
-            if (h_entropy[i] > bestScore) {
-                bestScore = h_entropy[i];
-                bestIndex = i;
-            }
-        }
-
-#if defined(DEBUG) || defined(_DEBUG)
-        if (Settings::debugLogging) {
-            std::printf("[DEBUG] Best tile entropy: %.8f\n", bestScore);
-        }
-#endif
-
-        if (bestIndex >= 0) {
-            int bx = bestIndex % tilesX;
-            int by = bestIndex / tilesX;
+            int bx = i % tilesX;
+            int by = i / tilesX;
 
             float centerX = (bx + 0.5f) * tileSize;
             float centerY = (by + 0.5f) * tileSize;
@@ -87,9 +74,34 @@ void renderCudaFrame(
             };
 
             float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+            float score = h_entropy[i] / (1.0f + 50.0f * dist); // 📊 Entropie-Bonus für nähere Ziele
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestIndex = i;
+            }
+        }
+
+#if defined(DEBUG) || defined(_DEBUG)
+        if (Settings::debugLogging) {
+            std::printf("[DEBUG] Best tile score: %.8f\n", bestScore);
+        }
+#endif
+
+        if (bestIndex >= 0) {
+            int bx = bestIndex % tilesX;
+            int by = bestIndex / tilesX;
+
+            float centerX = (bx + 0.5f) * tileSize;
+            float centerY = (by + 0.5f) * tileSize;
+
+            float2 tileCenter = {
+                (centerX - width  / 2.0f) / zoom + offset.x,
+                (centerY - height / 2.0f) / zoom + offset.y
+            };
 
             newOffset = tileCenter;
-            shouldZoom = true; // ← wird nicht mehr gebraucht, aber Struktur bleibt konsistent
+            shouldZoom = true; // Struktur bleibt erhalten
 
         } else {
             shouldZoom = false;
