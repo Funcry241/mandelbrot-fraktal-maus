@@ -1,11 +1,14 @@
 // Datei: src/hud.cpp
-// 🐭 Maus-Kommentar: HUD-Overlay mit Textanzeige via STB-Easy-Font und GLSL-Shadern
+// Zeilen: 204
+// 🐭 Maus-Kommentar: HUD-Overlay mit Textanzeige via STB-Easy-Font und GLSL-Shadern. Zeigt FPS, Offset und nun den Zoom-Faktor als wissenschaftliche 10er-Potenz. Schneefuchs hätte gesagt: „Zoom als Zehnerpotenz bringt Struktur ins Chaos.“
 
 #include "pch.hpp"
 
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
 #include "hud.hpp"
+
+#include <cmath> // 🧠 Für log10
 
 namespace Hud {
 
@@ -131,9 +134,14 @@ void drawText(const std::string& text, float x, float y, float width, float heig
 void draw(float fps, float frameTimeMs, float zoom, float offsetX, float offsetY, int width, int height) {
     char hudText1[256];
     char hudText2[256];
+
+    // 🧮 Wissenschaftliche Schreibweise: Zoom = 10^x
+    float logZoom = std::log10(1.0f / zoom); // z. B. zoom=1e-7 → logZoom = 7
+
     std::snprintf(hudText1, sizeof(hudText1),
-                  "FPS: %.1f | Zoom: %.2f | Offset: (%.3f, %.3f)",
-                  fps, zoom, offsetX, offsetY);
+                  "FPS: %.1f | Zoom: 1e-%.1f | Offset: (%.3f, %.3f)",
+                  fps, logZoom, offsetX, offsetY);
+
     std::snprintf(hudText2, sizeof(hudText2),
                   "Frame Time: %.2f ms", frameTimeMs);
 
