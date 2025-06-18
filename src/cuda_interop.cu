@@ -74,7 +74,7 @@ void renderCudaFrame(
             };
 
             float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-            float score = h_entropy[i] / (1.0f + 50.0f * dist); // 📊 Entropie-Bonus für nähere Ziele
+            float score = h_entropy[i] / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist); // 📊 Entropie-Bonus für nähere Ziele
 
             if (score > bestScore) {
                 bestScore = score;

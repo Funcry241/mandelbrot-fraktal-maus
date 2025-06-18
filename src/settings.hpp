@@ -1,7 +1,7 @@
 #pragma once
 
 // Datei: src/settings.hpp
-// Zeilen: 92
+// Zeilen: 93
 // 🐅 Maus-Kommentar: Steuerungszentrale für Auto-Zoom, Fraktal-Feintuning, Entropieanalyse und CUDA-Tile-Verhalten.
 // MIN_JUMP_DISTANCE wurde deaktiviert – Zoom läuft jetzt dauerhaft, LERP bleibt. Schwester kann jetzt mit gutem Gewissen loslassen.
 
@@ -45,6 +45,9 @@ inline constexpr float LERP_FACTOR = 0.02f; // Zwischen 0.0 (sanft) und 1.0 (sof
 
 // ❌ Mindestdistanz für Bewegung (nicht mehr aktiv genutzt)
 // inline constexpr float MIN_JUMP_DISTANCE = 1e-4f;
+
+// 📈 Gewichtung für Entropie-Nähe-Bonus im Auto-Zoom (je höher, desto stärker der Nahbereich bevorzugt)
+inline constexpr float ENTROPY_NEARBY_BIAS = 60.0f;
 
 // 💚 CUDA-Tile-Einstellungen (wichtig für Parallelisierung & Analyse)
 inline constexpr int BASE_TILE_SIZE = 8;
