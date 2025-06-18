@@ -23,7 +23,7 @@ Das Projekt verwendet folgende Agents und Werkzeuge:
 | OpenGL            | 4.3+            | Benötigt Core Profile                     |
 | Visual Studio     | 2022            | Inklusive C++- und CUDA-Support           |
 | CMake             | ≥3.25           | Empfehlung: aktuelle stabile Version      |
-| Ninja             | 1.10+           | Für schnelle parallele Builds             |
+| Ninja             | 1.10+           | Für schnelle parallele Builds             
 | vcpkg             | aktuell         | Verwaltung von Drittanbieter-Bibliotheken |
 
 ---
@@ -47,7 +47,7 @@ sudo apt install build-essential cmake git libglfw3-dev libglew-dev libcuda1-525
 
 2. **Repository klonen & vcpkg initialisieren**:
 ```bash
-git clone https://github.com/dein-username/otterdream-mandelbrot.git
+git clone https://github.com/Funcry241/otterdream-mandelbrot.git
 cd otterdream-mandelbrot
 ./vcpkg/bootstrap-vcpkg.sh
 ```
@@ -72,4 +72,3 @@ cd build/linux
   - `.github/workflows/ci.yml` führt bei jedem Push auf `main` einen vollständigen Build und Tests durch.
 - **Dependabot**:
   - Automatisches Update der vcpkg-Abhängigkeiten wöchentlich.
-

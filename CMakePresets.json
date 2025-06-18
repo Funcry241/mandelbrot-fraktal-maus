@@ -10,13 +10,12 @@
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
         "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_CXX_STANDARD": "23",
         "CMAKE_CXX_EXTENSIONS": "OFF",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_CUDA_STANDARD": "20",
         "CMAKE_CUDA_EXTENSIONS": "OFF",
-        "CMAKE_CUDA_ARCHITECTURES": "80;86;89",
-        "CMAKE_CUDA_COMPILER": "$env{CUDA_PATH}/bin/nvcc.exe"
+        "CMAKE_CUDA_ARCHITECTURES": "80;86;89"
       }
     },
     {
@@ -28,12 +27,13 @@
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-linux",
         "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_CXX_STANDARD": "23",
         "CMAKE_CXX_EXTENSIONS": "OFF",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_CUDA_STANDARD": "20",
         "CMAKE_CUDA_EXTENSIONS": "OFF",
         "CMAKE_CUDA_ARCHITECTURES": "80;86;89",
+        "CMAKE_CUDA_COMPILER": "/usr/local/cuda/bin/nvcc",
         "CMAKE_CXX_COMPILER": "/usr/bin/g++-13",
         "CMAKE_C_COMPILER": "/usr/bin/gcc-13"
       }
