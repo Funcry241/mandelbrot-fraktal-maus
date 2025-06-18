@@ -139,7 +139,7 @@ void draw(float fps, float frameTimeMs, float zoom, float offsetX, float offsetY
     float logZoom = std::log10(1.0f / zoom); // z. B. zoom=1e-7 → logZoom = 7
 
     std::snprintf(hudText1, sizeof(hudText1),
-                  "FPS: %.1f | Zoom: 1e-%.1f | Offset: (%.3f, %.3f)",
+                  "FPS: %.1f | Zoom: 1e%.1f | Offset: (%.3f, %.3f)",
                   fps, logZoom, offsetX, offsetY);
 
     std::snprintf(hudText2, sizeof(hudText2),
