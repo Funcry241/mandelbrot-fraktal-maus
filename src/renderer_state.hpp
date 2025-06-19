@@ -1,7 +1,3 @@
-// Datei: src/renderer_state.hpp
-// Zeilen: 73
-// 🐭 Maus-Kommentar: Enthält den aktiven Renderer-Zustand – Zoom, Offset, Zielkoordinaten, GPU-Puffer etc. Jetzt mit Timing-Werten für FPS- und Frameanalyse. Neu: `pbo` & `tex` direkt im State, `.resources` ist obsolet. Schneefuchs: „Ein Zustand, sie zu binden – im Shader, im Loop, in der Tiefe.“
-
 #pragma once
 
 #include "pch.hpp"  // 🧠 Enthält <cuda_runtime.h>, das float2 definiert – keine eigene Definition mehr nötig!
@@ -61,3 +57,6 @@ public:
     void applyLerpStep();
     void adaptIterationCount();
 };
+
+// 🧰 Initialisiert OpenGL-Textur, PBO, registriert bei CUDA und allokiert GPU-Buffer
+void initResources(RendererState& state);

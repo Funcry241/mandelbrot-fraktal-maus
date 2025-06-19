@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 151
-// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Auto-Zoom via Entropieanalyse (pro Tile), bestes Tile wird ermittelt, Zoom-Ziel korrekt in Fraktalkoordinaten umgerechnet (inkl. Mittelpunktabzug wie im Kernel). Jetzt mit "SmoothZoom + NearbyBias" zur Vermeidung von Flattern. Schneefuchs hätte gesagt: „Sanft wie ein Gleitflug zum Entropie-Hotspot.“
+// Zeilen: 155
+// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Jetzt mit Schutz vor mehrfacher Registrierung & explizitem Fehler bei uninitialisiertem cudaPboResource. Schneefuchs: „Ein Puffer, der doppelt registriert, fällt – und zwar auf die Nase.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 
@@ -11,10 +11,14 @@
 
 namespace CudaInterop {
 
-static cudaGraphicsResource_t cudaPboResource;
+static cudaGraphicsResource_t cudaPboResource = nullptr;
 static bool pauseZoom = false;
 
 void registerPBO(unsigned int pbo) {
+    if (cudaPboResource != nullptr) {
+        std::cerr << "[ERROR] registerPBO called but resource is already registered!\n";
+        return;
+    }
     CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard));
 }
 
@@ -38,6 +42,11 @@ void renderCudaFrame(
     bool& shouldZoom,
     int tileSize
 ) {
+    if (!cudaPboResource) {
+        std::cerr << "[FATAL] CUDA PBO not registered before renderCudaFrame.\n";
+        std::exit(EXIT_FAILURE);
+    }
+
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
     uchar4* devPtr = nullptr;
     size_t size = 0;
@@ -101,7 +110,7 @@ void renderCudaFrame(
             };
 
             newOffset = tileCenter;
-            shouldZoom = true; // Struktur bleibt erhalten
+            shouldZoom = true;
 
         } else {
             shouldZoom = false;

@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 67
-// 🐭 Maus-Kommentar: Entry-Point für das Rendering-Modul. `RendererWindow` managt Fenster, `RendererPipeline` initialisiert. Neu: `renderFrame()` ruft korrekt `RendererLoop::renderFrame(...)` auf (nicht impl direkt!). Schneefuchs: „Kein Shortcut durch den Sumpf!“
+// Zeilen: 66
+// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. Keine manuelle TileSize mehr – `setupBuffers()` berechnet aus Zoom & heuristischer Blockgröße implizit die Tile-Anzahl. Schneefuchs sagt: „Wenn das System weiß, was gut für dich ist, dann hör drauf.“
 
 #include "pch.hpp"
 
@@ -41,8 +41,19 @@ void Renderer::setupBuffers() {
     CUDA_CHECK(cudaMalloc(&state.d_iterations, totalPixels * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&state.d_entropy, totalPixels * sizeof(float)));
 
-    int tilesX = state.width / state.lastTileSize;
-    int tilesY = state.height / state.lastTileSize;
+    // Dynamische Tile-Größe heuristisch wie im Kernel
+    int tileSize = 32;
+    if (state.zoom > 30000.0f)
+        tileSize = 4;
+    else if (state.zoom > 3000.0f)
+        tileSize = 8;
+    else if (state.zoom > 1000.0f)
+        tileSize = 16;
+    tileSize = std::max(4, std::min(tileSize, 32));
+    state.lastTileSize = tileSize;
+
+    int tilesX = state.width / tileSize;
+    int tilesY = state.height / tileSize;
     state.h_entropy.resize(tilesX * tilesY);
 }
 

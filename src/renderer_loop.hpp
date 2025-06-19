@@ -11,6 +11,9 @@
 
 namespace RendererLoop {
 
+// 🆕 Für Initialisierung
+void initResources(RendererState& state); // 🆕 Für Initialisierung
+
 // 🕒 Initialisiert Zeitmesser, misst deltaTime & berechnet FPS
 void beginFrame(RendererState& state);
 

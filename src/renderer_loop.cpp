@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 109
-// 🐭 Maus-Kommentar: Implementiert die zentralen Frame-Operationen für das Rendering. `renderFrame()` ist der neue API-Einstiegspunkt, intern leitet er an `renderFrame_impl()` weiter. Schneefuchs sagt: „Formell sauber, Otter-kompatibel.“
+// Zeilen: 112
+// 🐭 Maus-Kommentar: Zentrale Frame-Schleife mit integrierter dynamischer Tile-Anpassung. `updateTileSize()` berechnet heuristisch die Blockgröße passend zum aktuellen Zoom – identisch zum Kernel. Schneefuchs: „Wer zoomt, der fließt.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -23,7 +23,17 @@ void beginFrame(RendererState& state) {
 }
 
 void updateTileSize(RendererState& state) {
-    // Dynamische Anpassung der Tile-Größe könnte hier erfolgen
+    // Automatische, zoom-abhängige Tilegröße
+    int tileSize = 32;
+    if (state.zoom > 30000.0f)
+        tileSize = 4;
+    else if (state.zoom > 3000.0f)
+        tileSize = 8;
+    else if (state.zoom > 1000.0f)
+        tileSize = 16;
+
+    tileSize = std::max(4, std::min(tileSize, 32));
+    state.lastTileSize = tileSize;
 }
 
 void computeCudaFrame(RendererState& state) {
@@ -69,7 +79,7 @@ void drawFrame(RendererState& state) {
 
 void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     beginFrame(state);
-    updateTileSize(state);
+    updateTileSize(state);   // 🧠 Aktiviert und implementiert
     computeCudaFrame(state);
 
     if (autoZoomEnabled) {

@@ -1,8 +1,15 @@
 // Datei: src/common.hpp
-// Zeilen: 50
-// 🐭 Maus-Kommentar: Zentrale Header-Schutzmauer für CUDA, OpenGL, Windows und C++-Standard. Enthält essentielle Makros, pragmatische Includes und die `CUDA_CHECK`-Macro für robuste Fehlerbehandlung. Schneefuchs hätte darauf bestanden, dass kein `GLU` reinkriecht und der Fehler sauber mit Datei+Zeile rauskommt.
+// Zeilen: +15
+// 🐭 Maus-Kommentar: Tile-Größe wird jetzt logarithmisch aus dem Zoomfaktor berechnet – ohne Sprungstellen, kontinuierlich gleitend. Schneefuchs flüstert: „Wer weich zoomt, gewinnt mehr Spielraum.“
 
 #pragma once
+#include <cmath>
+
+inline int computeTileSizeFromZoom(float zoom) {
+    float raw = 32.0f - std::log2f(zoom + 1.0f);  // weich fallend
+    int clamped = std::max(4, std::min(32, static_cast<int>(std::round(raw))));
+    return clamped;
+}
 
 // 🔧 Windows-spezifische Makros und Header
 #ifdef _WIN32

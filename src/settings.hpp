@@ -1,9 +1,9 @@
 #pragma once
 
 // Datei: src/settings.hpp
-// Zeilen: 93
+// Zeilen: 83
 // 🐅 Maus-Kommentar: Steuerungszentrale für Auto-Zoom, Fraktal-Feintuning, Entropieanalyse und CUDA-Tile-Verhalten.
-// MIN_JUMP_DISTANCE wurde deaktiviert – Zoom läuft jetzt dauerhaft, LERP bleibt. Schwester kann jetzt mit gutem Gewissen loslassen.
+// Nur aktive, genutzte Konstanten bleiben erhalten – der Rest wurde entrümpelt. Die Schwester atmet auf.
 
 #include <algorithm>  // für std::max, std::clamp
 #include <cmath>      // für logf, log2f, sqrtf
@@ -15,48 +15,39 @@ inline constexpr bool debugGradient = false; // Zeige nur den Entropie-Gradiente
 inline constexpr bool debugLogging  = true;  // Zusätzliche Debug-Ausgaben im Terminal anzeigen
 
 // 🖥️ Fensterkonfiguration (Initialgröße und Position auf dem Bildschirm)
-inline constexpr int width        = 1024;  // Fensterbreite in Pixel
-inline constexpr int height       = 768;   // Fensterhöhe in Pixel
-inline constexpr int windowPosX   = 100;   // X-Startposition
-inline constexpr int windowPosY   = 100;   // Y-Startposition
+inline constexpr int width        = 1024;
+inline constexpr int height       = 768;
+inline constexpr int windowPosX   = 100;
+inline constexpr int windowPosY   = 100;
 
 // 🔭 Initialer Fraktal-Ausschnitt (Zoom und Position)
-inline constexpr float initialZoom    = 300.0f; // Anfangszoom-Stufe (Skalierungsfaktor)
-inline constexpr float initialOffsetX = -0.5f;  // Startverschiebung X-Achse
-inline constexpr float initialOffsetY =  0.0f;  // Startverschiebung Y-Achse
+inline constexpr float initialZoom    = 300.0f;
+inline constexpr float initialOffsetX = -0.5f;
+inline constexpr float initialOffsetY =  0.0f;
 
-// 🔍 Manueller Zoom (z. B. per Mausrad) pro Schritt
-inline constexpr float ZOOM_STEP_FACTOR = 0.002f; // Kleinere Werte = feinere Zoomkontrolle
+// 🔍 Manueller Zoom (z. B. per Mausrad) pro Schritt
+inline constexpr float ZOOM_STEP_FACTOR = 0.002f;
 
 // 🌟 Schwelle zur Erkennung "interessanter" Tiles via Entropie
-inline constexpr float VARIANCE_THRESHOLD     = 1e-12f; // Standard-Sensitivität für Tile-Komplexität
-inline constexpr float MIN_VARIANCE_THRESHOLD = 1e-10f; // Untergrenze der Schwelle
+inline constexpr float VARIANCE_THRESHOLD     = 1e-12f;
+inline constexpr float MIN_VARIANCE_THRESHOLD = 1e-10f;
 
 // 🌀 Wie schnell zoomt das Bild automatisch pro Frame
-inline constexpr float AUTOZOOM_SPEED = 1.005f; // Jeder Frame: zoom *= AUTOZOOM_SPEED
+inline constexpr float AUTOZOOM_SPEED = 1.005f;
 
 // ♻️ Steuerung der Fraktaldarstellung durch Iterationsanzahl
-inline constexpr int INITIAL_ITERATIONS = 100;     // Startwert für Iterationen
-inline constexpr int MAX_ITERATIONS_CAP = 50000;   // Harte Obergrenze für Qualität / Performance
-inline constexpr int ITERATION_STEP     = 5;       // Schrittweite bei Progression
+inline constexpr int INITIAL_ITERATIONS = 100;
+inline constexpr int MAX_ITERATIONS_CAP = 50000;
+inline constexpr int ITERATION_STEP     = 5;
 
-// 🪞 Glättung der Kamerabewegung zum Ziel-Tile (statt harten Sprung)
-inline constexpr float LERP_FACTOR = 0.02f; // Zwischen 0.0 (sanft) und 1.0 (sofort)
+// 🪞 Glättung der Kamerabewegung zum Ziel-Tile
+inline constexpr float LERP_FACTOR = 0.02f;
 
-// ❌ Mindestdistanz für Bewegung (nicht mehr aktiv genutzt)
-// inline constexpr float MIN_JUMP_DISTANCE = 1e-4f;
-
-// 📈 Gewichtung für Entropie-Nähe-Bonus im Auto-Zoom (je höher, desto stärker der Nahbereich bevorzugt)
+// 📈 Gewichtung für Entropie-Nähe-Bonus im Auto-Zoom
 inline constexpr float ENTROPY_NEARBY_BIAS = 60.0f;
 
-// 💚 CUDA-Tile-Einstellungen (wichtig für Parallelisierung & Analyse)
+// 💚 CUDA-Tile-Einstellungen
 inline constexpr int BASE_TILE_SIZE = 8;
-inline constexpr int MIN_TILE_SIZE  = 4;
-inline constexpr int MAX_TILE_SIZE  = 32;
-
-// 📏 Feste Tile-Maße (optional für Grid-Overlays oder Debug-Darstellung)
-inline constexpr int TILE_W = 16;
-inline constexpr int TILE_H = 16;
 
 // 📊 Tile-Größe passt sich dynamisch dem Zoom-Level an
 inline int dynamicTileSize(float zoom) {
@@ -87,7 +78,7 @@ inline int dynamicTileSize(float zoom) {
     return bestSize;
 }
 
-// 📈 Variance-Schwelle wird mit Zoom mitskaliert (empfindlicher bei großem Zoom)
+// 📈 Entropie-Schwelle passt sich dem Zoomlevel an
 inline float dynamicVarianceThreshold(float zoom) {
     float scaled = VARIANCE_THRESHOLD * (1.0f + 0.02f * log2f(zoom + 1.0f));
     return std::clamp(scaled, VARIANCE_THRESHOLD, MIN_VARIANCE_THRESHOLD * 10.0f);

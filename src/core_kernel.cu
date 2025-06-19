@@ -1,11 +1,13 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 129
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel & Entropieanalyse. Hier erfolgt die Bildberechnung, Farbgebung und Strukturwertung pro Tile. Schwester wünscht korrekte Schwarz-Darstellung für Innenpunkte und konstante Farbübergänge trotz Zoom.
+// Zeilen: 132
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel & Entropieanalyse mit formelbasiertem Tiling. `tileSize` wird aus `zoom` per log2-Formel berechnet – weich, kontinuierlich, exakt. Schwester: „Schwarz bleibt schwarz, der Rest fließt.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
+#include <cmath>
 #include "settings.hpp"
+#include "common.hpp"           // 🔁 computeTileSizeFromZoom
 #include "core_kernel.h"
 
 __device__ __forceinline__ uchar4 elegantColor(float t) {
@@ -114,7 +116,8 @@ extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
                                         int width, int height,
                                         float zoom, float2 offset,
                                         int maxIterations) {
-    dim3 block(Settings::TILE_W, Settings::TILE_H);
+    int tileSize = computeTileSizeFromZoom(zoom);
+    dim3 block(tileSize, tileSize);
     dim3 grid((width + block.x - 1) / block.x,
               (height + block.y - 1) / block.y);
 
