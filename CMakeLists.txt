@@ -1,6 +1,6 @@
 # Datei: CMakeLists.txt
-# Zeilen: 125
-# 📍 Maus-Kommentar: CMake jetzt mit `find_package(CUDAToolkit REQUIRED)` und korrektem `CUDA::cudart`-Linking. Architekturen via Preset, manuelles `-lcudart` entfernt. Schneefuchs hätte gesagt: "Nie wieder linker pain unter Linux."
+# Zeilen: 144
+# 📍 Maus-Kommentar: Modularisierung + CUDA/OpenGL-Interop Fix. Ergänzt Workaround für fehlende cuda_gl_interop.h – notwendig für Windows-Installationen, bei denen der Header nicht durch CUDAToolkit automatisch gefunden wird. Schneefuchs: „Workaround ist, wenn du weißt, was du tust – und es trotzdem tust.“
 
 cmake_minimum_required(VERSION 3.25)
 
@@ -37,10 +37,32 @@ find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------
+# 🩹 Fix: Suche nach cuda_gl_interop.h (wird nicht automatisch von CUDAToolkit eingebunden)
+find_path(CUDA_GL_INTEROP_INCLUDE_DIR cuda_gl_interop.h
+    PATHS
+        "$ENV{CUDA_PATH}/include"
+        "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/include"
+        "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9/include"
+        "/usr/local/cuda/include"
+        "/opt/cuda/include"
+    DOC "Pfad zu cuda_gl_interop.h"
+)
+
+if(NOT CUDA_GL_INTEROP_INCLUDE_DIR)
+  message(FATAL_ERROR "cuda_gl_interop.h not found – CUDA-OpenGL Interop benötigt!")
+endif()
+
+include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
+
+# ---------------------------------------------------------
 # 🛠 Executable
 add_executable(mandelbrot_otterdream
     src/main.cpp
     src/renderer_core.cu
+    src/renderer_window.cpp
+    src/renderer_pipeline.cpp
+    src/renderer_loop.cpp
+    src/renderer_state.cpp
     src/cuda_interop.cu
     src/core_kernel.cu
     src/hud.cpp
@@ -99,6 +121,10 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
 
 set_source_files_properties(
     src/renderer_core.cu
+    src/renderer_window.cpp
+    src/renderer_pipeline.cpp
+    src/renderer_loop.cpp
+    src/renderer_state.cpp
     src/cuda_interop.cu
     src/core_kernel.cu
     src/progressive.cu

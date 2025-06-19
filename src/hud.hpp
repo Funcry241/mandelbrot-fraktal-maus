@@ -1,10 +1,11 @@
 // Datei: src/hud.hpp
-// Zeilen: 41
+// Zeilen: 44
 // 🐭 Maus-Kommentar: HUD-Schnittstelle – zeigt FPS, Zoom und Offsets via STB-Easy-Font. Wird über OpenGL-Overlay gezeichnet. Kein ImGui, keine Abhängigkeiten, dafür pures ASCII mit 1ms Genauigkeit. Schneefuchs hätte es „effiziente Eleganz“ genannt.
 
 #pragma once
 
 #include <string>
+#include "renderer_state.hpp"  // ✅ Damit RendererState in draw() bekannt ist
 
 // ------------------------------------------------------------
 // 🖥️ STB Easy Font Binding (nur für interne Nutzung)
@@ -23,14 +24,8 @@ namespace Hud {
     /// 🚀 Initialisiert Shader und Vertex-Buffer für das HUD
     void init();
 
-    /// 🖼️ Rendert das HUD mit den aktuellen Werten (FPS, Frame Time, Zoom, Offset)
-    void draw(float fps,
-              float frameTimeMs,
-              float zoom,
-              float offsetX,
-              float offsetY,
-              int width,
-              int height);
+    /// 🖼️ Rendert das HUD mit den aktuellen Werten aus dem RendererState
+    void draw(RendererState& state);  // ✅ Vereinheitlicht – Übergabe des gesamten Zustands
 
     /// 🧹 Gibt alle HUD-bezogenen OpenGL-Ressourcen frei
     void cleanup();

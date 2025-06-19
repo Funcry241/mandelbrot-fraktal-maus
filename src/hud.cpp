@@ -1,12 +1,13 @@
 // Datei: src/hud.cpp
-// Zeilen: 204
-// 🐭 Maus-Kommentar: HUD-Overlay mit Textanzeige via STB-Easy-Font und GLSL-Shadern. Zeigt FPS, Offset und nun den Zoom-Faktor als wissenschaftliche 10er-Potenz. Schneefuchs hätte gesagt: „Zoom als Zehnerpotenz bringt Struktur ins Chaos.“
+// Zeilen: 208
+// 🐭 Maus-Kommentar: HUD-Overlay mit Textanzeige via STB-Easy-Font und GLSL-Shadern. Zeigt FPS, Offset und nun den Zoom-Faktor als wissenschaftliche 10er-Potenz. Zugriff auf `state.currentFPS` und `state.deltaTime * 1000.0f` ersetzt veraltete Membernamen (`fps`, `frameTimeMs`). Schneefuchs hätte gesagt: „Der MausZoom verdient saubere Anzeige!“
 
 #include "pch.hpp"
 
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
 #include "hud.hpp"
+#include "renderer_state.hpp" // 🧠 Für Zugriff auf RendererState
 
 #include <cmath> // 🧠 Für log10
 
@@ -88,16 +89,12 @@ void init() {
 void drawText(const std::string& text, float x, float y, float width, float height) {
     if (text.empty()) return;
 
-    // 📝 STB-Easy-Font Mesh
     char buffer[99999];
     int num_quads = stb_easy_font_print(x, y, const_cast<char*>(text.c_str()), nullptr, buffer, sizeof(buffer));
 
-    struct Vertex {
-        float x, y;
-    };
-
+    struct Vertex { float x, y; };
     std::vector<Vertex> vertices;
-    vertices.reserve(num_quads * 6); // 2 Triangles = 6 vertices per quad
+    vertices.reserve(num_quads * 6);
 
     for (int i = 0; i < num_quads; ++i) {
         unsigned char* quad = reinterpret_cast<unsigned char*>(buffer) + i * 64;
@@ -105,13 +102,8 @@ void drawText(const std::string& text, float x, float y, float width, float heig
         Vertex v1 = *reinterpret_cast<Vertex*>(quad + 16);
         Vertex v2 = *reinterpret_cast<Vertex*>(quad + 32);
         Vertex v3 = *reinterpret_cast<Vertex*>(quad + 48);
-
-        vertices.push_back(v0);
-        vertices.push_back(v1);
-        vertices.push_back(v2);
-        vertices.push_back(v0);
-        vertices.push_back(v2);
-        vertices.push_back(v3);
+        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
     }
 
     glBindVertexArray(hudVAO);
@@ -131,22 +123,23 @@ void drawText(const std::string& text, float x, float y, float width, float heig
     glBindVertexArray(0);
 }
 
-void draw(float fps, float frameTimeMs, float zoom, float offsetX, float offsetY, int width, int height) {
+void draw(RendererState& state) {
     char hudText1[256];
     char hudText2[256];
 
-    // 🧮 Wissenschaftliche Schreibweise: Zoom = 10^x
-    float logZoom = std::log10(1.0f / zoom); // z.​ B. zoom=1e-7 → logZoom = 7
+    float logZoom = std::log10(1.0f / state.zoom); // z. B. 1e-7 → logZoom = 7
+    float fps = state.currentFPS;
+    float frameTimeMs = state.deltaTime * 1000.0f;
 
     std::snprintf(hudText1, sizeof(hudText1),
                   "FPS: %.1f | Zoom: 1e%.1f | Offset: (%.3f, %.3f)",
-                  fps, logZoom, offsetX, offsetY);
+                  fps, logZoom, state.offset.x, state.offset.y);
 
     std::snprintf(hudText2, sizeof(hudText2),
                   "Frame Time: %.2f ms", frameTimeMs);
 
-    drawText(hudText1, 10.0f, 20.0f, static_cast<float>(width), static_cast<float>(height));
-    drawText(hudText2, 10.0f, 50.0f, static_cast<float>(width), static_cast<float>(height));
+    drawText(hudText1, 10.0f, 20.0f, static_cast<float>(state.width), static_cast<float>(state.height));
+    drawText(hudText2, 10.0f, 50.0f, static_cast<float>(state.width), static_cast<float>(state.height));
 }
 
 void cleanup() {

@@ -1,6 +1,6 @@
 // Datei: src/opengl_utils.hpp
-// Zeilen: 35
-// 🐭 Maus-Kommentar: Header für OpenGL-Hilfsfunktionen – VAO für Fullscreen-Rendering, Shader-Erzeugung aus Quelltext. GLEW wird nur eingebunden, wenn **nicht** im CUDA-Compiler, sonst gibt es Symbolkonflikte. Schneefuchs hätte den CUDA-Ausschluss beim VAO geliebt – sonst kracht's bei `nvcc`.
+// Zeilen: 28
+// 🐭 Maus-Kommentar: Aufgeräumt – keine Altlasten mehr. Nur noch moderne Shader-/Quad-Erzeugung mit expliziter VAO-Nutzung. Schneefuchs meinte: „Globals raus, Klartext rein.“
 
 #pragma once
 #ifndef OPENGL_UTILS_HPP
@@ -15,17 +15,11 @@ typedef unsigned int GLuint;
 
 namespace OpenGLUtils {
 
-// 🖥️ Globale VAO-ID für das Fullscreen-Quad
-#ifndef __CUDACC__
-extern GLuint gFullscreenVAO;
-#endif
-
 // 🎨 Shader-Utilities
 GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc);
 
 // 🖼️ Fullscreen-Quad-Utilities
 void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO);
-void drawFullscreenQuad();
 void deleteFullscreenQuad(GLuint* inVAO, GLuint* inVBO, GLuint* inEBO);
 
 } // namespace OpenGLUtils

@@ -1,5 +1,10 @@
 {
   "version": 5,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "windows-msvc",
@@ -36,6 +41,9 @@
         "CMAKE_CUDA_COMPILER": "/usr/local/cuda/bin/nvcc",
         "CMAKE_CXX_COMPILER": "/usr/bin/g++-13",
         "CMAKE_C_COMPILER": "/usr/bin/gcc-13"
+      },
+      "environment": {
+        "CUDA_PATH": "/usr/local/cuda"
       }
     }
   ],

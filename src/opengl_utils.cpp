@@ -1,15 +1,11 @@
 // Datei: src/opengl_utils.cpp
-// 🐭 Maus-Kommentar: Hilfsfunktionen für Shader, VAO/VBO-Einrichtung und Fullscreen-Quad
+// Zeilen: 90
+// 🐭 Maus-Kommentar: Aufgeräumt. `drawFullscreenQuad()` ist raus – nur noch moderne Übergabe per VAO. Shaderfehler sauber gemeldet, Speicherverwaltung getrennt. Schneefuchs: „Nicht nur schöner – jetzt auch eindeutig!“
 
 #include "pch.hpp"
 #include "opengl_utils.hpp"
 
 namespace OpenGLUtils {
-
-// Globale VAO-ID für das Fullscreen-Quad
-#ifndef __CUDACC__
-GLuint gFullscreenVAO = 0;
-#endif
 
 // Hilfsfunktion: Shader kompilieren
 #ifndef __CUDACC__
@@ -73,19 +69,8 @@ void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) {
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
-    glBindVertexArray(0);
 
-#ifndef __CUDACC__
-    gFullscreenVAO = *outVAO;
-#endif
-}
-
-void drawFullscreenQuad() {
-#ifndef __CUDACC__
-    glBindVertexArray(gFullscreenVAO);
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
-#endif
 }
 
 void deleteFullscreenQuad(GLuint* inVAO, GLuint* inVBO, GLuint* inEBO) {

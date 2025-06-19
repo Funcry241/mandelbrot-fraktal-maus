@@ -27,7 +27,7 @@ void unregisterPBO() {
 
 void renderCudaFrame(    
     int* d_iterations,
-    float* d_entropy,    
+    float* d_entropy,
     int width,
     int height,
     float zoom,
