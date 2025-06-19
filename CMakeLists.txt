@@ -68,6 +68,7 @@ add_executable(mandelbrot_otterdream
     src/hud.cpp
     src/opengl_utils.cpp
     src/progressive.cu
+    src/renderer_resources.cpp
 )
 
 # Precompiled Header (MSVC-only)

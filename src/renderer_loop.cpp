@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 121
-// 🐭 Maus-Kommentar: Zentrale Frame-Schleife mit integrierter dynamischer Tile-Anpassung. `initResources()` initialisiert Textur, PBO, CUDA-Interop und HUD. `updateTileSize()` passt die Blockgröße dem Zoom an – fließend wie der Otterblick. Schneefuchs: „Wer zoomt, der fließt.“
+// Zeilen: 123
+// 🐭 Maus-Kommentar: Haupt-Frame-Loop mit CUDA-Interop, dynamischer Tile-Größe, Auto-Zoom & HUD. Jetzt mit sauberer PBO-/Textur-Erzeugung via OpenGLUtils. Schneefuchs: „Modularisieren wie ein Otter seinen Bau – sonst undicht!“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -8,29 +8,26 @@
 #include "hud.hpp"
 #include "settings.hpp"
 #include "renderer_pipeline.hpp"
+#include "renderer_resources.hpp"  // 🆕 PBO & Textur über Helper erzeugen
 
 namespace RendererLoop {
 
-void initResources(RendererState& state) {
-    // 🔧 OpenGL-PBO erzeugen
-    glGenBuffers(1, &state.pbo);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, state.pbo);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, state.width * state.height * 4, nullptr, GL_DYNAMIC_DRAW);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+// 🔢 Tile-Größe berechnet sich logarithmisch aus Zoom
+inline int computeTileSizeFromZoom(float zoom) {
+    float raw = 32.0f - std::log2f(zoom + 1.0f);
+    return std::max(4, std::min(32, static_cast<int>(raw)));
+}
 
-    // 🖼️ OpenGL-Textur erzeugen
-    glGenTextures(1, &state.tex);
-    glBindTexture(GL_TEXTURE_2D, state.tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, state.width, state.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
+void initResources(RendererState& state) {
+    // 🔧 OpenGL-PBO & Textur erzeugen via Helper
+    state.pbo = OpenGLUtils::createPBO(state.width, state.height);
+    state.tex = OpenGLUtils::createTexture(state.width, state.height);
 
     // ⚙️ CUDA-Interop aktivieren
     CudaInterop::registerPBO(state.pbo);
 
     // 🎨 HUD initialisieren
-    Hud::init();  // ✅ Korrigiert: kein Parameter übergeben
+    Hud::init();
 
 #if defined(DEBUG) || defined(_DEBUG)
     if (Settings::debugLogging) {
@@ -51,16 +48,7 @@ void beginFrame(RendererState& state) {
 }
 
 void updateTileSize(RendererState& state) {
-    int tileSize = 32;
-    if (state.zoom > 30000.0f)
-        tileSize = 4;
-    else if (state.zoom > 3000.0f)
-        tileSize = 8;
-    else if (state.zoom > 1000.0f)
-        tileSize = 16;
-
-    tileSize = std::max(4, std::min(tileSize, 32));
-    state.lastTileSize = tileSize;
+    state.lastTileSize = computeTileSizeFromZoom(state.zoom);
 }
 
 void computeCudaFrame(RendererState& state) {

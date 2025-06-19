@@ -1,6 +1,6 @@
 <!-- Datei: README.md -->
-<!-- Zeilen: 109 -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 4.3 – korrekte Zoom-/Iter-Logik, CI-Status, kein CC 3.0 mehr, alles auf Ampere+ getrimmt. Schneefuchs hätte die 3.0 ausradiert und „realistisch“ gemurmelt. -->
+<!-- Zeilen: 113 -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 6 – aktualisierte Build-Presets, korrekte Cleanup-Routinen, konsistente Tile-Größen-Logik. Schneefuchs hätte gesagt: „Ein README, das lügt, wird niemals Alpha.“ -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
@@ -92,8 +92,8 @@ sudo apt install build-essential cmake ninja-build libglfw3-dev libglew-dev
 ```bash
 git clone https://github.com/Funcry241/otterdream-mandelbrot.git
 cd otterdream-mandelbrot
-cmake --preset linux-gcc13
-cmake --build --preset linux-gcc
+cmake --preset linux-build
+cmake --build --preset linux-build
 ./dist/mandelbrot_otterdream
 ```
 

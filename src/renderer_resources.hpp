@@ -1,4 +1,4 @@
-// Datei: src/opengl_utils.hpp
+// Datei: src/renderer_resources.hpp
 // Zeilen: 22
 // 🐭 Maus-Kommentar: Stellt OpenGL-Helfer bereit – Erstellung von PBOs und Texturen für das Fraktal-Rendering. Muss in `renderer_resources.cpp` sichtbar sein. Schneefuchs: „Ohne diese Helfer meckert der Linker – wie ein Otter ohne Wasser!“
 

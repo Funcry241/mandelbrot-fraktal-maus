@@ -1,9 +1,9 @@
-// Datei: src/opengl_utils.cpp
+// Datei: src/renderer_resources.cpp
 // Zeilen: 55
 // 🐭 Maus-Kommentar: Implementiert Hilfsfunktionen zur Erstellung von OpenGL-PBOs und Texturen für CUDA-Interop. Korrekt initialisierte Objekte vermeiden undefined behavior. Schneefuchs: „Kein Fraktal ohne Puffer – und kein Puffer ohne Format!“
 
 #include "pch.hpp"
-#include "opengl_utils.hpp"
+#include "renderer_resources.hpp"  // ✅ Korrektur: richtiger Header-Name
 #include <stdexcept>
 #include <cstdio>
 
