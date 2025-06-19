@@ -10,6 +10,7 @@
 #include "renderer_state.hpp"
 #include "renderer_loop.hpp"     // 🎯 renderFrame und renderFrame_impl
 #include "common.hpp"
+#include "settings.hpp"
 
 Renderer::Renderer(int width, int height)
     : state(width, height) {}
@@ -17,10 +18,26 @@ Renderer::Renderer(int width, int height)
 Renderer::~Renderer() {}
 
 void Renderer::initGL() {
+#if defined(DEBUG) || defined(_DEBUG)
+    if (Settings::debugLogging) std::puts("[DEBUG] initGL aufgerufen");
+#endif
+
     state.window = RendererWindow::createWindow(state.width, state.height, this);
+    if (!state.window) {
+#if defined(DEBUG) || defined(_DEBUG)
+        std::puts("[ERROR] Fenstererstellung fehlgeschlagen (GLFW)");
+#endif
+        return;
+    }
+
     RendererWindow::setResizeCallback(state.window, this);
     RendererWindow::setKeyCallback(state.window);
-    RendererPipeline::init();  // ✅ keine Parameter mehr
+
+    RendererPipeline::init();
+
+#if defined(DEBUG) || defined(_DEBUG)
+    if (Settings::debugLogging) std::puts("[DEBUG] OpenGL-Initialisierung abgeschlossen");
+#endif
 }
 
 bool Renderer::shouldClose() const {
