@@ -60,5 +60,7 @@ public:
     void updateOffsetTarget(float2 newOffset);
     void applyLerpStep();
     void adaptIterationCount();
+    // 🔧 Allokiert CUDA-Puffer für Iterationen und Entropie-Auswertung
+    void setupCudaBuffers();
 };
 

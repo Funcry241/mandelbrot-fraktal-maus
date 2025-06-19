@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 123
+// Zeilen: 124
 // 🐭 Maus-Kommentar: Haupt-Frame-Loop mit CUDA-Interop, dynamischer Tile-Größe, Auto-Zoom & HUD. Jetzt mit sauberer PBO-/Textur-Erzeugung via OpenGLUtils. Schneefuchs: „Modularisieren wie ein Otter seinen Bau – sonst undicht!“
 
 #include "pch.hpp"
@@ -88,6 +88,9 @@ void drawFrame(RendererState& state) {
 void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     beginFrame(state);
     updateTileSize(state);
+
+    state.adaptIterationCount();  // 🧠 Iterationsanzahl dynamisch anpassen – Schneefuchs war hier streng!
+
     computeCudaFrame(state);
 
     if (autoZoomEnabled) {

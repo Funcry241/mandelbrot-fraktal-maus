@@ -58,3 +58,16 @@ void RendererState::adaptIterationCount() {
     maxIterations = static_cast<int>(baseIterations + logZoom * 200.0f);
     maxIterations = std::min(maxIterations, Settings::MAX_ITERATIONS_CAP);
 }
+
+void RendererState::setupCudaBuffers() {
+    const int totalPixels = width * height;
+    const int tileSize = lastTileSize;
+    const int tilesX = (width + tileSize - 1) / tileSize;
+    const int tilesY = (height + tileSize - 1) / tileSize;
+    const int numTiles = tilesX * tilesY;
+
+    CUDA_CHECK(cudaMalloc(&d_iterations, totalPixels * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_entropy, numTiles * sizeof(float)));
+
+    h_entropy.resize(numTiles);  // Optional: hostseitig vorallozieren
+}
