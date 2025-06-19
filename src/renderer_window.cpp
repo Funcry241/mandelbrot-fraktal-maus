@@ -59,11 +59,6 @@ bool shouldClose(GLFWwindow* window) {
     return glfwWindowShouldClose(window);
 }
 
-void swapAndPoll(GLFWwindow* window) {
-    glfwSwapBuffers(window);
-    glfwPollEvents();
-}
-
 void setResizeCallback(GLFWwindow* window, Renderer* instance) {
     RendererInternals::configureWindowCallbacks(window, instance); // 🟡 Duplikat, aber korrekt
 }

@@ -98,6 +98,21 @@ void Renderer::resize(int newW, int newH) {
 void Renderer::cleanup() {
     Hud::cleanup();
     RendererPipeline::cleanup();
+
+    // 🔓 CUDA PBO deregistrieren
+    CudaInterop::unregisterPBO();
+
+    // 🧹 OpenGL-Ressourcen löschen
+    glDeleteBuffers(1, &state.pbo);
+    glDeleteTextures(1, &state.tex);
+
+    // 🪟 Fenster schließen
     RendererWindow::destroyWindow(state.window);
+
+    // 🧠 GPU-Speicher freigeben
     freeDeviceBuffers();
+
+    // 🧼 GLFW abschließen
+    glfwTerminate();
 }
+

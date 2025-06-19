@@ -13,7 +13,6 @@ namespace RendererWindow {
 
 GLFWwindow* createWindow(int width, int height, Renderer* instance);
 bool shouldClose(GLFWwindow* window);
-void swapAndPoll(GLFWwindow* window);
 void setResizeCallback(GLFWwindow* window, Renderer* instance);
 void setKeyCallback(GLFWwindow* window);
 void destroyWindow(GLFWwindow* window);  // 🆕 Fenster korrekt schließen

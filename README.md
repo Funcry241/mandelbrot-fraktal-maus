@@ -1,6 +1,8 @@
 <!-- Datei: README.md -->
 <!-- Zeilen: 113 -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 6 – aktualisierte Build-Presets, korrekte Cleanup-Routinen, konsistente Tile-Größen-Logik. Schneefuchs hätte gesagt: „Ein README, das lügt, wird niemals Alpha.“ -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 6 – aktualisierte Build-Presets, korrekte Cleanup-Routinen, konsistente Tile-Größen-Logik. Schneefuchs hätte gesagt: „Ein README, das lügt, wird niemals Alpha.“
+> 💡 Hinweis: Der Build benötigt Internetzugriff, um `vcpkg`-Pakete beim ersten Konfigurieren zu installieren. In Offline-Umgebungen bitte vorher `vcpkg`-Ordner clonen und `vcpkg install` lokal ausführen. -->
+
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 

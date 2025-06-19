@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 155
+// Zeilen: 154
 // 🐅 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Jetzt mit Schutz vor mehrfacher Registrierung & explizitem Fehler bei uninitialisiertem cudaPboResource. Schneefuchs: „Ein Puffer, der doppelt registriert, fällt – und zwar auf die Nase.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
@@ -111,7 +111,6 @@ void renderCudaFrame(
 
             newOffset = tileCenter;
             shouldZoom = true;
-
         } else {
             shouldZoom = false;
         }

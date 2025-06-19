@@ -62,5 +62,3 @@ public:
     void adaptIterationCount();
 };
 
-// 🧰 Initialisiert OpenGL-Textur, PBO, registriert bei CUDA und allokiert GPU-Buffer
-void initResources(RendererState& state);
