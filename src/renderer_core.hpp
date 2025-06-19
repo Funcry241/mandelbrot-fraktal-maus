@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.hpp
-// Zeilen: 39
-// 🐭 Maus-Kommentar: Header für das Rendering-Modul. Zugriff auf `state` bleibt öffentlich für HUD & Loop. `renderFrame_impl` ist jetzt private, da intern genutzt. Überflüssige Methoden entfernt – Schneefuchs nickt mit strenger Miene.
+// Zeilen: 40
+// 🐭 Maus-Kommentar: Header für das Rendering-Modul. Zugriff auf `state` bleibt öffentlich für HUD & Loop. `cleanup()` ergänzt zur vollständigen Ressourcenfreigabe. Schneefuchs: „Wer zerstört, muss vorher deklarieren!“
 
 #pragma once
 
@@ -23,4 +23,5 @@ private:
     void renderFrame_impl(bool autoZoomEnabled);  // 🔐 nur intern aufrufbar
     void setupBuffers();
     void freeDeviceBuffers();
+    void cleanup();  // 🧹 vollständiges Aufräumen aller GL/CUDA-Ressourcen
 };

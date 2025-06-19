@@ -1,27 +1,17 @@
-// Datei: src/renderer_resources.hpp
-// Zeilen: 42
-// 🐭 Maus-Kommentar: Kapselt alle OpenGL- und CUDA-Ressourcen für das Rendering. Zuständig für PBO, Textur, Interop und Cleanup. Schneefuchs sagt: „Wenn Zustände trennen, dann sauber und zuständig.“
+// Datei: src/opengl_utils.hpp
+// Zeilen: 22
+// 🐭 Maus-Kommentar: Stellt OpenGL-Helfer bereit – Erstellung von PBOs und Texturen für das Fraktal-Rendering. Muss in `renderer_resources.cpp` sichtbar sein. Schneefuchs: „Ohne diese Helfer meckert der Linker – wie ein Otter ohne Wasser!“
 
 #pragma once
 
 #include "pch.hpp"
-#include <cuda_gl_interop.h>
 
-class RendererResources {
-public:
-    // 🔗 CUDA/OpenGL Interop Resource
-    cudaGraphicsResource_t cudaPboResource = nullptr;
+namespace OpenGLUtils {
 
-    // 📦 OpenGL Buffer und Textur
-    GLuint pbo = 0;
-    GLuint tex = 0;
+// 🖼️ Erstellt einen Pixel Buffer Object (PBO) für die CUDA/OpenGL-Interop
+GLuint createPBO(int width, int height);
 
-    // 🔧 Initialisierung der Ressourcen
-    void init(int width, int height);
+// 🎨 Erstellt eine OpenGL-Textur zur Darstellung im Shader
+GLuint createTexture(int width, int height);
 
-    // 🔄 Aktualisiere die Textur über PBO (für CUDA → OpenGL)
-    void updateTexture(int width, int height);
-
-    // 🧹 Aufräumen der GPU-Ressourcen
-    void cleanup();
-};
+} // namespace OpenGLUtils

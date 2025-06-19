@@ -72,4 +72,10 @@ void setKeyCallback(GLFWwindow* window) {
     glfwSetKeyCallback(window, CudaInterop::keyCallback);
 }
 
+void destroyWindow(GLFWwindow* window) {
+    if (window) {
+        glfwDestroyWindow(window);
+    }
+}
+
 } // namespace RendererWindow

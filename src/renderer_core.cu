@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 66
-// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. Keine manuelle TileSize mehr – `setupBuffers()` berechnet aus Zoom & heuristischer Blockgröße implizit die Tile-Anzahl. Schneefuchs sagt: „Wenn das System weiß, was gut für dich ist, dann hör drauf.“
+// Zeilen: 84
+// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. Jetzt mit `glewInit()` direkt nach Kontext-Erstellung und automatischem Cleanup im Destruktor. Schneefuchs: „Nur wer gründlich aufräumt, darf Neues entstehen lassen.“
 
 #include "pch.hpp"
 
@@ -11,11 +11,15 @@
 #include "renderer_loop.hpp"     // 🎯 renderFrame und renderFrame_impl
 #include "common.hpp"
 #include "settings.hpp"
+#include "hud.hpp"
+#include "cuda_interop.hpp"
 
 Renderer::Renderer(int width, int height)
     : state(width, height) {}
 
-Renderer::~Renderer() {}
+Renderer::~Renderer() {
+    cleanup();
+}
 
 void Renderer::initGL() {
 #if defined(DEBUG) || defined(_DEBUG)
@@ -26,6 +30,13 @@ void Renderer::initGL() {
     if (!state.window) {
 #if defined(DEBUG) || defined(_DEBUG)
         std::puts("[ERROR] Fenstererstellung fehlgeschlagen (GLFW)");
+#endif
+        return;
+    }
+
+    if (glewInit() != GLEW_OK) {
+#if defined(DEBUG) || defined(_DEBUG)
+        std::puts("[ERROR] glewInit() fehlgeschlagen");
 #endif
         return;
     }
@@ -58,15 +69,7 @@ void Renderer::setupBuffers() {
     CUDA_CHECK(cudaMalloc(&state.d_iterations, totalPixels * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&state.d_entropy, totalPixels * sizeof(float)));
 
-    // Dynamische Tile-Größe heuristisch wie im Kernel
-    int tileSize = 32;
-    if (state.zoom > 30000.0f)
-        tileSize = 4;
-    else if (state.zoom > 3000.0f)
-        tileSize = 8;
-    else if (state.zoom > 1000.0f)
-        tileSize = 16;
-    tileSize = std::max(4, std::min(tileSize, 32));
+    int tileSize = computeTileSizeFromZoom(state.zoom);
     state.lastTileSize = tileSize;
 
     int tilesX = state.width / tileSize;
@@ -90,4 +93,11 @@ void Renderer::resize(int newW, int newH) {
     state.width = newW;
     state.height = newH;
     std::printf("[INFO] Resized to %d x %d\n", newW, newH);
+}
+
+void Renderer::cleanup() {
+    Hud::cleanup();
+    RendererPipeline::cleanup();
+    RendererWindow::destroyWindow(state.window);
+    freeDeviceBuffers();
 }

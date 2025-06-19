@@ -1,58 +1,57 @@
-// Datei: src/renderer_resources.cpp
-// Zeilen: 74
-// 🐭 Maus-Kommentar: Verwaltet PBO, Textur und CUDA-Interop. Verwendet robuste `OpenGLUtils`-Hilfen. `init()` und `cleanup()` sind strikt symmetrisch. Schneefuchs: „Wer allokiert, der räumt auch auf.“
+// Datei: src/opengl_utils.cpp
+// Zeilen: 55
+// 🐭 Maus-Kommentar: Implementiert Hilfsfunktionen zur Erstellung von OpenGL-PBOs und Texturen für CUDA-Interop. Korrekt initialisierte Objekte vermeiden undefined behavior. Schneefuchs: „Kein Fraktal ohne Puffer – und kein Puffer ohne Format!“
 
 #include "pch.hpp"
-#include "renderer_resources.hpp"
 #include "opengl_utils.hpp"
-#include "common.hpp"
+#include <stdexcept>
+#include <cstdio>
 
-void RendererResources::init(int width, int height) {
-    // 🔁 Vorherige Ressourcen ggf. freigeben
-    cleanup();
+namespace OpenGLUtils {
 
-    // 🧵 OpenGL: PBO + Textur erstellen
-    pbo = OpenGLUtils::createPBO(width, height);
-    tex = OpenGLUtils::createTexture(width, height);
-
-    // 🔗 CUDA-Interop registrieren
-    CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard));
+GLuint createPBO(int width, int height) {
+    GLuint pbo = 0;
+    glGenBuffers(1, &pbo);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER,
+                 width * height * 4,  // 4 Bytes pro Pixel (RGBA8)
+                 nullptr,
+                 GL_STREAM_DRAW);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
 #if defined(DEBUG) || defined(_DEBUG)
-    std::printf("[DEBUG] RendererResources::init → PBO %u, Texture %u\n", pbo, tex);
+    std::printf("[DEBUG] OpenGLUtils::createPBO → ID %u\n", pbo);
 #endif
+
+    return pbo;
 }
 
-void RendererResources::updateTexture(int width, int height) {
-    // 🔁 Texturinhalt vom PBO übernehmen (CUDA → OpenGL)
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+GLuint createTexture(int width, int height) {
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
 
-    glTexSubImage2D(GL_TEXTURE_2D,
-                    0, 0, 0,
-                    width, height,
-                    GL_RGBA, GL_UNSIGNED_BYTE,
-                    nullptr);  // Daten liegen im gebundenen PBO
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);  // ✨ Sanftes Herunterskalieren
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);  // ✨ Sanftes Hochskalieren
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glTexImage2D(GL_TEXTURE_2D,
+                 0,
+                 GL_RGBA8,
+                 width, height,
+                 0,
+                 GL_RGBA,
+                 GL_UNSIGNED_BYTE,
+                 nullptr);  // Speicher nur allokieren, noch keine Daten
 
     glBindTexture(GL_TEXTURE_2D, 0);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+#if defined(DEBUG) || defined(_DEBUG)
+    std::printf("[DEBUG] OpenGLUtils::createTexture → ID %u\n", tex);
+#endif
+
+    return tex;
 }
 
-void RendererResources::cleanup() {
-    // 🔌 CUDA-Interop deregistrieren
-    if (cudaPboResource) {
-        cudaGraphicsUnregisterResource(cudaPboResource);
-        cudaPboResource = nullptr;
-    }
-
-    // 🧹 OpenGL-Objekte löschen
-    if (pbo) {
-        glDeleteBuffers(1, &pbo);
-        pbo = 0;
-    }
-
-    if (tex) {
-        glDeleteTextures(1, &tex);
-        tex = 0;
-    }
-}
+} // namespace OpenGLUtils
