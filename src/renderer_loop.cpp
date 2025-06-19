@@ -1,19 +1,47 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 112
-// 🐭 Maus-Kommentar: Zentrale Frame-Schleife mit integrierter dynamischer Tile-Anpassung. `updateTileSize()` berechnet heuristisch die Blockgröße passend zum aktuellen Zoom – identisch zum Kernel. Schneefuchs: „Wer zoomt, der fließt.“
+// Zeilen: 121
+// 🐭 Maus-Kommentar: Zentrale Frame-Schleife mit integrierter dynamischer Tile-Anpassung. `initResources()` initialisiert Textur, PBO, CUDA-Interop und HUD. `updateTileSize()` passt die Blockgröße dem Zoom an – fließend wie der Otterblick. Schneefuchs: „Wer zoomt, der fließt.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
 #include "hud.hpp"
 #include "settings.hpp"
-#include "renderer_pipeline.hpp"  // ✅ drawFullscreenQuad()
+#include "renderer_pipeline.hpp"
 
 namespace RendererLoop {
 
+void initResources(RendererState& state) {
+    // 🔧 OpenGL-PBO erzeugen
+    glGenBuffers(1, &state.pbo);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, state.pbo);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, state.width * state.height * 4, nullptr, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+    // 🖼️ OpenGL-Textur erzeugen
+    glGenTextures(1, &state.tex);
+    glBindTexture(GL_TEXTURE_2D, state.tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, state.width, state.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // ⚙️ CUDA-Interop aktivieren
+    CudaInterop::registerPBO(state.pbo);
+
+    // 🎨 HUD initialisieren
+    Hud::init();  // ✅ Korrigiert: kein Parameter übergeben
+
+#if defined(DEBUG) || defined(_DEBUG)
+    if (Settings::debugLogging) {
+        std::puts("[DEBUG] initResources() abgeschlossen");
+    }
+#endif
+}
+
 void beginFrame(RendererState& state) {
-    double currentTime = glfwGetTime(); // Sekunden
-    state.deltaTime = static_cast<float>(currentTime - state.lastTime); // Sekunden
+    double currentTime = glfwGetTime();
+    state.deltaTime = static_cast<float>(currentTime - state.lastTime);
     state.lastTime = currentTime;
 
     state.frameCount++;
@@ -23,7 +51,6 @@ void beginFrame(RendererState& state) {
 }
 
 void updateTileSize(RendererState& state) {
-    // Automatische, zoom-abhängige Tilegröße
     int tileSize = 32;
     if (state.zoom > 30000.0f)
         tileSize = 4;
@@ -71,15 +98,14 @@ void drawFrame(RendererState& state) {
     glClear(GL_COLOR_BUFFER_BIT);
 
     RendererPipeline::drawFullscreenQuad(state.tex);
-
-    Hud::draw(state);  // 🆕 Neue vereinfachte Signatur: nur noch `RendererState&`
+    Hud::draw(state);
 
     glfwSwapBuffers(state.window);
 }
 
 void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     beginFrame(state);
-    updateTileSize(state);   // 🧠 Aktiviert und implementiert
+    updateTileSize(state);
     computeCudaFrame(state);
 
     if (autoZoomEnabled) {

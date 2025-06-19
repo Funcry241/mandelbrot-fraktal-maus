@@ -14,7 +14,7 @@ struct cudaGraphicsResource;
 
 namespace CudaInterop {
 
-void registerPBO(unsigned int pbo);
+void registerPBO(unsigned int pbo);  // ✅ Direkt: kein state.resources.pbo
 void unregisterPBO();
 
 void renderCudaFrame(    

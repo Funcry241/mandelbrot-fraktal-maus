@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.hpp
-// Zeilen: 40
-// 🐭 Maus-Kommentar: Header für das Rendering-Modul. Zugriff auf `state` bleibt öffentlich für HUD & Loop. `cleanup()` ergänzt zur vollständigen Ressourcenfreigabe. Schneefuchs: „Wer zerstört, muss vorher deklarieren!“
+// Zeilen: 42
+// 🐭 Maus-Kommentar: Header für das Rendering-Modul. `state` ist jetzt geschützt, Zugriff über `getState()`. `cleanup()` bereit für sauberes Shutdown. Schneefuchs: „Zugriff ja – aber mit Stil.“
 
 #pragma once
 
@@ -17,11 +17,14 @@ public:
     bool shouldClose() const;
     void resize(int newW, int newH);
 
-    RendererState state;  // ⚠️ öffentlich, da z. B. von HUD verwendet
+    // 🆕 Getter für Zugriff auf internen Zustand
+    RendererState& getState() { return state; }
 
 private:
-    void renderFrame_impl(bool autoZoomEnabled);  // 🔐 nur intern aufrufbar
+    RendererState state;  // 🔐 jetzt privat, aber via getState() zugänglich
+
+    void renderFrame_impl(bool autoZoomEnabled);
     void setupBuffers();
     void freeDeviceBuffers();
-    void cleanup();  // 🧹 vollständiges Aufräumen aller GL/CUDA-Ressourcen
+    void cleanup();
 };

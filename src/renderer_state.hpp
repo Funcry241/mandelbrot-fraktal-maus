@@ -1,3 +1,7 @@
+// Datei: src/renderer_state.hpp
+// Zeilen: 63
+// 🐭 Maus-Kommentar: Der Status des Renderers – ganz ohne `resources`. PBO & Tex wieder direkt hier drin, wie gewünscht. Schneefuchs: „Kapselung ist schön, aber Pragmatismus ist mächtiger.“
+
 #pragma once
 
 #include "pch.hpp"  // 🧠 Enthält <cuda_runtime.h>, das float2 definiert – keine eigene Definition mehr nötig!
@@ -26,8 +30,8 @@ public:
     float smoothedZoom;
 
     // 📈 FPS und Framezeit zur Anzeige im HUD
-    float currentFPS = 0.0f;   // 🆕 explizit initialisiert
-    float deltaTime = 0.0f;    // 🆕 explizit initialisiert
+    float currentFPS = 0.0f;
+    float deltaTime = 0.0f;
 
     // 🧩 Adaptive Tile-Größe + Entropie-Auswertung
     int lastTileSize;
@@ -37,9 +41,9 @@ public:
     int* d_iterations = nullptr;
     float* d_entropy = nullptr;
 
-    // 🎥 OpenGL-Puffer (neu: direkt statt über .resources)
-    unsigned int pbo = 0;
-    unsigned int tex = 0;
+    // 🎥 OpenGL-Puffer (direkt im State enthalten)
+    unsigned int pbo = 0;  // Pixel Buffer Object
+    unsigned int tex = 0;  // Textur-ID für CUDA-Ausgabe
 
     // 🕒 Frame-Zählung und Zeit für FPS-Berechnung
     int frameCount = 0;

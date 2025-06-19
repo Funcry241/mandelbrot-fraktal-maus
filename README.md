@@ -92,7 +92,7 @@ sudo apt install build-essential cmake ninja-build libglfw3-dev libglew-dev
 ```bash
 git clone https://github.com/Funcry241/otterdream-mandelbrot.git
 cd otterdream-mandelbrot
-cmake --preset linux-gcc
+cmake --preset linux-gcc13
 cmake --build --preset linux-gcc
 ./dist/mandelbrot_otterdream
 ```
