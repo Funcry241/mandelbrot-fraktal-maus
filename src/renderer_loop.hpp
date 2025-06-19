@@ -8,6 +8,7 @@
 #include <GLFW/glfw3.h>
 
 #include "renderer_state.hpp"
+#include "common.hpp"
 
 namespace RendererLoop {
 

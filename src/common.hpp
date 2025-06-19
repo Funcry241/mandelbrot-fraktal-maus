@@ -1,15 +1,8 @@
 // Datei: src/common.hpp
-// Zeilen: +15
-// 🐭 Maus-Kommentar: Tile-Größe wird jetzt logarithmisch aus dem Zoomfaktor berechnet – ohne Sprungstellen, kontinuierlich gleitend. Schneefuchs flüstert: „Wer weich zoomt, gewinnt mehr Spielraum.“
+// Zeilen: 60
+// 🐭 Maus-Kommentar: Zentraler Header mit weicher Tile-Größenfunktion, CUDA-Fehlermakro und Standard-Includes. Schneefuchs empfiehlt: kein doppeltes `<cmath>`, `computeTileSizeFromZoom` immer aus genau dieser Quelle verwenden!
 
 #pragma once
-#include <cmath>
-
-inline int computeTileSizeFromZoom(float zoom) {
-    float raw = 32.0f - std::log2f(zoom + 1.0f);  // weich fallend
-    int clamped = std::max(4, std::min(32, static_cast<int>(std::round(raw))));
-    return clamped;
-}
 
 // 🔧 Windows-spezifische Makros und Header
 #ifdef _WIN32
@@ -22,7 +15,7 @@ inline int computeTileSizeFromZoom(float zoom) {
   #include <windows.h>
 #endif
 
-// 🎨 OpenGL: GLEW vor gl.h, kein GLU
+// 🎨 OpenGL: GLEW vor glfw3.h, kein GLU
 #ifndef GL_DO_NOT_INCLUDE_GL_H
   #define GL_DO_NOT_INCLUDE_GL_H
 #endif
@@ -32,8 +25,6 @@ inline int computeTileSizeFromZoom(float zoom) {
 #endif
 
 #include <GL/glew.h>
-
-// ⚡ CUDA
 #include <cuda_gl_interop.h>
 
 // 🧠 C++ Standardbibliothek
@@ -44,7 +35,7 @@ inline int computeTileSizeFromZoom(float zoom) {
 #include <stdexcept>
 #include <vector>
 #include <string>
-#include <cmath>
+#include <cmath> // Nur einmal einbinden
 
 // 🧪 CUDA-Fehlerprüfung
 #define CUDA_CHECK(call)                                                       \
@@ -56,3 +47,10 @@ inline int computeTileSizeFromZoom(float zoom) {
             std::exit(EXIT_FAILURE);                                           \
         }                                                                      \
     } while (0)
+
+// 🔢 Tile-Größe aus Zoom-Level berechnen (weicher Verlauf)
+inline int computeTileSizeFromZoom(float zoom) {
+    float raw = 32.0f - std::log2f(zoom + 1.0f);  // weich fallend
+    int clamped = std::max(4, std::min(32, static_cast<int>(std::round(raw))));
+    return clamped;
+}

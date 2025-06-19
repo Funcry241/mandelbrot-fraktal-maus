@@ -12,12 +12,6 @@
 
 namespace RendererLoop {
 
-// 🔢 Tile-Größe berechnet sich logarithmisch aus Zoom
-inline int computeTileSizeFromZoom(float zoom) {
-    float raw = 32.0f - std::log2f(zoom + 1.0f);
-    return std::max(4, std::min(32, static_cast<int>(raw)));
-}
-
 void initResources(RendererState& state) {
     // 🔧 OpenGL-PBO & Textur erzeugen via Helper
     state.pbo = OpenGLUtils::createPBO(state.width, state.height);

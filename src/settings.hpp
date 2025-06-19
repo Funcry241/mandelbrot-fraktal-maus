@@ -49,39 +49,4 @@ inline constexpr float ENTROPY_NEARBY_BIAS = 60.0f;
 // 💚 CUDA-Tile-Einstellungen
 inline constexpr int BASE_TILE_SIZE = 8;
 
-// 📊 Tile-Größe passt sich dynamisch dem Zoom-Level an
-inline int dynamicTileSize(float zoom) {
-    static int lastSize = -1;
-
-    float logZoom = log10f(zoom + 1.0f);
-    float rawSize = BASE_TILE_SIZE * (8.0f / (logZoom + 1.0f));
-
-    constexpr int allowedSizes[] = {32, 16, 8, 4};
-
-    int bestSize = allowedSizes[0];
-    for (int size : allowedSizes) {
-        if (rawSize >= size) {
-            bestSize = size;
-            break;
-        }
-    }
-
-    if (bestSize != lastSize) {
-#if defined(DEBUG) || defined(_DEBUG)
-        if (Settings::debugLogging) {
-            std::printf("[DEBUG] TileSize changed to %d\n", bestSize);
-        }
-#endif
-        lastSize = bestSize;
-    }
-
-    return bestSize;
-}
-
-// 📈 Entropie-Schwelle passt sich dem Zoomlevel an
-inline float dynamicVarianceThreshold(float zoom) {
-    float scaled = VARIANCE_THRESHOLD * (1.0f + 0.02f * log2f(zoom + 1.0f));
-    return std::clamp(scaled, VARIANCE_THRESHOLD, MIN_VARIANCE_THRESHOLD * 10.0f);
-}
-
 } // namespace Settings
