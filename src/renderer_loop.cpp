@@ -70,11 +70,14 @@ void computeCudaFrame(RendererState& state) {
     state.targetOffset = newOffset;
 }
 
+// Datei: src/renderer_core.cu oder wo du `updateAutoZoom` definiert hast
 void updateAutoZoom(RendererState& state) {
     if (!state.shouldZoom) return;
 
+    // Zoom-Fortschritt
     state.zoom *= Settings::AUTOZOOM_SPEED;
 
+    // Abstand berechnen
     float2 delta = {
         state.targetOffset.x - state.offset.x,
         state.targetOffset.y - state.offset.y
@@ -83,12 +86,15 @@ void updateAutoZoom(RendererState& state) {
     float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
     if (dist < Settings::DEADZONE) return;
 
-    float t = Settings::LERP_FACTOR;
-    t = Settings::my_clamp(t, 0.0f, 1.0f);
+    // Dämpfung durch tanh: Normierte Richtung × tanh(dist * scale)
+    constexpr float SCALE = 10.0f;  // je höher, desto schneller das Abklingen
 
-    state.offset.x += delta.x * t;
-    state.offset.y += delta.y * t;
+    float factor = std::tanh(dist * SCALE) * Settings::MAX_OFFSET_FRACTION;
+
+    state.offset.x += delta.x * factor;
+    state.offset.y += delta.y * factor;
 }
+
 
 
 void drawFrame(RendererState& state) {
