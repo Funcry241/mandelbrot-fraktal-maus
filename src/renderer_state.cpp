@@ -1,5 +1,5 @@
 // Datei: src/renderer_state.cpp
-// Zeilen: 63
+// Zeilen: 56
 // 🐭 Maus-Kommentar: Zustand des Renderers: Zoom, Offset, FPS, Iterationen – aber keine redundante Ressourceninitialisierung mehr. Schneefuchs: „State kümmert sich um Werte – nicht um Texturen!“
 
 #include "pch.hpp"
@@ -23,9 +23,6 @@ void RendererState::reset() {
     targetZoom = zoom;
     targetOffset = offset;
 
-    smoothedZoom = zoom;
-    smoothedOffset = offset;
-
     currentFPS = 0.0f;
     deltaTime = 0.0f;
     lastTileSize = Settings::BASE_TILE_SIZE;
@@ -42,15 +39,6 @@ void RendererState::updateZoomTarget(float newZoom) {
 
 void RendererState::updateOffsetTarget(float2 newOffset) {
     targetOffset = newOffset;
-}
-
-void RendererState::applyLerpStep() {
-    smoothedZoom += (targetZoom - smoothedZoom) * Settings::LERP_FACTOR;
-    smoothedOffset.x += (targetOffset.x - smoothedOffset.x) * Settings::LERP_FACTOR;
-    smoothedOffset.y += (targetOffset.y - smoothedOffset.y) * Settings::LERP_FACTOR;
-
-    zoom = smoothedZoom;
-    offset = smoothedOffset;
 }
 
 void RendererState::adaptIterationCount() {

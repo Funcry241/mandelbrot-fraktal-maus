@@ -1,5 +1,5 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 63
+// Zeilen: 62
 // 🐭 Maus-Kommentar: Der Status des Renderers – ganz ohne `resources`. PBO & Tex wieder direkt hier drin, wie gewünscht. Schneefuchs: „Kapselung ist schön, aber Pragmatismus ist mächtiger.“
 
 #pragma once
@@ -58,9 +58,7 @@ public:
     void reset();
     void updateZoomTarget(float newZoom);
     void updateOffsetTarget(float2 newOffset);
-    void applyLerpStep();
     void adaptIterationCount();
     // 🔧 Allokiert CUDA-Puffer für Iterationen und Entropie-Auswertung
     void setupCudaBuffers();
 };
-
