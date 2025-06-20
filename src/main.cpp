@@ -23,6 +23,7 @@ int main() {
 
     while (!renderer.shouldClose()) {
         renderer.renderFrame(true); // Auto-Zoom aktiviert
+        glfwPollEvents();
     }
 
     return 0;
