@@ -41,7 +41,7 @@ inline constexpr int MAX_ITERATIONS_CAP = 50000;
 inline constexpr int ITERATION_STEP     = 5;
 
 // 🪞 Glättung der Kamerabewegung zum Ziel-Tile
-inline constexpr float LERP_FACTOR = 0.075f;      // sanftes Nachziehen
+inline constexpr float LERP_FACTOR = 0.035f;      // sanftes Nachziehen
 inline constexpr float DEADZONE    = 1e-9f;       // Bild bleibt ruhig, wenn Ziel erreicht
 
 // 📈 Gewichtung für Entropie-Nähe-Bonus im Auto-Zoom
