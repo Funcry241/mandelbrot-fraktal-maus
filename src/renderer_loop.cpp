@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 124
-// 🐭 Maus-Kommentar: Haupt-Frame-Loop mit CUDA-Interop, dynamischer Tile-Größe, Auto-Zoom & HUD. Jetzt mit sauberer PBO-/Textur-Erzeugung via OpenGLUtils. Schneefuchs: „Modularisieren wie ein Otter seinen Bau – sonst undicht!“
+// Zeilen: 130
+// 🐭 Maus-Kommentar: Haupt-Frame-Loop mit CUDA-Interop, dynamischer Tile-Größe, Auto-Zoom & HUD. Jetzt mit tanh-gedämpfter Offset-Annäherung – Schneefuchs: „So flüssig wie ein Otter im Gleitflug!“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -70,32 +70,31 @@ void computeCudaFrame(RendererState& state) {
     state.targetOffset = newOffset;
 }
 
-// Datei: src/renderer_core.cu oder wo du `updateAutoZoom` definiert hast
 void updateAutoZoom(RendererState& state) {
     if (!state.shouldZoom) return;
 
-    // Zoom-Fortschritt
+    // 📌 Zoom-Fortschritt
     state.zoom *= Settings::AUTOZOOM_SPEED;
 
-    // Abstand berechnen
+    // ➗ Abstand zum Zieloffset berechnen
     float2 delta = {
         state.targetOffset.x - state.offset.x,
         state.targetOffset.y - state.offset.y
     };
 
     float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+
+    // 🧊 Bewegung stoppen, wenn fast am Ziel
     if (dist < Settings::DEADZONE) return;
 
-    // Dämpfung durch tanh: Normierte Richtung × tanh(dist * scale)
-    constexpr float SCALE = 10.0f;  // je höher, desto schneller das Abklingen
+    // 🌀 Weiche Dämpfung über tanh + Fraktionslimitierung
+    float factor = std::tanh(Settings::OFFSET_TANH_SCALE * dist) * Settings::MAX_OFFSET_FRACTION;
+    factor = Settings::my_clamp(factor, 0.0f, 1.0f);
 
-    float factor = std::tanh(dist * SCALE) * Settings::MAX_OFFSET_FRACTION;
-
+    // ➡️ Offset schrittweise bewegen
     state.offset.x += delta.x * factor;
     state.offset.y += delta.y * factor;
 }
-
-
 
 void drawFrame(RendererState& state) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

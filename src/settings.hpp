@@ -51,6 +51,11 @@ inline constexpr float MAX_OFFSET_FRACTION = 0.1f; // empfohlen: 0.05 bis 0.2 �
 // 0.0 = keine Bevorzugung, 1.0 = starker Bias auf Nähe
 inline constexpr float ENTROPY_NEARBY_BIAS = 0.5f; // empfohlen: 0.0 bis 0.6 – höher = weniger Hüpfen
 
+// 🆕 Skaliert die Offset-Distanz vor Anwendung von tanh (nonlineare Dämpfung)
+// Kleinere Werte = stärkere Dämpfung bei kleinen Bewegungen
+// Empfohlen: 1.0 bis 10.0 – z. B. 5.0 bedeutet, dass bei tanh(5.0 * distance) ≈ 1 schnelle Bewegung erfolgt
+inline constexpr float OFFSET_TANH_SCALE = 5.0f;
+
 // ♻️ Iterationssteuerung – beeinflusst Detailtiefe bei starkem Zoom
 inline constexpr int INITIAL_ITERATIONS = 100;     // Basiswert – empfohlen: 50 bis 200
 inline constexpr int MAX_ITERATIONS_CAP = 50000;   // Hardlimit – je höher, desto langsamer, aber detaillierter
