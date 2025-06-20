@@ -44,7 +44,7 @@ inline constexpr int ITERATION_STEP     = 5;
 inline constexpr float LERP_FACTOR = 0.02f;
 
 // 📈 Gewichtung für Entropie-Nähe-Bonus im Auto-Zoom
-inline constexpr float ENTROPY_NEARBY_BIAS = 60.0f;
+inline constexpr float ENTROPY_NEARBY_BIAS = 0.5f;
 
 // 💚 CUDA-Tile-Einstellungen
 inline constexpr int BASE_TILE_SIZE = 8;
