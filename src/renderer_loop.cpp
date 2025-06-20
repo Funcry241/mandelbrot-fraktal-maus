@@ -23,11 +23,9 @@ void initResources(RendererState& state) {
     // 🎨 HUD initialisieren
     Hud::init();
 
-#if defined(DEBUG) || defined(_DEBUG)
     if (Settings::debugLogging) {
         std::puts("[DEBUG] initResources() abgeschlossen");
     }
-#endif
 }
 
 void beginFrame(RendererState& state) {

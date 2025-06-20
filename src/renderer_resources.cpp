@@ -19,9 +19,7 @@ GLuint createPBO(int width, int height) {
                  GL_STREAM_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-#if defined(DEBUG) || defined(_DEBUG)
     std::printf("[DEBUG] OpenGLUtils::createPBO → ID %u\n", pbo);
-#endif
 
     return pbo;
 }
@@ -47,9 +45,7 @@ GLuint createTexture(int width, int height) {
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
-#if defined(DEBUG) || defined(_DEBUG)
     std::printf("[DEBUG] OpenGLUtils::createTexture → ID %u\n", tex);
-#endif
 
     return tex;
 }

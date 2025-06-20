@@ -9,11 +9,9 @@
 #include "renderer_loop.hpp"  // 🧠 Für RendererLoop::initResources
 
 int main() {
-    #if defined(DEBUG) || defined(_DEBUG)
-        if (Settings::debugLogging) {
-            std::puts("[DEBUG] Mandelbrot-Otterdream gestartet");
-        }
-    #endif
+    if (Settings::debugLogging) {
+        std::puts("[DEBUG] Mandelbrot-Otterdream gestartet");
+    }
 
     Renderer renderer(Settings::width, Settings::height);
     renderer.initGL();

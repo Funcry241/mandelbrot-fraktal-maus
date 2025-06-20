@@ -22,22 +22,16 @@ Renderer::~Renderer() {
 }
 
 void Renderer::initGL() {
-#if defined(DEBUG) || defined(_DEBUG)
     if (Settings::debugLogging) std::puts("[DEBUG] initGL aufgerufen");
-#endif
 
     state.window = RendererWindow::createWindow(state.width, state.height, this);
     if (!state.window) {
-#if defined(DEBUG) || defined(_DEBUG)
         std::puts("[ERROR] Fenstererstellung fehlgeschlagen (GLFW)");
-#endif
         return;
     }
 
     if (glewInit() != GLEW_OK) {
-#if defined(DEBUG) || defined(_DEBUG)
         std::puts("[ERROR] glewInit() fehlgeschlagen");
-#endif
         return;
     }
 
@@ -46,9 +40,7 @@ void Renderer::initGL() {
 
     RendererPipeline::init();
 
-#if defined(DEBUG) || defined(_DEBUG)
     if (Settings::debugLogging) std::puts("[DEBUG] OpenGL-Initialisierung abgeschlossen");
-#endif
     state.setupCudaBuffers();
 }
 

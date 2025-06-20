@@ -91,11 +91,9 @@ void renderCudaFrame(
             }
         }
 
-#if defined(DEBUG) || defined(_DEBUG)
         if (Settings::debugLogging) {
             std::printf("[DEBUG] Best tile score: %.8f\n", bestScore);
         }
-#endif
 
         if (bestIndex >= 0) {
             int bx = bestIndex % tilesX;
