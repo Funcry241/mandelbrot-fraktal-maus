@@ -65,6 +65,8 @@ void renderCudaFrame(
         int bestIndex = -1;
         float bestScore = -1.0f;
 
+        float dynamicThreshold = std::max(Settings::VARIANCE_THRESHOLD / std::log2(zoom + 2.0f), Settings::MIN_VARIANCE_THRESHOLD);
+
         for (int i = 0; i < numTiles; ++i) {
             int bx = i % tilesX;
             int by = i / tilesX;
@@ -83,15 +85,17 @@ void renderCudaFrame(
             };
 
             float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-            float score = h_entropy[i] / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist); // 📊 Entropie-Bonus für nähere Ziele
+            float score = h_entropy[i] / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist);
 
-            if (score > bestScore) {
+            // 🧠 Nur Tiles oberhalb der dynamischen Schwelle berücksichtigen
+            if (h_entropy[i] > dynamicThreshold && score > bestScore) {
                 bestScore = score;
                 bestIndex = i;
             }
         }
 
         if (Settings::debugLogging) {
+            std::printf("[DEBUG] Entropy threshold: %.10f\n", std::max(Settings::VARIANCE_THRESHOLD / std::log2(zoom + 2.0f), Settings::MIN_VARIANCE_THRESHOLD));
             std::printf("[DEBUG] Best tile score: %.8f\n", bestScore);
         }
 
