@@ -23,6 +23,9 @@ void RendererState::reset() {
     targetZoom = zoom;
     targetOffset = offset;
 
+    smoothedZoom = zoom;               // 🧈 verhindert Ruck nach Reset
+    smoothedOffset = offset;
+
     currentFPS = 0.0f;
     deltaTime = 0.0f;
     lastTileSize = Settings::BASE_TILE_SIZE;
