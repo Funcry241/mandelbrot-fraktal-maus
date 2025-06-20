@@ -61,6 +61,11 @@ void computeCudaFrame(RendererState& state) {
         state.lastTileSize
     );
 
+    // 🔁 PBO nach Texture übertragen (damit drawFullscreenQuad was sieht)
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, state.pbo);
+    glBindTexture(GL_TEXTURE_2D, state.tex);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, state.width, state.height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
     state.shouldZoom = shouldZoom;
     state.targetOffset = newOffset;
 }
