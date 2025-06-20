@@ -16,6 +16,7 @@
 # 💡 VSCode Konfigurationen
 .vscode/*
 !.vscode/c_cpp_properties.json
+!.vscode/settings.json
 
 # ----------------------------------------------------------------------
 # 🧹 Temporäre Dateien & Logs
@@ -37,6 +38,7 @@ Desktop.ini
 *.dll
 *.exe
 *.pdb
+*.dmp
 
 # ----------------------------------------------------------------------
 # ⚙️ CMake & Generator-Dateien

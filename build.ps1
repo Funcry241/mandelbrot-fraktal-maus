@@ -106,6 +106,12 @@ $cmakeArgs = @(
 )
 cmake @cmakeArgs
 
+# 9) CUDA architecture fallback (if not already set)
+if (-not $Env:CMAKE_CUDA_ARCHITECTURES) {
+    $cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=80;86;89"
+    Write-Host "[CUDA] Default architectures: 80;86;89"
+}
+
 # 11) CMake build
 Write-Host "[BUILD] Starting build..."
 cmake --build build --config $Configuration --parallel

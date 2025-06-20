@@ -1,6 +1,6 @@
 # Datei: CMakeLists.txt
-# Zeilen: 144
-# 📍 Maus-Kommentar: Modularisierung + CUDA/OpenGL-Interop Fix. Ergänzt Workaround für fehlende cuda_gl_interop.h – notwendig für Windows-Installationen, bei denen der Header nicht durch CUDAToolkit automatisch gefunden wird. Schneefuchs: „Workaround ist, wenn du weißt, was du tust – und es trotzdem tust.“
+# Zeilen: 145
+# 🐭 Maus-Kommentar: Modularisierung + CUDA/OpenGL-Interop Fix. Ergänzt Workaround für fehlende cuda_gl_interop.h – notwendig für Windows-Installationen, bei denen der Header nicht durch CUDAToolkit automatisch gefunden wird. Schneefuchs: „Workaround ist, wenn du weißt, was du tust – und es trotzdem tust.“
 
 cmake_minimum_required(VERSION 3.25)
 
@@ -45,6 +45,7 @@ find_path(CUDA_GL_INTEROP_INCLUDE_DIR cuda_gl_interop.h
         "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9/include"
         "/usr/local/cuda/include"
         "/opt/cuda/include"
+        "/usr/include"  # 🛠️ Ergänzt für Ubuntu-kompatible CUDA-Installationen (Schwester-Vorschlag)
     DOC "Pfad zu cuda_gl_interop.h"
 )
 
