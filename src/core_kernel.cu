@@ -133,13 +133,28 @@ extern "C" void computeTileEntropy(const int* d_iterations,
                                    int width, int height,
                                    int tileSize,
                                    int maxIter) {
+    // 🛡 Failsafe: Ungültige Werte verhindern Kernel-Launch
+    if (tileSize <= 0 || width <= 0 || height <= 0 || maxIter <= 0) {
+        std::fprintf(stderr, "[FATAL] computeTileEntropy: Invalid input – tileSize=%d, width=%d, height=%d, maxIter=%d\n",
+                     tileSize, width, height, maxIter);
+        return;  // Kein Exit, damit Fehler testweise überlebt werden kann
+    }
+
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
+
+    // 🛡 Schutz gegen Null-Gitter
+    if (tilesX == 0 || tilesY == 0) {
+        std::fprintf(stderr, "[FATAL] computeTileEntropy: tile grid is zero-sized! tilesX=%d, tilesY=%d\n", tilesX, tilesY);
+        return;
+    }
+
     dim3 grid(tilesX, tilesY);
-    dim3 block(128);  // erhöhte Parallelität pro Tile
+    dim3 block(128);
 
     entropyKernel<<<grid, block>>>(d_iterations, d_entropyOut,
                                    width, height,
                                    tileSize, maxIter);
     cudaDeviceSynchronize();
 }
+
