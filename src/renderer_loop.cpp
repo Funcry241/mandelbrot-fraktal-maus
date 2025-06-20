@@ -71,12 +71,25 @@ void computeCudaFrame(RendererState& state) {
 }
 
 void updateAutoZoom(RendererState& state) {
-    if (state.shouldZoom) {
-        state.zoom *= Settings::AUTOZOOM_SPEED;
-        state.offset.x = state.offset.x * (1.0f - Settings::LERP_FACTOR) + state.targetOffset.x * Settings::LERP_FACTOR;
-        state.offset.y = state.offset.y * (1.0f - Settings::LERP_FACTOR) + state.targetOffset.y * Settings::LERP_FACTOR;
-    }
+    if (!state.shouldZoom) return;
+
+    state.zoom *= Settings::AUTOZOOM_SPEED;
+
+    float2 delta = {
+        state.targetOffset.x - state.offset.x,
+        state.targetOffset.y - state.offset.y
+    };
+
+    float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+    if (dist < Settings::DEADZONE) return;
+
+    float t = Settings::LERP_FACTOR;
+    t = Settings::my_clamp(t, 0.0f, 1.0f);
+
+    state.offset.x += delta.x * t;
+    state.offset.y += delta.y * t;
 }
+
 
 void drawFrame(RendererState& state) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

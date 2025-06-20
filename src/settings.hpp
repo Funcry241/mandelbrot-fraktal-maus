@@ -41,12 +41,20 @@ inline constexpr int MAX_ITERATIONS_CAP = 50000;
 inline constexpr int ITERATION_STEP     = 5;
 
 // 🪞 Glättung der Kamerabewegung zum Ziel-Tile
-inline constexpr float LERP_FACTOR = 0.02f;
+inline constexpr float LERP_FACTOR = 0.075f;      // sanftes Nachziehen
+inline constexpr float DEADZONE    = 1e-9f;       // Bild bleibt ruhig, wenn Ziel erreicht
 
 // 📈 Gewichtung für Entropie-Nähe-Bonus im Auto-Zoom
 inline constexpr float ENTROPY_NEARBY_BIAS = 0.5f;
 
 // 💚 CUDA-Tile-Einstellungen
 inline constexpr int BASE_TILE_SIZE = 8;
+
+// 🐭 Maus-Kommentar: Eigene clamp-Funktion, um Konflikte mit <algorithm> (std::clamp) und PCH zu vermeiden.
+// Diese Funktion begrenzt einen Wert `val` auf das Intervall [minVal, maxVal].
+// Schneefuchs meinte: „Immer schön im Rahmen bleiben – wie ein Otter im Bau!“
+inline float my_clamp(float val, float minVal, float maxVal) {
+    return (val < minVal) ? minVal : (val > maxVal) ? maxVal : val;
+}
 
 } // namespace Settings
