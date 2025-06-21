@@ -109,7 +109,7 @@ void updateAutoZoom(RendererState& state) {
 
     // 🧭 Nur loggen, wenn das Ziel neu ist (d.h. neuer Tile-Fokus)
     if (newTarget && Settings::debugLogging) {
-        std::printf("[DEBUG] ▶ Neues Ziel-Tile: targetOffset = (%.10f, %.10f)\n", state.targetOffset.x, state.targetOffset.y);
+        std::printf("[DEBUG] Neues Ziel-Tile: targetOffset = (%.10f, %.10f)\n", state.targetOffset.x, state.targetOffset.y);
         std::printf("[DEBUG] Δ=%.3e | dist=%.6f | tanh=%.3f | move=(%.3e, %.3e)\n", dist, dist, rawTanh, moveX, moveY);
         std::printf("[DEBUG] Neuer Offset = (%.10f, %.10f)\n", state.offset.x, state.offset.y);
     }

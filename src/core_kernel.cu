@@ -104,7 +104,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
 
 #if ENABLE_ENTROPY_LOGGING
         if (entropy > ENTROPY_LOG_THRESHOLD && tileIndex % LOG_TILE_MODULO == 0) {
-            printf("[Entropy] Tile (%d,%d) idx %d → H = %.4f\n", tileX, tileY, tileIndex, entropy);
+            printf("[Entropy] Tile (%d,%d) idx %d -> H = %.4f\n", tileX, tileY, tileIndex, entropy);
         }
 #endif
     }
