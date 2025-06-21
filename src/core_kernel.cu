@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 132
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel & Entropieanalyse mit formelbasiertem Tiling. `tileSize` wird aus `zoom` per log2-Formel berechnet – weich, kontinuierlich, exakt. Schwester: „Schwarz bleibt schwarz, der Rest fließt.“
+// Zeilen: 142
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel & Entropieanalyse mit fließender Tiling-Formel. Jetzt mit klar kontrollierbarem Logging pro Tile, gebunden an `Settings::debugLogging`. Schneefuchs: „Wer zu viel sagt, fliegt aus dem Kernel.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -103,12 +103,10 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         int tileIndex = tileY * gridDim.x + tileX;
         entropyOut[tileIndex] = entropy;
 
-#ifdef DEBUG
-        if (entropy > 3.0f) {
-            printf("[ENTROPY] tile (%d,%d) idx %d -> H=%.4f\n",
+        if (Settings::debugLogging && entropy > 3.0f) {
+            printf("[TileEntropy] Tile (%d,%d) idx %d -> H = %.4f\n",
                    tileX, tileY, tileIndex, entropy);
         }
-#endif
     }
 }
 
@@ -137,13 +135,12 @@ extern "C" void computeTileEntropy(const int* d_iterations,
     if (tileSize <= 0 || width <= 0 || height <= 0 || maxIter <= 0) {
         std::fprintf(stderr, "[FATAL] computeTileEntropy: Invalid input – tileSize=%d, width=%d, height=%d, maxIter=%d\n",
                      tileSize, width, height, maxIter);
-        return;  // Kein Exit, damit Fehler testweise überlebt werden kann
+        return;
     }
 
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
 
-    // 🛡 Schutz gegen Null-Gitter
     if (tilesX == 0 || tilesY == 0) {
         std::fprintf(stderr, "[FATAL] computeTileEntropy: tile grid is zero-sized! tilesX=%d, tilesY=%d\n", tilesX, tilesY);
         return;
@@ -157,4 +154,3 @@ extern "C" void computeTileEntropy(const int* d_iterations,
                                    tileSize, maxIter);
     cudaDeviceSynchronize();
 }
-
