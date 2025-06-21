@@ -84,17 +84,41 @@ void updateAutoZoom(RendererState& state) {
 
     float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
 
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] Offset-Delta: dx=%.10f dy=%.10f | Dist=%.10f\n", delta.x, delta.y, dist);
+    }
+
     // 🧊 Bewegung stoppen, wenn fast am Ziel
-    if (dist < Settings::DEADZONE) return;
+    if (dist < Settings::DEADZONE) {
+        if (Settings::debugLogging) {
+            std::printf("[DEBUG] Offset liegt innerhalb DEADZONE (%.1e) – keine Bewegung\n", Settings::DEADZONE);
+        }
+        return;
+    }
 
     // 🌀 Weiche Dämpfung über tanh + Fraktionslimitierung
-    float factor = std::tanh(Settings::OFFSET_TANH_SCALE * dist) * Settings::MAX_OFFSET_FRACTION;
+    float rawTanh = std::tanh(Settings::OFFSET_TANH_SCALE * dist);
+    float factor = rawTanh * Settings::MAX_OFFSET_FRACTION;
     factor = Settings::my_clamp(factor, 0.0f, 1.0f);
 
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] tanh(%.2f × %.10f) = %.10f → moveFactor=%.10f\n",
+            Settings::OFFSET_TANH_SCALE, dist, rawTanh, factor);
+    }
+
     // ➡️ Offset schrittweise bewegen
-    state.offset.x += delta.x * factor;
-    state.offset.y += delta.y * factor;
+    float moveX = delta.x * factor;
+    float moveY = delta.y * factor;
+
+    state.offset.x += moveX;
+    state.offset.y += moveY;
+
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] Offset moved by: (%.10f, %.10f) → new = (%.10f, %.10f)\n",
+            moveX, moveY, state.offset.x, state.offset.y);
+    }
 }
+
 
 void drawFrame(RendererState& state) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
