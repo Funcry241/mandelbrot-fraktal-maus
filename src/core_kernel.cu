@@ -1,17 +1,20 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 143
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel & Entropieanalyse mit fließender Tiling-Formel. Logging pro Tile nur bei hoher Entropie & aktivem `debugLogging`. Schneefuchs: „Ein gutes Log redet nicht oft – aber immer mit Gewicht.“
+// Zeilen: 147
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit lokalem Logging-Flag. Keine Abhängigkeit zu settings.hpp, Logging nur bei hoher Entropie & Buildflag. Schneefuchs: „Ein Kernel, der sich selbst genügt – wie ein Otter mit seinem Stein.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
 #include <cmath>
-#include "settings.hpp"
-#include "common.hpp"           // 🔁 computeTileSizeFromZoom
+#include "common.hpp"
 #include "core_kernel.h"
 
+// 🔧 Lokale Debug-Schalter (nicht global!)
+#define ENABLE_ENTROPY_LOGGING 1
+constexpr float ENTROPY_LOG_THRESHOLD = 3.25f;
+
 __device__ __forceinline__ uchar4 elegantColor(float t) {
-    if (t < 0.0f) return make_uchar4(0, 0, 0, 255);  // Schwarz für Innenpunkte
+    if (t < 0.0f) return make_uchar4(0, 0, 0, 255);
     float tSharp = sqrtf(t);
     float r = 1.0f - tSharp;
     float g = 0.6f * tSharp;
@@ -37,10 +40,9 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  int maxIterations) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-
     if (x >= width || y >= height) return;
 
-    float jx = (x - width  / 2.0f) / zoom + offset.x;
+    float jx = (x - width / 2.0f) / zoom + offset.x;
     float jy = (y - height / 2.0f) / zoom + offset.y;
 
     int iter = mandelbrotIterations(jx, jy, maxIterations);
@@ -55,7 +57,6 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
                               int maxIter) {
     int tileX = blockIdx.x;
     int tileY = blockIdx.y;
-
     int startX = tileX * tileSize;
     int startY = tileY * tileSize;
 
@@ -65,7 +66,6 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     __syncthreads();
 
     int localCount = 0;
-
     int tid = threadIdx.x;
     int threads = blockDim.x;
     int total = tileSize * tileSize;
@@ -75,7 +75,6 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         int dy = idx / tileSize;
         int x = startX + dx;
         int y = startY + dy;
-
         if (x >= width || y >= height) continue;
 
         int iter = iterations[y * width + x];
@@ -88,7 +87,6 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     __shared__ int totalCount;
     if (threadIdx.x == 0) totalCount = 0;
     __syncthreads();
-
     atomicAdd(&totalCount, localCount);
     __syncthreads();
 
@@ -103,10 +101,11 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         int tileIndex = tileY * gridDim.x + tileX;
         entropyOut[tileIndex] = entropy;
 
-        // 🔍 Logik: Nur bei aktivem Debug & hoher Entropie melden
-        if (Settings::debugLogging && entropy > 3.25f) {
+#if ENABLE_ENTROPY_LOGGING
+        if (entropy > ENTROPY_LOG_THRESHOLD) {
             printf("[Entropy] Tile (%d,%d) idx %d → H = %.4f\n", tileX, tileY, tileIndex, entropy);
         }
+#endif
     }
 }
 
