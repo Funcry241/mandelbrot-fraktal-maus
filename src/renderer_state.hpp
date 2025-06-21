@@ -1,6 +1,6 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 61
-// 🐭 Maus-Kommentar: Der Status des Renderers – bereinigt. `targetZoom` und `updateZoomTarget()` sind weg. Schneefuchs: „Ein Ziel, das niemand verfolgt, ist nur Ballast.“
+// Zeilen: 67
+// 🐭 Maus-Kommentar: Der Status des Renderers – jetzt mit stabilisiertem Zielsystem (`smoothedTargetOffset`). Schneefuchs: „Ein Ziel, das zittert, verunsichert die Crew.“
 
 #pragma once
 
@@ -27,6 +27,13 @@ public:
     // 🧈 Zwischengespeicherte weichgeglättete Werte (smoothed Lerp)
     float2 smoothedOffset;
     float smoothedZoom;
+
+    // 📌 Auto-Zoom-Ziel (geglättet)
+    // Zielkoordinaten, die durch CUDA vorgeschlagen und hier persistent verfolgt werden
+    // Verhindert ruckeliges Springen zwischen ähnlich guten Tiles
+    float2 smoothedTargetOffset = { 0.0f, 0.0f };
+    float smoothedTargetScore = -1.0f;
+    int framesSinceTargetChange = 0;
 
     // 📈 FPS und Framezeit zur Anzeige im HUD
     float currentFPS = 0.0f;

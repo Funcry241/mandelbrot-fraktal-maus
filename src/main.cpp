@@ -1,12 +1,19 @@
 // Datei: src/main.cpp
-// Zeilen: 22
-// 🐭 Maus-Kommentar: Hauptprogramm – Einstiegspunkt. Jetzt mit korrekt gekapseltem Ressourcenzugriff über RendererLoop::initResources(). Schneefuchs nickt: „Niemals global, immer modular!“
+// Zeilen: 32
+// 🐭 Maus-Kommentar: Hauptprogramm – Initialisiert Renderer, verknüpft globalRendererState im Namespace CudaInterop korrekt und startet den Renderloop. Schneefuchs bestand darauf, dass globale Zustände sauber im Namensraum leben – nicht anonym herumschwirren wie Otter ohne Teich.
 
 #include "pch.hpp"
 
 #include "renderer_core.hpp"
 #include "settings.hpp"
-#include "renderer_loop.hpp"  // 🧠 Für RendererLoop::initResources
+#include "renderer_loop.hpp"
+#include "renderer_state.hpp"
+#include "cuda_interop.hpp"  // ❗️WICHTIG: Damit der Namespace bekannt ist
+
+// ✅ Globale Referenz innerhalb des korrekten Namensraums definieren
+namespace CudaInterop {
+    RendererState* globalRendererState = nullptr;
+}
 
 int main() {
     if (Settings::debugLogging) {
@@ -14,13 +21,13 @@ int main() {
     }
 
     Renderer renderer(Settings::width, Settings::height);
-    renderer.initGL();
+    CudaInterop::globalRendererState = &renderer.getState();
 
-    // 🔧 Init von PBO, Textur, CUDA-Buffern, HUD über modularisierte Schnittstelle
-    RendererLoop::initResources(renderer.getState());
+    renderer.initGL();
+    RendererLoop::initResources(*CudaInterop::globalRendererState);
 
     while (!renderer.shouldClose()) {
-        renderer.renderFrame(true); // Auto-Zoom aktiviert
+        renderer.renderFrame(true);
         glfwPollEvents();
     }
 

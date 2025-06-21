@@ -1,13 +1,13 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 172
-// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Logging jetzt differenzierter: keine Flut, aber exakte Scores & Schwellen bei Bedarf. Schneefuchs: „Das klügste Logging ist das, das nur redet, wenn es etwas zu sagen hat.“
+// Zeilen: 207
+// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Jetzt mit geglätteter Zielverfolgung (`smoothedTargetOffset`) – kein Zucken mehr! Schneefuchs: „Ein guter Otter verfolgt nur ein Ziel – aber mit Anstand.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
-
 #include "cuda_interop.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
 #include "common.hpp"
+#include "renderer_state.hpp"  // 🧠 Zugriff auf smoothedTargetOffset
 
 namespace CudaInterop {
 
@@ -55,9 +55,10 @@ void renderCudaFrame(
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations);
     computeTileEntropy(d_iterations, d_entropy, width, height, tileSize, maxIterations);
 
-    int tilesX = (width + tileSize - 1) / tileSize;
-    int tilesY = (height + tileSize - 1) / tileSize;
-    int numTiles = tilesX * tilesY;
+    const int tilesX = (width + tileSize - 1) / tileSize;
+    const int tilesY = (height + tileSize - 1) / tileSize;
+    const int numTiles = tilesX * tilesY;
+
     h_entropy.resize(numTiles);
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
@@ -66,9 +67,10 @@ void renderCudaFrame(
     if (!pauseZoom) {
         const float dynamicThreshold = std::max(Settings::VARIANCE_THRESHOLD / std::log2(zoom + 2.0f), Settings::MIN_VARIANCE_THRESHOLD);
 
-        int bestIndex = -1;
-        float bestScore = -1.0f;
+        float2 bestOffset = offset;
         float bestEntropy = 0.0f;
+        float bestScore = -1.0f;
+        int bestIndex = -1;
 
         for (int i = 0; i < numTiles; ++i) {
             int bx = i % tilesX;
@@ -88,36 +90,48 @@ void renderCudaFrame(
 
             if (h_entropy[i] > dynamicThreshold && score > bestScore) {
                 bestScore = score;
-                bestIndex = i;
+                bestOffset = tileCenter;
                 bestEntropy = h_entropy[i];
+                bestIndex = i;
             }
         }
 
         static int lastIndex = -1;
-        if (Settings::debugLogging) {
-            if (bestIndex != lastIndex) {
-                std::printf("[DEBUG] Zoom = %.6f | Dynamic Entropy Threshold = %.8f\n", zoom, dynamicThreshold);
-                if (bestIndex >= 0) {
-                    std::printf("[DEBUG] Best tile index = %d | Score = %.8f | Entropy = %.8f\n", bestIndex, bestScore, bestEntropy);
-                } else {
-                    std::puts("[DEBUG] No tile passed the entropy threshold. Zoom paused.");
-                }
-                lastIndex = bestIndex;
+        if (Settings::debugLogging && bestIndex != lastIndex) {
+            std::printf("[DEBUG] Zoom = %.6f | Threshold = %.5f\n", zoom, dynamicThreshold);
+            if (bestIndex >= 0) {
+                std::printf("[DEBUG] Best Tile = %d | Score = %.6f | Entropy = %.6f\n", bestIndex, bestScore, bestEntropy);
+            } else {
+                std::puts("[DEBUG] No tile passed threshold. Zoom paused.");
             }
+            lastIndex = bestIndex;
         }
 
         if (bestIndex >= 0) {
-            int bx = bestIndex % tilesX;
-            int by = bestIndex / tilesX;
+            // Zugriff auf RendererState
+            extern RendererState* globalRendererState;
+            auto& state = *globalRendererState;
 
-            float centerX = (bx + 0.5f) * tileSize;
-            float centerY = (by + 0.5f) * tileSize;
+            constexpr float SMOOTHING_ALPHA   = 0.15f;
+            constexpr float SCORE_THRESHOLD   = 0.95f;
+            constexpr float NEWTARGET_DIST    = 0.001f;
 
-            newOffset = {
-                (centerX - width  / 2.0f) / zoom + offset.x,
-                (centerY - height / 2.0f) / zoom + offset.y
+            float2 delta = {
+                bestOffset.x - state.smoothedTargetOffset.x,
+                bestOffset.y - state.smoothedTargetOffset.y
             };
+            float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+            bool isNewTarget = bestScore > state.smoothedTargetScore * SCORE_THRESHOLD || dist > NEWTARGET_DIST;
 
+            if (isNewTarget) {
+                state.smoothedTargetOffset = bestOffset;
+                state.smoothedTargetScore = bestScore;
+                state.framesSinceTargetChange = 0;
+            } else {
+                state.framesSinceTargetChange++;
+            }
+
+            newOffset = state.smoothedTargetOffset;
             shouldZoom = true;
         }
     }
