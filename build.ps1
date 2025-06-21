@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Write-Host "`n=== Build started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===`n"
 
-# 1) SSH agent setup
+# SSH agent setup
 if ((Get-Service ssh-agent -ErrorAction SilentlyContinue).Status -ne 'Running') {
     Start-Service ssh-agent
     Write-Host "[SSH] ssh-agent started."
@@ -27,7 +27,7 @@ if (-not (ssh-add -l 2>&1) -match "SHA256") {
     Write-Host "[SSH] Key already active."
 }
 
-# 2) Cleanup old artifacts
+# Cleanup old artifacts
 foreach ($p in "build", "dist", "mandelbrot_otterdream_log.txt") {
     if (Test-Path $p) {
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
@@ -35,14 +35,14 @@ foreach ($p in "build", "dist", "mandelbrot_otterdream_log.txt") {
     }
 }
 
-# 3) Supporter script check
+# Supporter script check
 $supporterDir = "ps1Supporter"
 if (-not (Test-Path $supporterDir)) {
     Write-Error "[SUPPORT] Missing folder: $supporterDir"
     exit 1
 }
 
-# 4) CUDA setup
+# CUDA setup
 try {
     $nvcc = (Get-Command nvcc.exe -ErrorAction Stop).Source
     $cudaBin = Split-Path $nvcc -Parent
@@ -52,7 +52,7 @@ try {
     exit 1
 }
 
-# 5) MSVC setup
+# MSVC setup
 $vswhere = "${Env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe"
 $vsInstall = & "$vswhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vsInstall) {
@@ -66,7 +66,7 @@ cmd /c "`"$vcvars`" && set" | ForEach-Object {
     }
 }
 
-# 6) Load .env
+# Load .env
 if (Test-Path .env) {
     Write-Host "[ENV] Loading .env..."
     Get-Content .env | ForEach-Object {
@@ -77,7 +77,7 @@ if (Test-Path .env) {
     }
 }
 
-# 7) vcpkg setup
+# vcpkg setup
 try {
     $vcpkg = (Get-Command vcpkg.exe -ErrorAction Stop).Source
     $vcpkgRoot = Split-Path $vcpkg -Parent
@@ -88,11 +88,11 @@ try {
     exit 1
 }
 
-# 8) Create directories
+# Create directories
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
 
-# 10) CMake configure (clean call)
+# CMake configure (clean call)
 Write-Host "[INFO] CMake version: $(cmake --version | Select-String -Pattern 'cmake version')"
 Write-Host "[BUILD] Configuring project..."
 $cmakeArgs = @(
@@ -106,17 +106,17 @@ $cmakeArgs = @(
 )
 cmake @cmakeArgs
 
-# 9) CUDA architecture fallback (if not already set)
+# CUDA architecture fallback (if not already set)
 if (-not $Env:CMAKE_CUDA_ARCHITECTURES) {
     $cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=80;86;89"
     Write-Host "[CUDA] Default architectures: 80;86;89"
 }
 
-# 11) CMake build
+# CMake build
 Write-Host "[BUILD] Starting build..."
 cmake --build build --config $Configuration --parallel
 
-# 12) Copy executable
+# Copy executable
 $exe = "build\\$Configuration\\mandelbrot_otterdream.exe"
 if (-not (Test-Path $exe)) { $exe = "build\\mandelbrot_otterdream.exe" }
 if (Test-Path $exe) {
@@ -127,7 +127,7 @@ if (Test-Path $exe) {
     exit 1
 }
 
-# 13) Copy GLEW/GLFW DLLs
+# Copy GLEW/GLFW DLLs
 $dllSearchRoots = Get-ChildItem "$PSScriptRoot\\vcpkg_installed" -Recurse -Directory | Where-Object { $_.Name -eq "bin" }
 foreach ($dll in 'glfw3.dll','glew32.dll') {
     $src = $dllSearchRoots | ForEach-Object {
@@ -142,7 +142,7 @@ foreach ($dll in 'glfw3.dll','glew32.dll') {
     }
 }
 
-# 14) Copy CUDA runtime DLLs
+# Copy CUDA runtime DLLs
 $cudaDlls = Get-ChildItem $cudaBin -Filter 'cudart64_*.dll'
 if ($cudaDlls) {
     foreach ($dll in $cudaDlls) {
@@ -154,7 +154,7 @@ if ($cudaDlls) {
     exit 1
 }
 
-# 15) Run supporter scripts
+# Run supporter scripts
 foreach ($script in 'run_build_inner.ps1','MausDelete.ps1','MausGitAutoCommit.ps1') {
     $path = Join-Path $supporterDir $script
     if (Test-Path $path) {
