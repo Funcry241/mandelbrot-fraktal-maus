@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 142
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel & Entropieanalyse mit fließender Tiling-Formel. Jetzt mit klar kontrollierbarem Logging pro Tile, gebunden an `Settings::debugLogging`. Schneefuchs: „Wer zu viel sagt, fliegt aus dem Kernel.“
+// Zeilen: 143
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel & Entropieanalyse mit fließender Tiling-Formel. Logging pro Tile nur bei hoher Entropie & aktivem `debugLogging`. Schneefuchs: „Ein gutes Log redet nicht oft – aber immer mit Gewicht.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -103,9 +103,9 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         int tileIndex = tileY * gridDim.x + tileX;
         entropyOut[tileIndex] = entropy;
 
-        if (Settings::debugLogging && entropy > 3.0f) {
-            printf("[TileEntropy] Tile (%d,%d) idx %d -> H = %.4f\n",
-                   tileX, tileY, tileIndex, entropy);
+        // 🔍 Logik: Nur bei aktivem Debug & hoher Entropie melden
+        if (Settings::debugLogging && entropy > 3.25f) {
+            printf("[Entropy] Tile (%d,%d) idx %d → H = %.4f\n", tileX, tileY, tileIndex, entropy);
         }
     }
 }
@@ -131,7 +131,6 @@ extern "C" void computeTileEntropy(const int* d_iterations,
                                    int width, int height,
                                    int tileSize,
                                    int maxIter) {
-    // 🛡 Failsafe: Ungültige Werte verhindern Kernel-Launch
     if (tileSize <= 0 || width <= 0 || height <= 0 || maxIter <= 0) {
         std::fprintf(stderr, "[FATAL] computeTileEntropy: Invalid input – tileSize=%d, width=%d, height=%d, maxIter=%d\n",
                      tileSize, width, height, maxIter);
