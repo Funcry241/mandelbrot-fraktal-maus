@@ -1,8 +1,6 @@
 <!-- Datei: README.md -->
-<!-- Zeilen: 113 -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 6 – aktualisierte Build-Presets, korrekte Cleanup-Routinen, konsistente Tile-Größen-Logik. Schneefuchs hätte gesagt: „Ein README, das lügt, wird niemals Alpha.“
-> 💡 Hinweis: Der Build benötigt Internetzugriff, um `vcpkg`-Pakete beim ersten Konfigurieren zu installieren. In Offline-Umgebungen bitte vorher `vcpkg`-Ordner clonen und `vcpkg install` lokal ausführen. -->
-
+<!-- Zeilen: 123 -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 11.1 – jetzt mit macOS-Bauanleitung. Kein Ziel bleibt außen vor. Schneefuchs: „Auch der Mac darf mitzoomen.“ -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
@@ -98,6 +96,22 @@ cmake --preset linux-build
 cmake --build --preset linux-build
 ./dist/mandelbrot_otterdream
 ```
+
+---
+
+### 🍏 macOS Build (Experimental)
+
+> Nur auf älteren Macs mit NVIDIA-GPU (CUDA), ansonsten NICHT funktionsfähig
+
+```bash
+brew install cmake glfw glew
+git clone --recurse-submodules https://github.com/Funcry241/otterdream-mandelbrot.git
+cd otterdream-mandelbrot
+cmake --preset macos-default
+cmake --build --preset macos-default
+```
+
+> ⚠️ Hinweis: CUDA wird auf Apple Silicon nicht unterstützt. Das Projekt nutzt keine Metal-Backends.
 
 ---
 
