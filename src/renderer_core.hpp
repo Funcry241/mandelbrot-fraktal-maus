@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.hpp
-// Zeilen: 42
-// 🐭 Maus-Kommentar: Header für das Rendering-Modul. `state` ist jetzt geschützt, Zugriff über `getState()`. `cleanup()` bereit für sauberes Shutdown. Schneefuchs: „Zugriff ja – aber mit Stil.“
+// Zeilen: 41
+// 🐭 Maus-Kommentar: Header für das Rendering-Modul. Entfernt: `setupBuffers()`. Neu: `const getState()` für sauberen lesenden Zugriff. Schneefuchs: „Nur wer gibt, darf auch nehmen – aber bitte ohne Schreibzugriff.“
 
 #pragma once
 
@@ -19,12 +19,12 @@ public:
 
     // 🆕 Getter für Zugriff auf internen Zustand
     RendererState& getState() { return state; }
+    const RendererState& getState() const { return state; }  // 🆕 nur lesend
 
 private:
     RendererState state;  // 🔐 jetzt privat, aber via getState() zugänglich
 
     void renderFrame_impl(bool autoZoomEnabled);
-    void setupBuffers();
     void freeDeviceBuffers();
     void cleanup();
 };

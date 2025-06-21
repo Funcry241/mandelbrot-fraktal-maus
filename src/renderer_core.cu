@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 84
-// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. Jetzt mit `glewInit()` direkt nach Kontext-Erstellung und automatischem Cleanup im Destruktor. Schneefuchs: „Nur wer gründlich aufräumt, darf Neues entstehen lassen.“
+// Zeilen: 78
+// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. Entfernt: ungenutztes `setupBuffers()`. Cleanup durch Destruktor bleibt. Schneefuchs: „Weniger ist mehr – wenn der Code schweigt, wird der Otter klug.“
 
 #include "pch.hpp"
 
@@ -56,20 +56,6 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     RendererLoop::renderFrame_impl(state, autoZoomEnabled);  // 🔁 interne Schleife bei Bedarf
 }
 
-void Renderer::setupBuffers() {
-    int totalPixels = state.width * state.height;
-
-    CUDA_CHECK(cudaMalloc(&state.d_iterations, totalPixels * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&state.d_entropy, totalPixels * sizeof(float)));
-
-    int tileSize = computeTileSizeFromZoom(state.zoom);
-    state.lastTileSize = tileSize;
-
-    int tilesX = state.width / tileSize;
-    int tilesY = state.height / tileSize;
-    state.h_entropy.resize(tilesX * tilesY);
-}
-
 void Renderer::freeDeviceBuffers() {
     if (state.d_iterations) {
         CUDA_CHECK(cudaFree(state.d_iterations));
@@ -108,4 +94,3 @@ void Renderer::cleanup() {
     // 🧼 GLFW abschließen
     glfwTerminate();
 }
-

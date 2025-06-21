@@ -1,6 +1,6 @@
 // Datei: src/renderer_state.cpp
-// Zeilen: 56
-// 🐭 Maus-Kommentar: Zustand des Renderers: Zoom, Offset, FPS, Iterationen – aber keine redundante Ressourceninitialisierung mehr. Schneefuchs: „State kümmert sich um Werte – nicht um Texturen!“
+// Zeilen: 53
+// 🐭 Maus-Kommentar: Zustand des Renderers: Zoom, Offset, FPS, Iterationen – jetzt ohne `targetZoom`. Schneefuchs: „Weniger Ziele, mehr Fokus.“
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -20,7 +20,6 @@ void RendererState::reset() {
     baseIterations = Settings::INITIAL_ITERATIONS;
     maxIterations = Settings::MAX_ITERATIONS_CAP;
 
-    targetZoom = zoom;
     targetOffset = offset;
 
     smoothedZoom = zoom;               // 🧈 verhindert Ruck nach Reset
@@ -34,10 +33,6 @@ void RendererState::reset() {
     frameCount = 0;
     lastTime = 0.0;
     lastFrameTime = 0.0f;
-}
-
-void RendererState::updateZoomTarget(float newZoom) {
-    targetZoom = newZoom;
 }
 
 void RendererState::updateOffsetTarget(float2 newOffset) {

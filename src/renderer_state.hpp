@@ -1,6 +1,6 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 62
-// 🐭 Maus-Kommentar: Der Status des Renderers – ganz ohne `resources`. PBO & Tex wieder direkt hier drin, wie gewünscht. Schneefuchs: „Kapselung ist schön, aber Pragmatismus ist mächtiger.“
+// Zeilen: 61
+// 🐭 Maus-Kommentar: Der Status des Renderers – bereinigt. `targetZoom` und `updateZoomTarget()` sind weg. Schneefuchs: „Ein Ziel, das niemand verfolgt, ist nur Ballast.“
 
 #pragma once
 
@@ -21,9 +21,8 @@ public:
     int baseIterations;
     int maxIterations;
 
-    // 🎯 Zielwerte für Auto-Zoom (werden mit LERP angenähert)
+    // 🎯 Zielwert für Auto-Zoom (wird mit LERP angenähert)
     float2 targetOffset;
-    float targetZoom;
 
     // 🧈 Zwischengespeicherte weichgeglättete Werte (smoothed Lerp)
     float2 smoothedOffset;
@@ -56,7 +55,6 @@ public:
     // 🔁 Konstruktor & Methoden zur Zustandspflege
     RendererState(int w, int h);
     void reset();
-    void updateZoomTarget(float newZoom);
     void updateOffsetTarget(float2 newOffset);
     void adaptIterationCount();
     // 🔧 Allokiert CUDA-Puffer für Iterationen und Entropie-Auswertung
