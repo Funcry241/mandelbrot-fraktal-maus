@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 147
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit lokalem Logging-Flag. Keine Abhängigkeit zu settings.hpp, Logging nur bei hoher Entropie & Buildflag. Schneefuchs: „Ein Kernel, der sich selbst genügt – wie ein Otter mit seinem Stein.“
+// Zeilen: 149
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit throttled Logging – Ausgabe nur bei hoher Entropie und jedem 32. Tile. Schneefuchs: „Ein Fraktal, das flüstert statt schreit.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -12,6 +12,7 @@
 // 🔧 Lokale Debug-Schalter (nicht global!)
 #define ENABLE_ENTROPY_LOGGING 1
 constexpr float ENTROPY_LOG_THRESHOLD = 3.25f;
+constexpr int LOG_TILE_MODULO = 32; // Nur jedes 32. Tile loggen
 
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     if (t < 0.0f) return make_uchar4(0, 0, 0, 255);
@@ -102,7 +103,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         entropyOut[tileIndex] = entropy;
 
 #if ENABLE_ENTROPY_LOGGING
-        if (entropy > ENTROPY_LOG_THRESHOLD) {
+        if (entropy > ENTROPY_LOG_THRESHOLD && tileIndex % LOG_TILE_MODULO == 0) {
             printf("[Entropy] Tile (%d,%d) idx %d → H = %.4f\n", tileX, tileY, tileIndex, entropy);
         }
 #endif
