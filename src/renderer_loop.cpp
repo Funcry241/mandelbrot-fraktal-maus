@@ -13,6 +13,14 @@
 namespace RendererLoop {
 
 void initResources(RendererState& state) {
+    // 🛡️ Schutz gegen doppelte Initialisierung
+    if (state.pbo != 0 || state.tex != 0) {
+        if (Settings::debugLogging) {
+            std::puts("[DEBUG] initResources() übersprungen – Ressourcen bereits initialisiert");
+        }
+        return;
+    }
+
     // 🔧 OpenGL-PBO & Textur erzeugen via Helper
     state.pbo = OpenGLUtils::createPBO(state.width, state.height);
     state.tex = OpenGLUtils::createTexture(state.width, state.height);
@@ -23,10 +31,14 @@ void initResources(RendererState& state) {
     // 🎨 HUD initialisieren
     Hud::init();
 
+    // 📊 CUDA-Buffer allokieren
+    state.setupCudaBuffers();
+
     if (Settings::debugLogging) {
         std::puts("[DEBUG] initResources() abgeschlossen");
     }
 }
+
 
 void beginFrame(RendererState& state) {
     double currentTime = glfwGetTime();

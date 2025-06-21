@@ -41,7 +41,6 @@ void Renderer::initGL() {
     RendererPipeline::init();
 
     if (Settings::debugLogging) std::puts("[DEBUG] OpenGL-Initialisierung abgeschlossen");
-    state.setupCudaBuffers();
 }
 
 bool Renderer::shouldClose() const {
