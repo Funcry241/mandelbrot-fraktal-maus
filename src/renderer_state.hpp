@@ -1,6 +1,6 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 67
-// 🐭 Maus-Kommentar: Der Status des Renderers – jetzt mit stabilisiertem Zielsystem (`smoothedTargetOffset`). Schneefuchs: „Ein Ziel, das zittert, verunsichert die Crew.“
+// Zeilen: 75
+// 🐭 Maus-Kommentar: Der Status des Renderers – jetzt mit stabilisiertem Zielsystem (`smoothedTargetOffset`) und dynamischem GPU-Resize. Schneefuchs: „Nur wer seine Form anpasst, bleibt im Fraktal.“
 
 #pragma once
 
@@ -29,8 +29,6 @@ public:
     float smoothedZoom;
 
     // 📌 Auto-Zoom-Ziel (geglättet)
-    // Zielkoordinaten, die durch CUDA vorgeschlagen und hier persistent verfolgt werden
-    // Verhindert ruckeliges Springen zwischen ähnlich guten Tiles
     float2 smoothedTargetOffset = { 0.0f, 0.0f };
     float smoothedTargetScore = -1.0f;
     int framesSinceTargetChange = 0;
@@ -64,6 +62,8 @@ public:
     void reset();
     void updateOffsetTarget(float2 newOffset);
     void adaptIterationCount();
-    // 🔧 Allokiert CUDA-Puffer für Iterationen und Entropie-Auswertung
     void setupCudaBuffers();
+
+    // 🧽 Dynamischer Resize inkl. GPU-Ressourcen
+    void resize(int newWidth, int newHeight);
 };

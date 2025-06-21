@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.hpp
-// Zeilen: 30
+// Zeilen: 32
 // 🐭 Maus-Kommentar: Definiert den Render-Loop und die Darstellung pro Frame. Steuert FPS-Zähler, Auto-Zoom-Logik und HUD-Anzeige. Schneefuchs würde sagen: „Der Taktgeber des Fraktal-Tanzes.“
 
 #pragma once
@@ -12,8 +12,11 @@
 
 namespace RendererLoop {
 
-// 🆕 Für Initialisierung
-void initResources(RendererState& state); // 🆕 Für Initialisierung
+// 🔧 Forward-Deklaration für Resize-Callback
+static void framebufferSizeCallback(GLFWwindow* window, int width, int height);
+
+// 🆕 Initialisiert OpenGL-, CUDA- und HUD-Ressourcen
+void initResources(RendererState& state);
 
 // 🕒 Initialisiert Zeitmesser, misst deltaTime & berechnet FPS
 void beginFrame(RendererState& state);

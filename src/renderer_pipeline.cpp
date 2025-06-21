@@ -1,5 +1,5 @@
 // Datei: src/renderer_pipeline.cpp
-// Zeilen: 79
+// Zeilen: 80
 // 🐭 Maus-Kommentar: Sauber und ohne Altlast – `drawFullscreenQuad()` ist die einzige Renderfunktion. Shader lokal, VAO-Handling korrekt, kein `render()`-Legacy mehr. Schneefuchs: „So soll C++ schmecken.“
 
 #include "pch.hpp"
@@ -45,6 +45,8 @@ void init() {
     OpenGLUtils::createFullscreenQuad(&VAO, &VBO, &EBO);
 }
 
+// 🪄 Aktualisiert Texturinhalt aus CUDA-PBO (Zero-Copy Upload)
+// Dies ersetzt glTexSubImage2D-Aufrufe im Mainloop. Muss nach CUDA-Fill aufgerufen werden!
 void updateTexture(GLuint pbo, GLuint tex, int width, int height) {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBindTexture(GL_TEXTURE_2D, tex);

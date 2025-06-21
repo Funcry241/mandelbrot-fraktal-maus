@@ -1,12 +1,13 @@
 // Datei: src/renderer_state.cpp
-// Zeilen: 53
-// 🐭 Maus-Kommentar: Zustand des Renderers: Zoom, Offset, FPS, Iterationen – jetzt ohne `targetZoom`. Schneefuchs: „Weniger Ziele, mehr Fokus.“
+// Zeilen: 84
+// 🐭 Maus-Kommentar: Zustand des Renderers – jetzt mit vollem GPU-Resize-Support. Schneefuchs: „Ein Otter muss wachsen, wenn das Wasser steigt.“
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
 #include "settings.hpp"
 #include "cuda_interop.hpp"
-#include "common.hpp"  // 💡 Enthält CUDA_CHECK
+#include "common.hpp"
+#include "renderer_resources.hpp"  // 🧱 Für PBO/Texture-Helfer
 
 RendererState::RendererState(int w, int h)
     : width(w), height(h) {
@@ -22,14 +23,13 @@ void RendererState::reset() {
 
     targetOffset = offset;
 
-    smoothedZoom = zoom;               // 🧈 verhindert Ruck nach Reset
+    smoothedZoom = zoom;
     smoothedOffset = offset;
 
     currentFPS = 0.0f;
     deltaTime = 0.0f;
     lastTileSize = Settings::BASE_TILE_SIZE;
 
-    // 🕒 Frame-Timing-Reset
     frameCount = 0;
     lastTime = 0.0;
     lastFrameTime = 0.0f;
@@ -55,5 +55,48 @@ void RendererState::setupCudaBuffers() {
     CUDA_CHECK(cudaMalloc(&d_iterations, totalPixels * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&d_entropy, numTiles * sizeof(float)));
 
-    h_entropy.resize(numTiles);  // Optional: hostseitig vorallozieren
+    h_entropy.resize(numTiles);
+}
+
+void RendererState::resize(int newWidth, int newHeight) {
+    // 🧼 Alte CUDA-Puffer freigeben
+    if (d_iterations) {
+        cudaFree(d_iterations);
+        d_iterations = nullptr;
+    }
+    if (d_entropy) {
+        cudaFree(d_entropy);
+        d_entropy = nullptr;
+    }
+
+    // 🧽 PBO deregistrieren
+    CudaInterop::unregisterPBO();
+
+    // 🗑️ Alte OpenGL-Ressourcen löschen
+    if (pbo != 0) {
+        glDeleteBuffers(1, &pbo);
+        pbo = 0;
+    }
+    if (tex != 0) {
+        glDeleteTextures(1, &tex);
+        tex = 0;
+    }
+
+    // 📐 Neue Größe setzen
+    width = newWidth;
+    height = newHeight;
+
+    // 🆕 Neue Ressourcen erzeugen
+    pbo = OpenGLUtils::createPBO(width, height);
+    tex = OpenGLUtils::createTexture(width, height);
+
+    // 🔗 CUDA-Interop neu registrieren
+    CudaInterop::registerPBO(pbo);
+
+    // 🔁 CUDA-Puffer neu allokieren
+    setupCudaBuffers();
+
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] Resize auf %dx%d abgeschlossen\n", width, height);
+    }
 }

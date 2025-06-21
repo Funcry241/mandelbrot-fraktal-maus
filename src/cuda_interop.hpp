@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.hpp
-// Zeilen: 45
+// Zeilen: 48
 // 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL Interop – PBO-Registrierung, CUDA-Render-Bridge, Auto-Zoom mit Entropieanalyse. Entfernt direkte CUDA-Includes zur Vermeidung von PCH-Fehlern. `keyCallback` erlaubt Zoom-Pause per Tastatur. Schneefuchs sagte: „Ein Interface soll nie stolpern.“
 
 #ifndef CUDA_INTEROP_HPP
@@ -12,9 +12,11 @@
 // 🧠 Vorwärtsdeklaration – CUDA-Typen nicht direkt inkludieren
 struct cudaGraphicsResource;
 
+class RendererState;  // 🧠 Nur Vorwärtsdeklaration nötig (kein Include von renderer_state.hpp)
+
 namespace CudaInterop {
 
-void registerPBO(unsigned int pbo);  // ✅ Direkt: kein state.resources.pbo
+void registerPBO(unsigned int pbo);
 void unregisterPBO();
 
 void renderCudaFrame(    
@@ -34,8 +36,10 @@ void renderCudaFrame(
 void setPauseZoom(bool pause);
 bool getPauseZoom();
 
-// 🧠 Tastatureingabe-Handler für Auto-Zoom Pause (Taste P oder SPACE)
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+
+// 🧭 Globale Referenz auf den aktuellen Renderer-State für CUDA ↔ Zoom-Steuerung
+extern RendererState* globalRendererState;
 
 } // namespace CudaInterop
 
