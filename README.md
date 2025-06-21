@@ -1,6 +1,6 @@
 <!-- Datei: README.md -->
-<!-- Zeilen: 123 -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 11.1 – jetzt mit macOS-Bauanleitung. Kein Ziel bleibt außen vor. Schneefuchs: „Auch der Mac darf mitzoomen.“ -->
+<!-- Zeilen: 130 -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 11.2 – ergänzt um `--install`-Anleitung für strukturierte Binary-Ausgabe. Schneefuchs: „Ein Otter wirft nichts einfach irgendwohin – er installiert präzise.“ -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
@@ -37,7 +37,7 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 - **NVIDIA GPU** mit CUDA (Compute Capability **8.0+**, empfohlen **8.6+**)
 - CUDA Toolkit (empfohlen: **v12.9**)
 - Visual Studio 2022 mit C++ & CUDA-Komponenten
-- CMake (Version **≥3.25**), Ninja
+- CMake (Version **≥3.29**), Ninja
 - vcpkg (für GLFW, GLEW)
 
 > ⚠️ Hinweis: GPUs unter Compute Capability 8.0 (z. B. Kepler, Maxwell) werden **nicht unterstützt**.
@@ -73,16 +73,17 @@ git clone https://github.com/Funcry241/otterdream-mandelbrot.git
 cd otterdream-mandelbrot
 cmake --preset windows-msvc
 cmake --build --preset windows-msvc
-.\dist\mandelbrot_otterdream.exe
+cmake --install build/windows --prefix ./dist
+.\distin\mandelbrot_otterdream.exe
 ```
 
-> 🛠 Tipp: `build.ps1` ist ein PowerShell-Skript für automatisierten Build & Run
+> 🛠 Tipp: `build.ps1` ist ein PowerShell-Skript für automatisierten Build & Install
 
 ---
 
 ### 🐧 Linux Build
 
-> Voraussetzung: CUDA, GCC, Ninja, CMake ≥3.25, OpenGL-Treiber, GLFW & GLEW
+> Voraussetzung: CUDA, GCC, Ninja, CMake ≥3.29, OpenGL-Treiber, GLFW & GLEW
 
 ```bash
 sudo apt update
@@ -94,7 +95,8 @@ git clone https://github.com/Funcry241/otterdream-mandelbrot.git
 cd otterdream-mandelbrot
 cmake --preset linux-build
 cmake --build --preset linux-build
-./dist/mandelbrot_otterdream
+cmake --install build/linux --prefix ./dist
+./dist/bin/mandelbrot_otterdream
 ```
 
 ---

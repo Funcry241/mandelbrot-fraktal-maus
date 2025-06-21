@@ -15,7 +15,7 @@ if ((Get-Service ssh-agent -ErrorAction SilentlyContinue).Status -ne 'Running') 
     Write-Host "[SSH] ssh-agent started."
 }
 if (-not (ssh-add -l 2>&1) -match "SHA256") {
-    $keyPath = "$Env:USERPROFILE\\.ssh\\id_ed25519"
+    $keyPath = "$Env:USERPROFILE\.ssh\id_ed25519"
     if (Test-Path $keyPath) {
         ssh-add $keyPath | Out-Null
         Write-Host "[SSH] Key loaded."
@@ -53,7 +53,7 @@ try {
 }
 
 # MSVC setup
-$vswhere = "${Env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe"
+$vswhere = "${Env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vsInstall = & "$vswhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vsInstall) {
     Write-Error "[MSVC] Visual Studio not found."
@@ -81,7 +81,7 @@ if (Test-Path .env) {
 try {
     $vcpkg = (Get-Command vcpkg.exe -ErrorAction Stop).Source
     $vcpkgRoot = Split-Path $vcpkg -Parent
-    $toolchain = "$vcpkgRoot\\scripts\\buildsystems\\vcpkg.cmake"
+    $toolchain = "$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
     Write-Host "[VCPKG] Toolchain: $toolchain"
 } catch {
     Write-Error "[VCPKG] Not found."
@@ -91,34 +91,28 @@ try {
 # Create directories
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
-
 # CMake configure (clean call)
 Write-Host "[INFO] CMake version: $(cmake --version | Select-String -Pattern 'cmake version')"
 Write-Host "[BUILD] Configuring project..."
+$cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=80;86;89"
 $cmakeArgs = @(
     "-S", ".", "-B", "build", "-G", "Ninja",
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
     "-DCMAKE_BUILD_TYPE=$Configuration",
     "-DCMAKE_CUDA_COMPILER=$nvcc",
-    "-DCMAKE_CUDA_TOOLKIT_ROOT_DIR=$($cudaBin)\\..",
+    "-DCMAKE_CUDA_TOOLKIT_ROOT_DIR=$($cudaBin)\..",
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     $cudaArch
 )
 cmake @cmakeArgs
-
-# CUDA architecture fallback (if not already set)
-if (-not $Env:CMAKE_CUDA_ARCHITECTURES) {
-    $cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=80;86;89"
-    Write-Host "[CUDA] Default architectures: 80;86;89"
-}
 
 # CMake build
 Write-Host "[BUILD] Starting build..."
 cmake --build build --config $Configuration --parallel
 
 # Copy executable
-$exe = "build\\$Configuration\\mandelbrot_otterdream.exe"
-if (-not (Test-Path $exe)) { $exe = "build\\mandelbrot_otterdream.exe" }
+$exe = "build\$Configuration\mandelbrot_otterdream.exe"
+if (-not (Test-Path $exe)) { $exe = "build\mandelbrot_otterdream.exe" }
 if (Test-Path $exe) {
     Copy-Item $exe -Destination dist -Force
     Write-Host "[COPY] Executable to dist"
@@ -128,7 +122,7 @@ if (Test-Path $exe) {
 }
 
 # Copy GLEW/GLFW DLLs
-$dllSearchRoots = Get-ChildItem "$PSScriptRoot\\vcpkg_installed" -Recurse -Directory | Where-Object { $_.Name -eq "bin" }
+$dllSearchRoots = Get-ChildItem "$PSScriptRoot\vcpkg_installed" -Recurse -Directory | Where-Object { $_.Name -eq "bin" }
 foreach ($dll in 'glfw3.dll','glew32.dll') {
     $src = $dllSearchRoots | ForEach-Object {
         Get-ChildItem $_.FullName -Filter $dll -ErrorAction SilentlyContinue

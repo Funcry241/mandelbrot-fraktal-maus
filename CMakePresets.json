@@ -2,7 +2,7 @@
   "version": 5,
   "cmakeMinimumRequired": {
     "major": 3,
-    "minor": 25,
+    "minor": 29,
     "patch": 0
   },
   "configurePresets": [
@@ -17,8 +17,10 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_CXX_STANDARD": "23",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_CXX_EXTENSIONS": "OFF",
         "CMAKE_CUDA_STANDARD": "20",
+        "CMAKE_CUDA_STANDARD_REQUIRED": "ON",
         "CMAKE_CUDA_EXTENSIONS": "OFF",
         "CMAKE_CUDA_ARCHITECTURES": "80;86;89"
       }
@@ -34,8 +36,10 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_CXX_STANDARD": "23",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_CXX_EXTENSIONS": "OFF",
         "CMAKE_CUDA_STANDARD": "20",
+        "CMAKE_CUDA_STANDARD_REQUIRED": "ON",
         "CMAKE_CUDA_EXTENSIONS": "OFF",
         "CMAKE_CUDA_ARCHITECTURES": "80;86;89",
         "CMAKE_CUDA_COMPILER": "/usr/local/cuda/bin/nvcc",
@@ -57,6 +61,18 @@
       "name": "linux-build",
       "displayName": "Build (Linux, GCC 13)",
       "configurePreset": "linux-gcc13"
+    },
+    {
+      "name": "windows-install",
+      "displayName": "Install (Windows)",
+      "configurePreset": "windows-msvc",
+      "inherits": ["windows-build"]
+    },
+    {
+      "name": "linux-install",
+      "displayName": "Install (Linux)",
+      "configurePreset": "linux-gcc13",
+      "inherits": ["linux-build"]
     }
   ]
 }

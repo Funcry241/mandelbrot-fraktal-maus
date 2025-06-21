@@ -1,6 +1,6 @@
 # Datei: .github/workflows/ci.yml
-# Zeilen: 38
-# 🐭 Maus-Kommentar: CI-Workflow für OtterDream Mandelbrot mit C++23, CUDA, CMake, vcpkg und Ninja unter Ubuntu 22.04. Schneefuchs: „Was lokal klappt, muss auch remote tanzen – vcpkg führt die Choreographie.“
+# Zeilen: 48
+# 🐭 Maus-Kommentar: CI-Workflow mit offiziell eingebundenem CUDA 12.9 .deb-Repo statt veralteter Ubuntu-Version. Ergänzt um `--install`-Schritt für validierte Binary-Ausgabe. Schneefuchs: „Der Otter tanzt nicht nur – er packt auch ein.“
 
 name: Build Validation
 
@@ -24,10 +24,16 @@ jobs:
       - name: Install Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      - name: Install CUDA Toolkit
+      - name: Install CUDA 12.9 via NVIDIA Repo
         run: |
           sudo apt-get update
-          sudo apt-get install -y nvidia-cuda-toolkit
+          sudo apt-get install -y wget gnupg lsb-release
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-ubuntu2204.pin
+          sudo mv cuda-ubuntu2204.pin /etc/apt/preferences.d/cuda-repository-pin-600
+          sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/3bf863cc.pub
+          sudo add-apt-repository "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /"
+          sudo apt-get update
+          sudo apt-get install -y cuda-toolkit-12-9
 
       - name: Clone vcpkg
         run: git clone https://github.com/microsoft/vcpkg.git
@@ -41,3 +47,6 @@ jobs:
 
       - name: Build project
         run: cmake --build build
+
+      - name: Install project
+        run: cmake --install build --prefix ./dist
