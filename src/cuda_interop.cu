@@ -94,9 +94,12 @@ void renderCudaFrame(
             }
         }
 
-        if (Settings::debugLogging) {
-            std::printf("[DEBUG] Entropy threshold: %.10f\n", std::max(Settings::VARIANCE_THRESHOLD / std::log2(zoom + 2.0f), Settings::MIN_VARIANCE_THRESHOLD));
-            std::printf("[DEBUG] Best tile score: %.8f\n", bestScore);
+        static int lastBestIndex = -1;
+        if (bestIndex != lastBestIndex && Settings::debugLogging) {
+            float dynamicThreshold = std::max(Settings::VARIANCE_THRESHOLD / std::log2(zoom + 2.0f), Settings::MIN_VARIANCE_THRESHOLD);
+            std::printf("[DEBUG] Entropy threshold: %.10f\n", dynamicThreshold);
+            std::printf("[DEBUG] Best tile score: %.8f (index = %d)\n", bestScore, bestIndex);
+            lastBestIndex = bestIndex;
         }
 
         if (bestIndex >= 0) {

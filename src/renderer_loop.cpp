@@ -71,7 +71,12 @@ void computeCudaFrame(RendererState& state) {
 }
 
 void updateAutoZoom(RendererState& state) {
+    static float2 lastTarget = {0.0f, 0.0f};  // 🧠 Nur ändern, wenn Ziel wechselt
+
     if (!state.shouldZoom) return;
+
+    bool newTarget = std::fabs(state.targetOffset.x - lastTarget.x) > 1e-12f ||
+                     std::fabs(state.targetOffset.y - lastTarget.y) > 1e-12f;
 
     // 📌 Zoom-Fortschritt
     state.zoom *= Settings::AUTOZOOM_SPEED;
@@ -84,40 +89,34 @@ void updateAutoZoom(RendererState& state) {
 
     float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
 
-    if (Settings::debugLogging) {
-        std::printf("[DEBUG] Offset-Delta: dx=%.10f dy=%.10f | Dist=%.10f\n", delta.x, delta.y, dist);
-    }
-
     // 🧊 Bewegung stoppen, wenn fast am Ziel
     if (dist < Settings::DEADZONE) {
-        if (Settings::debugLogging) {
-            std::printf("[DEBUG] Offset liegt innerhalb DEADZONE (%.1e) – keine Bewegung\n", Settings::DEADZONE);
+        if (newTarget && Settings::debugLogging) {
+            std::printf("[DEBUG] ▶ Ziel erreicht: delta=%.3e < DEADZONE (%.1e)\n", dist, Settings::DEADZONE);
         }
         return;
     }
 
-    // 🌀 Weiche Dämpfung über tanh + Fraktionslimitierung
+    // 🌀 Dämpfung via tanh + Fraktionslimitierung
     float rawTanh = std::tanh(Settings::OFFSET_TANH_SCALE * dist);
-    float factor = rawTanh * Settings::MAX_OFFSET_FRACTION;
-    factor = Settings::my_clamp(factor, 0.0f, 1.0f);
+    float factor = Settings::my_clamp(rawTanh * Settings::MAX_OFFSET_FRACTION, 0.0f, 1.0f);
 
-    if (Settings::debugLogging) {
-        std::printf("[DEBUG] tanh(%.2f × %.10f) = %.10f → moveFactor=%.10f\n",
-            Settings::OFFSET_TANH_SCALE, dist, rawTanh, factor);
-    }
-
-    // ➡️ Offset schrittweise bewegen
     float moveX = delta.x * factor;
     float moveY = delta.y * factor;
 
     state.offset.x += moveX;
     state.offset.y += moveY;
 
-    if (Settings::debugLogging) {
-        std::printf("[DEBUG] Offset moved by: (%.10f, %.10f) → new = (%.10f, %.10f)\n",
-            moveX, moveY, state.offset.x, state.offset.y);
+    // 🧭 Nur loggen, wenn das Ziel neu ist (d.h. neuer Tile-Fokus)
+    if (newTarget && Settings::debugLogging) {
+        std::printf("[DEBUG] ▶ Neues Ziel-Tile: targetOffset = (%.10f, %.10f)\n", state.targetOffset.x, state.targetOffset.y);
+        std::printf("[DEBUG] Δ=%.3e | dist=%.6f | tanh=%.3f | move=(%.3e, %.3e)\n", dist, dist, rawTanh, moveX, moveY);
+        std::printf("[DEBUG] Neuer Offset = (%.10f, %.10f)\n", state.offset.x, state.offset.y);
     }
+
+    lastTarget = state.targetOffset;
 }
+
 
 
 void drawFrame(RendererState& state) {
