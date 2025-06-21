@@ -1,6 +1,6 @@
 // Datei: src/renderer_window.hpp
-// Zeilen: 32
-// 🐭 Maus-Kommentar: Header für Fenster- und Kontextverwaltung im Renderer. Neu: `destroyWindow()` schließt GLFW sauber. Schneefuchs: „Ein Fenster, das nicht schließt, lässt den Otter erfrieren.“
+// Zeilen: 31
+// 🐭 Maus-Kommentar: Header für Fenster- und Kontextverwaltung im Renderer. Jetzt mit getrennter Callback-Registrierung – kein Überschreiben mehr. Schneefuchs: „Ein Ereignis, ein Handler – so bleibt das Rudel stabil.“
 
 #pragma once
 
@@ -13,8 +13,11 @@ namespace RendererWindow {
 
 GLFWwindow* createWindow(int width, int height, Renderer* instance);
 bool shouldClose(GLFWwindow* window);
+
+// 🔁 Neu: Callback-Registrierung klar getrennt
 void setResizeCallback(GLFWwindow* window, Renderer* instance);
 void setKeyCallback(GLFWwindow* window);
+
 void destroyWindow(GLFWwindow* window);  // 🆕 Fenster korrekt schließen
 
 } // namespace RendererWindow

@@ -1,6 +1,6 @@
 // Datei: src/renderer_window.cpp
-// Zeilen: 85
-// 🐭 Maus-Kommentar: Initialisierung und Verwaltung des GLFW-Fensters. Korrigiert: Öffentliche API in RendererWindow, interne Helfer in RendererInternals. Schneefuchs streicht sich zufrieden durchs Fell.
+// Zeilen: 83
+// 🐭 Maus-Kommentar: GLFW-Initialisierung – Callback-Zuweisung jetzt getrennt & explizit. Kein Überschreiben mehr durch `configureWindowCallbacks`. Schneefuchs: „Nur wer gezielt registriert, verliert nie die Kontrolle.“
 
 #include "pch.hpp"
 #include "renderer_window.hpp"
@@ -33,6 +33,7 @@ GLFWwindow* createGLFWWindow(int width, int height) {
     return window;
 }
 
+// 🔒 Nur intern bei Fenstererstellung – nicht mehr öffentlich verwendet
 void configureWindowCallbacks(GLFWwindow* window, void* userPointer) {
     glfwSetWindowUserPointer(window, userPointer);
 
@@ -60,7 +61,12 @@ bool shouldClose(GLFWwindow* window) {
 }
 
 void setResizeCallback(GLFWwindow* window, Renderer* instance) {
-    RendererInternals::configureWindowCallbacks(window, instance); // 🟡 Duplikat, aber korrekt
+    glfwSetWindowUserPointer(window, instance);  // 👈 nötig für `resize`-Lambda
+    glfwSetFramebufferSizeCallback(window, [](GLFWwindow* win, int newW, int newH) {
+        if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(win))) {
+            self->resize(newW, newH);
+        }
+    });
 }
 
 void setKeyCallback(GLFWwindow* window) {
