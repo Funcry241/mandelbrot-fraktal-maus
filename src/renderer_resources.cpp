@@ -1,6 +1,6 @@
 // Datei: src/renderer_resources.cpp
-// Zeilen: 55
-// 🐭 Maus-Kommentar: Implementiert Hilfsfunktionen zur Erstellung von OpenGL-PBOs und Texturen für CUDA-Interop. Korrekt initialisierte Objekte vermeiden undefined behavior. Schneefuchs: „Kein Fraktal ohne Puffer – und kein Puffer ohne Format!“
+// Zeilen: 76
+// 🐭 Maus-Kommentar: Jetzt mit kontextsensitivem Logging – jeder PBO/Texture-Aufruf meldet seine Herkunft (Init, Resize, Tilewechsel etc.). Schneefuchs: „Erkenne den Ursprung der Ressourcen – dann findest du den Fehler vor dem Fehler.“
 
 #include "pch.hpp"
 #include "renderer_resources.hpp"  // ✅ Korrektur: richtiger Header-Name
@@ -8,6 +8,13 @@
 #include <cstdio>
 
 namespace OpenGLUtils {
+
+// 🕵️ Kontext für Logging – z. B. "resize", "init", "tileSizeChange"
+static const char* resourceContext = "unknown";
+
+void setGLResourceContext(const char* context) {
+    resourceContext = context;
+}
 
 GLuint createPBO(int width, int height) {
     GLuint pbo = 0;
@@ -19,8 +26,7 @@ GLuint createPBO(int width, int height) {
                  GL_STREAM_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    std::printf("[DEBUG] OpenGLUtils::createPBO → ID %u\n", pbo);
-
+    std::printf("[DEBUG] OpenGLUtils::createPBO → ID %u (ctx: %s, %dx%d)\n", pbo, resourceContext, width, height);
     return pbo;
 }
 
@@ -45,8 +51,7 @@ GLuint createTexture(int width, int height) {
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    std::printf("[DEBUG] OpenGLUtils::createTexture → ID %u\n", tex);
-
+    std::printf("[DEBUG] OpenGLUtils::createTexture → ID %u (ctx: %s, %dx%d)\n", tex, resourceContext, width, height);
     return tex;
 }
 
