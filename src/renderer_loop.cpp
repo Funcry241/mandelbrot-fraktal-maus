@@ -54,8 +54,16 @@ void beginFrame(RendererState& state) {
 }
 
 void updateTileSize(RendererState& state) {
-    state.lastTileSize = computeTileSizeFromZoom(state.zoom);
+    int newSize = computeTileSizeFromZoom(state.zoom);
+    if (newSize != state.lastTileSize) {
+        state.lastTileSize = newSize;
+        state.resize(state.width, state.height);  // 🔁 CUDA/GL Ressourcen korrekt neu
+        if (Settings::debugLogging) {
+            std::printf("[DEBUG] TileSize geändert → Resize auf %dx%d mit tileSize=%d\n", state.width, state.height, newSize);
+        }
+    }
 }
+
 
 void computeCudaFrame(RendererState& state) {
     float2 newOffset;
