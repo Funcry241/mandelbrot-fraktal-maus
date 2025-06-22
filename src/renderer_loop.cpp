@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 160
+// Zeilen: 175
 // 🐭 Maus-Kommentar: Haupt-Frame-Loop mit dynamischem GPU-Resize, geglättetem Auto-Zoom & Texture-Hygiene via Helferfunktion. Jetzt mit kontextsensitiver Ressourcen-Erstellung. Schneefuchs: „Nur wer seinen Ursprung kennt, versteht sein Flackern!“
 
 #include "pch.hpp"
@@ -11,6 +11,17 @@
 #include "renderer_resources.hpp"
 
 namespace RendererLoop {
+
+// 📐 Zoomabhängige, aber stabile Berechnung der Tilegröße
+inline int computeTileSizeFromZoom(float zoom) {
+    float logZ = std::log2f(zoom + 1.0f);  // +1 verhindert log2(0)
+    int dynamicTileSize = static_cast<int>(Settings::BASE_TILE_SIZE + logZ);
+
+    constexpr int MIN_TILE_SIZE = 8;
+    constexpr int MAX_TILE_SIZE = 32;
+
+    return Settings::my_clamp(dynamicTileSize, MIN_TILE_SIZE, MAX_TILE_SIZE);
+}
 
 // 🧵 Callback für Fenstergrößenänderung – löst ein Resize aus
 static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
@@ -24,7 +35,7 @@ static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
 void initResources(RendererState& state) {
     if (state.pbo != 0 || state.tex != 0) {
         if (Settings::debugLogging) {
-            std::puts("[DEBUG] initResources() übersprungen – Ressourcen bereits initialisiert");
+            std::puts("[DEBUG] initResources() skipped - resources already initialized");
         }
         return;
     }
@@ -40,7 +51,7 @@ void initResources(RendererState& state) {
     glfwSetFramebufferSizeCallback(state.window, framebufferSizeCallback);
 
     if (Settings::debugLogging) {
-        std::puts("[DEBUG] initResources() abgeschlossen");
+        std::puts("[DEBUG] initResources() completed");
     }
 }
 
@@ -61,10 +72,10 @@ void updateTileSize(RendererState& state) {
         state.lastTileSize = newSize;
 
         OpenGLUtils::setGLResourceContext("tileSizeChange");
-        state.resize(state.width, state.height);  // 🔁 CUDA/GL Ressourcen korrekt neu
+        state.resize(state.width, state.height);
 
         if (Settings::debugLogging) {
-            std::printf("[DEBUG] TileSize geändert → Resize auf %dx%d mit tileSize=%d\n", state.width, state.height, newSize);
+            std::printf("[DEBUG] TileSize changed -> resize to %dx%d with tileSize=%d\n", state.width, state.height, newSize);
         }
     }
 }
@@ -112,7 +123,7 @@ void updateAutoZoom(RendererState& state) {
 
     if (dist < Settings::DEADZONE) {
         if (newTarget && Settings::debugLogging) {
-            std::printf("[DEBUG] ▶ Ziel erreicht: delta=%.3e < DEADZONE (%.1e)\n", dist, Settings::DEADZONE);
+            std::printf("[DEBUG] Target reached: delta=%.3e < DEADZONE (%.1e)\n", dist, Settings::DEADZONE);
         }
         return;
     }
@@ -127,9 +138,9 @@ void updateAutoZoom(RendererState& state) {
     state.offset.y += moveY;
 
     if (newTarget && Settings::debugLogging) {
-        std::printf("[DEBUG] Neues Ziel-Tile: targetOffset = (%.10f, %.10f)\n", state.targetOffset.x, state.targetOffset.y);
+        std::printf("[DEBUG] New target tile: targetOffset = (%.10f, %.10f)\n", state.targetOffset.x, state.targetOffset.y);
         std::printf("[DEBUG] Δ=%.3e | dist=%.6f | tanh=%.3f | move=(%.3e, %.3e)\n", dist, dist, rawTanh, moveX, moveY);
-        std::printf("[DEBUG] Neuer Offset = (%.10f, %.10f)\n", state.offset.x, state.offset.y);
+        std::printf("[DEBUG] New offset = (%.10f, %.10f)\n", state.offset.x, state.offset.y);
     }
 
     lastTarget = state.targetOffset;

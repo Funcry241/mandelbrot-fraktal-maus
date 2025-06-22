@@ -28,7 +28,7 @@ GLuint createPBO(int width, int height) {
                  GL_STREAM_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    std::printf("[DEBUG] OpenGLUtils::createPBO → ID %u (ctx: %s, %dx%d)\n", pbo, resourceContext, width, height);
+    std::printf("[DEBUG] OpenGLUtils::createPBO -> ID %u (ctx: %s, %dx%d)\n", pbo, resourceContext, width, height);
     return pbo;
 }
 
