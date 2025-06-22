@@ -14,14 +14,21 @@
 constexpr float ENTROPY_LOG_THRESHOLD = 3.25f;
 constexpr int LOG_TILE_MODULO = 32; // Nur jedes 32. Tile loggen
 
+// Datei: src/core_kernel.cu
+// 🐭 Maus-Kommentar: Neue Farbgebung via Sinus-Modulation – lebendig & kontrastreich. Schneefuchs: „Der Otter sieht jetzt Farben, die er nie geträumt hat.“
+
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     if (t < 0.0f) return make_uchar4(0, 0, 0, 255);
-    float tSharp = sqrtf(t);
-    float r = 1.0f - tSharp;
-    float g = 0.6f * tSharp;
-    float b = 0.4f + 0.5f * tSharp;
+
+    // Sanfter Übergang über mehrere Farbfrequenzen
+    float intensity = sqrtf(t);
+    float r = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.0f));
+    float g = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.33f));
+    float b = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.66f));
+
     return make_uchar4(r * 255, g * 255, b * 255, 255);
 }
+
 
 __device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
     float x = 0.0f, y = 0.0f;
