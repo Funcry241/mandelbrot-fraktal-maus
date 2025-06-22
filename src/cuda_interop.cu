@@ -130,10 +130,7 @@ void renderCudaFrame(
 
             if (isNewTarget) {
                 state.smoothedTargetOffset = bestOffset;
-                state.smoothedTargetScore = bestScore;
-                state.framesSinceTargetChange = 0;
-            } else {
-                state.framesSinceTargetChange++;
+                state.smoothedTargetScore = bestScore;                
             }
 
             newOffset = state.smoothedTargetOffset;

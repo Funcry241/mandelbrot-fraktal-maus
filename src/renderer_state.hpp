@@ -27,7 +27,6 @@ public:
     // 📌 Auto-Zoom-Ziel (geglättet)
     float2 smoothedTargetOffset = { 0.0f, 0.0f };
     float smoothedTargetScore = -1.0f;
-    int framesSinceTargetChange = 0;
 
     // 📈 FPS und Framezeit zur Anzeige im HUD
     float currentFPS = 0.0f;
