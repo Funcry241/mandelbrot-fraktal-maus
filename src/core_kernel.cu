@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 149
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit throttled Logging – Ausgabe nur bei hoher Entropie und jedem 32. Tile. Schneefuchs: „Ein Fraktal, das flüstert statt schreit.“
+// Zeilen: 159
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit Farbintelligenz – Sinusinterpolation mit Magnitude-Glühen. Debug-Entropie throttled. Schneefuchs: „Das Fraktal tanzt in Farben, wenn man es leise beobachtet.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -14,23 +14,20 @@
 constexpr float ENTROPY_LOG_THRESHOLD = 3.25f;
 constexpr int LOG_TILE_MODULO = 32; // Nur jedes 32. Tile loggen
 
-// Datei: src/core_kernel.cu
-// 🐭 Maus-Kommentar: Neue Farbgebung via Sinus-Modulation – lebendig & kontrastreich. Schneefuchs: „Der Otter sieht jetzt Farben, die er nie geträumt hat.“
+__device__ __forceinline__ uchar4 elegantColor(float normIter, float mag) {
+    if (normIter < 0.0f) return make_uchar4(0, 0, 0, 255);
 
-__device__ __forceinline__ uchar4 elegantColor(float t) {
-    if (t < 0.0f) return make_uchar4(0, 0, 0, 255);
-
-    // Sanfter Übergang über mehrere Farbfrequenzen
-    float intensity = sqrtf(t);
-    float r = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.0f));
-    float g = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.33f));
-    float b = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.66f));
-
+    float glow = expf(-mag * 0.1f);
+    float r = 0.6f + 0.4f * __sinf(3.0f + 5.0f * normIter + mag * 0.05f);
+    float g = 0.5f + 0.5f * __sinf(2.0f + 4.0f * normIter + mag * 0.03f);
+    float b = 0.4f + 0.6f * __sinf(4.0f + 6.0f * normIter + mag * 0.02f);
+    r = my_clamp(r * glow, 0.0f, 1.0f);
+    g = my_clamp(g * glow, 0.0f, 1.0f);
+    b = my_clamp(b * glow, 0.0f, 1.0f);
     return make_uchar4(r * 255, g * 255, b * 255, 255);
 }
 
-
-__device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
+__device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& magOut) {
     float x = 0.0f, y = 0.0f;
     int iter = 0;
     while (x * x + y * y <= 4.0f && iter < maxIter) {
@@ -39,6 +36,7 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
         x = xtemp;
         ++iter;
     }
+    magOut = sqrtf(x * x + y * y);
     return iter;
 }
 
@@ -53,11 +51,18 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     float jx = (x - width / 2.0f) / zoom + offset.x;
     float jy = (y - height / 2.0f) / zoom + offset.y;
 
-    int iter = mandelbrotIterations(jx, jy, maxIterations);
+    float mag = 0.0f;
+    int iter = mandelbrotIterations(jx, jy, maxIterations, mag);
     iterationsOut[y * width + x] = iter;
 
-    float t = (iter == maxIterations) ? -1.0f : (iter + 1.0f - log2f(log2f(x * x + y * y))) / maxIterations;
-    output[y * width + x] = elegantColor(t);
+    float smoothIter = iter;
+    if (iter < maxIterations) {
+        float log_zn = logf(mag * mag) / 2.0f;
+        float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
+        smoothIter = iter + 1.0f - nu;
+    }
+    float normIter = smoothIter / maxIterations;
+    output[y * width + x] = elegantColor(normIter, mag);
 }
 
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
@@ -111,7 +116,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
 
 #if ENABLE_ENTROPY_LOGGING
         if (entropy > ENTROPY_LOG_THRESHOLD && tileIndex % LOG_TILE_MODULO == 0) {
-            printf("[Entropy] Tile (%d,%d) idx %d -> H = %.4f\n", tileX, tileY, tileIndex, entropy);
+            printf("[Entropy] Tile (%d,%d) idx %d -> H = %.4f\\n", tileX, tileY, tileIndex, entropy);
         }
 #endif
     }
@@ -139,7 +144,7 @@ extern "C" void computeTileEntropy(const int* d_iterations,
                                    int tileSize,
                                    int maxIter) {
     if (tileSize <= 0 || width <= 0 || height <= 0 || maxIter <= 0) {
-        std::fprintf(stderr, "[FATAL] computeTileEntropy: Invalid input – tileSize=%d, width=%d, height=%d, maxIter=%d\n",
+        std::fprintf(stderr, "[FATAL] computeTileEntropy: Invalid input – tileSize=%d, width=%d, height=%d, maxIter=%d\\n",
                      tileSize, width, height, maxIter);
         return;
     }
@@ -148,7 +153,7 @@ extern "C" void computeTileEntropy(const int* d_iterations,
     int tilesY = (height + tileSize - 1) / tileSize;
 
     if (tilesX == 0 || tilesY == 0) {
-        std::fprintf(stderr, "[FATAL] computeTileEntropy: tile grid is zero-sized! tilesX=%d, tilesY=%d\n", tilesX, tilesY);
+        std::fprintf(stderr, "[FATAL] computeTileEntropy: tile grid is zero-sized! tilesX=%d, tilesY=%d\\n", tilesX, tilesY);
         return;
     }
 
