@@ -40,8 +40,6 @@ void initResources(RendererState& state) {
     state.lastTileSize = computeTileSizeFromZoom(state.zoom);
     state.setupCudaBuffers();
 
-    glfwSetFramebufferSizeCallback(state.window, framebufferSizeCallback);
-
     if (Settings::debugLogging) {
         std::puts("[DEBUG] initResources() completed");
     }
