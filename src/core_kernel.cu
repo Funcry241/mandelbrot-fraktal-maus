@@ -14,17 +14,36 @@
 constexpr float ENTROPY_LOG_THRESHOLD = 3.25f;
 constexpr int LOG_TILE_MODULO = 32; // Nur jedes 32. Tile loggen
 
-__device__ __forceinline__ uchar4 elegantColor(float normIter, float mag) {
-    if (normIter < 0.0f) return make_uchar4(0, 0, 0, 255);
+__device__ __forceinline__ uchar4 elegantColor(float t, float mag) {
+    if (t < 0.0f) return make_uchar4(0, 0, 0, 255);
 
+    // Farbwinkel rotiert gleichmäßig – kein abruptes Springen
+    float hue = 360.0f * t;
+    float s = 0.9f;
+    float v = 0.8f;
+
+    // HSV → RGB Umrechnung (GPU-geeignet, vereinfacht)
+    int hi = static_cast<int>(hue / 60.0f) % 6;
+    float f = (hue / 60.0f) - hi;
+    float p = v * (1.0f - s);
+    float q = v * (1.0f - f * s);
+    float r = v, g = v, b = v;
+
+    switch (hi) {
+        case 0: r = v; g = q; b = p; break;
+        case 1: r = q; g = v; b = p; break;
+        case 2: r = p; g = v; b = q; break;
+        case 3: r = p; g = q; b = v; break;
+        case 4: r = q; g = p; b = v; break;
+        case 5: r = v; g = p; b = q; break;
+    }
+
+    // Glow beibehalten
     float glow = expf(-mag * 0.1f);
-    float r = 0.6f + 0.4f * __sinf(3.0f + 5.0f * normIter + mag * 0.05f);
-    float g = 0.5f + 0.5f * __sinf(2.0f + 4.0f * normIter + mag * 0.03f);
-    float b = 0.4f + 0.6f * __sinf(4.0f + 6.0f * normIter + mag * 0.02f);
-    r = my_clamp(r * glow, 0.0f, 1.0f);
-    g = my_clamp(g * glow, 0.0f, 1.0f);
-    b = my_clamp(b * glow, 0.0f, 1.0f);
-    return make_uchar4(r * 255, g * 255, b * 255, 255);
+    return make_uchar4(my_clamp(r * glow, 0.0f, 1.0f) * 255,
+                       my_clamp(g * glow, 0.0f, 1.0f) * 255,
+                       my_clamp(b * glow, 0.0f, 1.0f) * 255,
+                       255);
 }
 
 __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& magOut) {
