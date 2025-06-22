@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 78
-// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. Entfernt: ungenutztes `setupBuffers()`. Cleanup durch Destruktor bleibt. Schneefuchs: „Weniger ist mehr – wenn der Code schweigt, wird der Otter klug.“
+// Zeilen: 76
+// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. Callback-Setup jetzt zentral in `createWindow()`. Entfernt: manuelle Doppelregistrierung. Schneefuchs: „Ein Handler pro Ereignis – Otterhirn spart Ressourcen.“
 
 #include "pch.hpp"
 
@@ -35,8 +35,8 @@ void Renderer::initGL() {
         return;
     }
 
-    RendererWindow::setResizeCallback(state.window, this);
-    RendererWindow::setKeyCallback(state.window);
+    // 🧹 Entfernt: doppelte Callback-Registrierung
+    // Callbacks sind bereits vollständig in createWindow(...) gesetzt
 
     RendererPipeline::init();
 

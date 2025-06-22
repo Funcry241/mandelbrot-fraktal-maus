@@ -1,6 +1,6 @@
 // Datei: src/renderer_window.cpp
-// Zeilen: 83
-// 🐭 Maus-Kommentar: GLFW-Initialisierung – Callback-Zuweisung jetzt getrennt & explizit. Kein Überschreiben mehr durch `configureWindowCallbacks`. Schneefuchs: „Nur wer gezielt registriert, verliert nie die Kontrolle.“
+// Zeilen: 66
+// 🐭 Maus-Kommentar: GLFW-Setup jetzt ohne Redundanz – Callback-Zuweisung erfolgt ausschließlich über `configureWindowCallbacks`, aufgerufen in `createWindow()`. Doppelte Registrierungen sind ausgeschlossen. Schneefuchs: „Einer registriert, sonst eskaliert’s.“
 
 #include "pch.hpp"
 #include "renderer_window.hpp"
@@ -33,7 +33,7 @@ GLFWwindow* createGLFWWindow(int width, int height) {
     return window;
 }
 
-// 🔒 Nur intern bei Fenstererstellung – nicht mehr öffentlich verwendet
+// ✅ Zentrale Callback-Registrierung – wird **nur** über createWindow(...) aufgerufen
 void configureWindowCallbacks(GLFWwindow* window, void* userPointer) {
     glfwSetWindowUserPointer(window, userPointer);
 
@@ -50,6 +50,7 @@ void configureWindowCallbacks(GLFWwindow* window, void* userPointer) {
 
 namespace RendererWindow {
 
+// 🟢 Einzige öffentliche Schnittstelle: Erzeugt Fenster und konfiguriert Callbacks
 GLFWwindow* createWindow(int width, int height, Renderer* instance) {
     GLFWwindow* window = RendererInternals::createGLFWWindow(width, height);
     RendererInternals::configureWindowCallbacks(window, instance);
@@ -60,18 +61,8 @@ bool shouldClose(GLFWwindow* window) {
     return glfwWindowShouldClose(window);
 }
 
-void setResizeCallback(GLFWwindow* window, Renderer* instance) {
-    glfwSetWindowUserPointer(window, instance);  // 👈 nötig für `resize`-Lambda
-    glfwSetFramebufferSizeCallback(window, [](GLFWwindow* win, int newW, int newH) {
-        if (auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(win))) {
-            self->resize(newW, newH);
-        }
-    });
-}
-
-void setKeyCallback(GLFWwindow* window) {
-    glfwSetKeyCallback(window, CudaInterop::keyCallback);
-}
+// 🧹 Entfernt: setResizeCallback()
+// 🧹 Entfernt: setKeyCallback()
 
 void destroyWindow(GLFWwindow* window) {
     if (window) {

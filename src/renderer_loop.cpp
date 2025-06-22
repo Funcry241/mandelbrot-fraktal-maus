@@ -12,17 +12,6 @@
 
 namespace RendererLoop {
 
-// 📐 Zoomabhängige, aber stabile Berechnung der Tilegröße
-inline int computeTileSizeFromZoom(float zoom) {
-    float logZ = std::log2f(zoom + 1.0f);  // +1 verhindert log2(0)
-    int dynamicTileSize = static_cast<int>(Settings::BASE_TILE_SIZE + logZ);
-
-    constexpr int MIN_TILE_SIZE = 8;
-    constexpr int MAX_TILE_SIZE = 32;
-
-    return Settings::my_clamp(dynamicTileSize, MIN_TILE_SIZE, MAX_TILE_SIZE);
-}
-
 // 🧵 Callback für Fenstergrößenänderung – löst ein Resize aus
 static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
     using namespace CudaInterop;

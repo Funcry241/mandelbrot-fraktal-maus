@@ -1,6 +1,6 @@
 // Datei: src/renderer_window.hpp
-// Zeilen: 31
-// 🐭 Maus-Kommentar: Header für Fenster- und Kontextverwaltung im Renderer. Jetzt mit getrennter Callback-Registrierung – kein Überschreiben mehr. Schneefuchs: „Ein Ereignis, ein Handler – so bleibt das Rudel stabil.“
+// Zeilen: 27
+// 🐭 Maus-Kommentar: Header für GLFW-Fensterverwaltung – Callback-Registrierung jetzt ausschließlich über `createWindow(...)`. Keine Mehrdeutigkeit, keine Überschreibgefahr. Schneefuchs: „Ein Fenster, eine Regel – keine wilden Handler mehr.“
 
 #pragma once
 
@@ -11,13 +11,12 @@ class Renderer;
 
 namespace RendererWindow {
 
-GLFWwindow* createWindow(int width, int height, Renderer* instance);
+GLFWwindow* createWindow(int width, int height, Renderer* instance);  // 🟢 Erstellt Fenster und konfiguriert alle Callbacks
 bool shouldClose(GLFWwindow* window);
 
-// 🔁 Neu: Callback-Registrierung klar getrennt
-void setResizeCallback(GLFWwindow* window, Renderer* instance);
-void setKeyCallback(GLFWwindow* window);
+void destroyWindow(GLFWwindow* window);  // 🧼 Ressourcen korrekt freigeben
 
-void destroyWindow(GLFWwindow* window);  // 🆕 Fenster korrekt schließen
+// 🧹 Entfernt: setResizeCallback(...)
+// 🧹 Entfernt: setKeyCallback(...)
 
 } // namespace RendererWindow
