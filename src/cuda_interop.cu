@@ -60,6 +60,11 @@ void renderCudaFrame(
     const int numTiles = tilesX * tilesY;
 
     h_entropy.resize(numTiles);
+
+    if (devPtr == nullptr) {
+        std::cerr << "[FATAL] devPtr is null after cudaGraphicsResourceGetMappedPointer!\n";
+        std::exit(EXIT_FAILURE);
+    }
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
     shouldZoom = false;

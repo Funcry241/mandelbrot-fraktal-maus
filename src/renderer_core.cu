@@ -67,9 +67,9 @@ void Renderer::freeDeviceBuffers() {
     state.h_entropy.clear();
 }
 
-void Renderer::resize(int newW, int newH) {    
+void Renderer::resize(int newW, int newH) {
     std::printf("[INFO] Resized to %d x %d\n", newW, newH);
-    state.resize(newW, newH);
+    state.resize(newW, newH);  // ✅ führt vollständiges Reset samt PBO/CUDA durch
 }
 
 void Renderer::cleanup() {
