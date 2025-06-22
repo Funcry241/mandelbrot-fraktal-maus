@@ -1,6 +1,6 @@
 // Datei: src/main.cpp
-// Zeilen: 32
-// 🐭 Maus-Kommentar: Hauptprogramm – Initialisiert Renderer, verknüpft globalRendererState im Namespace CudaInterop korrekt und startet den Renderloop. Schneefuchs bestand darauf, dass globale Zustände sauber im Namensraum leben – nicht anonym herumschwirren wie Otter ohne Teich.
+// Zeilen: 34
+// 🐭 Maus-Kommentar: Hauptprogramm – überprüft jetzt korrekt das Ergebnis von `initGL()`. Schneefuchs bestand darauf: „Wer blind initialisiert, stirbt auch blind.“
 
 #include "pch.hpp"
 
@@ -23,7 +23,11 @@ int main() {
     Renderer renderer(Settings::width, Settings::height);
     CudaInterop::globalRendererState = &renderer.getState();
 
-    renderer.initGL();
+    if (!renderer.initGL()) {
+        std::puts("[FATAL] OpenGL-Initialisierung fehlgeschlagen – Programm wird beendet");
+        return EXIT_FAILURE;
+    }
+
     RendererLoop::initResources(*CudaInterop::globalRendererState);
 
     while (!renderer.shouldClose()) {

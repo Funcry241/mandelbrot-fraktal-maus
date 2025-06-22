@@ -121,11 +121,7 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
 )
 
 set_source_files_properties(
-    src/renderer_core.cu
-    src/renderer_window.cpp
-    src/renderer_pipeline.cpp
-    src/renderer_loop.cpp
-    src/renderer_state.cpp
+    src/renderer_core.cu    
     src/cuda_interop.cu
     src/core_kernel.cu
     PROPERTIES LANGUAGE CUDA

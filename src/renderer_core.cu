@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 76
-// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. Callback-Setup jetzt zentral in `createWindow()`. Entfernt: manuelle Doppelregistrierung. Schneefuchs: „Ein Handler pro Ereignis – Otterhirn spart Ressourcen.“
+// Zeilen: 77
+// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. `initGL()` liefert jetzt korrekt `bool`. Keine stummen Fehler mehr – Otter prüft, bevor er springt. Schneefuchs: „Wer void zurückgibt, gibt auch Verantwortung auf.“
 
 #include "pch.hpp"
 
@@ -21,26 +21,26 @@ Renderer::~Renderer() {
     cleanup();
 }
 
-void Renderer::initGL() {
+bool Renderer::initGL() {
     if (Settings::debugLogging) std::puts("[DEBUG] initGL aufgerufen");
 
     state.window = RendererWindow::createWindow(state.width, state.height, this);
     if (!state.window) {
         std::puts("[ERROR] Fenstererstellung fehlgeschlagen (GLFW)");
-        return;
+        return false;
     }
 
     if (glewInit() != GLEW_OK) {
         std::puts("[ERROR] glewInit() fehlgeschlagen");
-        return;
+        return false;
     }
 
-    // 🧹 Entfernt: doppelte Callback-Registrierung
-    // Callbacks sind bereits vollständig in createWindow(...) gesetzt
+    // ✅ Callbacks wurden bereits in createWindow(...) gesetzt
 
     RendererPipeline::init();
 
     if (Settings::debugLogging) std::puts("[DEBUG] OpenGL-Initialisierung abgeschlossen");
+    return true;
 }
 
 bool Renderer::shouldClose() const {
