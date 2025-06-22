@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 81
-// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. `cleanup()` erfolgt jetzt nur bei erfolgreichem `initGL()` – keine Geisterbefehle mehr bei fehlgeschlagener GL-Init. Schneefuchs: „Wer nicht lebt, soll nicht sterben müssen.“
+// Zeilen: 83
+// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. `cleanup()` erfolgt jetzt nur bei erfolgreichem `initGL()` – keine Geisterbefehle mehr bei fehlgeschlagener GL-Init. `resize()` setzt nun korrekt den OpenGL-Viewport. Schneefuchs: „Wer nicht lebt, soll nicht sterben müssen – und wer malt, soll wissen, wo.“
 
 #include "pch.hpp"
 
@@ -8,14 +8,14 @@
 #include "renderer_window.hpp"
 #include "renderer_pipeline.hpp"
 #include "renderer_state.hpp"
-#include "renderer_loop.hpp"     // 🎯 renderFrame und renderFrame_impl
+#include "renderer_loop.hpp"
 #include "common.hpp"
 #include "settings.hpp"
 #include "hud.hpp"
 #include "cuda_interop.hpp"
 
 Renderer::Renderer(int width, int height)
-    : state(width, height) {}
+    : state(width, height), glInitialized(false) {}
 
 Renderer::~Renderer() {
     if (glInitialized) {
@@ -75,6 +75,9 @@ void Renderer::freeDeviceBuffers() {
 void Renderer::resize(int newW, int newH) {
     std::printf("[INFO] Resized to %d x %d\n", newW, newH);
     state.resize(newW, newH);
+
+    // 🟢 Viewport korrekt setzen – wichtig nach Fenstergröße-Änderung
+    glViewport(0, 0, newW, newH);
 }
 
 void Renderer::cleanup() {

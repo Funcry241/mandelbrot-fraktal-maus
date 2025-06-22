@@ -1,6 +1,4 @@
-// Datei: src/renderer_state.cpp
-// Zeilen: 86
-// 🐭 Maus-Kommentar: Zustand des Renderers – jetzt mit vollem GPU-Resize-Support & stabilisiertem Tile-Matching. Schneefuchs: „Wenn der Otter merkt, dass er schon da ist – hört er auf zu paddeln.“
+// 🐭 Maus-Kommentar: Zustand des Renderers – jetzt mit korrekt initialisierter Zeitbasis. Keine Delta-Geister mehr beim ersten Frame. Schneefuchs: „Wer bei null beginnt, hat schon verloren.“
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -28,7 +26,7 @@ void RendererState::reset() {
     lastTileSize = Settings::BASE_TILE_SIZE;
 
     frameCount = 0;
-    lastTime = 0.0;
+    lastTime = static_cast<float>(glfwGetTime());  // 🟢 Statt 0.0 – echte Zeitbasis!
 }
 
 void RendererState::updateOffsetTarget(float2 newOffset) {
