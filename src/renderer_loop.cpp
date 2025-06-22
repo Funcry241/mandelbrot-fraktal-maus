@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 175
-// 🐭 Maus-Kommentar: Haupt-Frame-Loop mit dynamischem GPU-Resize, geglättetem Auto-Zoom & Texture-Hygiene via Helferfunktion. Jetzt mit kontextsensitiver Ressourcen-Erstellung. Schneefuchs: „Nur wer seinen Ursprung kennt, versteht sein Flackern!“
+// Zeilen: 178
+// 🐭 Maus-Kommentar: Haupt-Frame-Loop mit robustem Fallback für initiale TileSize. Verhindert CUDA-Absturz durch fehlende Erstinitialisierung. Schneefuchs: „Ein Nullwert beim Zoom ist wie ein Otter ohne Wasser – sinnlos gefährlich.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -46,6 +46,9 @@ void initResources(RendererState& state) {
 
     CudaInterop::registerPBO(state.pbo);
     Hud::init();
+
+    // 🛡️ Setze initiale Tilegröße direkt
+    state.lastTileSize = computeTileSizeFromZoom(state.zoom);
     state.setupCudaBuffers();
 
     glfwSetFramebufferSizeCallback(state.window, framebufferSizeCallback);
@@ -68,7 +71,7 @@ void beginFrame(RendererState& state) {
 
 void updateTileSize(RendererState& state) {
     int newSize = computeTileSizeFromZoom(state.zoom);
-    if (newSize != state.lastTileSize) {
+    if (newSize != state.lastTileSize || state.lastTileSize == 0) {
         state.lastTileSize = newSize;
 
         OpenGLUtils::setGLResourceContext("tileSizeChange");
