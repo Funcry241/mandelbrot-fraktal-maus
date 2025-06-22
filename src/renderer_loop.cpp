@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 178
-// 🐭 Maus-Kommentar: Haupt-Frame-Loop mit robustem Fallback für initiale TileSize. Verhindert CUDA-Absturz durch fehlende Erstinitialisierung. Schneefuchs: „Ein Nullwert beim Zoom ist wie ein Otter ohne Wasser – sinnlos gefährlich.“
+// Zeilen: 180
+// 🐭 Maus-Kommentar: Schützt `targetOffset` vor Geisterwerten – Update nur, wenn CUDA ein neues Ziel vorgibt. Schneefuchs: „Otter schwimmt nicht in ungewissem Wasser.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -27,7 +27,6 @@ void initResources(RendererState& state) {
     CudaInterop::registerPBO(state.pbo);
     Hud::init();
 
-    // 🛡️ Setze initiale Tilegröße direkt
     state.lastTileSize = computeTileSizeFromZoom(state.zoom);
     state.setupCudaBuffers();
 
@@ -62,7 +61,7 @@ void updateTileSize(RendererState& state) {
 }
 
 void computeCudaFrame(RendererState& state) {
-    float2 newOffset;
+    float2 newOffset = {};  // ⚠️ defensiv initialisiert
     bool shouldZoom = false;
 
     CudaInterop::renderCudaFrame(
@@ -82,7 +81,10 @@ void computeCudaFrame(RendererState& state) {
     RendererPipeline::updateTexture(state.pbo, state.tex, state.width, state.height);
 
     state.shouldZoom = shouldZoom;
-    state.targetOffset = newOffset;
+
+    if (shouldZoom) {
+        state.targetOffset = newOffset;  // ✅ Nur übernehmen, wenn gültig
+    }
 }
 
 void updateAutoZoom(RendererState& state) {

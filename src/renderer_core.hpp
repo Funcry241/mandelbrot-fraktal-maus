@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.hpp
-// Zeilen: 41
-// 🐭 Maus-Kommentar: Header für das Rendering-Modul. `initGL()` liefert jetzt bool – für verlässliche Fehlererkennung. Schneefuchs: „Wer nicht antwortet, wird auch nicht gefragt.“
+// Zeilen: 44
+// 🐭 Maus-Kommentar: Header für das Rendering-Modul. `initGL()` meldet Erfolg/Fails. Internes Flag `glInitialized` schützt vor destruktivem Leichtsinn. Schneefuchs: „Kein Kontext, kein Cleanup.“
 
 #pragma once
 
@@ -22,7 +22,8 @@ public:
     const RendererState& getState() const { return state; }  // 🆕 nur lesend
 
 private:
-    RendererState state;  // 🔐 jetzt privat, aber via getState() zugänglich
+    RendererState state;   // 🔐 Zugriff nur über getState()
+    bool glInitialized = false;  // 🆕 Cleanup-Schutz für Destruktor
 
     void renderFrame_impl(bool autoZoomEnabled);
     void freeDeviceBuffers();

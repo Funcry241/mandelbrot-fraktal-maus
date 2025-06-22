@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 77
-// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. `initGL()` liefert jetzt korrekt `bool`. Keine stummen Fehler mehr – Otter prüft, bevor er springt. Schneefuchs: „Wer void zurückgibt, gibt auch Verantwortung auf.“
+// Zeilen: 81
+// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. `cleanup()` erfolgt jetzt nur bei erfolgreichem `initGL()` – keine Geisterbefehle mehr bei fehlgeschlagener GL-Init. Schneefuchs: „Wer nicht lebt, soll nicht sterben müssen.“
 
 #include "pch.hpp"
 
@@ -18,7 +18,11 @@ Renderer::Renderer(int width, int height)
     : state(width, height) {}
 
 Renderer::~Renderer() {
-    cleanup();
+    if (glInitialized) {
+        cleanup();  // ✅ Nur wenn GL-Kontext erfolgreich initialisiert wurde
+    } else if (Settings::debugLogging) {
+        std::puts("[DEBUG] cleanup() übersprungen – OpenGL nicht initialisiert");
+    }
 }
 
 bool Renderer::initGL() {
@@ -40,6 +44,7 @@ bool Renderer::initGL() {
     RendererPipeline::init();
 
     if (Settings::debugLogging) std::puts("[DEBUG] OpenGL-Initialisierung abgeschlossen");
+    glInitialized = true;  // 🟢 Flag setzen
     return true;
 }
 
@@ -48,11 +53,11 @@ bool Renderer::shouldClose() const {
 }
 
 void Renderer::renderFrame(bool autoZoomEnabled) {
-    RendererLoop::renderFrame(state, autoZoomEnabled);  // ✅ öffentlich sichtbare Schleife
+    RendererLoop::renderFrame(state, autoZoomEnabled);
 }
 
 void Renderer::renderFrame_impl(bool autoZoomEnabled) {
-    RendererLoop::renderFrame_impl(state, autoZoomEnabled);  // 🔁 interne Schleife bei Bedarf
+    RendererLoop::renderFrame_impl(state, autoZoomEnabled);
 }
 
 void Renderer::freeDeviceBuffers() {
@@ -69,26 +74,21 @@ void Renderer::freeDeviceBuffers() {
 
 void Renderer::resize(int newW, int newH) {
     std::printf("[INFO] Resized to %d x %d\n", newW, newH);
-    state.resize(newW, newH);  // ✅ führt vollständiges Reset samt PBO/CUDA durch
+    state.resize(newW, newH);
 }
 
 void Renderer::cleanup() {
     Hud::cleanup();
     RendererPipeline::cleanup();
 
-    // 🔓 CUDA PBO deregistrieren
     CudaInterop::unregisterPBO();
 
-    // 🧹 OpenGL-Ressourcen löschen
     glDeleteBuffers(1, &state.pbo);
     glDeleteTextures(1, &state.tex);
 
-    // 🪟 Fenster schließen
     RendererWindow::destroyWindow(state.window);
 
-    // 🧠 GPU-Speicher freigeben
     freeDeviceBuffers();
 
-    // 🧼 GLFW abschließen
     glfwTerminate();
 }
