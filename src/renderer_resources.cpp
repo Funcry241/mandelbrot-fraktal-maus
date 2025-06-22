@@ -54,7 +54,7 @@ GLuint createTexture(int width, int height) {
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    std::printf("[DEBUG] OpenGLUtils::createTexture → ID %u (ctx: %s, %dx%d)\n", tex, resourceContext, width, height);
+    std::printf("[DEBUG] OpenGLUtils::createTexture -> ID %u (ctx: %s, %dx%d)\n", tex, resourceContext, width, height);
     return tex;
 }
 
