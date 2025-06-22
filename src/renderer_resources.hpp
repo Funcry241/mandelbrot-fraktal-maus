@@ -1,17 +1,25 @@
 // Datei: src/renderer_resources.hpp
-// Zeilen: 22
-// 🐭 Maus-Kommentar: Stellt OpenGL-Helfer bereit – Erstellung von PBOs und Texturen für das Fraktal-Rendering. Muss in `renderer_resources.cpp` sichtbar sein. Schneefuchs: „Ohne diese Helfer meckert der Linker – wie ein Otter ohne Wasser!“
+// ⏱️ Nach wie vor modularisiert – jetzt mit Kontextsteuerung für Logging
 
 #pragma once
+#ifndef RENDERER_RESOURCES_HPP
+#define RENDERER_RESOURCES_HPP
 
-#include "pch.hpp"
+#ifdef __CUDACC__
+typedef unsigned int GLuint;
+#else
+#include <GL/glew.h>
+#endif
 
 namespace OpenGLUtils {
 
-// 🖼️ Erstellt einen Pixel Buffer Object (PBO) für die CUDA/OpenGL-Interop
-GLuint createPBO(int width, int height);
+// 🔧 Kontext für Logging – z. B. "resize", "init", "tileSizeChange"
+void setGLResourceContext(const char* context);
 
-// 🎨 Erstellt eine OpenGL-Textur zur Darstellung im Shader
+// 🧱 OpenGL-Ressourcen erzeugen
+GLuint createPBO(int width, int height);
 GLuint createTexture(int width, int height);
 
 } // namespace OpenGLUtils
+
+#endif // RENDERER_RESOURCES_HPP

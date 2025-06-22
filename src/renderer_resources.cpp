@@ -12,10 +12,12 @@ namespace OpenGLUtils {
 // 🕵️ Kontext für Logging – z. B. "resize", "init", "tileSizeChange"
 static const char* resourceContext = "unknown";
 
+// 🔧 Kontext setzen für nachfolgende Ressourcen-Erzeugung
 void setGLResourceContext(const char* context) {
-    resourceContext = context;
+    resourceContext = context ? context : "unknown";
 }
 
+// 🧱 Pixel Buffer Object erzeugen
 GLuint createPBO(int width, int height) {
     GLuint pbo = 0;
     glGenBuffers(1, &pbo);
@@ -30,6 +32,7 @@ GLuint createPBO(int width, int height) {
     return pbo;
 }
 
+// 🎨 Textur erzeugen
 GLuint createTexture(int width, int height) {
     GLuint tex = 0;
     glGenTextures(1, &tex);

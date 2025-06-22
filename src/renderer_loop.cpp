@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 150
-// 🐭 Maus-Kommentar: Haupt-Frame-Loop mit dynamischem GPU-Resize, geglättetem Auto-Zoom & Texture-Hygiene via Helferfunktion. Schneefuchs: „Wer PBOs von Hand pflegt, macht sich schmutzig. Nutze deine Werkzeuge!“
+// Zeilen: 160
+// 🐭 Maus-Kommentar: Haupt-Frame-Loop mit dynamischem GPU-Resize, geglättetem Auto-Zoom & Texture-Hygiene via Helferfunktion. Jetzt mit kontextsensitiver Ressourcen-Erstellung. Schneefuchs: „Nur wer seinen Ursprung kennt, versteht sein Flackern!“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -12,10 +12,11 @@
 
 namespace RendererLoop {
 
-// 🧵 Framebuffer-Callback zur Reaktion auf Fenstergröße
+// 🧵 Callback für Fenstergrößenänderung – löst ein Resize aus
 static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
     using namespace CudaInterop;
     if (globalRendererState && width > 0 && height > 0) {
+        OpenGLUtils::setGLResourceContext("resize");
         globalRendererState->resize(width, height);
     }
 }
@@ -28,6 +29,7 @@ void initResources(RendererState& state) {
         return;
     }
 
+    OpenGLUtils::setGLResourceContext("init");
     state.pbo = OpenGLUtils::createPBO(state.width, state.height);
     state.tex = OpenGLUtils::createTexture(state.width, state.height);
 
@@ -57,13 +59,15 @@ void updateTileSize(RendererState& state) {
     int newSize = computeTileSizeFromZoom(state.zoom);
     if (newSize != state.lastTileSize) {
         state.lastTileSize = newSize;
+
+        OpenGLUtils::setGLResourceContext("tileSizeChange");
         state.resize(state.width, state.height);  // 🔁 CUDA/GL Ressourcen korrekt neu
+
         if (Settings::debugLogging) {
             std::printf("[DEBUG] TileSize geändert → Resize auf %dx%d mit tileSize=%d\n", state.width, state.height, newSize);
         }
     }
 }
-
 
 void computeCudaFrame(RendererState& state) {
     float2 newOffset;
