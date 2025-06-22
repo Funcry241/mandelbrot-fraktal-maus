@@ -1,6 +1,6 @@
 <!-- Datei: README.md -->
-<!-- Zeilen: 130 -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 11.2 – ergänzt um `--install`-Anleitung für strukturierte Binary-Ausgabe. Schneefuchs: „Ein Otter wirft nichts einfach irgendwohin – er installiert präzise.“ -->
+<!-- Zeilen: 119 -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 13 – bereinigt um macOS-Fehlinformation und veraltete Submodul-Anweisung. Schneefuchs: „Nur was stimmt, darf auch in der README glänzen.“ -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
@@ -98,22 +98,6 @@ cmake --build --preset linux-build
 cmake --install build/linux --prefix ./dist
 ./dist/bin/mandelbrot_otterdream
 ```
-
----
-
-### 🍏 macOS Build (Experimental)
-
-> Nur auf älteren Macs mit NVIDIA-GPU (CUDA), ansonsten NICHT funktionsfähig
-
-```bash
-brew install cmake glfw glew
-git clone --recurse-submodules https://github.com/Funcry241/otterdream-mandelbrot.git
-cd otterdream-mandelbrot
-cmake --preset macos-default
-cmake --build --preset macos-default
-```
-
-> ⚠️ Hinweis: CUDA wird auf Apple Silicon nicht unterstützt. Das Projekt nutzt keine Metal-Backends.
 
 ---
 
