@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 149
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit throttled Logging – Ausgabe nur bei hoher Entropie und jedem 32. Tile. Schneefuchs: „Ein Fraktal, das flüstert statt schreit.“
+// Zeilen: 151
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit korrekter Farbberechnung – Smooth Coloring nutzt jetzt den finalen Betrag von z statt Pixelkoordinaten. Schneefuchs: „Nur wer den Weg des Z verfolgt, sieht echte Farben.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -14,13 +14,9 @@
 constexpr float ENTROPY_LOG_THRESHOLD = 3.25f;
 constexpr int LOG_TILE_MODULO = 32; // Nur jedes 32. Tile loggen
 
-// Datei: src/core_kernel.cu
-// 🐭 Maus-Kommentar: Neue Farbgebung via Sinus-Modulation – lebendig & kontrastreich. Schneefuchs: „Der Otter sieht jetzt Farben, die er nie geträumt hat.“
-
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     if (t < 0.0f) return make_uchar4(0, 0, 0, 255);
 
-    // Sanfter Übergang über mehrere Farbfrequenzen
     float intensity = sqrtf(t);
     float r = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.0f));
     float g = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.33f));
@@ -29,8 +25,7 @@ __device__ __forceinline__ uchar4 elegantColor(float t) {
     return make_uchar4(r * 255, g * 255, b * 255, 255);
 }
 
-
-__device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
+__device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& finalX, float& finalY) {
     float x = 0.0f, y = 0.0f;
     int iter = 0;
     while (x * x + y * y <= 4.0f && iter < maxIter) {
@@ -39,6 +34,8 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter) {
         x = xtemp;
         ++iter;
     }
+    finalX = x;
+    finalY = y;
     return iter;
 }
 
@@ -53,10 +50,16 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     float jx = (x - width / 2.0f) / zoom + offset.x;
     float jy = (y - height / 2.0f) / zoom + offset.y;
 
-    int iter = mandelbrotIterations(jx, jy, maxIterations);
+    float zx, zy;
+    int iter = mandelbrotIterations(jx, jy, maxIterations, zx, zy);
     iterationsOut[y * width + x] = iter;
 
-    float t = (iter == maxIterations) ? -1.0f : (iter + 1.0f - log2f(log2f(x * x + y * y))) / maxIterations;
+    float t = -1.0f;
+    if (iter < maxIterations) {
+        float norm = zx * zx + zy * zy;
+        t = (iter + 1.0f - log2f(log2f(norm))) / maxIterations;
+    }
+
     output[y * width + x] = elegantColor(t);
 }
 

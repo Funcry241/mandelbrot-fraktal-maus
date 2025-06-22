@@ -12,15 +12,6 @@
 
 namespace RendererLoop {
 
-// 🧵 Callback für Fenstergrößenänderung – löst ein Resize aus
-static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
-    using namespace CudaInterop;
-    if (globalRendererState && width > 0 && height > 0) {
-        OpenGLUtils::setGLResourceContext("resize");
-        globalRendererState->resize(width, height);
-    }
-}
-
 void initResources(RendererState& state) {
     if (state.pbo != 0 || state.tex != 0) {
         if (Settings::debugLogging) {

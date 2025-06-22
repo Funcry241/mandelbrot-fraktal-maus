@@ -12,9 +12,6 @@
 
 namespace RendererLoop {
 
-// 🔧 Forward-Deklaration für Resize-Callback
-static void framebufferSizeCallback(GLFWwindow* window, int width, int height);
-
 // 🆕 Initialisiert OpenGL-, CUDA- und HUD-Ressourcen
 void initResources(RendererState& state);
 
