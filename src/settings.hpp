@@ -29,8 +29,8 @@ inline constexpr float initialOffsetY =  0.0f;    // Anfangsverschiebung auf der
 inline constexpr float ZOOM_STEP_FACTOR = 0.002f; // Erhöhung = schnelleres Zoomen – empfohlen: 0.001 bis 0.01
 
 // 🌟 Schwellenwerte für Entropieanalyse zur Auswahl interessanter Tiles
-inline constexpr float VARIANCE_THRESHOLD     = 1e-12f; // Hauptschwelle für interessante Tiles – je kleiner, desto empfindlicher
-inline constexpr float MIN_VARIANCE_THRESHOLD = 1e-10f; // Notbremse für zu starkes Auto-Zoom – empfohlen: 1e-10 bis 1e-8
+inline constexpr float VARIANCE_THRESHOLD     = 0.01f; // Hauptschwelle für interessante Tiles – je kleiner, desto empfindlicher
+inline constexpr float MIN_VARIANCE_THRESHOLD = 0.001f; // Notbremse für zu starkes Auto-Zoom – empfohlen: 1e-10 bis 1e-8
 
 // 🌀 Geschwindigkeit des automatischen Zooms pro Frame
 inline constexpr float AUTOZOOM_SPEED = 1.005f; // Höher = schnellerer Zoom – empfohlen: 1.002 bis 1.01

@@ -98,7 +98,7 @@ void renderCudaFrame(
 
         static int lastIndex = -1;
         if (Settings::debugLogging && bestIndex != lastIndex) {
-            std::printf("[DEBUG] Zoom = %.6f | Threshold = %.5f\n", zoom, dynamicThreshold);
+            std::printf("[DEBUG] Zoom = %.6f | Threshold = %.8f\n", zoom, dynamicThreshold);
             if (bestIndex >= 0) {
                 std::printf("[DEBUG] Best Tile = %d | Score = %.6f | Entropy = %.6f\n", bestIndex, bestScore, bestEntropy);
             } else {
