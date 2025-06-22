@@ -51,7 +51,7 @@
 // 🔢 Tile-Größe aus Zoom-Level berechnen (weicher Verlauf)
 inline int computeTileSizeFromZoom(float zoom) {
     float raw = 32.0f - std::log2f(zoom + 1.0f);  // weich fallend
-    int clamped = std::max(4, std::min(32, static_cast<int>(std::round(raw))));
+    int clamped = std::max(4, std::min(256, static_cast<int>(std::round(raw))));
     return clamped;
 }
 
