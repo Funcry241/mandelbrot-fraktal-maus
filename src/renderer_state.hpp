@@ -24,10 +24,6 @@ public:
     // 🎯 Zielwert für Auto-Zoom (wird mit LERP angenähert)
     float2 targetOffset;
 
-    // 🧈 Zwischengespeicherte weichgeglättete Werte (smoothed Lerp)
-    float2 smoothedOffset;
-    float smoothedZoom;
-
     // 📌 Auto-Zoom-Ziel (geglättet)
     float2 smoothedTargetOffset = { 0.0f, 0.0f };
     float smoothedTargetScore = -1.0f;
