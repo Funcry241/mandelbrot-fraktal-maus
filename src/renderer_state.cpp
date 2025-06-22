@@ -1,6 +1,6 @@
 // Datei: src/renderer_state.cpp
-// Zeilen: 84
-// 🐭 Maus-Kommentar: Zustand des Renderers – jetzt mit vollem GPU-Resize-Support. Schneefuchs: „Ein Otter muss wachsen, wenn das Wasser steigt.“
+// Zeilen: 86
+// 🐭 Maus-Kommentar: Zustand des Renderers – jetzt mit vollem GPU-Resize-Support & stabilisiertem Tile-Matching. Schneefuchs: „Wenn der Otter merkt, dass er schon da ist – hört er auf zu paddeln.“
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -95,6 +95,9 @@ void RendererState::resize(int newWidth, int newHeight) {
 
     // 🔁 CUDA-Puffer neu allokieren
     setupCudaBuffers();
+
+    // 🔒 TileSize stabilisieren – verhindert Resize-Loop
+    lastTileSize = computeTileSizeFromZoom(zoom);
 
     if (Settings::debugLogging) {
         std::printf("[DEBUG] Resize auf %dx%d abgeschlossen\n", width, height);
