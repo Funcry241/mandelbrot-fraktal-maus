@@ -54,8 +54,3 @@ inline int computeTileSizeFromZoom(float zoom) {
     int clamped = std::max(4, std::min(256, static_cast<int>(std::round(raw))));
     return clamped;
 }
-
-// 🔒 GPU-geeignete Clamp-Funktion (vermeidet <algorithm>)
-__host__ __device__ __forceinline__ float my_clamp(float val, float minVal, float maxVal) {
-    return fminf(fmaxf(val, minVal), maxVal);
-}

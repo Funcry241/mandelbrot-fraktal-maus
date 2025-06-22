@@ -48,7 +48,6 @@ public:
     // 🕒 Frame-Zählung und Zeit für FPS-Berechnung
     int frameCount = 0;
     double lastTime = 0.0;
-    float lastFrameTime = 0.0f;
 
     // 🔁 Auto-Zoom Status
     bool shouldZoom = false;

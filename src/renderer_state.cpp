@@ -29,7 +29,6 @@ void RendererState::reset() {
 
     frameCount = 0;
     lastTime = 0.0;
-    lastFrameTime = 0.0f;
 }
 
 void RendererState::updateOffsetTarget(float2 newOffset) {

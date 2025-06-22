@@ -20,7 +20,6 @@ GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc);
 
 // 🖼️ Fullscreen-Quad-Utilities
 void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO);
-void deleteFullscreenQuad(GLuint* inVAO, GLuint* inVBO, GLuint* inEBO);
 
 } // namespace OpenGLUtils
 

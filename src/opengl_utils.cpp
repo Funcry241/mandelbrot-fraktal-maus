@@ -73,10 +73,4 @@ void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) {
     glBindVertexArray(0);
 }
 
-void deleteFullscreenQuad(GLuint* inVAO, GLuint* inVBO, GLuint* inEBO) {
-    glDeleteBuffers(1, inVBO);
-    glDeleteBuffers(1, inEBO);
-    glDeleteVertexArrays(1, inVAO);
-}
-
 } // namespace OpenGLUtils
