@@ -74,7 +74,7 @@ cd otterdream-mandelbrot
 cmake --preset windows-msvc
 cmake --build --preset windows-msvc
 cmake --install build/windows --prefix ./dist
-.\distin\mandelbrot_otterdream.exe
+.\dist\mandelbrot_otterdream.exe
 ```
 
 > 🛠 Tipp: `build.ps1` ist ein PowerShell-Skript für automatisierten Build & Install

@@ -67,10 +67,9 @@ void Renderer::freeDeviceBuffers() {
     state.h_entropy.clear();
 }
 
-void Renderer::resize(int newW, int newH) {
-    state.width = newW;
-    state.height = newH;
+void Renderer::resize(int newW, int newH) {    
     std::printf("[INFO] Resized to %d x %d\n", newW, newH);
+    state.resize(newW, newH);
 }
 
 void Renderer::cleanup() {
