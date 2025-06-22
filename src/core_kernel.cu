@@ -10,7 +10,7 @@
 #include "core_kernel.h"
 
 // 🔧 Lokale Debug-Schalter (nicht global!)
-#define ENABLE_ENTROPY_LOGGING 1
+#define ENABLE_ENTROPY_LOGGING 0
 constexpr float ENTROPY_LOG_THRESHOLD = 3.25f;
 constexpr int LOG_TILE_MODULO = 32; // Nur jedes 32. Tile loggen
 
