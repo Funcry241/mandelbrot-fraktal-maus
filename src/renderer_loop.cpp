@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 181
-// 🐭 Maus-Kommentar: Schützt `targetOffset` vor Geisterwerten – jetzt mit double-präziser Übergabe an CUDA. Schneefuchs: „Otter schwimmt nicht in ungewissem Wasser – er rechnet mit Tiefe.“
+// Zeilen: 185
+// 🐭 Maus-Kommentar: Schützt `targetOffset` vor Geisterwerten – jetzt mit sanftem Zielwechsel. Schneefuchs: „Ein Ziel muss sich lohnen, sonst bleibt man auf Kurs.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -83,7 +83,14 @@ void computeCudaFrame(RendererState& state) {
     state.shouldZoom = shouldZoom;
 
     if (shouldZoom) {
-        state.targetOffset = newOffset;  // ✅ Nur übernehmen, wenn gültig
+        // 🐭 Sanftes Zielverfolgen: nur übernehmen bei merklichem Unterschied
+        float dx = newOffset.x - state.targetOffset.x;
+        float dy = newOffset.y - state.targetOffset.y;
+        float dist = std::sqrt(dx * dx + dy * dy);
+
+        if (dist > Settings::MIN_JUMP_DISTANCE) {
+            state.targetOffset = newOffset;
+        }
     }
 }
 

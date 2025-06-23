@@ -35,6 +35,10 @@ inline constexpr float MIN_VARIANCE_THRESHOLD = 0.001f; // Notbremse für zu sta
 // 🌀 Geschwindigkeit des automatischen Zooms pro Frame
 inline constexpr float AUTOZOOM_SPEED = 1.005f; // Höher = schnellerer Zoom – empfohlen: 1.002 bis 1.01
 
+// Minimaler Abstand (in Fraktalkoordinaten) für Zielwechsel bei Auto-Zoom
+// Empfehlung: 0.0001 bis 0.01 je nach Zoomstufe – kleiner = empfindlicher, größer = träger
+inline constexpr float MIN_JUMP_DISTANCE = 0.001f;
+
 // 🪎 Glättungsfaktor für Kamera-Nachführung zum Ziel (linearer LERP)
 // Kleiner = langsameres Nachziehen, größer = schneller & unruhiger
 inline constexpr float LERP_FACTOR = 0.035f;  // empfohlen: 0.01 bis 0.08
