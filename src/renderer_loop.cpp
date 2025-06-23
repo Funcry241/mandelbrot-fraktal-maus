@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
 // Zeilen: 185
-// 🐭 Maus-Kommentar: Schützt `targetOffset` vor Geisterwerten – jetzt mit sanftem Zielwechsel. Schneefuchs: „Ein Ziel muss sich lohnen, sonst bleibt man auf Kurs.“
+// 🐭 Maus-Kommentar: Sanftes, zoom-skalierbares Zielsystem – jetzt wechselt der Otter das Ziel auch bei winzigen Fraktalverschiebungen im tiefsten Zoom. Schneefuchs: „Große Würfe erkennt man auch am leisesten Zucken.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -83,14 +83,20 @@ void computeCudaFrame(RendererState& state) {
     state.shouldZoom = shouldZoom;
 
     if (shouldZoom) {
-        // 🐭 Sanftes Zielverfolgen: nur übernehmen bei merklichem Unterschied
-        float dx = newOffset.x - state.targetOffset.x;
-        float dy = newOffset.y - state.targetOffset.y;
-        float dist = std::sqrt(dx * dx + dy * dy);
+        double dx = static_cast<double>(newOffset.x) - state.targetOffset.x;
+        double dy = static_cast<double>(newOffset.y) - state.targetOffset.y;
+        double dist = std::sqrt(dx * dx + dy * dy);
 
-        float minJump = Settings::MIN_JUMP_DISTANCE / static_cast<float>(state.zoom);
-        if (dist > minJump) {   
-            state.targetOffset = newOffset;
+        double dynamicJumpThreshold = Settings::MIN_JUMP_DISTANCE / state.zoom;
+        if (dist > dynamicJumpThreshold) {
+            state.updateOffsetTarget(newOffset);
+            if (Settings::debugLogging) {
+                std::printf("[DEBUG] Target updated | Δ=%.3e > threshold=%.3e\n", dist, dynamicJumpThreshold);
+            }
+        } else {
+            if (Settings::debugLogging) {
+                std::printf("[DEBUG] Target ignored | Δ=%.3e <= threshold=%.3e\n", dist, dynamicJumpThreshold);
+            }
         }
     }
 }
