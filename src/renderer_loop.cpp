@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 180
-// 🐭 Maus-Kommentar: Schützt `targetOffset` vor Geisterwerten – Update nur, wenn CUDA ein neues Ziel vorgibt. Schneefuchs: „Otter schwimmt nicht in ungewissem Wasser.“
+// Zeilen: 181
+// 🐭 Maus-Kommentar: Schützt `targetOffset` vor Geisterwerten – jetzt mit double-präziser Übergabe an CUDA. Schneefuchs: „Otter schwimmt nicht in ungewissem Wasser – er rechnet mit Tiefe.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -69,8 +69,8 @@ void computeCudaFrame(RendererState& state) {
         state.d_entropy,
         state.width,
         state.height,
-        state.zoom,
-        state.offset,
+        static_cast<double>(state.zoom),                         // ✅ double statt float
+        make_double2(state.offset.x, state.offset.y),            // ✅ double2 statt float2
         state.maxIterations,
         state.h_entropy,
         newOffset,
@@ -98,8 +98,8 @@ void updateAutoZoom(RendererState& state) {
     state.zoom *= Settings::AUTOZOOM_SPEED;
 
     float2 delta = {
-        state.targetOffset.x - state.offset.x,
-        state.targetOffset.y - state.offset.y
+        state.targetOffset.x - static_cast<float>(state.offset.x),
+        state.targetOffset.y - static_cast<float>(state.offset.y)
     };
 
     float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);

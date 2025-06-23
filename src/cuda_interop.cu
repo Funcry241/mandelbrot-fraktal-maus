@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 207
-// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop für PBO-Mapping & Fraktalberechnung. Jetzt mit geglätteter Zielverfolgung (`smoothedTargetOffset`) – kein Zucken mehr! Schneefuchs: „Ein guter Otter verfolgt nur ein Ziel – aber mit Anstand.“
+// Zeilen: 208
+// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop – jetzt mit doppelter Genauigkeit bei Zoom & Offset für stabile Navigation. Float bleibt im Kernel. Schneefuchs: „Nur wer präzise zielt, braucht nicht zu rudern.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
@@ -34,8 +34,8 @@ void renderCudaFrame(
     float* d_entropy,
     int width,
     int height,
-    float zoom,
-    float2 offset,
+    double zoom,
+    double2 offset,
     int maxIterations,
     std::vector<float>& h_entropy,
     float2& newOffset,
@@ -52,7 +52,11 @@ void renderCudaFrame(
     size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
-    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations);
+    // 🔄 Übergabe intern als float (GPU bleibt in Single Precision)
+    float zoom_f = static_cast<float>(zoom);
+    float2 offset_f = make_float2(static_cast<float>(offset.x), static_cast<float>(offset.y));
+
+    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom_f, offset_f, maxIterations);
     computeTileEntropy(d_iterations, d_entropy, width, height, tileSize, maxIterations);
 
     const int tilesX = (width + tileSize - 1) / tileSize;
@@ -70,9 +74,9 @@ void renderCudaFrame(
     shouldZoom = false;
 
     if (!pauseZoom) {
-        const float dynamicThreshold = std::max(Settings::VARIANCE_THRESHOLD / std::log2(zoom + 2.0f), Settings::MIN_VARIANCE_THRESHOLD);
+        const float dynamicThreshold = std::max(Settings::VARIANCE_THRESHOLD / std::log2(zoom_f + 2.0f), Settings::MIN_VARIANCE_THRESHOLD);
 
-        float2 bestOffset = offset;
+        float2 bestOffset = offset_f;
         float bestEntropy = 0.0f;
         float bestScore = -1.0f;
         int bestIndex = -1;
@@ -85,11 +89,11 @@ void renderCudaFrame(
             float centerY = (by + 0.5f) * tileSize;
 
             float2 tileCenter = {
-                (centerX - width  / 2.0f) / zoom + offset.x,
-                (centerY - height / 2.0f) / zoom + offset.y
+                (centerX - width  / 2.0f) / zoom_f + offset_f.x,
+                (centerY - height / 2.0f) / zoom_f + offset_f.y
             };
 
-            float2 delta = { tileCenter.x - offset.x, tileCenter.y - offset.y };
+            float2 delta = { tileCenter.x - offset_f.x, tileCenter.y - offset_f.y };
             float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
             float score = h_entropy[i] / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist);
 
@@ -103,7 +107,7 @@ void renderCudaFrame(
 
         static int lastIndex = -1;
         if (Settings::debugLogging && bestIndex != lastIndex) {
-            std::printf("[DEBUG] Zoom = %.6f | Threshold = %.8f\n", zoom, dynamicThreshold);
+            std::printf("[DEBUG] Zoom = %.6f | Threshold = %.8f\n", zoom_f, dynamicThreshold);
             if (bestIndex >= 0) {
                 std::printf("[DEBUG] Best Tile = %d | Score = %.6f | Entropy = %.6f\n", bestIndex, bestScore, bestEntropy);
             } else {
@@ -113,7 +117,6 @@ void renderCudaFrame(
         }
 
         if (bestIndex >= 0) {
-            // Zugriff auf RendererState
             extern RendererState* globalRendererState;
             auto& state = *globalRendererState;
 

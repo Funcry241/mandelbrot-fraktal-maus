@@ -1,4 +1,6 @@
-// 🐭 Maus-Kommentar: Zustand des Renderers – jetzt mit korrekt initialisierter Zeitbasis. Keine Delta-Geister mehr beim ersten Frame. Schneefuchs: „Wer bei null beginnt, hat schon verloren.“
+// Datei: src/renderer_state.cpp
+// Zeilen: 86
+// 🐭 Maus-Kommentar: Zustand des Renderers – jetzt mit double-präzisem Zoomsystem für tiefes Fraktal-Tauchen. Schneefuchs: „Nur wer doppelt sieht, erkennt die Wahrheit.“
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -13,20 +15,20 @@ RendererState::RendererState(int w, int h)
 }
 
 void RendererState::reset() {
-    zoom = Settings::initialZoom;
-    offset = { Settings::initialOffsetX, Settings::initialOffsetY };
+    zoom = static_cast<double>(Settings::initialZoom);
+    offset = { static_cast<double>(Settings::initialOffsetX), static_cast<double>(Settings::initialOffsetY) };
 
     baseIterations = Settings::INITIAL_ITERATIONS;
     maxIterations = Settings::MAX_ITERATIONS_CAP;
 
-    targetOffset = offset;
+    targetOffset = make_float2(static_cast<float>(offset.x), static_cast<float>(offset.y));
 
     currentFPS = 0.0f;
     deltaTime = 0.0f;
     lastTileSize = Settings::BASE_TILE_SIZE;
 
     frameCount = 0;
-    lastTime = static_cast<float>(glfwGetTime());  // 🟢 Statt 0.0 – echte Zeitbasis!
+    lastTime = glfwGetTime();  // 🔄 Präzise als double speichern
 }
 
 void RendererState::updateOffsetTarget(float2 newOffset) {
@@ -34,8 +36,8 @@ void RendererState::updateOffsetTarget(float2 newOffset) {
 }
 
 void RendererState::adaptIterationCount() {
-    float logZoom = std::log10(zoom);
-    maxIterations = static_cast<int>(baseIterations + logZoom * 200.0f);
+    double logZoom = std::log10(zoom);
+    maxIterations = static_cast<int>(baseIterations + logZoom * 200.0);
     maxIterations = std::min(maxIterations, Settings::MAX_ITERATIONS_CAP);
 }
 
@@ -91,7 +93,7 @@ void RendererState::resize(int newWidth, int newHeight) {
     setupCudaBuffers();
 
     // 🔒 TileSize stabilisieren – verhindert Resize-Loop
-    lastTileSize = computeTileSizeFromZoom(zoom);
+    lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
 
     if (Settings::debugLogging) {
         std::printf("[DEBUG] Resize auf %dx%d abgeschlossen\n", width, height);

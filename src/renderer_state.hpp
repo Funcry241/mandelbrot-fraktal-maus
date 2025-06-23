@@ -1,6 +1,6 @@
 // Datei: src/renderer_state.hpp
 // Zeilen: 75
-// 🐭 Maus-Kommentar: Der Status des Renderers – jetzt mit stabilisiertem Zielsystem (`smoothedTargetOffset`) und dynamischem GPU-Resize. Schneefuchs: „Nur wer seine Form anpasst, bleibt im Fraktal.“
+// 🐭 Maus-Kommentar: Der Status des Renderers – jetzt mit double-präzisem Zoom & Offset für präzise Navigation. Float bleibt intern GPU-seitig – maximal effizient. Schneefuchs: „Präzision ist die Höflichkeit der Tiefensucher.“
 
 #pragma once
 
@@ -13,9 +13,9 @@ public:
     int height;
     GLFWwindow* window = nullptr;  // 🔲 OpenGL-Fensterhandle
 
-    // 🔍 Aktueller Zoom & Bildverschiebung
-    float zoom;
-    float2 offset;
+    // 🔍 Aktueller Zoom & Bildverschiebung (jetzt double für Präzision)
+    double zoom;
+    double2 offset;
 
     // 🧮 Iterationsparameter (für progressive Darstellung)
     int baseIterations;
