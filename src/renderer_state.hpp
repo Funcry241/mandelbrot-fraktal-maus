@@ -1,5 +1,5 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 75
+// Zeilen: 77
 // 🐭 Maus-Kommentar: Der Status des Renderers – jetzt mit double-präzisem Zoom & Offset für präzise Navigation. Float bleibt intern GPU-seitig – maximal effizient. Schneefuchs: „Präzision ist die Höflichkeit der Tiefensucher.“
 
 #pragma once
@@ -23,8 +23,9 @@ public:
 
     // 🎯 Zielwert für Auto-Zoom (wird mit LERP angenähert)
     float2 targetOffset;
+    double2 filteredTargetOffset = { 0.0, 0.0 };  // 🎯 Double-präzises geglättetes Ziel
 
-    // 📌 Auto-Zoom-Ziel (geglättet)
+    // 📌 Auto-Zoom-Ziel (geglättet über CUDA-Auswertung)
     float2 smoothedTargetOffset = { 0.0f, 0.0f };
     float smoothedTargetScore = -1.0f;
 

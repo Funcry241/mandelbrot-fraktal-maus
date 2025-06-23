@@ -1,6 +1,6 @@
 // Datei: src/renderer_state.cpp
-// Zeilen: 86
-// 🐭 Maus-Kommentar: Zustand des Renderers – jetzt mit double-präzisem Zoomsystem für tiefes Fraktal-Tauchen. Schneefuchs: „Nur wer doppelt sieht, erkennt die Wahrheit.“
+// Zeilen: 91
+// 🐭 Maus-Kommentar: Zustand des Renderers – jetzt mit geglättetem Ziel per EMA. `filteredTargetOffset` puffert sanft. Schneefuchs: „Ein Otter schlägt nicht abrupt den Kurs – er lässt Strömung zu.“
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -22,6 +22,7 @@ void RendererState::reset() {
     maxIterations = Settings::MAX_ITERATIONS_CAP;
 
     targetOffset = make_float2(static_cast<float>(offset.x), static_cast<float>(offset.y));
+    filteredTargetOffset = { offset.x, offset.y };  // 🆕 EMA-Initialisierung
 
     currentFPS = 0.0f;
     deltaTime = 0.0f;
@@ -32,7 +33,17 @@ void RendererState::reset() {
 }
 
 void RendererState::updateOffsetTarget(float2 newOffset) {
-    targetOffset = newOffset;
+    constexpr double alpha = 0.2;  // 🧮 Glättungsfaktor: kleiner = langsamer, weicher
+
+    // 💧 Exponentieller Filter auf double-Basis
+    filteredTargetOffset.x = (1.0 - alpha) * filteredTargetOffset.x + alpha * static_cast<double>(newOffset.x);
+    filteredTargetOffset.y = (1.0 - alpha) * filteredTargetOffset.y + alpha * static_cast<double>(newOffset.y);
+
+    // ⛵ Zielposition für Kamera: weich verfolgt
+    targetOffset = make_float2(
+        static_cast<float>(filteredTargetOffset.x),
+        static_cast<float>(filteredTargetOffset.y)
+    );
 }
 
 void RendererState::adaptIterationCount() {
