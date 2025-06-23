@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 208
-// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop – jetzt mit doppelter Genauigkeit bei Zoom & Offset für stabile Navigation. Float bleibt im Kernel. Schneefuchs: „Nur wer präzise zielt, braucht nicht zu rudern.“
+// Zeilen: 212
+// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop – jetzt mit sicherem Zoom-Ziel: newOffset wird nur gesetzt, wenn gültig. Float bleibt im Kernel. Schneefuchs: „Ein Otter zoomt nicht ins Leere – er prüft zuerst das Wasser.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
@@ -133,7 +133,7 @@ void renderCudaFrame(
 
             if (isNewTarget) {
                 state.smoothedTargetOffset = bestOffset;
-                state.smoothedTargetScore = bestScore;                
+                state.smoothedTargetScore = bestScore;
             }
 
             newOffset = state.smoothedTargetOffset;
