@@ -88,7 +88,8 @@ void computeCudaFrame(RendererState& state) {
         float dy = newOffset.y - state.targetOffset.y;
         float dist = std::sqrt(dx * dx + dy * dy);
 
-        if (dist > Settings::MIN_JUMP_DISTANCE) {
+        float minJump = Settings::MIN_JUMP_DISTANCE / static_cast<float>(state.zoom);
+        if (dist > minJump) {   
             state.targetOffset = newOffset;
         }
     }
