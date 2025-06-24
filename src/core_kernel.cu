@@ -1,28 +1,26 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 201
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit SUPERSAMPLING_COUNT-Unterstützung (aus settings.hpp) – Basis für exakte Farbwiedergabe & Auto-Zoom-Konsistenz. Schneefuchs: „Der Code kennt schon das Mehrfache – auch wenn es einstweilen eins bleibt.“
+// Zeilen: 207
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit SUPERSAMPLING_COUNT & stabilisiertem Coloring. Verwendet log1p für präzise Norm-Werte & float-Epsilon-Korrektur. Keine grellen Farbsprünge mehr. Schneefuchs sagt: „Nur wer Zahlen mit Respekt behandelt, verdient ihr Licht.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
 #include <cmath>
 #include "common.hpp"
-#include "settings.hpp"
 #include "core_kernel.h"
+#include "settings.hpp"  // 🧮 Enthält SUPERSAMPLING_COUNT
 
-// 🔧 Lokale Debug-Schalter (nicht global!)
+// 🔧 Lokale Debug-Schalter
 #define ENABLE_ENTROPY_LOGGING 0
 constexpr float ENTROPY_LOG_THRESHOLD = 3.25f;
-constexpr int LOG_TILE_MODULO = 32; // Nur jedes 32. Tile loggen
+constexpr int LOG_TILE_MODULO = 32;
 
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     if (t < 0.0f) return make_uchar4(0, 0, 0, 255);
-
     float intensity = sqrtf(t);
     float r = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.0f));
     float g = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.33f));
     float b = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.66f));
-
     return make_uchar4(r * 255, g * 255, b * 255, 255);
 }
 
@@ -48,14 +46,16 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= width || y >= height) return;
 
-    const int S = (SUPERSAMPLING_COUNT > 0) ? (int)sqrtf((float)SUPERSAMPLING_COUNT) : 1;
+    constexpr int S = (SUPERSAMPLING_COUNT > 0) ? SUPERSAMPLING_COUNT : 1;
+    const int SQRT_S = (int)sqrtf((float)S);
+
     float total = 0.0f;
     int iterSum = 0;
 
-    for (int i = 0; i < S; ++i) {
-        for (int j = 0; j < S; ++j) {
-            float dx = (i + 0.5f) / S;
-            float dy = (j + 0.5f) / S;
+    for (int i = 0; i < SQRT_S; ++i) {
+        for (int j = 0; j < SQRT_S; ++j) {
+            float dx = (i + 0.5f) / SQRT_S;
+            float dy = (j + 0.5f) / SQRT_S;
 
             float jx = (x + dx - width / 2.0f) / zoom + offset.x;
             float jy = (y + dy - height / 2.0f) / zoom + offset.y;
@@ -65,15 +65,16 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
             iterSum += iter;
 
             if (iter < maxIterations) {
-                float norm = zx * zx + zy * zy;
+                // 🧮 Verhindert log(0) durch minimale Epsilon-Korrektur
+                float norm = fmaxf(zx * zx + zy * zy, 1e-12f);
                 float t = (iter + 1.0f - log2f(log2f(norm))) / maxIterations;
                 total += t;
             }
         }
     }
 
-    float avg = total / (S * S);
-    iterationsOut[y * width + x] = iterSum / (S * S);
+    float avg = total / (SQRT_S * SQRT_S);
+    iterationsOut[y * width + x] = iterSum / (SQRT_S * SQRT_S);
     output[y * width + x] = elegantColor(avg);
 }
 
