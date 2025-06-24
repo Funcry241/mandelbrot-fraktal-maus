@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 205
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit echtem 4×4 Supersampling (16 Subpixel, fest). Kein Jitter, dafür perfekte Farbtreue & Entropie-Konsistenz. Smooth Coloring nutzt finalen Betrag. Schneefuchs: „Sechzehn Augen sehen mehr als eines – solange sie sich einig sind.“
+// Zeilen: 211
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit stabilisierter Supersampling-Farbmittelung – nutzt nur gültige Escape-Punkte für Farbberechnung. Kein Grün-Drift mehr! Schneefuchs: „Nur wer das Ende kennt, darf mit Farbe reden.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -48,6 +48,7 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
 
     constexpr int S = 4;  // 4x4 Supersampling
     float totalColor = 0.0f;
+    int validSamples = 0;
     int totalIter = 0;
 
     for (int i = 0; i < S; ++i) {
@@ -66,11 +67,12 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                 float norm = zx * zx + zy * zy;
                 float t = (iter + 1.0f - log2f(log2f(norm))) / maxIterations;
                 totalColor += t;
+                ++validSamples;
             }
         }
     }
 
-    float avgColor = totalColor / (S * S);
+    float avgColor = (validSamples > 0) ? (totalColor / validSamples) : -1.0f;
     int avgIter = totalIter / (S * S);
     output[y * width + x] = elegantColor(avgColor);
     iterationsOut[y * width + x] = avgIter;
