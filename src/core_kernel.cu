@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 207
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit SUPERSAMPLING_COUNT & stabilisiertem Coloring. Verwendet log1p für präzise Norm-Werte & float-Epsilon-Korrektur. Keine grellen Farbsprünge mehr. Schneefuchs sagt: „Nur wer Zahlen mit Respekt behandelt, verdient ihr Licht.“
+// Zeilen: 205
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit echtem 4×4 Supersampling (16 Subpixel, fest). Kein Jitter, dafür perfekte Farbtreue & Entropie-Konsistenz. Smooth Coloring nutzt finalen Betrag. Schneefuchs: „Sechzehn Augen sehen mehr als eines – solange sie sich einig sind.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -8,7 +8,7 @@
 #include <cmath>
 #include "common.hpp"
 #include "core_kernel.h"
-#include "settings.hpp"  // 🧮 Enthält SUPERSAMPLING_COUNT
+#include "settings.hpp"  // Enthält globale Parameter, falls nötig
 
 // 🔧 Lokale Debug-Schalter
 #define ENABLE_ENTROPY_LOGGING 0
@@ -46,36 +46,34 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= width || y >= height) return;
 
-    constexpr int S = (SUPERSAMPLING_COUNT > 0) ? SUPERSAMPLING_COUNT : 1;
-    const int SQRT_S = (int)sqrtf((float)S);
+    constexpr int S = 4;  // 4x4 Supersampling
+    float totalColor = 0.0f;
+    int totalIter = 0;
 
-    float total = 0.0f;
-    int iterSum = 0;
-
-    for (int i = 0; i < SQRT_S; ++i) {
-        for (int j = 0; j < SQRT_S; ++j) {
-            float dx = (i + 0.5f) / SQRT_S;
-            float dy = (j + 0.5f) / SQRT_S;
+    for (int i = 0; i < S; ++i) {
+        for (int j = 0; j < S; ++j) {
+            float dx = (i + 0.5f) / S;
+            float dy = (j + 0.5f) / S;
 
             float jx = (x + dx - width / 2.0f) / zoom + offset.x;
             float jy = (y + dy - height / 2.0f) / zoom + offset.y;
 
             float zx, zy;
             int iter = mandelbrotIterations(jx, jy, maxIterations, zx, zy);
-            iterSum += iter;
+            totalIter += iter;
 
             if (iter < maxIterations) {
-                // 🧮 Verhindert log(0) durch minimale Epsilon-Korrektur
-                float norm = fmaxf(zx * zx + zy * zy, 1e-12f);
+                float norm = zx * zx + zy * zy;
                 float t = (iter + 1.0f - log2f(log2f(norm))) / maxIterations;
-                total += t;
+                totalColor += t;
             }
         }
     }
 
-    float avg = total / (SQRT_S * SQRT_S);
-    iterationsOut[y * width + x] = iterSum / (SQRT_S * SQRT_S);
-    output[y * width + x] = elegantColor(avg);
+    float avgColor = totalColor / (S * S);
+    int avgIter = totalIter / (S * S);
+    output[y * width + x] = elegantColor(avgColor);
+    iterationsOut[y * width + x] = avgIter;
 }
 
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
