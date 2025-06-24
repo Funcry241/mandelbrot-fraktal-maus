@@ -10,6 +10,11 @@
 
 namespace Settings {
 
+// 🧪 Anzahl Samples pro Pixel (1 = kein Supersampling, 4 = 2×2, 16 = 4×4)
+// Datei: settings.hpp (Ziel: CUDA-kompatibel)
+// 🐭 Hinweis: Muss als Makro definiert werden, sonst sieht NVCC es nicht!
+#define SUPERSAMPLING_COUNT 1
+
 // 🔍 Debug-Modi: visuelle Darstellung & Konsolen-Ausgabe aktivieren
 inline constexpr bool debugGradient = false; // Aktiviert reine Entropie-Ansicht (keine Farben) – nur zu Analysezwecken
 inline constexpr bool debugLogging  = false;  // Aktiviert Konsolenausgaben für Auto-Zoom, Tile-Entropie etc.

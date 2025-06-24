@@ -1,12 +1,13 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 151
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit korrekter Farbberechnung – Smooth Coloring nutzt jetzt den finalen Betrag von z statt Pixelkoordinaten. Schneefuchs: „Nur wer den Weg des Z verfolgt, sieht echte Farben.“
+// Zeilen: 201
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit SUPERSAMPLING_COUNT-Unterstützung (aus settings.hpp) – Basis für exakte Farbwiedergabe & Auto-Zoom-Konsistenz. Schneefuchs: „Der Code kennt schon das Mehrfache – auch wenn es einstweilen eins bleibt.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
 #include <cmath>
 #include "common.hpp"
+#include "settings.hpp"
 #include "core_kernel.h"
 
 // 🔧 Lokale Debug-Schalter (nicht global!)
@@ -47,20 +48,33 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= width || y >= height) return;
 
-    float jx = (x - width / 2.0f) / zoom + offset.x;
-    float jy = (y - height / 2.0f) / zoom + offset.y;
+    const int S = (SUPERSAMPLING_COUNT > 0) ? (int)sqrtf((float)SUPERSAMPLING_COUNT) : 1;
+    float total = 0.0f;
+    int iterSum = 0;
 
-    float zx, zy;
-    int iter = mandelbrotIterations(jx, jy, maxIterations, zx, zy);
-    iterationsOut[y * width + x] = iter;
+    for (int i = 0; i < S; ++i) {
+        for (int j = 0; j < S; ++j) {
+            float dx = (i + 0.5f) / S;
+            float dy = (j + 0.5f) / S;
 
-    float t = -1.0f;
-    if (iter < maxIterations) {
-        float norm = zx * zx + zy * zy;
-        t = (iter + 1.0f - log2f(log2f(norm))) / maxIterations;
+            float jx = (x + dx - width / 2.0f) / zoom + offset.x;
+            float jy = (y + dy - height / 2.0f) / zoom + offset.y;
+
+            float zx, zy;
+            int iter = mandelbrotIterations(jx, jy, maxIterations, zx, zy);
+            iterSum += iter;
+
+            if (iter < maxIterations) {
+                float norm = zx * zx + zy * zy;
+                float t = (iter + 1.0f - log2f(log2f(norm))) / maxIterations;
+                total += t;
+            }
+        }
     }
 
-    output[y * width + x] = elegantColor(t);
+    float avg = total / (S * S);
+    iterationsOut[y * width + x] = iterSum / (S * S);
+    output[y * width + x] = elegantColor(avg);
 }
 
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
