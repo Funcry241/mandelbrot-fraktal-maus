@@ -81,6 +81,12 @@ void renderCudaFrame(
         float bestScore = -1.0f;
         int bestIndex = -1;
 
+// Datei: src/cuda_interop.cu
+// Zeilen: 214
+// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop – mit Auto-Zoom-Patch D.1: Zielscore wird jetzt sanft mit log(Zoom)-Faktor geschärft, damit das System auch bei tiefem Zoom weiterzieht. Schneefuchs: „Der Blick wird schärfer, je tiefer man taucht.“
+
+// … (unverändert bis zur Schleife über numTiles)
+
         for (int i = 0; i < numTiles; ++i) {
             int bx = i % tilesX;
             int by = i / tilesX;
@@ -95,7 +101,10 @@ void renderCudaFrame(
 
             float2 delta = { tileCenter.x - offset_f.x, tileCenter.y - offset_f.y };
             float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-            float score = h_entropy[i] / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist);
+
+            // 🧠 Patch D.1 – Zoom-basierte Verstärkung
+            float sharpening = log2f(zoom_f + 2.0f);
+            float score = (h_entropy[i] / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist)) * sharpening;
 
             if (h_entropy[i] > dynamicThreshold && score > bestScore) {
                 bestScore = score;
