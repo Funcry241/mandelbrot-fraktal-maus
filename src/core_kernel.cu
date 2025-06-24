@@ -46,7 +46,7 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= width || y >= height) return;
 
-    constexpr int S = 4;  // 4x4 Supersampling
+    constexpr int S = SUPERSAMPLING_COUNT;
     float totalColor = 0.0f;
     int validSamples = 0;
     int totalIter = 0;
