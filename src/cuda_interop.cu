@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 212
-// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop – jetzt mit sicherem Zoom-Ziel: newOffset wird nur gesetzt, wenn gültig. Float bleibt im Kernel. Schneefuchs: „Ein Otter zoomt nicht ins Leere – er prüft zuerst das Wasser.“
+// Zeilen: 232
+// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop – mit Auto-Zoom-Patch D.2: Zusätzlich zum Zoom-Score wird jetzt eine Watchdog-Analyse bei Zoom-Blockade durchgeführt. Loggt nur dann, wenn relevante Entropie vorliegt, aber kein Zoom erfolgt. Schneefuchs: „Wenn du nicht mehr weiterweißt, frag zuerst, ob du noch etwas siehst.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
@@ -52,7 +52,6 @@ void renderCudaFrame(
     size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
-    // 🔄 Übergabe intern als float (GPU bleibt in Single Precision)
     float zoom_f = static_cast<float>(zoom);
     float2 offset_f = make_float2(static_cast<float>(offset.x), static_cast<float>(offset.y));
 
@@ -81,15 +80,9 @@ void renderCudaFrame(
         float bestScore = -1.0f;
         int bestIndex = -1;
 
-// Datei: src/cuda_interop.cu
-// Zeilen: 214
-// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop – mit Auto-Zoom-Patch D.1: Zielscore wird jetzt sanft mit log(Zoom)-Faktor geschärft, damit das System auch bei tiefem Zoom weiterzieht. Schneefuchs: „Der Blick wird schärfer, je tiefer man taucht.“
-
-// … (unverändert bis zur Schleife über numTiles)
-
         for (int i = 0; i < numTiles; ++i) {
             int bx = i % tilesX;
-            int by = i / tilesX;
+            int by = i / tileSize;
 
             float centerX = (bx + 0.5f) * tileSize;
             float centerY = (by + 0.5f) * tileSize;
@@ -102,8 +95,7 @@ void renderCudaFrame(
             float2 delta = { tileCenter.x - offset_f.x, tileCenter.y - offset_f.y };
             float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
 
-            // 🧠 Patch D.1 – Zoom-basierte Verstärkung
-            float sharpening = log2f(zoom_f + 2.0f);
+            float sharpening = log2f(zoom_f + 2.0f);  // 🧠 Patch D.1: Verstärkung bei hohem Zoom
             float score = (h_entropy[i] / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist)) * sharpening;
 
             if (h_entropy[i] > dynamicThreshold && score > bestScore) {
@@ -147,6 +139,22 @@ void renderCudaFrame(
 
             newOffset = state.smoothedTargetOffset;
             shouldZoom = true;
+        }
+
+        // 🔍 Auto-Zoom Watchdog: Zoom wurde nicht ausgeführt, aber Potenzial?
+        if (!shouldZoom) {
+            float avgEntropy = 0.0f;
+            int countAbove = 0;
+            for (float h : h_entropy) {
+                avgEntropy += h;
+                if (h > dynamicThreshold) countAbove++;
+            }
+            avgEntropy /= h_entropy.size();
+
+            if (countAbove > 0) {
+                std::printf("[WARN] Auto-Zoom inactive: %d tiles > threshold, avgEntropy = %.4f\n",
+                            countAbove, avgEntropy);
+            }
         }
     }
 
