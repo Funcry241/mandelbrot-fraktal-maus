@@ -1,6 +1,7 @@
 // Datei: src/renderer_state.cpp
-// Zeilen: 91
+// Zeilen: 93
 // 🐭 Maus-Kommentar: Zustand des Renderers – jetzt mit geglättetem Ziel per EMA. `filteredTargetOffset` puffert sanft. Schneefuchs: „Ein Otter schlägt nicht abrupt den Kurs – er lässt Strömung zu.“
+// Patch Schneefuchs Punkt 3: `cudaFree` wird jetzt sauber mit `CUDA_CHECK` abgesichert.
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -68,11 +69,11 @@ void RendererState::setupCudaBuffers() {
 void RendererState::resize(int newWidth, int newHeight) {
     // 🧼 Alte CUDA-Puffer freigeben
     if (d_iterations) {
-        cudaFree(d_iterations);
+        CUDA_CHECK(cudaFree(d_iterations));  // ✅ Sicher freigeben
         d_iterations = nullptr;
     }
     if (d_entropy) {
-        cudaFree(d_entropy);
+        CUDA_CHECK(cudaFree(d_entropy));     // ✅ Sicher freigeben
         d_entropy = nullptr;
     }
 

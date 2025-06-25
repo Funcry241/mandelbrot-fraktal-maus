@@ -1,9 +1,11 @@
 // Datei: src/renderer_resources.cpp
-// Zeilen: 76
+// Zeilen: 80
 // 🐭 Maus-Kommentar: Jetzt mit kontextsensitivem Logging – jeder PBO/Texture-Aufruf meldet seine Herkunft (Init, Resize, Tilewechsel etc.). Schneefuchs: „Erkenne den Ursprung der Ressourcen – dann findest du den Fehler vor dem Fehler.“
+// Patch für Schneefuchs-Hinweis 2: Debug-Logs erscheinen jetzt **nur noch**, wenn `Settings::debugLogging` aktiv ist.
 
 #include "pch.hpp"
 #include "renderer_resources.hpp"  // ✅ Korrektur: richtiger Header-Name
+#include "settings.hpp"            // 🧠 Zugriff auf Settings::debugLogging
 #include <stdexcept>
 #include <cstdio>
 
@@ -28,7 +30,9 @@ GLuint createPBO(int width, int height) {
                  GL_STREAM_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    std::printf("[DEBUG] OpenGLUtils::createPBO -> ID %u (ctx: %s, %dx%d)\n", pbo, resourceContext, width, height);
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] OpenGLUtils::createPBO -> ID %u (ctx: %s, %dx%d)\n", pbo, resourceContext, width, height);
+    }
     return pbo;
 }
 
@@ -54,7 +58,9 @@ GLuint createTexture(int width, int height) {
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    std::printf("[DEBUG] OpenGLUtils::createTexture -> ID %u (ctx: %s, %dx%d)\n", tex, resourceContext, width, height);
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] OpenGLUtils::createTexture -> ID %u (ctx: %s, %dx%d)\n", tex, resourceContext, width, height);
+    }
     return tex;
 }
 
