@@ -82,7 +82,7 @@ void renderCudaFrame(
 
         for (int i = 0; i < numTiles; ++i) {
             int bx = i % tilesX;
-            int by = i / tileSize;
+            int by = i / tilesX; // ✅ FIX: Korrekte Zeilenberechnung
 
             float centerX = (bx + 0.5f) * tileSize;
             float centerY = (by + 0.5f) * tileSize;
