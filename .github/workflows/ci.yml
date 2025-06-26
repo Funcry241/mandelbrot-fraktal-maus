@@ -1,5 +1,5 @@
 # Datei: .github/workflows/ci.yml
-# Zeilen: 58
+# Zeilen: 62
 # 🐭 Maus-Kommentar: CI mit CUDA 12.9 und Artifact-Upload – das gebaute Projekt wird automatisch bereitgestellt. Schneefuchs: „Ein Otter, der baut, soll auch liefern.“
 
 name: Build Validation
@@ -24,6 +24,9 @@ jobs:
       - name: Install Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
+      - name: Add Ninja to PATH
+        run: echo "/usr/bin" >> $GITHUB_PATH
+
       - name: Install CUDA 12.9 via NVIDIA Repo
         run: |
           sudo apt-get update
@@ -35,6 +38,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cuda-toolkit-12-9
 
+      - name: Install system packages required by GLEW
+        run: sudo apt-get install -y libxmu-dev libxi-dev libgl-dev
+
       - name: Clone vcpkg
         run: git clone https://github.com/microsoft/vcpkg.git
 
@@ -42,11 +48,8 @@ jobs:
         run: ./vcpkg/bootstrap-vcpkg.sh
         shell: bash
 
-      - name: Install system packages required by GLEW
-        run: sudo apt-get install -y libxmu-dev libxi-dev libgl-dev
-
       - name: Configure project with vcpkg
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_MAKE_PROGRAM=/usr/bin/ninja
 
       - name: Build project
         run: cmake --build build

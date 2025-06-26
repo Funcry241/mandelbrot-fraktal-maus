@@ -14,12 +14,17 @@ Write-Host "`n--- MausDelete gestartet ---`n"
 $fileExtensions   = @('.obj', '.o', '.ilk', '.pdb', '.log', '.tmp', '.tlog')
 $filenamePatterns = @('CMakeCache.txt', 'CMakeGenerate.stamp', '*.VC.db', '*~')
 $folderNames      = @('CMakeFiles', 'build', 'Debug', 'Release', 'x64', '.vs', '.idea')
+$excludedFolders  = @('dist')  # 🛡️ Diese Ordner werden NIE gelöscht (aber Inhalt ggf. gesondert behandelt)
 
 # 🔍 Rekursiver Suchlauf ab Projektwurzel
 $allItems = Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue
 
 foreach ($item in $allItems) {
     try {
+        if ($item.PSIsContainer -and ($excludedFolders -contains $item.Name)) {
+            continue  # dist/ etc. werden hier grundsätzlich übersprungen
+        }
+
         $isTrash = $false
 
         if (-not $item.PSIsContainer) {
@@ -45,6 +50,25 @@ foreach ($item in $allItems) {
         }
     } catch {
         Write-Warning "  Fehler beim Löschen: $($item.FullName)"
+    }
+}
+
+# 🔧 Spezialfall: dist/-Inhalt leeren, aber Ordner behalten
+$distPath = Join-Path -Path $PSScriptRoot -ChildPath "dist"
+if (Test-Path $distPath) {
+    Get-ChildItem -Path $distPath -Force | Where-Object {
+        $_.Name -ne '.gitkeep'
+    } | ForEach-Object {
+        try {
+            if ($dryRun) {
+                Write-Host "  (DRY RUN) Würde in dist/ löschen: $($_.FullName)"
+            } else {
+                Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host "  Entfernt aus dist/: $($_.FullName)"
+            }
+        } catch {
+            Write-Warning "  Fehler beim Löschen in dist/: $($_.FullName)"
+        }
     }
 }
 

@@ -68,3 +68,8 @@ OtterDream_Project.zip
 # ----------------------------------------------------------------------
 # 👤 Benutzerabhängige Konfiguration
 /imgui.ini
+
+# ----------------------------------------------------------------------
+# 🚫 CI-Output-Artefakte sicher ignorieren
+/dist/*
+!/dist/.gitkeep
