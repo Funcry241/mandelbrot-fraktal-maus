@@ -1,6 +1,6 @@
 // Datei: src/opengl_utils.cpp
-// Zeilen: 90
-// 🐭 Maus-Kommentar: Aufgeräumt. `drawFullscreenQuad()` ist raus – nur noch moderne Übergabe per VAO. Shaderfehler sauber gemeldet, Speicherverwaltung getrennt. Schneefuchs: „Nicht nur schöner – jetzt auch eindeutig!“
+// Zeilen: 108
+// 🐭 Maus-Kommentar: Shaderfehler führen nun nicht mehr zum Programmabbruch – stattdessen Rückgabe von 0 und klare Log-Ausgabe. Schneefuchs sagt: „Wenn dein Shader stirbt, muss dein Otter noch lange nicht sterben.“
 
 #include "pch.hpp"
 #include "opengl_utils.hpp"
@@ -18,15 +18,25 @@ static GLuint compileShader(GLenum type, const char* src) {
     if (!ok) {
         char buf[512];
         glGetShaderInfoLog(s, 512, nullptr, buf);
-        std::cerr << "Shader-Compile-Error: " << buf << std::endl;
-        std::exit(EXIT_FAILURE);
+        std::cerr << "[ShaderError] Compilation failed (" 
+                  << (type == GL_VERTEX_SHADER ? "Vertex" : "Fragment")
+                  << "): " << buf << std::endl;
+        glDeleteShader(s);
+        return 0;
     }
     return s;
 }
 
 GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) {
     GLuint v = compileShader(GL_VERTEX_SHADER, vertexSrc);
+    if (v == 0) return 0;
+
     GLuint f = compileShader(GL_FRAGMENT_SHADER, fragmentSrc);
+    if (f == 0) {
+        glDeleteShader(v);
+        return 0;
+    }
+
     GLuint prog = glCreateProgram();
     glAttachShader(prog, v);
     glAttachShader(prog, f);
@@ -36,9 +46,13 @@ GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) {
     if (!ok) {
         char buf[512];
         glGetProgramInfoLog(prog, 512, nullptr, buf);
-        std::cerr << "Program-Link-Error: " << buf << std::endl;
-        std::exit(EXIT_FAILURE);
+        std::cerr << "[ShaderError] Program link failed: " << buf << std::endl;
+        glDeleteShader(v);
+        glDeleteShader(f);
+        glDeleteProgram(prog);
+        return 0;
     }
+
     glDeleteShader(v);
     glDeleteShader(f);
     return prog;

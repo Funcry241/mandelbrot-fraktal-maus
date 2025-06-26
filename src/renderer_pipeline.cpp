@@ -1,6 +1,6 @@
 // Datei: src/renderer_pipeline.cpp
-// Zeilen: 80
-// 🐭 Maus-Kommentar: Sauber und ohne Altlast – `drawFullscreenQuad()` ist die einzige Renderfunktion. Shader lokal, VAO-Handling korrekt, kein `render()`-Legacy mehr. Schneefuchs: „So soll C++ schmecken.“
+// Zeilen: 87
+// 🐭 Maus-Kommentar: Shaderfehler werden nun korrekt erkannt – keine stille OpenGL-Misere mehr. Otter-VAO bleibt, doch Schneefuchs flüstert: „Abstürzen ist keine Option.“
 
 #include "pch.hpp"
 
@@ -8,6 +8,7 @@
 #include "opengl_utils.hpp"
 #include "common.hpp"
 #include <iostream>
+#include <cstdlib>  // Für std::exit
 
 namespace RendererPipeline {
 
@@ -37,6 +38,10 @@ void main() {
 
 void init() {
     program = OpenGLUtils::createProgramFromSource(vertexShaderSrc, fragmentShaderSrc);
+    if (program == 0) {
+        std::cerr << "[FATAL] Shaderprogramm konnte nicht erstellt werden – OpenGL-Abbruch\n";
+        std::exit(EXIT_FAILURE);
+    }
 
     glUseProgram(program);
     glUniform1i(glGetUniformLocation(program, "uTex"), 0);
@@ -45,8 +50,6 @@ void init() {
     OpenGLUtils::createFullscreenQuad(&VAO, &VBO, &EBO);
 }
 
-// 🪄 Aktualisiert Texturinhalt aus CUDA-PBO (Zero-Copy Upload)
-// Dies ersetzt glTexSubImage2D-Aufrufe im Mainloop. Muss nach CUDA-Fill aufgerufen werden!
 void updateTexture(GLuint pbo, GLuint tex, int width, int height) {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBindTexture(GL_TEXTURE_2D, tex);
