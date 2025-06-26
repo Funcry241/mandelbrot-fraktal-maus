@@ -4,6 +4,9 @@
 
 cmake_minimum_required(VERSION 3.29)
 
+# 🩹 GitHub CI Fix: CUDA-Architektur manuell setzen
+set(CMAKE_CUDA_ARCHITECTURES 86)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(OtterDreamMandelbrot LANGUAGES CXX CUDA)
 
