@@ -1,5 +1,5 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 211
+// Zeilen: 213
 // 🐭 Maus-Kommentar: Mandelbrot-Kernel mit stabilisierter Supersampling-Farbmittelung – nutzt nur gültige Escape-Punkte für Farbberechnung. Kein Grün-Drift mehr! Schneefuchs: „Nur wer das Ende kennt, darf mit Farbe reden.“
 
 #include <cuda_runtime.h>
@@ -12,8 +12,8 @@
 
 // 🔧 Lokale Debug-Schalter
 #define ENABLE_ENTROPY_LOGGING 0
-constexpr float ENTROPY_LOG_THRESHOLD = 3.25f;
-constexpr int LOG_TILE_MODULO = 32;
+constexpr float ENTROPY_LOG_THRESHOLD [[maybe_unused]] = 3.25f;
+constexpr int LOG_TILE_MODULO [[maybe_unused]] = 32;
 
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     if (t < 0.0f) return make_uchar4(0, 0, 0, 255);

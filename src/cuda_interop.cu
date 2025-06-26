@@ -118,7 +118,6 @@ void renderCudaFrame(
         }
 
         if (bestIndex >= 0) {
-            constexpr float SMOOTHING_ALPHA   = 0.15f;
             constexpr float SCORE_THRESHOLD   = 0.95f;
             constexpr float NEWTARGET_DIST    = 0.001f;
 
