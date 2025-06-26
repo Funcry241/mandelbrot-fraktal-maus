@@ -117,7 +117,7 @@ target_compile_options(mandelbrot_otterdream PRIVATE
 # 🤝 Linking
 target_link_libraries(mandelbrot_otterdream PRIVATE
     OpenGL::GL
-    GLEW::glew
+    GLEW::GLEW
     glfw
     CUDA::cudart
     Threads::Threads
