@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.hpp
-// Zeilen: 49
-// 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL Interop – jetzt mit double-präzisem Zoom & Offset für hohe Vergrößerungstiefe. Keine CUDA-Header in der PCH – sauber gekapselt. Schneefuchs sagte: „Wer weit sehen will, braucht scharfe Koordinaten.“
+// Zeilen: 48
+// 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL Interop – `globalRendererState` entfernt, `RendererState&` wird direkt übergeben. Schneefuchs: „Ein Zustand, der wandert, ist keiner, der lauert.“
 
 #ifndef CUDA_INTEROP_HPP
 #define CUDA_INTEROP_HPP
@@ -19,28 +19,26 @@ namespace CudaInterop {
 void registerPBO(unsigned int pbo);
 void unregisterPBO();
 
-// 🔁 Haupt-Renderfunktion – jetzt mit double-Parameter für Präzision
+// 🔁 Haupt-Renderfunktion – mit double-Precision + direkter Übergabe des Zustands
 void renderCudaFrame(    
     int* d_iterations,
     float* d_entropy,
     int width,
     int height,
-    double zoom,           // ✅ jetzt double
-    double2 offset,        // ✅ jetzt double2
+    double zoom,
+    double2 offset,
     int maxIterations,
     std::vector<float>& h_entropy,
     float2& newOffset,
     bool& shouldZoom,
-    int tileSize
+    int tileSize,
+    RendererState& state // ✅ neu: Zustand explizit übergeben
 );
 
 void setPauseZoom(bool pause);
 bool getPauseZoom();
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
-
-// 🧭 Globale Referenz auf den aktuellen Renderer-State für CUDA ↔ Zoom-Steuerung
-extern RendererState* globalRendererState;
 
 } // namespace CudaInterop
 

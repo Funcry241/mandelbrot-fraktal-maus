@@ -1,6 +1,6 @@
 // Datei: src/renderer_window.cpp
-// Zeilen: 66
-// 🐭 Maus-Kommentar: GLFW-Setup jetzt ohne Redundanz – Callback-Zuweisung erfolgt ausschließlich über `configureWindowCallbacks`, aufgerufen in `createWindow()`. Doppelte Registrierungen sind ausgeschlossen. Schneefuchs: „Einer registriert, sonst eskaliert’s.“
+// Zeilen: 71
+// 🐭 Maus-Kommentar: Fenster-Erstellung ist jetzt fehlerbehandelbar – kein `std::exit` mehr, sondern nullptr-Rückgabe bei Misserfolg. Aufrufende Instanzen (z. B. Renderer) können reagieren. Schneefuchs: „Nicht jedes Scheitern ist fatal – außer du beendest dich selbst.“
 
 #include "pch.hpp"
 #include "renderer_window.hpp"
@@ -13,7 +13,7 @@ namespace RendererInternals {
 GLFWwindow* createGLFWWindow(int width, int height) {
     if (!glfwInit()) {
         std::cerr << "[ERROR] GLFW init failed\n";
-        std::exit(EXIT_FAILURE);
+        return nullptr;
     }
 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -24,7 +24,7 @@ GLFWwindow* createGLFWWindow(int width, int height) {
     if (!window) {
         std::cerr << "[ERROR] Window creation failed\n";
         glfwTerminate();
-        std::exit(EXIT_FAILURE);
+        return nullptr;
     }
 
     glfwMakeContextCurrent(window);
@@ -53,6 +53,7 @@ namespace RendererWindow {
 // 🟢 Einzige öffentliche Schnittstelle: Erzeugt Fenster und konfiguriert Callbacks
 GLFWwindow* createWindow(int width, int height, Renderer* instance) {
     GLFWwindow* window = RendererInternals::createGLFWWindow(width, height);
+    if (!window) return nullptr;
     RendererInternals::configureWindowCallbacks(window, instance);
     return window;
 }

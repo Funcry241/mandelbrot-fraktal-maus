@@ -69,14 +69,16 @@ void computeCudaFrame(RendererState& state) {
         state.d_entropy,
         state.width,
         state.height,
-        static_cast<double>(state.zoom),                         // ✅ double statt float
-        make_double2(state.offset.x, state.offset.y),            // ✅ double2 statt float2
+        static_cast<double>(state.zoom),
+        make_double2(state.offset.x, state.offset.y),
         state.maxIterations,
         state.h_entropy,
         newOffset,
         shouldZoom,
-        state.lastTileSize
+        state.lastTileSize,
+        state
     );
+
 
     RendererPipeline::updateTexture(state.pbo, state.tex, state.width, state.height);
 

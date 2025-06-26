@@ -1,13 +1,13 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 232
-// 🐅 Maus-Kommentar: CUDA/OpenGL-Interop – mit Auto-Zoom-Patch D.2: Zusätzlich zum Zoom-Score wird jetzt eine Watchdog-Analyse bei Zoom-Blockade durchgeführt. Loggt nur dann, wenn relevante Entropie vorliegt, aber kein Zoom erfolgt. Schneefuchs: „Wenn du nicht mehr weiterweißt, frag zuerst, ob du noch etwas siehst.“
+// Zeilen: 232 → 233
+// 🐅 Maus-Kommentar: Entfernt globalRendererState vollständig – Auto-Zoom verwendet nun explizit übergebenen RendererState. Schneefuchs: „Global ist nur der Himmel – nicht dein Zustand.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
 #include "common.hpp"
-#include "renderer_state.hpp"  // 🧠 Zugriff auf smoothedTargetOffset
+#include "renderer_state.hpp"
 
 namespace CudaInterop {
 
@@ -40,7 +40,8 @@ void renderCudaFrame(
     std::vector<float>& h_entropy,
     float2& newOffset,
     bool& shouldZoom,
-    int tileSize
+    int tileSize,
+    RendererState& state // ✅ NEU
 ) {
     if (!cudaPboResource) {
         std::cerr << "[FATAL] CUDA PBO not registered before renderCudaFrame.\n";
@@ -82,7 +83,7 @@ void renderCudaFrame(
 
         for (int i = 0; i < numTiles; ++i) {
             int bx = i % tilesX;
-            int by = i / tilesX; // ✅ FIX: Korrekte Zeilenberechnung
+            int by = i / tilesX;
 
             float centerX = (bx + 0.5f) * tileSize;
             float centerY = (by + 0.5f) * tileSize;
@@ -95,7 +96,7 @@ void renderCudaFrame(
             float2 delta = { tileCenter.x - offset_f.x, tileCenter.y - offset_f.y };
             float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
 
-            float sharpening = log2f(zoom_f + 2.0f);  // 🧠 Patch D.1: Verstärkung bei hohem Zoom
+            float sharpening = log2f(zoom_f + 2.0f);
             float score = (h_entropy[i] / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist)) * sharpening;
 
             if (h_entropy[i] > dynamicThreshold && score > bestScore) {
@@ -118,9 +119,6 @@ void renderCudaFrame(
         }
 
         if (bestIndex >= 0) {
-            extern RendererState* globalRendererState;
-            auto& state = *globalRendererState;
-
             constexpr float SMOOTHING_ALPHA   = 0.15f;
             constexpr float SCORE_THRESHOLD   = 0.95f;
             constexpr float NEWTARGET_DIST    = 0.001f;
@@ -141,7 +139,6 @@ void renderCudaFrame(
             shouldZoom = true;
         }
 
-        // 🔍 Auto-Zoom Watchdog: Zoom wurde nicht ausgeführt, aber Potenzial?
         if (!shouldZoom) {
             float avgEntropy = 0.0f;
             int countAbove = 0;
