@@ -44,8 +44,7 @@ void renderCudaFrame(
     RendererState& state // ✅ NEU
 ) {
     if (!cudaPboResource) {
-        std::cerr << "[FATAL] CUDA PBO not registered before renderCudaFrame.\n";
-        std::exit(EXIT_FAILURE);
+        throw std::runtime_error("[FATAL] CUDA PBO not registered before renderCudaFrame.");
     }
 
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));

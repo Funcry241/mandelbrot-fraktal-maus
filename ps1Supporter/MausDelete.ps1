@@ -57,7 +57,7 @@ foreach ($item in $allItems) {
 $distPath = Join-Path -Path $PSScriptRoot -ChildPath "dist"
 if (Test-Path $distPath) {
     Get-ChildItem -Path $distPath -Force | Where-Object {
-        $_.Name -ne '.gitkeep'
+        $_.Name
     } | ForEach-Object {
         try {
             if ($dryRun) {
