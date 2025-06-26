@@ -1,6 +1,6 @@
 <!-- Datei: README.md -->
-<!-- Zeilen: 119 -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 13 – bereinigt um macOS-Fehlinformation und veraltete Submodul-Anweisung. Schneefuchs: „Nur was stimmt, darf auch in der README glänzen.“ -->
+<!-- Zeilen: 129 -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 20 – Build-Anleitung jetzt vollständig und CI-kompatibel, mit klarem vcpkg-Weg und aktualisierter CMake-Version. Schneefuchs: „Wer bauen will, muss vorher graben – im richtigen Verzeichnis.“ -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
@@ -33,10 +33,10 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 
 ## 🖥️ Systemvoraussetzungen
 
-- Windows 10 oder 11
+- Windows 10 oder 11 **oder Linux**
 - **NVIDIA GPU** mit CUDA (Compute Capability **8.0+**, empfohlen **8.6+**)
 - CUDA Toolkit (empfohlen: **v12.9**)
-- Visual Studio 2022 mit C++ & CUDA-Komponenten
+- Visual Studio 2022 **oder** GCC 11+
 - CMake (Version **≥3.28**), Ninja
 - vcpkg (für GLFW, GLEW)
 
@@ -57,42 +57,39 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 ### 📁 Vcpkg Setup
 
 ```bash
+git clone --recurse-submodules https://github.com/Funcry241/otterdream-mandelbrot.git
+cd otterdream-mandelbrot
 git clone https://github.com/microsoft/vcpkg.git
 cd vcpkg
-./bootstrap-vcpkg.bat
-vcpkg integrate install
-vcpkg install glfw3 glew
+./bootstrap-vcpkg.sh   # oder .bat unter Windows
+cd ..
 ```
 
 ---
 
 ### 🪟 Windows Build
 
-```bash
-git clone https://github.com/Funcry241/otterdream-mandelbrot.git
-cd otterdream-mandelbrot
+```powershell
 cmake --preset windows-msvc
 cmake --build --preset windows-msvc
 cmake --install build/windows --prefix ./dist
 .\dist\mandelbrot_otterdream.exe
 ```
 
-> 🛠 Tipp: `build.ps1` ist ein PowerShell-Skript für automatisierten Build & Install
+> 🛠 `build.ps1` automatisiert alle Schritte (Build, Install, Run)
 
 ---
 
 ### 🐧 Linux Build
 
-> Voraussetzung: CUDA, GCC, Ninja, CMake ≥3.28, OpenGL-Treiber, GLFW & GLEW
+> Voraussetzung: CUDA 12.9, GCC, Ninja, CMake ≥3.28, OpenGL-Treiber, vcpkg
 
 ```bash
 sudo apt update
-sudo apt install build-essential cmake ninja-build libglfw3-dev libglew-dev
+sudo apt install build-essential cmake ninja-build libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config
 ```
 
 ```bash
-git clone https://github.com/Funcry241/otterdream-mandelbrot.git
-cd otterdream-mandelbrot
 cmake --preset linux-build
 cmake --build --preset linux-build
 cmake --install build/linux --prefix ./dist
