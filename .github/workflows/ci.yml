@@ -1,6 +1,6 @@
 # Datei: .github/workflows/ci.yml
-# Zeilen: 48
-# 🐭 Maus-Kommentar: CI-Workflow mit offiziell eingebundenem CUDA 12.9 .deb-Repo statt veralteter Ubuntu-Version. Ergänzt um `--install`-Schritt für validierte Binary-Ausgabe. Schneefuchs: „Der Otter tanzt nicht nur – er packt auch ein.“
+# Zeilen: 58
+# 🐭 Maus-Kommentar: CI mit CUDA 12.9 und Artifact-Upload – das gebaute Projekt wird automatisch bereitgestellt. Schneefuchs: „Ein Otter, der baut, soll auch liefern.“
 
 name: Build Validation
 
@@ -42,6 +42,9 @@ jobs:
         run: ./vcpkg/bootstrap-vcpkg.sh
         shell: bash
 
+      - name: Install system packages required by GLEW
+        run: sudo apt-get install -y libxmu-dev libxi-dev libgl-dev
+
       - name: Configure project with vcpkg
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
 
@@ -50,3 +53,9 @@ jobs:
 
       - name: Install project
         run: cmake --install build --prefix ./dist
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mandelbrot-build
+          path: ./dist
