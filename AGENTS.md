@@ -22,7 +22,7 @@ Das Projekt verwendet folgende Agents und Werkzeuge:
 | CUDA Toolkit  | 12.9+          | Erforderlich für GPU-Rendering            |
 | OpenGL        | 4.3+           | Benötigt Core Profile                     |
 | Visual Studio | 2022           | Inklusive C++- und CUDA-Support           |
-| CMake         | ≥3.29          | Install-Ziel via `--install`              |
+| CMake         | ≥3.28          | Install-Ziel via `--install`              |
 | Ninja         | 1.10+          | Für schnelle parallele Builds             |
 | vcpkg         | aktuell        | Verwaltung von Drittanbieter-Bibliotheken |
 

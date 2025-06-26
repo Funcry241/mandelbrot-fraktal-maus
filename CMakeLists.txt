@@ -2,7 +2,7 @@
 # Zeilen: 146
 # 🐭 Maus-Kommentar: Modularisierung + CUDA/OpenGL-Interop Fix. Ergänzt Workaround für fehlende cuda_gl_interop.h – notwendig für Windows-Installationen, bei denen der Header nicht durch CUDAToolkit automatisch gefunden wird. Schneefuchs: „Workaround ist, wenn du weißt, was du tust – und es trotzdem tust.“
 
-cmake_minimum_required(VERSION 3.29)
+cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
 # 🩹 GitHub CI Fix: CUDA-Architektur manuell setzen
 set(CMAKE_CUDA_ARCHITECTURES 86)

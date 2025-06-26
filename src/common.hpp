@@ -35,7 +35,9 @@
 #include <stdexcept>
 #include <vector>
 #include <string>
-#include <cmath> // Nur einmal einbinden
+#include <cmath> 
+#include <algorithm>
+#include <cstdint>
 
 // 🧪 CUDA-Fehlerprüfung
 #define CUDA_CHECK(call)                                                       \

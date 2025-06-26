@@ -37,7 +37,7 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 - **NVIDIA GPU** mit CUDA (Compute Capability **8.0+**, empfohlen **8.6+**)
 - CUDA Toolkit (empfohlen: **v12.9**)
 - Visual Studio 2022 mit C++ & CUDA-Komponenten
-- CMake (Version **≥3.29**), Ninja
+- CMake (Version **≥3.28**), Ninja
 - vcpkg (für GLFW, GLEW)
 
 > ⚠️ Hinweis: GPUs unter Compute Capability 8.0 (z. B. Kepler, Maxwell) werden **nicht unterstützt**.
@@ -83,7 +83,7 @@ cmake --install build/windows --prefix ./dist
 
 ### 🐧 Linux Build
 
-> Voraussetzung: CUDA, GCC, Ninja, CMake ≥3.29, OpenGL-Treiber, GLFW & GLEW
+> Voraussetzung: CUDA, GCC, Ninja, CMake ≥3.28, OpenGL-Treiber, GLFW & GLEW
 
 ```bash
 sudo apt update
