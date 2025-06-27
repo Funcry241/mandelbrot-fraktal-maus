@@ -30,7 +30,7 @@ struct ZoomResult {
 // Bewertet alle Tiles und bestimmt, ob ein neues Zoom-Ziel gewählt werden soll
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& h_entropy,
-    float2 offset,
+    double2 offset,
     float zoom,
     int width,
     int height,

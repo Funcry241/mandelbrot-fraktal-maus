@@ -72,7 +72,7 @@ void renderCudaFrame(
 
     if (!pauseZoom) {
         ZoomLogic::ZoomResult result = ZoomLogic::evaluateZoomTarget(
-            h_entropy, offset_f, zoom_f, width, height, tileSize, state
+            h_entropy, make_double2(offset_f.x, offset_f.y), zoom_f, width, height, tileSize, state
         );
 
         if (result.bestIndex >= 0) {

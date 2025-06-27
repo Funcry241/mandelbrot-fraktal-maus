@@ -1,4 +1,4 @@
-// zoom_logic.cpp - Zeilen: 163
+// zoom_logic.cpp - Zeilen: 167
 
 /*
 Maus-Kommentar 🐭: Diese Datei vereint nun die Zielauswahl-Logik: Low-Level-Entscheidung (selectZoomTarget) und High-Level-Auswahl (evaluateZoomTarget mit ZoomResult). Schneefuchs wünscht Ordnung – hier ist sie.
@@ -83,7 +83,7 @@ bool selectZoomTarget(
 
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& h_entropy,
-    float2 offset,
+    double2 offset,
     float zoom,
     int width,
     int height,
@@ -97,6 +97,9 @@ ZoomResult evaluateZoomTarget(
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
 
+    // 🔄 Fix: float2 aus double2 extrahieren
+    float2 currentOffset = make_float2(static_cast<float>(state.offset.x), static_cast<float>(state.offset.y));
+
     for (int i = 0; i < tilesX * tilesY; ++i) {
         float entropy = h_entropy[i];
         float contrast = computeEntropyContrast(h_entropy, i, tilesX, tilesY);
@@ -105,8 +108,8 @@ ZoomResult evaluateZoomTarget(
         int y = i / tilesX;
 
         float2 candidateCenter;
-        candidateCenter.x = offset.x + ((x + 0.5f) * tileSize - width / 2.0f) * zoom;
-        candidateCenter.y = offset.y + ((y + 0.5f) * tileSize - height / 2.0f) * zoom;
+        candidateCenter.x = static_cast<float>(offset.x + ((x + 0.5) * tileSize - width / 2.0) * zoom);
+        candidateCenter.y = static_cast<float>(offset.y + ((y + 0.5) * tileSize - height / 2.0) * zoom);
 
         float score = entropy + contrast;
 
@@ -114,7 +117,7 @@ ZoomResult evaluateZoomTarget(
         bool isNew = false;
 
         bool accepted = selectZoomTarget(
-            zoom, state.lastIndex, state.lastEntropy, state.lastContrast, offset,
+            zoom, state.lastIndex, state.lastEntropy, state.lastContrast, currentOffset,
             candidateCenter, i, entropy, contrast, score,
             dummyNewTarget, isNew
         );
@@ -128,8 +131,8 @@ ZoomResult evaluateZoomTarget(
             result.bestContrast = contrast;
             result.isNewTarget = isNew;
 
-            float dx = candidateCenter.x - offset.x;
-            float dy = candidateCenter.y - offset.y;
+            float dx = candidateCenter.x - currentOffset.x;
+            float dy = candidateCenter.y - currentOffset.y;
             result.distance = sqrtf(dx * dx + dy * dy);
             result.minDistance = Settings::MIN_JUMP_DISTANCE / zoom;
             result.relEntropyGain = state.lastEntropy > 0.01f ? (entropy - state.lastEntropy) / state.lastEntropy : 0.0f;
