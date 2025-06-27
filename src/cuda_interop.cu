@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 238
+// Zeilen: 261
 // 🐭 Maus-Kommentar: Kompaktlogik in EINER ASCII-Zeile. Zoom-Analyse in CSV-tauglichem Format. Schneefuchs: „Eine Zeile regiert sie alle.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
@@ -29,6 +29,26 @@ void unregisterPBO() {
         CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboResource));
         cudaPboResource = nullptr;
     }
+}
+
+float computeEntropyContrast(const std::vector<float>& h, int index, int tilesX, int tilesY) {
+    int x = index % tilesX;
+    int y = index / tilesX;
+    float sum = 0.0f;
+    int count = 0;
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            if (dx == 0 && dy == 0) continue;
+            int nx = x + dx;
+            int ny = y + dy;
+            if (nx >= 0 && nx < tilesX && ny >= 0 && ny < tilesY) {
+                int nIndex = ny * tilesX + nx;
+                sum += fabsf(h[index] - h[nIndex]);
+                ++count;
+            }
+        }
+    }
+    return count > 0 ? sum / count : 0.0f;
 }
 
 void renderCudaFrame(
@@ -104,6 +124,8 @@ void renderCudaFrame(
         }
 
         static int lastIndex = -1;
+        static float lastEntropy = 0.0f;
+
         float2 prevTarget = state.smoothedTargetOffset;
         float2 delta = {
             bestOffset.x - prevTarget.x,
@@ -123,8 +145,16 @@ void renderCudaFrame(
         }
 
 #if ENABLE_ZOOM_LOGGING
-        std::printf("ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f S %.5f Dist %.6f New %d\n",
-            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestScore, dist, isNewTarget ? 1 : 0);
+        float dE = fabsf(bestEntropy - lastEntropy);
+        int dI = (bestIndex != lastIndex);
+        float contrast = computeEntropyContrast(h_entropy, bestIndex, tilesX, tilesY);
+        std::printf(
+            "ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f S %.5f Dist %.6f dE %.4f dI %d C %.4f New %d\n",
+            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestScore, dist,
+            dE, dI, contrast, isNewTarget ? 1 : 0
+        );
+        lastEntropy = bestEntropy;
+        lastIndex = bestIndex;
 #endif
 
         if (!shouldZoom) {
@@ -135,7 +165,6 @@ void renderCudaFrame(
                 if (h > dynamicThreshold) countAbove++;
             }
             avgEntropy /= h_entropy.size();
-
 #if ENABLE_ZOOM_LOGGING
             std::printf("ZoomLog NoZoom TilesAbove %d AvgEntropy %.5f\n", countAbove, avgEntropy);
 #endif
