@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
 // Zeilen: 272
-// 🐭 Maus-Kommentar: Zielkoordinaten-Logging eingebaut. Log zeigt nun auch gewählten TileCenter in Pixel- und Weltkoordinaten. Schneefuchs: „Nur wer weiß, wo er ist, findet wohin.“
+// 🐭 Maus-Kommentar: Zielwahl basiert nun auf lokalem Entropie-Kontrast. Score = Kontrast × log2(zoom+2). Schneefuchs: „Nicht der Lauteste, sondern der Auffälligste zählt.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
@@ -94,36 +94,35 @@ void renderCudaFrame(
 
         float2 bestOffset = offset_f;
         float bestEntropy = 0.0f;
+        float bestContrast = 0.0f;
         float bestScore = -1.0f;
         int bestIndex = -1;
-        float bestCenterX = 0.0f;
-        float bestCenterY = 0.0f;
 
         for (int i = 0; i < numTiles; ++i) {
-            int bx = i % tilesX;
-            int by = i / tilesX;
+            float entropy = h_entropy[i];
+            if (entropy < dynamicThreshold) continue;
 
-            float centerX = (bx + 0.5f) * tileSize;
-            float centerY = (by + 0.5f) * tileSize;
-
-            float2 tileCenter = {
-                (centerX - width  / 2.0f) / zoom_f + offset_f.x,
-                (centerY - height / 2.0f) / zoom_f + offset_f.y
-            };
-
-            float2 delta = { tileCenter.x - offset_f.x, tileCenter.y - offset_f.y };
-            float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-
+            float contrast = computeEntropyContrast(h_entropy, i, tilesX, tilesY);
             float sharpening = log2f(zoom_f + 2.0f);
-            float score = (h_entropy[i] / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist)) * sharpening;
+            float score = contrast * sharpening;
 
-            if (h_entropy[i] > dynamicThreshold && score > bestScore) {
+            if (score > bestScore) {
+                int bx = i % tilesX;
+                int by = i / tilesX;
+
+                float centerX = (bx + 0.5f) * tileSize;
+                float centerY = (by + 0.5f) * tileSize;
+
+                float2 tileCenter = {
+                    (centerX - width  / 2.0f) / zoom_f + offset_f.x,
+                    (centerY - height / 2.0f) / zoom_f + offset_f.y
+                };
+
                 bestScore = score;
                 bestOffset = tileCenter;
-                bestEntropy = h_entropy[i];
+                bestEntropy = entropy;
+                bestContrast = contrast;
                 bestIndex = i;
-                bestCenterX = centerX;
-                bestCenterY = centerY;
             }
         }
 
@@ -155,15 +154,10 @@ void renderCudaFrame(
 #if ENABLE_ZOOM_LOGGING
         float dE = fabsf(bestEntropy - lastEntropy);
         int dI = (bestIndex != lastIndex);
-        float contrast = computeEntropyContrast(h_entropy, bestIndex, tilesX, tilesY);
         std::printf(
-            "ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f S %.5f Dist %.6f Min %.6f dE %.4f dI %d C %.4f New %d\n",
-            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestScore, dist, minDist,
-            dE, dI, contrast, isNewTarget ? 1 : 0
-        );
-        std::printf(
-            "ZoomTarget PixelCenter %.2f %.2f WorldTarget %.10f %.10f\n",
-            bestCenterX, bestCenterY, bestOffset.x, bestOffset.y
+            "ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f C %.5f S %.5f Dist %.6f Min %.6f dE %.4f dI %d New %d\n",
+            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestContrast, bestScore, dist, minDist,
+            dE, dI, isNewTarget ? 1 : 0
         );
         lastEntropy = bestEntropy;
         lastIndex = bestIndex;
