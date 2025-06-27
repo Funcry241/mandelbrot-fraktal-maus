@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 283
-// 🐭 Maus-Kommentar: Zielwechsel jetzt mit Score-Hysterese (minScoreDelta) und Kontrast-Mindestschwelle. Schneefuchs: „Nicht jeder Glanz ist Gold.“
+// Zeilen: 305
+// 🐭 Maus-Kommentar: Zielwahl basiert jetzt auf RELATIVEM Kontrast. Nicht nur beste Kachel, sondern auffälligste im Kontext. Schneefuchs: „Nicht der Höchste gewinnt, sondern der Andersste.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
@@ -91,16 +91,24 @@ void renderCudaFrame(
 
     if (!pauseZoom) {
         const float dynamicThreshold = std::max(Settings::VARIANCE_THRESHOLD / std::log2(zoom_f + 2.0f), Settings::MIN_VARIANCE_THRESHOLD);
-        constexpr float minScoreDelta = 0.05f;
-        constexpr float minContrast = 0.01f;
+
+        std::vector<float> contrastMap(numTiles);
+        float totalContrast = 0.0f;
+        for (int i = 0; i < numTiles; ++i) {
+            float contrast = computeEntropyContrast(h_entropy, i, tilesX, tilesY);
+            contrastMap[i] = contrast;
+            totalContrast += contrast;
+        }
+        float avgContrast = totalContrast / numTiles;
 
         float2 bestOffset = offset_f;
         float bestEntropy = 0.0f;
         float bestScore = -1.0f;
         int bestIndex = -1;
-        float bestContrast = 0.0f;
 
         for (int i = 0; i < numTiles; ++i) {
+            if (contrastMap[i] < avgContrast * 1.25f) continue;  // nur auffällige Kacheln
+
             int bx = i % tilesX;
             int by = i / tilesX;
 
@@ -116,15 +124,13 @@ void renderCudaFrame(
             float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
 
             float sharpening = log2f(zoom_f + 2.0f);
-            float contrast = computeEntropyContrast(h_entropy, i, tilesX, tilesY);
-            float score = (h_entropy[i] + contrast) / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist) * sharpening;
+            float score = (contrastMap[i] / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist)) * sharpening;
 
             if (h_entropy[i] > dynamicThreshold && score > bestScore) {
                 bestScore = score;
                 bestOffset = tileCenter;
                 bestEntropy = h_entropy[i];
                 bestIndex = i;
-                bestContrast = contrast;
             }
         }
 
@@ -141,9 +147,7 @@ void renderCudaFrame(
         constexpr float MIN_PIXEL_JUMP = 1.0f;
         float minDist = MIN_PIXEL_JUMP / zoom_f;
 
-        bool isNewTarget = bestIndex >= 0 &&
-            (bestScore > state.smoothedTargetScore + minScoreDelta) &&
-            (bestContrast > minContrast || dist > minDist);
+        bool isNewTarget = bestIndex >= 0 && (bestScore > state.smoothedTargetScore * 0.95f || dist > minDist);
 
         if (isNewTarget) {
             state.smoothedTargetOffset = bestOffset;
@@ -158,10 +162,11 @@ void renderCudaFrame(
 #if ENABLE_ZOOM_LOGGING
         float dE = fabsf(bestEntropy - lastEntropy);
         int dI = (bestIndex != lastIndex);
+        float contrast = (bestIndex >= 0) ? contrastMap[bestIndex] : 0.0f;
         std::printf(
             "ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f S %.5f Dist %.6f Min %.6f dE %.4f dI %d C %.4f New %d\n",
             zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestScore, dist, minDist,
-            dE, dI, bestContrast, isNewTarget ? 1 : 0
+            dE, dI, contrast, isNewTarget ? 1 : 0
         );
         lastEntropy = bestEntropy;
         lastIndex = bestIndex;
