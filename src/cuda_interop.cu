@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
 // Zeilen: 238
-// 🐭 Maus-Kommentar: ASCII-only ZoomLog für PowerShell. Kompakt und scharf wie ein Fraktalmesser. Schneefuchs nickt zustimmend.
+// 🐭 Maus-Kommentar: Kompaktlogik in EINER ASCII-Zeile. Zoom-Analyse in CSV-tauglichem Format. Schneefuchs: „Eine Zeile regiert sie alle.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
@@ -103,34 +103,29 @@ void renderCudaFrame(
             }
         }
 
-#if ENABLE_ZOOM_LOGGING
-        std::printf("ZoomLog Z %.5e Th %.6f BestIdx %d Entropy %.5f Score %.5f\n", zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestScore);
-#endif
-
         static int lastIndex = -1;
+        float2 prevTarget = state.smoothedTargetOffset;
+        float2 delta = {
+            bestOffset.x - prevTarget.x,
+            bestOffset.y - prevTarget.y
+        };
+        float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+        bool isNewTarget = bestIndex >= 0 && (bestScore > state.smoothedTargetScore * 0.95f || dist > 0.001f);
+
+        if (isNewTarget) {
+            state.smoothedTargetOffset = bestOffset;
+            state.smoothedTargetScore = bestScore;
+        }
+
         if (bestIndex >= 0) {
-            constexpr float SCORE_THRESHOLD = 0.95f;
-            constexpr float NEWTARGET_DIST  = 0.001f;
-
-            float2 delta = {
-                bestOffset.x - state.smoothedTargetOffset.x,
-                bestOffset.y - state.smoothedTargetOffset.y
-            };
-            float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-            bool isNewTarget = bestScore > state.smoothedTargetScore * SCORE_THRESHOLD || dist > NEWTARGET_DIST;
-
-#if ENABLE_ZOOM_LOGGING
-            std::printf("ZoomLog Dist %.6f NewTarget %d\n", dist, isNewTarget ? 1 : 0);
-#endif
-
-            if (isNewTarget) {
-                state.smoothedTargetOffset = bestOffset;
-                state.smoothedTargetScore = bestScore;
-            }
-
             newOffset = state.smoothedTargetOffset;
             shouldZoom = true;
         }
+
+#if ENABLE_ZOOM_LOGGING
+        std::printf("ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f S %.5f Dist %.6f New %d\n",
+            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestScore, dist, isNewTarget ? 1 : 0);
+#endif
 
         if (!shouldZoom) {
             float avgEntropy = 0.0f;
