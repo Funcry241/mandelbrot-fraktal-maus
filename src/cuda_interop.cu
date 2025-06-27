@@ -1,3 +1,7 @@
+// Datei: src/cuda_interop.cu
+// Zeilen: 277
+// 🐭 Maus-Kommentar: Entscheidung für neues Zoom-Ziel basiert nun **rein auf relativen Gewinnen** bei Entropie, Kontrast und Score. Keine Zielsprünge mehr bei stagnierender Information. Schneefuchs: „Der Funke springt nur, wenn es wirklich knistert.“
+
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
 #include "core_kernel.h"
@@ -90,8 +94,8 @@ void renderCudaFrame(
 
         float2 bestOffset = offset_f;
         float bestEntropy = 0.0f;
-        float bestContrast = 0.0f;
         float bestScore = -1.0f;
+        float bestContrast = 0.0f;
         int bestIndex = -1;
 
         for (int i = 0; i < numTiles; ++i) {
@@ -109,7 +113,7 @@ void renderCudaFrame(
             float contrast = computeEntropyContrast(h_entropy, i, tilesX, tilesY);
             float score = contrast > 0.0f ? h_entropy[i] / contrast : 0.0f;
 
-            if (score > bestScore) {
+            if (h_entropy[i] > dynamicThreshold && score > bestScore) {
                 bestScore = score;
                 bestOffset = tileCenter;
                 bestEntropy = h_entropy[i];
@@ -118,27 +122,18 @@ void renderCudaFrame(
             }
         }
 
+        static int lastIndex = -1;
         static float lastEntropy = 0.0f;
         static float lastContrast = 0.0f;
-        static float lastScore = 0.0f;
-        static int lastIndex = -1;
 
-        float2 delta = {
-            bestOffset.x - state.smoothedTargetOffset.x,
-            bestOffset.y - state.smoothedTargetOffset.y
-        };
-        float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+        float relEntropyGain  = (bestEntropy - lastEntropy)  / (lastEntropy + 1e-6f);
+        float relContrastGain = (bestContrast - lastContrast) / (lastContrast + 1e-6f);
+        float relScoreGain    = (bestScore - state.smoothedTargetScore) / (state.smoothedTargetScore + 1e-6f);
 
-        float relE = (bestEntropy - lastEntropy) / (lastEntropy + 1e-6f);
-        float relC = (bestContrast - lastContrast) / (lastContrast + 1e-6f);
-        float relS = (bestScore - lastScore) / (lastScore + 1e-6f);
-
-        constexpr float MIN_PIXEL_JUMP = 1.0f;
-        float minDist = MIN_PIXEL_JUMP / zoom_f;
-
-        bool isNewTarget = bestIndex >= 0 && (
-            (relS > 0.10f && relE > 0.05f && relC > 0.03f) || dist > minDist
-        );
+        bool isNewTarget = bestIndex >= 0 &&
+            relEntropyGain  > 0.05f &&
+            relContrastGain > 0.03f &&
+            relScoreGain    > 0.02f;
 
         if (isNewTarget) {
             state.smoothedTargetOffset = bestOffset;
@@ -147,19 +142,25 @@ void renderCudaFrame(
 
         if (bestIndex >= 0) {
             newOffset = state.smoothedTargetOffset;
-            shouldZoom = true;
+            shouldZoom = isNewTarget;
         }
 
 #if ENABLE_ZOOM_LOGGING
+        float2 delta = {
+            bestOffset.x - state.smoothedTargetOffset.x,
+            bestOffset.y - state.smoothedTargetOffset.y
+        };
+        float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+        float dE = bestEntropy - lastEntropy;
+        float dC = bestContrast - lastContrast;
         int dI = (bestIndex != lastIndex);
         std::printf(
-            "ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f C %.5f S %.5f Dist %.6f Min %.6f dI %d RelE %.3f RelC %.3f RelS %.3f New %d\n",
-            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestContrast, bestScore, dist, minDist,
-            dI, relE, relC, relS, isNewTarget ? 1 : 0
+            "ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f S %.5f dE %.4f dC %.4f RelE %.3f RelC %.3f RelS %.3f dI %d New %d\n",
+            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestScore,
+            dE, dC, relEntropyGain, relContrastGain, relScoreGain, dI, isNewTarget ? 1 : 0
         );
         lastEntropy = bestEntropy;
         lastContrast = bestContrast;
-        lastScore = bestScore;
         lastIndex = bestIndex;
 #endif
 
