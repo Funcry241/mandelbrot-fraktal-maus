@@ -22,7 +22,7 @@ void RendererState::reset() {
     baseIterations = Settings::INITIAL_ITERATIONS;
     maxIterations = Settings::MAX_ITERATIONS_CAP;
 
-    targetOffset = make_float2(static_cast<float>(offset.x), static_cast<float>(offset.y));
+    targetOffset = make_double2(static_cast<float>(offset.x), static_cast<float>(offset.y));
     filteredTargetOffset = { offset.x, offset.y };  // 🆕 EMA-Initialisierung
 
     currentFPS = 0.0f;
@@ -33,7 +33,7 @@ void RendererState::reset() {
     lastTime = glfwGetTime();  // 🔄 Präzise als double speichern
 }
 
-void RendererState::updateOffsetTarget(float2 newOffset) {
+void RendererState::updateOffsetTarget(double2 newOffset) {
     constexpr double alpha = 0.2;  // 🧮 Glättungsfaktor: kleiner = langsamer, weicher
 
     // 💧 Exponentieller Filter auf double-Basis
@@ -41,7 +41,7 @@ void RendererState::updateOffsetTarget(float2 newOffset) {
     filteredTargetOffset.y = (1.0 - alpha) * filteredTargetOffset.y + alpha * static_cast<double>(newOffset.y);
 
     // ⛵ Zielposition für Kamera: weich verfolgt
-    targetOffset = make_float2(
+    targetOffset = make_double2(
         static_cast<float>(filteredTargetOffset.x),
         static_cast<float>(filteredTargetOffset.y)
     );

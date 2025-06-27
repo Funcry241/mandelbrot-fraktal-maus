@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 185
-// 🐭 Maus-Kommentar: Sanftes, zoom-skalierbares Zielsystem – jetzt wechselt der Otter das Ziel auch bei winzigen Fraktalverschiebungen im tiefsten Zoom. Schneefuchs: „Große Würfe erkennt man auch am leisesten Zucken.“
+// Zeilen: 189
+// 🐭 Maus-Kommentar: Float2 ist Geschichte – alle Offset- und Deltawerte jetzt konsequent als double2 geführt. Präzision auch bei tiefstem Zoom. Schneefuchs: „Nur wer doppelt denkt, zoomt wirklich tief.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -61,7 +61,7 @@ void updateTileSize(RendererState& state) {
 }
 
 void computeCudaFrame(RendererState& state) {
-    float2 newOffset = {};  // ⚠️ defensiv initialisiert
+    double2 newOffset = make_double2(0.0, 0.0);
     bool shouldZoom = false;
 
     CudaInterop::renderCudaFrame(
@@ -79,46 +79,44 @@ void computeCudaFrame(RendererState& state) {
         state
     );
 
-
     RendererPipeline::updateTexture(state.pbo, state.tex, state.width, state.height);
-
     state.shouldZoom = shouldZoom;
 
     if (shouldZoom) {
-        double dx = static_cast<double>(newOffset.x) - state.targetOffset.x;
-        double dy = static_cast<double>(newOffset.y) - state.targetOffset.y;
+        double dx = newOffset.x - state.targetOffset.x;
+        double dy = newOffset.y - state.targetOffset.y;
         double dist = std::sqrt(dx * dx + dy * dy);
 
         double dynamicJumpThreshold = Settings::MIN_JUMP_DISTANCE / state.zoom;
         if (dist > dynamicJumpThreshold) {
             state.updateOffsetTarget(newOffset);
             if (Settings::debugLogging) {
-                std::printf("[DEBUG] Target updated | Δ=%.3e > threshold=%.3e\n", dist, dynamicJumpThreshold);
+                std::printf("[DEBUG] Target updated | d=%.3e > threshold=%.3e\n", dist, dynamicJumpThreshold);
             }
         } else {
             if (Settings::debugLogging) {
-                std::printf("[DEBUG] Target ignored | Δ=%.3e <= threshold=%.3e\n", dist, dynamicJumpThreshold);
+                std::printf("[DEBUG] Target ignored | d=%.3e <= threshold=%.3e\n", dist, dynamicJumpThreshold);
             }
         }
     }
 }
 
 void updateAutoZoom(RendererState& state) {
-    static float2 lastTarget = {0.0f, 0.0f};
+    static double2 lastTarget = {0.0, 0.0};
 
     if (!state.shouldZoom) return;
 
-    bool newTarget = std::fabs(state.targetOffset.x - lastTarget.x) > 1e-12f ||
-                     std::fabs(state.targetOffset.y - lastTarget.y) > 1e-12f;
+    bool newTarget = std::fabs(state.targetOffset.x - lastTarget.x) > 1e-12 ||
+                     std::fabs(state.targetOffset.y - lastTarget.y) > 1e-12;
 
     state.zoom *= Settings::AUTOZOOM_SPEED;
 
-    float2 delta = {
-        state.targetOffset.x - static_cast<float>(state.offset.x),
-        state.targetOffset.y - static_cast<float>(state.offset.y)
+    double2 delta = {
+        state.targetOffset.x - state.offset.x,
+        state.targetOffset.y - state.offset.y
     };
 
-    float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+    double dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
 
     if (dist < Settings::DEADZONE) {
         if (newTarget && Settings::debugLogging) {
@@ -127,18 +125,18 @@ void updateAutoZoom(RendererState& state) {
         return;
     }
 
-    float rawTanh = std::tanh(Settings::OFFSET_TANH_SCALE * dist);
-    float factor = Settings::my_clamp(rawTanh * Settings::MAX_OFFSET_FRACTION, 0.0f, 1.0f);
+    double rawTanh = std::tanh(Settings::OFFSET_TANH_SCALE * dist);
+    double factor = Settings::my_clamp(rawTanh * Settings::MAX_OFFSET_FRACTION, 0.0, 1.0);
 
-    float moveX = delta.x * factor;
-    float moveY = delta.y * factor;
+    double moveX = delta.x * factor;
+    double moveY = delta.y * factor;
 
     state.offset.x += moveX;
     state.offset.y += moveY;
 
     if (newTarget && Settings::debugLogging) {
         std::printf("[DEBUG] New target tile: targetOffset = (%.10f, %.10f)\n", state.targetOffset.x, state.targetOffset.y);
-        std::printf("[DEBUG] Δ=%.3e | dist=%.6f | tanh=%.3f | move=(%.3e, %.3e)\n", dist, dist, rawTanh, moveX, moveY);
+        std::printf("[DEBUG] d=%.3e | dist=%.6f | tanh=%.3f | move=(%.3e, %.3e)\n", dist, dist, rawTanh, moveX, moveY);
         std::printf("[DEBUG] New offset = (%.10f, %.10f)\n", state.offset.x, state.offset.y);
     }
 

@@ -22,7 +22,7 @@ public:
     int maxIterations;
 
     // 🎯 Zielwert für Auto-Zoom (wird mit LERP angenähert)
-    float2 targetOffset;
+    double2 targetOffset;
     double2 filteredTargetOffset = { 0.0, 0.0 };  // 🎯 Double-präzises geglättetes Ziel
 
     // 📌 Auto-Zoom-Ziel (geglättet über CUDA-Auswertung)
@@ -60,7 +60,7 @@ public:
     // 🔁 Konstruktor & Methoden zur Zustandspflege
     RendererState(int w, int h);
     void reset();
-    void updateOffsetTarget(float2 newOffset);
+    void updateOffsetTarget(double2 newOffset);
     void adaptIterationCount();
     void setupCudaBuffers();
 

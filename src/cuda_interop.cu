@@ -41,7 +41,7 @@ void renderCudaFrame(
     double2 offset,
     int maxIterations,
     std::vector<float>& h_entropy,
-    float2& newOffset,
+    double2& newOffset,
     bool& shouldZoom,
     int tileSize,
     RendererState& state
@@ -72,7 +72,7 @@ void renderCudaFrame(
 
     if (!pauseZoom) {
         ZoomLogic::ZoomResult result = ZoomLogic::evaluateZoomTarget(
-            h_entropy, make_double2(offset_f.x, offset_f.y), zoom_f, width, height, tileSize, state
+            h_entropy, offset, zoom_f, width, height, tileSize, state
         );
 
         if (result.bestIndex >= 0) {

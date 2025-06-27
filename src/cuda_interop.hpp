@@ -29,10 +29,10 @@ void renderCudaFrame(
     double2 offset,
     int maxIterations,
     std::vector<float>& h_entropy,
-    float2& newOffset,
+    double2& newOffset,     // ✅ FIXED: war fälschlich float2 – jetzt korrekt
     bool& shouldZoom,
     int tileSize,
-    RendererState& state // ✅ neu: Zustand explizit übergeben
+    RendererState& state    // ✅ explizit übergeben
 );
 
 void setPauseZoom(bool pause);

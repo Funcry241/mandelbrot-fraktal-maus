@@ -84,11 +84,11 @@ bool selectZoomTarget(
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& h_entropy,
     double2 offset,
-    float zoom,
+    double zoom,
     int width,
     int height,
     int tileSize,
-    RendererState& state
+    const RendererState& state
 ) {
     ZoomResult result = {};
     result.bestScore = -1.0f;
@@ -125,7 +125,7 @@ ZoomResult evaluateZoomTarget(
         if (accepted && score > result.bestScore) {
             result.bestScore = score;
             result.bestIndex = i;
-            result.newOffset = candidateCenter;
+            result.newOffset = make_double2(candidateCenter.x, candidateCenter.y);  // ✅ fix: convert to double2
             result.shouldZoom = true;
             result.bestEntropy = entropy;
             result.bestContrast = contrast;

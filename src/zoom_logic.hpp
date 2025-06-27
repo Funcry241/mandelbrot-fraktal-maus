@@ -1,49 +1,36 @@
-// zoom_logic.hpp - Zeilen: 52
-
-/*
-🐭 Maus-Kommentar: Deklariert die Zoom-Zielbewertungslogik getrennt von CUDA. Erlaubt saubere Trennung von Zustandsdaten und Zielauswahl. Schneefuchs: „Ein klarer Kopf entscheidet besser.“
-*/
+// Datei: src/zoom_logic.hpp
+// Zeilen: 37
+// 🐭 Maus-Kommentar: ZoomResult liefert jetzt double2 für präzise Zielkoordinaten. Kein float2 mehr, um Genauigkeit bei starkem Zoom zu bewahren. Schneefuchs nickt zustimmend.
 
 #pragma once
-
-#include <vector>
-#include <cuda_runtime.h>
+#include "common.hpp"
 #include "renderer_state.hpp"
+#include <vector>
 
 namespace ZoomLogic {
 
-// Ergebnisstruktur einer Zielbewertung
 struct ZoomResult {
-    float2 newOffset;
-    bool shouldZoom;
-    float bestScore;
-    int bestIndex;
-    float bestEntropy;
-    float bestContrast;
-    float distance;
-    float minDistance;
-    float relEntropyGain;
-    float relContrastGain;
-    bool isNewTarget;
+    int bestIndex = -1;
+    float bestEntropy = 0.0f;
+    float bestContrast = 0.0f;
+    float bestScore = 0.0f;
+    float distance = 0.0f;
+    float minDistance = 0.0f;
+    float relEntropyGain = 0.0f;
+    float relContrastGain = 0.0f;
+    bool isNewTarget = false;
+    bool shouldZoom = false;
+    double2 newOffset = make_double2(0.0, 0.0);
 };
 
-// Bewertet alle Tiles und bestimmt, ob ein neues Zoom-Ziel gewählt werden soll
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& h_entropy,
-    double2 offset,
-    float zoom,
+    double2 currentOffset,
+    double currentZoom,
     int width,
     int height,
     int tileSize,
-    RendererState& state
+    const RendererState& state
 );
 
-// Berechnet lokalen Entropiekontrast eines Tiles (Mittelwert zu Nachbarn)
-float computeEntropyContrast(
-    const std::vector<float>& h,
-    int index,
-    int tilesX,
-    int tilesY
-);
-
-}  // namespace ZoomLogic
+} // namespace ZoomLogic
