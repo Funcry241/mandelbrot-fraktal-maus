@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 276
-// 🐭 Maus-Kommentar: Zielwahl auf relative Auffälligkeit umgestellt. Nicht das stärkste Tile gewinnt, sondern das auffälligste im Kontext. Schneefuchs: „Unterschied macht Eindruck.“
+// Zeilen: 275
+// 🐭 Maus-Kommentar: Neue Zielwahl mit gewichteter Scoreformel. Entropie und Kontrast fließen kombiniert ein. Schneefuchs: „Nicht die hellste Stelle, sondern die interessanteste!“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
@@ -9,7 +9,7 @@
 #include "common.hpp"
 #include "renderer_state.hpp"
 
-#define ENABLE_ZOOM_LOGGING 1  // Set to 0 to disable local zoom analysis logs
+#define ENABLE_ZOOM_LOGGING 1
 
 namespace CudaInterop {
 
@@ -91,38 +91,35 @@ void renderCudaFrame(
 
     if (!pauseZoom) {
         const float dynamicThreshold = std::max(Settings::VARIANCE_THRESHOLD / std::log2(zoom_f + 2.0f), Settings::MIN_VARIANCE_THRESHOLD);
+        const float alpha = 0.6f;
+        const float beta = 0.4f;
 
         float2 bestOffset = offset_f;
         float bestEntropy = 0.0f;
-        float bestContrast = -1.0f;
-        float bestLocalContrast = -1.0f;
+        float bestContrast = 0.0f;
+        float bestScore = -1.0f;
         int bestIndex = -1;
 
-        constexpr float epsilon = 1e-5f;
-
         for (int i = 0; i < numTiles; ++i) {
-            float entropy = h_entropy[i];
-            if (entropy < dynamicThreshold) continue;
-
             int bx = i % tilesX;
             int by = i / tilesX;
+            float cx = (bx + 0.5f) * tileSize;
+            float cy = (by + 0.5f) * tileSize;
 
-            float centerX = (bx + 0.5f) * tileSize;
-            float centerY = (by + 0.5f) * tileSize;
-
-            float2 tileCenter = {
-                (centerX - width  / 2.0f) / zoom_f + offset_f.x,
-                (centerY - height / 2.0f) / zoom_f + offset_f.y
+            float2 center = {
+                (cx - width / 2.0f) / zoom_f + offset_f.x,
+                (cy - height / 2.0f) / zoom_f + offset_f.y
             };
 
+            float entropy = h_entropy[i];
             float contrast = computeEntropyContrast(h_entropy, i, tilesX, tilesY);
-            float localContrast = contrast / (entropy + epsilon);
+            float score = alpha * entropy + beta * contrast;
 
-            if (localContrast > bestLocalContrast) {
-                bestLocalContrast = localContrast;
-                bestContrast = contrast;
+            if (entropy > dynamicThreshold && score > bestScore) {
+                bestScore = score;
+                bestOffset = center;
                 bestEntropy = entropy;
-                bestOffset = tileCenter;
+                bestContrast = contrast;
                 bestIndex = i;
             }
         }
@@ -131,20 +128,17 @@ void renderCudaFrame(
         static float lastEntropy = 0.0f;
 
         float2 prevTarget = state.smoothedTargetOffset;
-        float2 delta = {
-            bestOffset.x - prevTarget.x,
-            bestOffset.y - prevTarget.y
-        };
+        float2 delta = { bestOffset.x - prevTarget.x, bestOffset.y - prevTarget.y };
         float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
 
         constexpr float MIN_PIXEL_JUMP = 1.0f;
         float minDist = MIN_PIXEL_JUMP / zoom_f;
 
-        bool isNewTarget = bestIndex >= 0 && dist > minDist;
+        bool isNewTarget = bestIndex >= 0 && (bestScore > state.smoothedTargetScore * 0.95f || dist > minDist);
 
         if (isNewTarget) {
             state.smoothedTargetOffset = bestOffset;
-            state.smoothedTargetScore = bestLocalContrast; // 🐭 Nur für Vergleich
+            state.smoothedTargetScore = bestScore;
         }
 
         if (bestIndex >= 0) {
@@ -156,8 +150,9 @@ void renderCudaFrame(
         float dE = fabsf(bestEntropy - lastEntropy);
         int dI = (bestIndex != lastIndex);
         std::printf(
-            "ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f C %.5f LC %.5f Dist %.6f Min %.6f dE %.4f dI %d New %d\n",
-            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestContrast, bestLocalContrast,
+            "ZoomLog Z %.5e Th %.6f Idx %d E %.5f C %.5f S %.5f Dist %.6f Min %.6f dE %.4f dI %d New %d\n",
+            zoom_f, dynamicThreshold, bestIndex,
+            bestEntropy, bestContrast, bestScore,
             dist, minDist, dE, dI, isNewTarget ? 1 : 0
         );
         lastEntropy = bestEntropy;
@@ -181,13 +176,8 @@ void renderCudaFrame(
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
 }
 
-void setPauseZoom(bool pause) {
-    pauseZoom = pause;
-}
-
-bool getPauseZoom() {
-    return pauseZoom;
-}
+void setPauseZoom(bool pause) { pauseZoom = pause; }
+bool getPauseZoom() { return pauseZoom; }
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (action == GLFW_PRESS && (key == GLFW_KEY_P || key == GLFW_KEY_SPACE)) {
