@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 272
-// 🐭 Maus-Kommentar: Zielwahl basiert nun auf lokalem Entropie-Kontrast. Score = Kontrast × log2(zoom+2). Schneefuchs: „Nicht der Lauteste, sondern der Auffälligste zählt.“
+// Zeilen: 283
+// 🐭 Maus-Kommentar: Zielwechsel jetzt mit Score-Hysterese (minScoreDelta) und Kontrast-Mindestschwelle. Schneefuchs: „Nicht jeder Glanz ist Gold.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
@@ -91,38 +91,40 @@ void renderCudaFrame(
 
     if (!pauseZoom) {
         const float dynamicThreshold = std::max(Settings::VARIANCE_THRESHOLD / std::log2(zoom_f + 2.0f), Settings::MIN_VARIANCE_THRESHOLD);
+        constexpr float minScoreDelta = 0.05f;
+        constexpr float minContrast = 0.01f;
 
         float2 bestOffset = offset_f;
         float bestEntropy = 0.0f;
-        float bestContrast = 0.0f;
         float bestScore = -1.0f;
         int bestIndex = -1;
+        float bestContrast = 0.0f;
 
         for (int i = 0; i < numTiles; ++i) {
-            float entropy = h_entropy[i];
-            if (entropy < dynamicThreshold) continue;
+            int bx = i % tilesX;
+            int by = i / tilesX;
 
-            float contrast = computeEntropyContrast(h_entropy, i, tilesX, tilesY);
+            float centerX = (bx + 0.5f) * tileSize;
+            float centerY = (by + 0.5f) * tileSize;
+
+            float2 tileCenter = {
+                (centerX - width  / 2.0f) / zoom_f + offset_f.x,
+                (centerY - height / 2.0f) / zoom_f + offset_f.y
+            };
+
+            float2 delta = { tileCenter.x - offset_f.x, tileCenter.y - offset_f.y };
+            float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+
             float sharpening = log2f(zoom_f + 2.0f);
-            float score = contrast * sharpening;
+            float contrast = computeEntropyContrast(h_entropy, i, tilesX, tilesY);
+            float score = (h_entropy[i] + contrast) / (1.0f + Settings::ENTROPY_NEARBY_BIAS * dist) * sharpening;
 
-            if (score > bestScore) {
-                int bx = i % tilesX;
-                int by = i / tilesX;
-
-                float centerX = (bx + 0.5f) * tileSize;
-                float centerY = (by + 0.5f) * tileSize;
-
-                float2 tileCenter = {
-                    (centerX - width  / 2.0f) / zoom_f + offset_f.x,
-                    (centerY - height / 2.0f) / zoom_f + offset_f.y
-                };
-
+            if (h_entropy[i] > dynamicThreshold && score > bestScore) {
                 bestScore = score;
                 bestOffset = tileCenter;
-                bestEntropy = entropy;
-                bestContrast = contrast;
+                bestEntropy = h_entropy[i];
                 bestIndex = i;
+                bestContrast = contrast;
             }
         }
 
@@ -139,7 +141,9 @@ void renderCudaFrame(
         constexpr float MIN_PIXEL_JUMP = 1.0f;
         float minDist = MIN_PIXEL_JUMP / zoom_f;
 
-        bool isNewTarget = bestIndex >= 0 && (bestScore > state.smoothedTargetScore * 0.95f || dist > minDist);
+        bool isNewTarget = bestIndex >= 0 &&
+            (bestScore > state.smoothedTargetScore + minScoreDelta) &&
+            (bestContrast > minContrast || dist > minDist);
 
         if (isNewTarget) {
             state.smoothedTargetOffset = bestOffset;
@@ -155,9 +159,9 @@ void renderCudaFrame(
         float dE = fabsf(bestEntropy - lastEntropy);
         int dI = (bestIndex != lastIndex);
         std::printf(
-            "ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f C %.5f S %.5f Dist %.6f Min %.6f dE %.4f dI %d New %d\n",
-            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestContrast, bestScore, dist, minDist,
-            dE, dI, isNewTarget ? 1 : 0
+            "ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f S %.5f Dist %.6f Min %.6f dE %.4f dI %d C %.4f New %d\n",
+            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestScore, dist, minDist,
+            dE, dI, bestContrast, isNewTarget ? 1 : 0
         );
         lastEntropy = bestEntropy;
         lastIndex = bestIndex;
