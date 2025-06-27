@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 261
-// 🐭 Maus-Kommentar: Kompaktlogik in EINER ASCII-Zeile. Zoom-Analyse in CSV-tauglichem Format. Schneefuchs: „Eine Zeile regiert sie alle.“
+// Zeilen: 266
+// 🐭 Maus-Kommentar: Kompakte Zielanalyse mit zoomskalierter Sprungschwelle. `MIN_PIXEL_JUMP / zoom` entscheidet. Schneefuchs: „Nähe ist relativ.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
@@ -132,7 +132,11 @@ void renderCudaFrame(
             bestOffset.y - prevTarget.y
         };
         float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-        bool isNewTarget = bestIndex >= 0 && (bestScore > state.smoothedTargetScore * 0.95f || dist > 0.001f);
+
+        constexpr float MIN_PIXEL_JUMP = 1.0f;
+        float minDist = MIN_PIXEL_JUMP / zoom_f;
+
+        bool isNewTarget = bestIndex >= 0 && (bestScore > state.smoothedTargetScore * 0.95f || dist > minDist);
 
         if (isNewTarget) {
             state.smoothedTargetOffset = bestOffset;
@@ -149,8 +153,8 @@ void renderCudaFrame(
         int dI = (bestIndex != lastIndex);
         float contrast = computeEntropyContrast(h_entropy, bestIndex, tilesX, tilesY);
         std::printf(
-            "ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f S %.5f Dist %.6f dE %.4f dI %d C %.4f New %d\n",
-            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestScore, dist,
+            "ZoomLog Z %.5e Th %.6f Idx %d Ent %.5f S %.5f Dist %.6f Min %.6f dE %.4f dI %d C %.4f New %d\n",
+            zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestScore, dist, minDist,
             dE, dI, contrast, isNewTarget ? 1 : 0
         );
         lastEntropy = bestEntropy;
