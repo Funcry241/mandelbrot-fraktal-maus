@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 97
-// 🐭 Maus-Kommentar: Kompaktlogik für Zoomanalyse angepasst für double2. Keine impliziten Casts. Nur echte Werte. Schneefuchs: „Miss, was du meinst – nicht was du willst.“
+// Zeilen: 103
+// 🐭 Maus-Kommentar: Kompaktlogik für Zoomanalyse inkl. Zielstabilität. `Jumped` zeigt Zielwechsel, `Stayed` zählt verbleibende Frames am selben Ziel. Schneefuchs: „Nur wer bleibt, hat Ziel.“
 
 #include "pch.hpp"
 
@@ -69,7 +69,19 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     double dx = tx - ox;
     double dy = ty - oy;
     double dist = std::sqrt(dx * dx + dy * dy);
-    std::printf("ZoomLog Frame OffsetX %.10f OffsetY %.10f TargetX %.10f TargetY %.10f Dist %.6f\n", ox, oy, tx, ty, dist);
+
+    static double2 lastTarget = { 0.0, 0.0 };
+    static int stayCounter = 0;
+    bool jumped = (tx != lastTarget.x || ty != lastTarget.y);
+    if (jumped) {
+        stayCounter = 0;
+        lastTarget = { tx, ty };
+    } else {
+        stayCounter++;
+    }
+
+    std::printf("ZoomLog FrameZ Z %.5e Dist %.6f Jumped %d Stayed %d\n",
+        state.zoom, dist, jumped ? 1 : 0, stayCounter);
 #endif
 }
 
