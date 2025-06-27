@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 232 → 233
-// 🐅 Maus-Kommentar: Entfernt globalRendererState vollständig – Auto-Zoom verwendet nun explizit übergebenen RendererState. Schneefuchs: „Global ist nur der Himmel – nicht dein Zustand.“
+// Zeilen: 238
+// 🐭 Maus-Kommentar: ASCII-only ZoomLog für PowerShell. Kompakt und scharf wie ein Fraktalmesser. Schneefuchs nickt zustimmend.
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
@@ -8,6 +8,8 @@
 #include "settings.hpp"
 #include "common.hpp"
 #include "renderer_state.hpp"
+
+#define ENABLE_ZOOM_LOGGING 1  // Set to 0 to disable local zoom analysis logs
 
 namespace CudaInterop {
 
@@ -41,7 +43,7 @@ void renderCudaFrame(
     float2& newOffset,
     bool& shouldZoom,
     int tileSize,
-    RendererState& state // ✅ NEU
+    RendererState& state
 ) {
     if (!cudaPboResource) {
         throw std::runtime_error("[FATAL] CUDA PBO not registered before renderCudaFrame.");
@@ -63,11 +65,6 @@ void renderCudaFrame(
     const int numTiles = tilesX * tilesY;
 
     h_entropy.resize(numTiles);
-
-    if (devPtr == nullptr) {
-        std::cerr << "[FATAL] devPtr is null after cudaGraphicsResourceGetMappedPointer!\n";
-        std::exit(EXIT_FAILURE);
-    }
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
     shouldZoom = false;
@@ -106,20 +103,14 @@ void renderCudaFrame(
             }
         }
 
-        static int lastIndex = -1;
-        if (Settings::debugLogging && bestIndex != lastIndex) {
-            std::printf("[DEBUG] Zoom = %.6f | Threshold = %.8f\n", zoom_f, dynamicThreshold);
-            if (bestIndex >= 0) {
-                std::printf("[DEBUG] Best Tile = %d | Score = %.6f | Entropy = %.6f\n", bestIndex, bestScore, bestEntropy);
-            } else {
-                std::puts("[DEBUG] No tile passed threshold. Zoom paused.");
-            }
-            lastIndex = bestIndex;
-        }
+#if ENABLE_ZOOM_LOGGING
+        std::printf("ZoomLog Z %.5e Th %.6f BestIdx %d Entropy %.5f Score %.5f\n", zoom_f, dynamicThreshold, bestIndex, bestEntropy, bestScore);
+#endif
 
+        static int lastIndex = -1;
         if (bestIndex >= 0) {
-            constexpr float SCORE_THRESHOLD   = 0.95f;
-            constexpr float NEWTARGET_DIST    = 0.001f;
+            constexpr float SCORE_THRESHOLD = 0.95f;
+            constexpr float NEWTARGET_DIST  = 0.001f;
 
             float2 delta = {
                 bestOffset.x - state.smoothedTargetOffset.x,
@@ -127,6 +118,10 @@ void renderCudaFrame(
             };
             float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
             bool isNewTarget = bestScore > state.smoothedTargetScore * SCORE_THRESHOLD || dist > NEWTARGET_DIST;
+
+#if ENABLE_ZOOM_LOGGING
+            std::printf("ZoomLog Dist %.6f NewTarget %d\n", dist, isNewTarget ? 1 : 0);
+#endif
 
             if (isNewTarget) {
                 state.smoothedTargetOffset = bestOffset;
@@ -146,10 +141,9 @@ void renderCudaFrame(
             }
             avgEntropy /= h_entropy.size();
 
-            if (countAbove > 0) {
-                std::printf("[WARN] Auto-Zoom inactive: %d tiles > threshold, avgEntropy = %.4f\n",
-                            countAbove, avgEntropy);
-            }
+#if ENABLE_ZOOM_LOGGING
+            std::printf("ZoomLog NoZoom TilesAbove %d AvgEntropy %.5f\n", countAbove, avgEntropy);
+#endif
         }
     }
 

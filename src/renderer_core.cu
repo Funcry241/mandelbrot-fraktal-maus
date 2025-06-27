@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 83
-// 🐭 Maus-Kommentar: Entry-Point fürs Rendering. `cleanup()` erfolgt jetzt nur bei erfolgreichem `initGL()` – keine Geisterbefehle mehr bei fehlgeschlagener GL-Init. `resize()` setzt nun korrekt den OpenGL-Viewport. Schneefuchs: „Wer nicht lebt, soll nicht sterben müssen – und wer malt, soll wissen, wo.“
+// Zeilen: 97
+// 🐭 Maus-Kommentar: Kompaktlogik für Zoomanalyse angepasst für double2. Keine impliziten Casts. Nur echte Werte. Schneefuchs: „Miss, was du meinst – nicht was du willst.“
 
 #include "pch.hpp"
 
@@ -13,6 +13,8 @@
 #include "settings.hpp"
 #include "hud.hpp"
 #include "cuda_interop.hpp"
+
+#define ENABLE_ZOOM_LOGGING 1  // Set to 0 to disable local zoom analysis logs
 
 Renderer::Renderer(int width, int height)
     : state(width, height), glInitialized(false) {}
@@ -58,6 +60,17 @@ void Renderer::renderFrame(bool autoZoomEnabled) {
 
 void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     RendererLoop::renderFrame_impl(state, autoZoomEnabled);
+
+#if ENABLE_ZOOM_LOGGING
+    double ox = state.offset.x;
+    double oy = state.offset.y;
+    double tx = state.smoothedTargetOffset.x;
+    double ty = state.smoothedTargetOffset.y;
+    double dx = tx - ox;
+    double dy = ty - oy;
+    double dist = std::sqrt(dx * dx + dy * dy);
+    std::printf("ZoomLog Frame OffsetX %.10f OffsetY %.10f TargetX %.10f TargetY %.10f Dist %.6f\n", ox, oy, tx, ty, dist);
+#endif
 }
 
 void Renderer::freeDeviceBuffers() {
