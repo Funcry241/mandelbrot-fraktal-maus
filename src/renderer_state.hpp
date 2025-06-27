@@ -1,6 +1,6 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 77
-// 🐭 Maus-Kommentar: Der Status des Renderers – jetzt mit double-präzisem Zoom & Offset für präzise Navigation. Float bleibt intern GPU-seitig – maximal effizient. Schneefuchs: „Präzision ist die Höflichkeit der Tiefensucher.“
+// Zeilen: 82
+// 🐭 Maus-Kommentar: Der Renderer merkt sich nun den letzten Entropiewert, Kontrast und Index – nötig für relative Zielwahl im Auto-Zoom. Schneefuchs: „Ohne Erinnerung keine Richtung.“
 
 #pragma once
 
@@ -51,6 +51,11 @@ public:
 
     // 🔁 Auto-Zoom Status
     bool shouldZoom = false;
+
+    // 🧠 Letzte Ziel-Auswertung (für relative Analyse)
+    int lastIndex = -1;
+    float lastEntropy = 0.0f;
+    float lastContrast = 0.0f;
 
     // 🔁 Konstruktor & Methoden zur Zustandspflege
     RendererState(int w, int h);
