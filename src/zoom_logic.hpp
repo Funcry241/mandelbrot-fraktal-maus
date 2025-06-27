@@ -1,6 +1,8 @@
-// Datei: src/zoom_logic.hpp
-// Zeilen: 52
-// 🐭 Maus-Kommentar: Deklariert die Zoom-Zielbewertungslogik getrennt von CUDA. Erlaubt saubere Trennung von Zustandsdaten und Zielauswahl. Schneefuchs: „Ein klarer Kopf entscheidet besser.“
+// zoom_logic.hpp - Zeilen: 52
+
+/*
+🐭 Maus-Kommentar: Deklariert die Zoom-Zielbewertungslogik getrennt von CUDA. Erlaubt saubere Trennung von Zustandsdaten und Zielauswahl. Schneefuchs: „Ein klarer Kopf entscheidet besser.“
+*/
 
 #pragma once
 
@@ -10,6 +12,7 @@
 
 namespace ZoomLogic {
 
+// Ergebnisstruktur einer Zielbewertung
 struct ZoomResult {
     float2 newOffset;
     bool shouldZoom;
@@ -24,6 +27,7 @@ struct ZoomResult {
     bool isNewTarget;
 };
 
+// Bewertet alle Tiles und bestimmt, ob ein neues Zoom-Ziel gewählt werden soll
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& h_entropy,
     float2 offset,
@@ -34,6 +38,7 @@ ZoomResult evaluateZoomTarget(
     RendererState& state
 );
 
+// Berechnet lokalen Entropiekontrast eines Tiles (Mittelwert zu Nachbarn)
 float computeEntropyContrast(
     const std::vector<float>& h,
     int index,

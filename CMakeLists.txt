@@ -73,6 +73,7 @@ add_executable(mandelbrot_otterdream
     src/hud.cpp
     src/opengl_utils.cpp
     src/renderer_resources.cpp
+    src/zoom_logic.cpp
 )
 
 # Precompiled Header (MSVC-only)

@@ -1,36 +1,88 @@
-// Datei: src/zoom_logic.cpp
-// Zeilen: 83
-// 🐭 Maus-Kommentar: Kapselt Zielauswahl rein auf relativer Basis. Bewertet Tiles nach Kontrast und Entropie-Gewinn. Schneefuchs: „Nur wer im Umfeld glitzert, zieht den Blick.“
+// zoom_logic.cpp - Zeilen: 163
+
+/*
+Maus-Kommentar 🐭: Diese Datei vereint nun die Zielauswahl-Logik: Low-Level-Entscheidung (selectZoomTarget) und High-Level-Auswahl (evaluateZoomTarget mit ZoomResult). Schneefuchs wünscht Ordnung – hier ist sie.
+*/
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
 #include <cmath>
-#include <algorithm>
+#include <cstdio>
+
+#define ENABLE_ZOOM_LOGGING 1
 
 namespace ZoomLogic {
+
+float computeEntropyContrast(float center, float neighbors[4]) {
+    float contrast = 0.0f;
+    for (int i = 0; i < 4; ++i) {
+        contrast += fabsf(center - neighbors[i]);
+    }
+    return contrast / 4.0f;
+}
 
 float computeEntropyContrast(const std::vector<float>& h, int index, int tilesX, int tilesY) {
     int x = index % tilesX;
     int y = index / tilesX;
-    float sum = 0.0f;
-    int count = 0;
-    for (int dy = -1; dy <= 1; ++dy) {
-        for (int dx = -1; dx <= 1; ++dx) {
-            if (dx == 0 && dy == 0) continue;
-            int nx = x + dx;
-            int ny = y + dy;
-            if (nx >= 0 && nx < tilesX && ny >= 0 && ny < tilesY) {
-                int nIndex = ny * tilesX + nx;
-                sum += std::abs(h[index] - h[nIndex]);
-                ++count;
-            }
-        }
+    float center = h[index];
+    float neighbors[4] = {
+        (x > 0         ? h[index - 1]     : center),
+        (x < tilesX-1  ? h[index + 1]     : center),
+        (y > 0         ? h[index - tilesX]: center),
+        (y < tilesY-1  ? h[index + tilesX]: center)
+    };
+    return computeEntropyContrast(center, neighbors);
+}
+
+bool selectZoomTarget(
+    float zoom,
+    int currentIndex,
+    float currentEntropy,
+    float currentContrast,
+    const float2& currentTarget,
+    const float2& candidateTarget,
+    int candidateIndex,
+    float candidateEntropy,
+    float candidateContrast,
+    float candidateScore,
+    float2& newTarget,
+    bool& isNewTarget
+) {
+    float dx = candidateTarget.x - currentTarget.x;
+    float dy = candidateTarget.y - currentTarget.y;
+    float dist = sqrtf(dx * dx + dy * dy);
+
+    float minDist = Settings::MIN_JUMP_DISTANCE / zoom;
+    float deltaEntropy = candidateEntropy - currentEntropy;
+    float deltaContrast = candidateContrast - currentContrast;
+
+    float relEntropy = currentEntropy > 0.01f ? deltaEntropy / currentEntropy : 0.0f;
+    float relContrast = currentContrast > 0.01f ? deltaContrast / currentContrast : 0.0f;
+
+    float dynamicScoreThreshold = 0.95f + 0.05f * log2f(zoom + 1.0f);
+    bool skipByDelta = fabsf(deltaEntropy) < 0.3f && fabsf(deltaContrast) < 0.2f;
+
+    isNewTarget = (dist > minDist && candidateScore > dynamicScoreThreshold && !skipByDelta);
+
+    if (isNewTarget) {
+        newTarget = candidateTarget;
     }
-    return count > 0 ? sum / count : 0.0f;
+
+#if ENABLE_ZOOM_LOGGING
+    printf(
+        "ZoomLog Z %.5e Idx %d Ent %.5f S %.5f Dist %.6f Min %.6f dE %.4f dC %.4f RelE %.3f RelC %.3f dI %d New %d\n",
+        zoom, candidateIndex, candidateEntropy, candidateScore,
+        dist, minDist, deltaEntropy, deltaContrast,
+        relEntropy, relContrast,
+        (candidateIndex != currentIndex), isNewTarget
+    );
+#endif
+
+    return isNewTarget;
 }
 
 ZoomResult evaluateZoomTarget(
-    const std::vector<float>& entropy,
+    const std::vector<float>& h_entropy,
     float2 offset,
     float zoom,
     int width,
@@ -38,56 +90,52 @@ ZoomResult evaluateZoomTarget(
     int tileSize,
     RendererState& state
 ) {
+    ZoomResult result = {};
+    result.bestScore = -1.0f;
+    result.bestIndex = -1;
+
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
-    const int numTiles = tilesX * tilesY;
 
-    float dynamicThreshold = std::max(Settings::VARIANCE_THRESHOLD / std::log2(zoom + 2.0f), Settings::MIN_VARIANCE_THRESHOLD);
+    for (int i = 0; i < tilesX * tilesY; ++i) {
+        float entropy = h_entropy[i];
+        float contrast = computeEntropyContrast(h_entropy, i, tilesX, tilesY);
 
-    ZoomResult result{};
-    result.bestIndex = -1;
-    result.bestScore = -1.0f;
+        int x = i % tilesX;
+        int y = i / tilesX;
 
-    for (int i = 0; i < numTiles; ++i) {
-        int bx = i % tilesX;
-        int by = i / tilesX;
+        float2 candidateCenter;
+        candidateCenter.x = offset.x + ((x + 0.5f) * tileSize - width / 2.0f) * zoom;
+        candidateCenter.y = offset.y + ((y + 0.5f) * tileSize - height / 2.0f) * zoom;
 
-        float centerX = (bx + 0.5f) * tileSize;
-        float centerY = (by + 0.5f) * tileSize;
+        float score = entropy + contrast;
 
-        float2 tileCenter = {
-            (centerX - width / 2.0f) / zoom + offset.x,
-            (centerY - height / 2.0f) / zoom + offset.y
-        };
+        float2 dummyNewTarget;
+        bool isNew = false;
 
-        float2 delta = { tileCenter.x - offset.x, tileCenter.y - offset.y };
-        float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+        bool accepted = selectZoomTarget(
+            zoom, state.lastIndex, state.lastEntropy, state.lastContrast, offset,
+            candidateCenter, i, entropy, contrast, score,
+            dummyNewTarget, isNew
+        );
 
-        float contrast = computeEntropyContrast(entropy, i, tilesX, tilesY);
-        float score = contrast > 0.0f ? entropy[i] / contrast : 0.0f;
-
-        if (entropy[i] > dynamicThreshold && score > result.bestScore) {
+        if (accepted && score > result.bestScore) {
             result.bestScore = score;
-            result.newOffset = tileCenter;
-            result.bestEntropy = entropy[i];
-            result.bestContrast = contrast;
             result.bestIndex = i;
-            result.distance = dist;
+            result.newOffset = candidateCenter;
+            result.shouldZoom = true;
+            result.bestEntropy = entropy;
+            result.bestContrast = contrast;
+            result.isNewTarget = isNew;
+
+            float dx = candidateCenter.x - offset.x;
+            float dy = candidateCenter.y - offset.y;
+            result.distance = sqrtf(dx * dx + dy * dy);
+            result.minDistance = Settings::MIN_JUMP_DISTANCE / zoom;
+            result.relEntropyGain = state.lastEntropy > 0.01f ? (entropy - state.lastEntropy) / state.lastEntropy : 0.0f;
+            result.relContrastGain = state.lastContrast > 0.01f ? (contrast - state.lastContrast) / state.lastContrast : 0.0f;
         }
     }
-
-    constexpr float MIN_PIXEL_JUMP = 1.0f;
-    result.minDistance = MIN_PIXEL_JUMP / zoom;
-
-    result.relEntropyGain = (result.bestEntropy - state.lastEntropy) / (state.lastEntropy + 1e-6f);
-    result.relContrastGain = (result.bestContrast - state.lastContrast) / (state.lastContrast + 1e-6f);
-
-    result.isNewTarget = result.bestIndex >= 0 && (
-        (result.relEntropyGain > 0.1f && result.relContrastGain > 0.05f) ||
-        result.distance > result.minDistance
-    );
-
-    result.shouldZoom = result.bestIndex >= 0;
 
     return result;
 }
