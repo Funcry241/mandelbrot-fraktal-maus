@@ -129,6 +129,7 @@ void updateAutoZoom(RendererState& state) {
 
     state.offset.x += moveX;
     state.offset.y += moveY;
+    state.justZoomed = true;
 
     if (Settings::debugLogging) {
         std::printf("[DEBUG] Zoom update: offset -> (%.10f, %.10f)\n", state.offset.x, state.offset.y);
