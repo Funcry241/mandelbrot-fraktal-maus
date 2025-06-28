@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 137
+// Zeilen: 160
 // 🐭 Maus-Kommentar: CUDA-Interop delegiert Zielanalyse jetzt an ZoomLogic. Kompakter, modularer, klarer. Schneefuchs: „Nur wer delegiert, bleibt flexibel.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
@@ -30,6 +30,34 @@ void unregisterPBO() {
         CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboResource));
         cudaPboResource = nullptr;
     }
+}
+
+static void logZoomEvaluation(const int* d_iterations, int width, int height, int maxIterations, double zoom) {
+    std::vector<int> h_iters(width * height);
+    CUDA_CHECK(cudaMemcpy(h_iters.data(), d_iterations, h_iters.size() * sizeof(int), cudaMemcpyDeviceToHost));
+
+    double sum = 0.0, sumSq = 0.0;
+    int minIt = maxIterations;
+    int maxIt = 0;
+    int escapeCount = 0;
+
+    for (int it : h_iters) {
+        sum += it;
+        sumSq += it * it;
+        if (it < minIt) minIt = it;
+        if (it > maxIt) maxIt = it;
+        if (it < 5) escapeCount++;
+    }
+
+    const int total = static_cast<int>(h_iters.size());
+    const double mean = sum / total;
+    const double variance = (sumSq / total) - (mean * mean);
+    const double escapeRatio = static_cast<double>(escapeCount) / total;
+
+    bool valid = (escapeRatio < 0.98) && (variance > 0.05) && (mean > 5.0);
+
+    std::printf("ZoomEval Z %.1e MeanIt %.2f VarIt %.2f Escape %.3f Min %d Max %d Valid %d\n",
+        zoom, mean, variance, escapeRatio, minIt, maxIt, valid ? 1 : 0);
 }
 
 void renderCudaFrame(
@@ -84,7 +112,6 @@ void renderCudaFrame(
             state.zoomResult.bestContrast
         );
 
-
         if (result.bestIndex >= 0) {
             shouldZoom = result.shouldZoom;
             newOffset = result.newOffset;
@@ -101,6 +128,7 @@ void renderCudaFrame(
                 (result.bestIndex != state.zoomResult.bestIndex) ? 1 : 0,
                 result.isNewTarget ? 1 : 0
             );
+            logZoomEvaluation(d_iterations, width, height, maxIterations, zoom);
         } else {
             float avgEntropy = 0.0f;
             int countAbove = 0;
