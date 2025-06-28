@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 178
+// Zeilen: 184
 // 🐭 Maus-Kommentar: CUDA-Interop delegiert Zielanalyse jetzt an ZoomLogic. Kompakter, modularer, klarer. Schneefuchs: „Nur wer delegiert, bleibt flexibel.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
@@ -116,12 +116,18 @@ void renderCudaFrame(
         );
 
         if (result.bestIndex >= 0) {
-            shouldZoom = result.shouldZoom;
             newOffset = result.newOffset;
+
+            // 🔧 Fix: immer zoomen, wenn Zielwechsel (New=1), selbst bei Score knapp
+            if (result.isNewTarget) {
+                shouldZoom = true;
+            } else {
+                shouldZoom = false;
+            }
         }
 
 #if ENABLE_ZOOM_LOGGING
-        if (shouldZoom) {
+        if (result.bestIndex >= 0) {
             std::printf(
                 "ZoomLog Z %.5e Idx %d Ent %.5f S %.5f Dist %.6f Min %.6f dE %.4f dC %.4f RelE %.3f RelC %.3f dI %d New %d\n",
                 zoom_f, result.bestIndex, result.bestEntropy, result.bestScore, result.distance, result.minDistance,
@@ -131,7 +137,6 @@ void renderCudaFrame(
                 (result.bestIndex != state.zoomResult.bestIndex) ? 1 : 0,
                 result.isNewTarget ? 1 : 0
             );
-            logZoomEvaluation(d_iterations, width, height, maxIterations, zoom);
         } else {
             float avgEntropy = 0.0f;
             int countAbove = 0;
@@ -144,7 +149,7 @@ void renderCudaFrame(
         }
 #endif
 
-        state.zoomResult = result;  // 🔁 ZoomResult speichern (auch Kontrast-Heatmap!)
+        state.zoomResult = result;
     }
 
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
