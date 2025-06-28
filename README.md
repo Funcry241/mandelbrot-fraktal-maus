@@ -106,3 +106,6 @@ Dieses Projekt steht unter der MIT-Lizenz – siehe [LICENSE](LICENSE) für Deta
 
 **OtterDream** – von der Raupe zum Fraktal-Schmetterling 🦋  
 *Happy Zooming!*
+
+
+🐭 This project owes a mouse more than it admits.
