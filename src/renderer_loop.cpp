@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 223
+// Zeilen: 234
 // 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms. Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
 
 #include "pch.hpp"
@@ -126,6 +126,18 @@ void updateAutoZoom(RendererState& state) {
 
     double moveX = delta.x * factor;
     double moveY = delta.y * factor;
+
+    if (Settings::debugLogging) {
+        std::printf("[ZoomMove] Z=%.2e  dist=%.2e  move=(%.2e, %.2e)  factor=%.3f  → target=(%.10f, %.10f)\n",
+            state.zoom,
+            dist,
+            moveX,
+            moveY,
+            factor,
+            state.targetOffset.x,
+            state.targetOffset.y
+        );
+    }
 
     state.offset.x += moveX;
     state.offset.y += moveY;
