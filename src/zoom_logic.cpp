@@ -1,5 +1,5 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 158
+// Zeilen: 163
 /*
 Maus-Kommentar 🐭: Diese Datei wurde irrtümlich als Ort für Hauptfunktionen wie `renderFrame`, `drawFrame` etc. verwendet – das führt zu symbolischen Duplikaten mit `renderer_loop.cpp`. Schneefuchs sagt: „Nie zweimal das Gleiche rufen lassen, sonst knallt der Linker.“
 Diese Datei ist jetzt korrekt bereinigt und enthält **ausschließlich** logische Auswertungsfunktionen wie Entropiekontrast, Zoom-Bewertung und Heatmap-Werte.
@@ -104,6 +104,11 @@ ZoomResult evaluateZoomTarget(
         result.relEntropyGain > 0.01f &&
         result.relContrastGain > 0.01f &&
         result.distance > result.minDistance;
+
+    // 🐭 Schneefuchs-Fix: Erlaube Zielwechsel bei stagnierendem Score, wenn Alt-Ziel zu alt
+    if (!result.isNewTarget && result.bestEntropy > 2.0f && result.relEntropyGain <= 0.001f && result.relContrastGain <= 0.001f) {
+        result.isNewTarget = true;
+    }
 
     result.shouldZoom = result.isNewTarget;
 
