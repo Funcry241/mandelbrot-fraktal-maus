@@ -1,5 +1,5 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 123
+// Zeilen: 126
 /*
 Maus-Kommentar 🐭: Diese Datei wurde irrtümlich als Ort für Hauptfunktionen wie `renderFrame`, `drawFrame` etc. verwendet – das führt zu symbolischen Duplikaten mit `renderer_loop.cpp`. Schneefuchs sagt: „Nie zweimal das Gleiche rufen lassen, sonst knallt der Linker.“
 Diese Datei ist jetzt korrekt bereinigt und enthält **ausschließlich** logische Auswertungsfunktionen wie Entropiekontrast etc.
@@ -56,8 +56,10 @@ ZoomResult evaluateZoomTarget(
     result.bestEntropy   = currentEntropy;
     result.bestContrast  = currentContrast;
     result.newOffset     = offset;
+    result.perTileContrast.resize(tileCount, 0.0f);
 
     float maxScore = -1.0f;
+
     for (int i = 0; i < tileCount; ++i) {
         float entropy = h_entropy[i];
 
@@ -76,11 +78,13 @@ ZoomResult evaluateZoomTarget(
         float distWeight = 1.0f / (1.0f + dist * zoom);
         float score = entropy * distWeight;
 
+        result.perTileContrast[i] = score;  // Heatmap-Wert
+
         if (score > maxScore) {
             maxScore = score;
             result.bestIndex     = i;
             result.bestEntropy   = entropy;
-            result.newOffset     = { candidateOffset.x, candidateOffset.y };
+            result.newOffset     = make_double2(candidateOffset.x, candidateOffset.y);  // fix ✅
         }
     }
 
