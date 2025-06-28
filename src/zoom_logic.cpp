@@ -1,8 +1,6 @@
-// zoom_logic.cpp - Zeilen: 167
-
-/*
-Maus-Kommentar 🐭: Diese Datei vereint nun die Zielauswahl-Logik: Low-Level-Entscheidung (selectZoomTarget) und High-Level-Auswahl (evaluateZoomTarget mit ZoomResult). Schneefuchs wünscht Ordnung – hier ist sie.
-*/
+// Datei: src/zoom_logic.cpp
+// Zeilen: 166
+// 🐭 Maus-Kommentar: Umgestellt auf reine Datenübergabe – `RendererState` wird nicht mehr eingebunden. Damit ist diese Datei vollständig C++-kompatibel, auch für .cu-Dateien, falls gewünscht. Schneefuchs: „Trennung schafft Klarheit.“
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -88,7 +86,10 @@ ZoomResult evaluateZoomTarget(
     int width,
     int height,
     int tileSize,
-    const RendererState& state
+    float2 currentOffset,
+    int currentIndex,
+    float currentEntropy,
+    float currentContrast
 ) {
     ZoomResult result = {};
     result.bestScore = -1.0f;
@@ -96,9 +97,6 @@ ZoomResult evaluateZoomTarget(
 
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
-
-    // 🔄 Fix: float2 aus double2 extrahieren
-    float2 currentOffset = make_float2(static_cast<float>(state.offset.x), static_cast<float>(state.offset.y));
 
     for (int i = 0; i < tilesX * tilesY; ++i) {
         float entropy = h_entropy[i];
@@ -108,8 +106,8 @@ ZoomResult evaluateZoomTarget(
         int y = i / tilesX;
 
         float2 candidateCenter;
-        candidateCenter.x = static_cast<float>(offset.x + ((x + 0.5) * tileSize - width / 2.0) * zoom);
-        candidateCenter.y = static_cast<float>(offset.y + ((y + 0.5) * tileSize - height / 2.0) * zoom);
+        candidateCenter.x = static_cast<float>(offset.x + ((x + 0.5f) * tileSize - width / 2.0f) * zoom);
+        candidateCenter.y = static_cast<float>(offset.y + ((y + 0.5f) * tileSize - height / 2.0f) * zoom);
 
         float score = entropy + contrast;
 
@@ -117,7 +115,7 @@ ZoomResult evaluateZoomTarget(
         bool isNew = false;
 
         bool accepted = selectZoomTarget(
-            zoom, state.lastIndex, state.lastEntropy, state.lastContrast, currentOffset,
+            zoom, currentIndex, currentEntropy, currentContrast, currentOffset,
             candidateCenter, i, entropy, contrast, score,
             dummyNewTarget, isNew
         );
@@ -125,7 +123,7 @@ ZoomResult evaluateZoomTarget(
         if (accepted && score > result.bestScore) {
             result.bestScore = score;
             result.bestIndex = i;
-            result.newOffset = make_double2(candidateCenter.x, candidateCenter.y);  // ✅ fix: convert to double2
+            result.newOffset = make_double2(candidateCenter.x, candidateCenter.y);
             result.shouldZoom = true;
             result.bestEntropy = entropy;
             result.bestContrast = contrast;
@@ -135,8 +133,8 @@ ZoomResult evaluateZoomTarget(
             float dy = candidateCenter.y - currentOffset.y;
             result.distance = sqrtf(dx * dx + dy * dy);
             result.minDistance = Settings::MIN_JUMP_DISTANCE / zoom;
-            result.relEntropyGain = state.lastEntropy > 0.01f ? (entropy - state.lastEntropy) / state.lastEntropy : 0.0f;
-            result.relContrastGain = state.lastContrast > 0.01f ? (contrast - state.lastContrast) / state.lastContrast : 0.0f;
+            result.relEntropyGain = currentEntropy > 0.01f ? (entropy - currentEntropy) / currentEntropy : 0.0f;
+            result.relContrastGain = currentContrast > 0.01f ? (contrast - currentContrast) / currentContrast : 0.0f;
         }
     }
 

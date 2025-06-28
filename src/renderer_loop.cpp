@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 189
+// Zeilen: 194
 // 🐭 Maus-Kommentar: Float2 ist Geschichte – alle Offset- und Deltawerte jetzt konsequent als double2 geführt. Präzision auch bei tiefstem Zoom. Schneefuchs: „Nur wer doppelt denkt, zoomt wirklich tief.“
 
 #include "pch.hpp"
@@ -98,6 +98,11 @@ void computeCudaFrame(RendererState& state) {
                 std::printf("[DEBUG] Target ignored | d=%.3e <= threshold=%.3e\n", dist, dynamicJumpThreshold);
             }
         }
+    }
+
+    // 🧠 Zustand immer aktualisieren, auch ohne Sprung – wichtig für RelE / RelC
+    if (state.zoomResult.bestScore > 0.0f) {
+        // Kein Update mehr nötig – Werte sind direkt in state.zoomResult enthalten
     }
 }
 

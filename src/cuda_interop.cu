@@ -72,8 +72,18 @@ void renderCudaFrame(
 
     if (!pauseZoom) {
         ZoomLogic::ZoomResult result = ZoomLogic::evaluateZoomTarget(
-            h_entropy, offset, zoom_f, width, height, tileSize, state
+            h_entropy,
+            offset,
+            zoom_f,
+            width,
+            height,
+            tileSize,
+            make_float2(static_cast<float>(state.offset.x), static_cast<float>(state.offset.y)),
+            state.zoomResult.bestIndex,
+            state.zoomResult.bestEntropy,
+            state.zoomResult.bestContrast
         );
+
 
         if (result.bestIndex >= 0) {
             shouldZoom = result.shouldZoom;
@@ -85,10 +95,10 @@ void renderCudaFrame(
             std::printf(
                 "ZoomLog Z %.5e Idx %d Ent %.5f S %.5f Dist %.6f Min %.6f dE %.4f dC %.4f RelE %.3f RelC %.3f dI %d New %d\n",
                 zoom_f, result.bestIndex, result.bestEntropy, result.bestScore, result.distance, result.minDistance,
-                result.bestEntropy - state.lastEntropy,
-                result.bestContrast - state.lastContrast,
+                result.bestEntropy - state.zoomResult.bestEntropy,
+                result.bestContrast - state.zoomResult.bestContrast,
                 result.relEntropyGain, result.relContrastGain,
-                (result.bestIndex != state.lastIndex) ? 1 : 0,
+                (result.bestIndex != state.zoomResult.bestIndex) ? 1 : 0,
                 result.isNewTarget ? 1 : 0
             );
         } else {
@@ -103,9 +113,9 @@ void renderCudaFrame(
         }
 #endif
 
-        state.lastIndex = result.bestIndex;
-        state.lastEntropy = result.bestEntropy;
-        state.lastContrast = result.bestContrast;
+        state.zoomResult.bestIndex = result.bestIndex;
+        state.zoomResult.bestEntropy = result.bestEntropy;
+        state.zoomResult.bestContrast = result.bestContrast;
     }
 
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));

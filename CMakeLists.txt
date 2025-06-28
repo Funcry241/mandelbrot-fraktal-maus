@@ -61,20 +61,26 @@ include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
 # ---------------------------------------------------------
 # 🛠 Executable
 add_executable(mandelbrot_otterdream
+    # 🧠 Core Logic
     src/main.cpp
     src/renderer_core.cu
-    src/renderer_window.cpp
-    src/renderer_pipeline.cpp
     src/renderer_loop.cpp
     src/renderer_state.cpp
-    src/cuda_interop.cu
-    src/core_kernel.cu
-    src/zoom_logic.cpp
-    src/zoom_logic.cpp 
+
+    # 🎨 Rendering & UI
+    src/renderer_pipeline.cpp
+    src/renderer_window.cpp
+    src/renderer_resources.cpp
     src/hud.cpp
     src/opengl_utils.cpp
-    src/renderer_resources.cpp
     src/heatmap_overlay.cpp
+
+    # ⚙️ CUDA
+    src/cuda_interop.cu
+    src/core_kernel.cu
+
+    # 🔎 Zoom
+    src/zoom_logic.cpp
 )
 
 # Precompiled Header (MSVC-only)

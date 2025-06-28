@@ -1,5 +1,5 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 103
+// Zeilen: 106
 // 🐭 Maus-Kommentar: Kompaktlogik für Zoomanalyse inkl. Zielstabilität. `Jumped` zeigt Zielwechsel, `Stayed` zählt verbleibende Frames am selben Ziel. Schneefuchs: „Nur wer bleibt, hat Ziel.“
 
 #include "pch.hpp"
@@ -13,6 +13,7 @@
 #include "settings.hpp"
 #include "hud.hpp"
 #include "cuda_interop.hpp"
+#include "zoom_logic.hpp"
 
 #define ENABLE_ZOOM_LOGGING 1  // Set to 0 to disable local zoom analysis logs
 

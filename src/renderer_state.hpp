@@ -1,10 +1,12 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 82
-// 🐭 Maus-Kommentar: Der Renderer merkt sich nun den letzten Entropiewert, Kontrast und Index – nötig für relative Zielwahl im Auto-Zoom. Schneefuchs: „Ohne Erinnerung keine Richtung.“
+// Zeilen: 83
+// 🐭 Maus-Kommentar: Der Renderer merkt sich nun Entropie, Kontrast, Index und Score (zoomResult) – für Analyse, Visualisierung oder Heatmap. Schneefuchs: „Wer messen will, muss erinnern.“
 
 #pragma once
 
 #include "pch.hpp"  // 🧠 Enthält <cuda_runtime.h>, das float2 definiert – keine eigene Definition mehr nötig!
+#include "zoom_logic.hpp"  // 📦 Enthält ZoomResult für Auto-Zoom-Auswertung
+#include "renderer_state.hpp"
 
 class RendererState {
 public:
@@ -52,10 +54,8 @@ public:
     // 🔁 Auto-Zoom Status
     bool shouldZoom = false;
 
-    // 🧠 Letzte Ziel-Auswertung (für relative Analyse)
-    int lastIndex = -1;
-    float lastEntropy = 0.0f;
-    float lastContrast = 0.0f;
+    // 🧠 Letzte Ziel-Auswertung als Struktur (für Kontrastanalyse etc.)
+    ZoomLogic::ZoomResult zoomResult;
 
     // 🔁 Konstruktor & Methoden zur Zustandspflege
     RendererState(int w, int h);
