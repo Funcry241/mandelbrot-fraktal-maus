@@ -1,5 +1,5 @@
 // Datei: src/zoom_logic.hpp
-// Zeilen: 63
+// Zeilen: 66
 // 🐭 Maus-Kommentar: Nur noch Deklarationen! Für saubere Trennung von Interface und Implementation. CUDA-tauglich, kompakt. Schneefuchs: „Header macht Angebot, nicht Geschäft.“
 
 #pragma once
@@ -23,6 +23,8 @@ struct ZoomResult {
     bool isNewTarget = false;
     bool shouldZoom = false;
     double2 newOffset = make_double2(0.0, 0.0);
+
+    std::vector<float> perTileContrast;  // 🔥 Kontrastwerte für HeatmapOverlay
 };
 
 // Nur Deklarationen – Definitionen siehe .cpp

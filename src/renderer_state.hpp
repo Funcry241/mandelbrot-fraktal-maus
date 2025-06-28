@@ -1,5 +1,5 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 85
+// Zeilen: 87
 // 🐭 Maus-Kommentar: Der Renderer merkt sich nun Entropie, Kontrast, Index und Score (zoomResult) – für Analyse, Visualisierung oder Heatmap. Schneefuchs: „Wer messen will, muss erinnern.“
 
 #pragma once
@@ -34,9 +34,10 @@ public:
     float currentFPS = 0.0f;
     float deltaTime = 0.0f;
 
-    // 🧩 Adaptive Tile-Größe + Entropie-Auswertung
+    // 🧩 Adaptive Tile-Größe + Entropie-/Kontrastspeicher
     int lastTileSize;
-    std::vector<float> h_entropy;
+    std::vector<float> h_entropy;   // 🔢 Entropie pro Tile
+    std::vector<float> h_contrast;  // 🌈 Kontrast pro Tile – für Heatmap-Overlay
 
     // 🔗 CUDA-Puffer (Geräteseite)
     int* d_iterations = nullptr;

@@ -1,7 +1,5 @@
-// heatmap_overlay.cpp - Zeilen: 135
-
 /*
-Maus-Kommentar 🐭: Heatmap-Overlay mit OpenGL und GLSL – nun **oben rechts** statt unten rechts. Die Shader und Zeichnung bleiben unverändert, aber Offset/Scale wurden angepasst. Schneefuchs validiert so visuell die Aktivität im Fraktalbild, ohne ImGui.
+Maus-Kommentar 🐭: Heatmap-Overlay mit OpenGL und GLSL – nun **oben rechts** statt unten rechts. Shaderfehler werden nun korrekt geprüft und im Log ausgegeben. Schneefuchs kann so sicher sein, dass kein schwarzer Bildschirm auf leere Shader zurückgeht.
 */
 
 #include "pch.hpp"
@@ -46,6 +44,15 @@ static GLuint compile(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, nullptr);
     glCompileShader(shader);
+
+    GLint success = 0;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        GLchar log[1024];
+        glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
+        std::fprintf(stderr, "[SHADER ERROR] Compilation failed: %s\n", log);
+    }
+
     return shader;
 }
 
@@ -56,6 +63,15 @@ static GLuint createShaderProgram() {
     glAttachShader(prog, vs);
     glAttachShader(prog, fs);
     glLinkProgram(prog);
+
+    GLint success = 0;
+    glGetProgramiv(prog, GL_LINK_STATUS, &success);
+    if (!success) {
+        GLchar log[1024];
+        glGetProgramInfoLog(prog, sizeof(log), nullptr, log);
+        std::fprintf(stderr, "[SHADER ERROR] Linking failed: %s\n", log);
+    }
+
     glDeleteShader(vs);
     glDeleteShader(fs);
     return prog;
@@ -65,11 +81,36 @@ void toggle() {
     showOverlay = !showOverlay;
 }
 
+void init(int /*width*/, int /*height*/) {
+    // Init deferred to drawOverlay()
+}
+
+void cleanup() {
+    if (overlayVAO) glDeleteVertexArrays(1, &overlayVAO);
+    if (overlayVBO) glDeleteBuffers(1, &overlayVBO);
+    if (overlayShader) glDeleteProgram(overlayShader);
+    overlayVAO = overlayVBO = overlayShader = 0;
+}
+
+void updateOverlayTexture(const std::vector<float>& entropy,
+                          const std::vector<float>& contrast,
+                          int width, int height,
+                          int tileSize) {
+    drawOverlay(entropy, contrast, width, height, tileSize, 0);
+}
+
+void drawOverlayTexture(const std::vector<float>& entropy,
+                        const std::vector<float>& contrast,
+                        int width, int height,
+                        int tileSize) {
+    drawOverlay(entropy, contrast, width, height, tileSize, 0);
+}
+
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width, int height,
                  int tileSize,
-                 GLuint textureId) {
+                 GLuint /*textureId*/) {
     if (!showOverlay) return;
 
     const int tilesX = (width + tileSize - 1) / tileSize;

@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 160
+// Zeilen: 178
 // 🐭 Maus-Kommentar: CUDA-Interop delegiert Zielanalyse jetzt an ZoomLogic. Kompakter, modularer, klarer. Schneefuchs: „Nur wer delegiert, bleibt flexibel.“
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
@@ -9,6 +9,7 @@
 #include "common.hpp"
 #include "renderer_state.hpp"
 #include "zoom_logic.hpp"
+#include "heatmap_overlay.hpp"  // 🔥 Overlay-Toggle per Taste
 
 #define ENABLE_ZOOM_LOGGING 1  // Set to 0 to disable local zoom analysis logs
 
@@ -143,9 +144,7 @@ void renderCudaFrame(
         }
 #endif
 
-        state.zoomResult.bestIndex = result.bestIndex;
-        state.zoomResult.bestEntropy = result.bestEntropy;
-        state.zoomResult.bestContrast = result.bestContrast;
+        state.zoomResult = result;  // 🔁 ZoomResult speichern (auch Kontrast-Heatmap!)
     }
 
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
@@ -160,9 +159,18 @@ bool getPauseZoom() {
 }
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (action == GLFW_PRESS && (key == GLFW_KEY_P || key == GLFW_KEY_SPACE)) {
-        pauseZoom = !pauseZoom;
-        std::cout << "[Zoom] Auto-Zoom " << (pauseZoom ? "paused" : "resumed") << "\n";
+    if (action == GLFW_PRESS) {
+        if (key == GLFW_KEY_P || key == GLFW_KEY_SPACE) {
+            pauseZoom = !pauseZoom;
+            std::cout << "[Zoom] Auto-Zoom " << (pauseZoom ? "paused" : "resumed") << "\n";
+        }
+
+        if (key == GLFW_KEY_H) {
+            HeatmapOverlay::toggle();
+            if (Settings::debugLogging) {
+                std::puts("[DEBUG] Heatmap overlay toggled (H)");
+            }
+        }
     }
 }
 

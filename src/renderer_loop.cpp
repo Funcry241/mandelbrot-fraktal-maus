@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 194
-// 🐭 Maus-Kommentar: Float2 ist Geschichte – alle Offset- und Deltawerte jetzt konsequent als double2 geführt. Präzision auch bei tiefstem Zoom. Schneefuchs: „Nur wer doppelt denkt, zoomt wirklich tief.“
+// Zeilen: 223
+// 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms. Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -9,6 +9,7 @@
 #include "settings.hpp"
 #include "renderer_pipeline.hpp"
 #include "renderer_resources.hpp"
+#include "heatmap_overlay.hpp"  // ✅ Heatmap integriert
 
 namespace RendererLoop {
 
@@ -99,20 +100,10 @@ void computeCudaFrame(RendererState& state) {
             }
         }
     }
-
-    // 🧠 Zustand immer aktualisieren, auch ohne Sprung – wichtig für RelE / RelC
-    if (state.zoomResult.bestScore > 0.0f) {
-        // Kein Update mehr nötig – Werte sind direkt in state.zoomResult enthalten
-    }
 }
 
 void updateAutoZoom(RendererState& state) {
-    static double2 lastTarget = {0.0, 0.0};
-
     if (!state.shouldZoom) return;
-
-    bool newTarget = std::fabs(state.targetOffset.x - lastTarget.x) > 1e-12 ||
-                     std::fabs(state.targetOffset.y - lastTarget.y) > 1e-12;
 
     state.zoom *= Settings::AUTOZOOM_SPEED;
 
@@ -124,7 +115,7 @@ void updateAutoZoom(RendererState& state) {
     double dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
 
     if (dist < Settings::DEADZONE) {
-        if (newTarget && Settings::debugLogging) {
+        if (Settings::debugLogging) {
             std::printf("[DEBUG] Target reached: delta=%.3e < DEADZONE (%.1e)\n", dist, Settings::DEADZONE);
         }
         return;
@@ -139,13 +130,9 @@ void updateAutoZoom(RendererState& state) {
     state.offset.x += moveX;
     state.offset.y += moveY;
 
-    if (newTarget && Settings::debugLogging) {
-        std::printf("[DEBUG] New target tile: targetOffset = (%.10f, %.10f)\n", state.targetOffset.x, state.targetOffset.y);
-        std::printf("[DEBUG] d=%.3e | dist=%.6f | tanh=%.3f | move=(%.3e, %.3e)\n", dist, dist, rawTanh, moveX, moveY);
-        std::printf("[DEBUG] New offset = (%.10f, %.10f)\n", state.offset.x, state.offset.y);
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] Zoom update: offset -> (%.10f, %.10f)\n", state.offset.x, state.offset.y);
     }
-
-    lastTarget = state.targetOffset;
 }
 
 void drawFrame(RendererState& state) {
@@ -153,8 +140,19 @@ void drawFrame(RendererState& state) {
     glClear(GL_COLOR_BUFFER_BIT);
 
     RendererPipeline::drawFullscreenQuad(state.tex);
-    Hud::draw(state);
 
+    if (!state.h_entropy.empty() && !state.zoomResult.perTileContrast.empty()) {
+        HeatmapOverlay::drawOverlay(
+            state.h_entropy,
+            state.zoomResult.perTileContrast,
+            state.width,
+            state.height,
+            state.lastTileSize,
+            state.tex
+        );
+    }
+
+    Hud::draw(state);
     glfwSwapBuffers(state.window);
 }
 
