@@ -1,12 +1,13 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 126
+// Zeilen: 158
 /*
 Maus-Kommentar 🐭: Diese Datei wurde irrtümlich als Ort für Hauptfunktionen wie `renderFrame`, `drawFrame` etc. verwendet – das führt zu symbolischen Duplikaten mit `renderer_loop.cpp`. Schneefuchs sagt: „Nie zweimal das Gleiche rufen lassen, sonst knallt der Linker.“
-Diese Datei ist jetzt korrekt bereinigt und enthält **ausschließlich** logische Auswertungsfunktionen wie Entropiekontrast etc.
+Diese Datei ist jetzt korrekt bereinigt und enthält **ausschließlich** logische Auswertungsfunktionen wie Entropiekontrast, Zoom-Bewertung und Heatmap-Werte.
 */
 
 #include "pch.hpp"
 #include "zoom_logic.hpp"
+#include "settings.hpp"
 
 namespace ZoomLogic {
 
@@ -55,7 +56,7 @@ ZoomResult evaluateZoomTarget(
     result.bestIndex     = currentIndex;
     result.bestEntropy   = currentEntropy;
     result.bestContrast  = currentContrast;
-    result.newOffset     = offset;
+    result.newOffset     = make_double2(currentOffset.x, currentOffset.y);
     result.perTileContrast.resize(tileCount, 0.0f);
 
     float maxScore = -1.0f;
@@ -84,9 +85,27 @@ ZoomResult evaluateZoomTarget(
             maxScore = score;
             result.bestIndex     = i;
             result.bestEntropy   = entropy;
-            result.newOffset     = make_double2(candidateOffset.x, candidateOffset.y);  // fix ✅
+            result.newOffset     = make_double2(candidateOffset.x, candidateOffset.y);
         }
     }
+
+    // Entscheidung über Zoom-Ziel
+    float dx = static_cast<float>(result.newOffset.x - currentOffset.x);
+    float dy = static_cast<float>(result.newOffset.y - currentOffset.y);
+    float dist = std::sqrt(dx * dx + dy * dy);
+
+    result.distance = dist;
+    result.minDistance = Settings::MIN_JUMP_DISTANCE / zoom;
+    result.relEntropyGain = result.bestEntropy - currentEntropy;
+    result.relContrastGain = result.perTileContrast[result.bestIndex] - currentContrast;
+
+    result.isNewTarget =
+        result.bestIndex != currentIndex &&
+        result.relEntropyGain > 0.01f &&
+        result.relContrastGain > 0.01f &&
+        result.distance > result.minDistance;
+
+    result.shouldZoom = result.isNewTarget;
 
     return result;
 }
