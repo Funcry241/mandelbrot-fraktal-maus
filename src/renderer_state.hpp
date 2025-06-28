@@ -1,12 +1,11 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 83
+// Zeilen: 85
 // 🐭 Maus-Kommentar: Der Renderer merkt sich nun Entropie, Kontrast, Index und Score (zoomResult) – für Analyse, Visualisierung oder Heatmap. Schneefuchs: „Wer messen will, muss erinnern.“
 
 #pragma once
 
 #include "pch.hpp"  // 🧠 Enthält <cuda_runtime.h>, das float2 definiert – keine eigene Definition mehr nötig!
 #include "zoom_logic.hpp"  // 📦 Enthält ZoomResult für Auto-Zoom-Auswertung
-#include "renderer_state.hpp"
 
 class RendererState {
 public:
@@ -56,6 +55,9 @@ public:
 
     // 🧠 Letzte Ziel-Auswertung als Struktur (für Kontrastanalyse etc.)
     ZoomLogic::ZoomResult zoomResult;
+
+    // 🆕 Merker für Analyse nach Zielwechsel
+    bool justZoomed = false;
 
     // 🔁 Konstruktor & Methoden zur Zustandspflege
     RendererState(int w, int h);

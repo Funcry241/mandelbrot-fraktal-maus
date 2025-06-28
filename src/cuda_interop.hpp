@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.hpp
-// Zeilen: 48
+// Zeilen: 51
 // 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL Interop – `globalRendererState` entfernt, `RendererState&` wird direkt übergeben. Schneefuchs: „Ein Zustand, der wandert, ist keiner, der lauert.“
 
 #ifndef CUDA_INTEROP_HPP
@@ -39,6 +39,9 @@ void setPauseZoom(bool pause);
 bool getPauseZoom();
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+
+// 🧪 Evaluation nach Zielwechsel – Frame-Analyse direkt aus GPU-Buffer
+void logZoomEvaluation(const int* d_iterations, int width, int height, int maxIterations, double zoom);
 
 } // namespace CudaInterop
 

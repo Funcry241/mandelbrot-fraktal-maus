@@ -32,7 +32,8 @@ void unregisterPBO() {
     }
 }
 
-static void logZoomEvaluation(const int* d_iterations, int width, int height, int maxIterations, double zoom) {
+void logZoomEvaluation(const int* d_iterations, int width, int height, int maxIterations, double zoom) {
+#if ENABLE_ZOOM_LOGGING
     std::vector<int> h_iters(width * height);
     CUDA_CHECK(cudaMemcpy(h_iters.data(), d_iterations, h_iters.size() * sizeof(int), cudaMemcpyDeviceToHost));
 
@@ -58,6 +59,7 @@ static void logZoomEvaluation(const int* d_iterations, int width, int height, in
 
     std::printf("ZoomEval Z %.1e MeanIt %.2f VarIt %.2f Escape %.3f Min %d Max %d Valid %d\n",
         zoom, mean, variance, escapeRatio, minIt, maxIt, valid ? 1 : 0);
+#endif
 }
 
 void renderCudaFrame(

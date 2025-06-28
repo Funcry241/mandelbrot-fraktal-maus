@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 106
-// 🐭 Maus-Kommentar: Kompaktlogik für Zoomanalyse inkl. Zielstabilität. `Jumped` zeigt Zielwechsel, `Stayed` zählt verbleibende Frames am selben Ziel. Schneefuchs: „Nur wer bleibt, hat Ziel.“
+// Zeilen: 113
+// 👝 Maus-Kommentar: Kompaktlogik für Zoomanalyse inkl. Zielstabilität. `Jumped` zeigt Zielwechsel, `Stayed` zählt verbleibende Frames am selben Ziel. Schneefuchs: „Nur wer bleibt, hat Ziel.“
 
 #include "pch.hpp"
 
@@ -83,6 +83,11 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
 
     std::printf("ZoomLog FrameZ Z %.5e Dist %.6f Jumped %d Stayed %d\n",
         state.zoom, dist, jumped ? 1 : 0, stayCounter);
+
+    if (state.justZoomed) {
+        CudaInterop::logZoomEvaluation(state.d_iterations, state.width, state.height, state.maxIterations, state.zoom);
+        state.justZoomed = false;
+    }
 #endif
 }
 
