@@ -1,6 +1,7 @@
 // Datei: src/main.cpp
-// Zeilen: 32
+// Zeilen: 34
 // 🐭 Maus-Kommentar: Hauptprogramm – entfernt globalRendererState komplett. RendererState wird nun direkt weitergereicht. Schneefuchs: „Globale Zustände? Nur wenn du die Welt regierst.“
+// 🔄 Auto-Zoom wird nun beim Start explizit aktiviert – kein manuelles SPACE/P nötig.
 
 #include "pch.hpp"
 
@@ -23,6 +24,9 @@ int main() {
     }
 
     RendererLoop::initResources(renderer.getState());
+
+    // ⏯️ Auto-Zoom explizit aktivieren beim Start
+    CudaInterop::setPauseZoom(false);
 
     while (!renderer.shouldClose()) {
         renderer.renderFrame(true);

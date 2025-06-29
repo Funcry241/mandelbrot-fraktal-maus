@@ -1,5 +1,5 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 155
+// Zeilen: 158
 /*
 👝 Maus-Kommentar: Fix laut Schneefuchs! Korrekte Umrechnung der Tile-Koordinaten nun zoom-basiert statt fensterbasiert. Kein „Springen“ mehr im Deep-Zoom. Undefinierte overloads entfernt. Logik jetzt stabil und glasklar.
 */
