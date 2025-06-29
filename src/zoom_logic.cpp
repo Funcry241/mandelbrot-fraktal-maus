@@ -105,8 +105,8 @@ ZoomResult evaluateZoomTarget(
         result.relContrastGain > 0.01f &&
         result.distance > result.minDistance;
 
-    // 🐭 Schneefuchs-Fix v2: Zielwechsel bei hoher Entropie, auch wenn relGain ≈ 0
-    if (!result.isNewTarget && result.bestEntropy > 2.0f) {
+    // Schneefuchs Notbremse: Entropie sehr niedrig? Dann trotzdem weiter.
+    if (!result.isNewTarget && result.bestEntropy < 0.25f && zoom < 1e6) {
         result.isNewTarget = true;
     }
 
