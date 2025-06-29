@@ -1,5 +1,5 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 162
+// Zeilen: 174
 /*
 Maus-Kommentar 🐭: Diese Datei wurde irrtümlich als Ort für Hauptfunktionen wie `renderFrame`, `drawFrame` etc. verwendet – das führt zu symbolischen Duplikaten mit `renderer_loop.cpp`. Schneefuchs sagt: „Nie zweimal das Gleiche rufen lassen, sonst knallt der Linker.“
 Diese Datei ist jetzt korrekt bereinigt und enthält **ausschließlich** logische Auswertungsfunktionen wie Entropiekontrast, Zoom-Bewertung und Heatmap-Werte.
@@ -85,6 +85,7 @@ ZoomResult evaluateZoomTarget(
             maxScore = score;
             result.bestIndex     = i;
             result.bestEntropy   = entropy;
+            result.bestContrast  = score;
             result.newOffset     = make_double2(candidateOffset.x, candidateOffset.y);
         }
     }
@@ -97,20 +98,16 @@ ZoomResult evaluateZoomTarget(
     result.distance = dist;
     result.minDistance = Settings::MIN_JUMP_DISTANCE / zoom;
     result.relEntropyGain = result.bestEntropy - currentEntropy;
-    result.relContrastGain = result.perTileContrast[result.bestIndex] - currentContrast;
+    result.relContrastGain = result.bestContrast - currentContrast;
 
+    // ✨ Verbesserte Zielwechsel-Bedingung mit Hysterese
     result.isNewTarget =
         result.bestIndex != currentIndex &&
         result.relEntropyGain > 0.01f &&
         result.relContrastGain > 0.01f &&
         result.distance > result.minDistance;
 
-        
-    result.isNewTarget = true;
-    
-
     result.shouldZoom = result.isNewTarget;
-
     return result;
 }
 
