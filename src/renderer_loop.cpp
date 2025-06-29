@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 234
+// Zeilen: 228
 // 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms. Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
 
 #include "pch.hpp"
@@ -84,20 +84,9 @@ void computeCudaFrame(RendererState& state) {
     state.shouldZoom = shouldZoom;
 
     if (shouldZoom) {
-        double dx = newOffset.x - state.targetOffset.x;
-        double dy = newOffset.y - state.targetOffset.y;
-        double dist = std::sqrt(dx * dx + dy * dy);
-
-        double dynamicJumpThreshold = Settings::MIN_JUMP_DISTANCE / state.zoom;
-        if (dist > dynamicJumpThreshold) {
-            state.updateOffsetTarget(newOffset);
-            if (Settings::debugLogging) {
-                std::printf("[DEBUG] Target updated | d=%.3e > threshold=%.3e\n", dist, dynamicJumpThreshold);
-            }
-        } else {
-            if (Settings::debugLogging) {
-                std::printf("[DEBUG] Target ignored | d=%.3e <= threshold=%.3e\n", dist, dynamicJumpThreshold);
-            }
+        state.updateOffsetTarget(newOffset);
+        if (Settings::debugLogging) {
+            std::printf("[DEBUG] Target updated to (%.10f, %.10f)\n", newOffset.x, newOffset.y);
         }
     }
 }
