@@ -1,16 +1,15 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 217
+// Zeilen: 221
 /*
-Maus-Kommentar 🐭: Entscheidungskriterium für isNewTarget präzisiert. Statt schwammiger Schwellen nun klare, stufenweise Logik:
-1. Ziel darf sich nicht nur in Index unterscheiden, sondern muss sich *qualitativ* lohnen (Score).
-2. Entropie-Gewinn oder Kontrastgewinn allein reichen nicht mehr – der Score muss auch *signifikant* besser sein.
-3. Das vermeidet Springen bei geringem Zoom-Gewinn. Schneefuchs-Vorgabe erfüllt: „Wenn du springst, dann mit Sinn.“
+🐭 Maus-Kommentar: Entscheidungskriterium für isNewTarget präzisiert. Neu mit erweitertem ASCII-Debug-Log zur Score-, Distanz- und Wechselanalyse. Keine Sonderzeichen, kompatibel mit PowerShell. Schneefuchs: „Nur wer besser ist UND weit genug – darf springen.“
 */
+
 #include "pch.hpp"
 #include "zoom_logic.hpp"
 #include "settings.hpp"
 #include <cmath>
 #include <cstdio>
+#include <algorithm>
 
 namespace ZoomLogic {
 
@@ -82,8 +81,11 @@ ZoomResult evaluateZoomTarget(
         float distWeight = 1.0f / (1.0f + dist * std::sqrt(zoom));
         float score = entropy * distWeight;
 
-        std::printf("[ZOOMDBG] i %d tx %d ty %d score %.4f entropy %.4f dist %.6f offset %.6f %.6f\n",
-                    i, tx, ty, score, entropy, dist, candidateOffset.x, candidateOffset.y);
+        std::printf("[ZoomPick] i=%d tx=%d ty=%d score=%.4f entropy=%.4f dist=%.6f offset=(%.6f %.6f)%s\n",
+            i, tx, ty, score, entropy, dist,
+            candidateOffset.x, candidateOffset.y,
+            (i == result.bestIndex ? " *BEST*" : "")
+        );
 
         result.perTileContrast[i] = score;
 
@@ -106,7 +108,6 @@ ZoomResult evaluateZoomTarget(
 
     bool forcedSwitch = (result.perTileContrast[result.bestIndex] < 0.001f && result.distance > result.minDistance * 5.0f);
 
-    // Neue Zielentscheidungslogik
     result.isNewTarget =
         (
             result.bestIndex != currentIndex &&
@@ -116,6 +117,17 @@ ZoomResult evaluateZoomTarget(
         || forcedSwitch;
 
     result.shouldZoom = result.isNewTarget;
+
+    std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d\n",
+        result.bestIndex,
+        result.relEntropyGain,
+        result.relContrastGain,
+        result.perTileContrast[result.bestIndex],
+        currentContrast,
+        result.distance,
+        result.minDistance,
+        result.isNewTarget ? 1 : 0
+    );
 
     return result;
 }
