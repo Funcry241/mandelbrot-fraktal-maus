@@ -1,13 +1,13 @@
 // Datei: src/zoom_logic.cpp
 // Zeilen: 174
 /*
-Maus-Kommentar 🐭: Diese Datei wurde irrtümlich als Ort für Hauptfunktionen wie `renderFrame`, `drawFrame` etc. verwendet – das führt zu symbolischen Duplikaten mit `renderer_loop.cpp`. Schneefuchs sagt: „Nie zweimal das Gleiche rufen lassen, sonst knallt der Linker.“
-Diese Datei ist jetzt korrekt bereinigt und enthält **ausschließlich** logische Auswertungsfunktionen wie Entropiekontrast, Zoom-Bewertung und Heatmap-Werte.
+Maus-Kommentar 🐭: Zielanalyse entklemmt – Score-Gewichtung nutzt jetzt sqrt(zoom), damit sie bei hohen Zoomlevels nicht abgewürgt wird. Zusätzlich: Sanity-Check für Score = 0 + Notfall-Zielwechsel bei großer Distanz. Schneefuchs-Siegel für präzises Entwirren.
 */
 
 #include "pch.hpp"
 #include "zoom_logic.hpp"
 #include "settings.hpp"
+#include <cmath>
 
 namespace ZoomLogic {
 
@@ -76,7 +76,7 @@ ZoomResult evaluateZoomTarget(
         float dy = candidateOffset.y - currentOffset.y;
         float dist = std::sqrt(dx * dx + dy * dy);
 
-        float distWeight = 1.0f / (1.0f + dist * zoom);
+        float distWeight = 1.0f / (1.0f + dist * std::sqrt(zoom));
         float score = entropy * distWeight;
 
         result.perTileContrast[i] = score;  // Heatmap-Wert
@@ -85,12 +85,10 @@ ZoomResult evaluateZoomTarget(
             maxScore = score;
             result.bestIndex     = i;
             result.bestEntropy   = entropy;
-            result.bestContrast  = score;
             result.newOffset     = make_double2(candidateOffset.x, candidateOffset.y);
         }
     }
 
-    // Entscheidung über Zoom-Ziel
     float dx = static_cast<float>(result.newOffset.x - currentOffset.x);
     float dy = static_cast<float>(result.newOffset.y - currentOffset.y);
     float dist = std::sqrt(dx * dx + dy * dy);
@@ -98,16 +96,20 @@ ZoomResult evaluateZoomTarget(
     result.distance = dist;
     result.minDistance = Settings::MIN_JUMP_DISTANCE / zoom;
     result.relEntropyGain = result.bestEntropy - currentEntropy;
-    result.relContrastGain = result.bestContrast - currentContrast;
+    result.relContrastGain = result.perTileContrast[result.bestIndex] - currentContrast;
 
-    // ✨ Verbesserte Zielwechsel-Bedingung mit Hysterese
+    // Sanity-Regel: Notfallwechsel, wenn alles gleich, aber Position komplett anders
+    bool forcedSwitch = (result.perTileContrast[result.bestIndex] < 0.001f && result.distance > result.minDistance * 5.0f);
+
     result.isNewTarget =
-        result.bestIndex != currentIndex &&
-        result.relEntropyGain > 0.01f &&
-        result.relContrastGain > 0.01f &&
-        result.distance > result.minDistance;
+        (result.bestIndex != currentIndex &&
+         result.relEntropyGain > 0.01f &&
+         result.relContrastGain > 0.01f &&
+         result.distance > result.minDistance)
+         || forcedSwitch;
 
     result.shouldZoom = result.isNewTarget;
+
     return result;
 }
 
