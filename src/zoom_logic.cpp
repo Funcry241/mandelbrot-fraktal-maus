@@ -1,7 +1,10 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 210
+// Zeilen: 217
 /*
-Maus-Kommentar 🐭: Erweiterte Debug-Logs eingebaut – jetzt wird jede bewertete Tile mit Index, Position, Score, Entropie, Distanz und Offset sauber ausgegeben. Die Logs sind ASCII-clean, PowerShell-kompatibel und fokussieren auf hohe Informationsdichte. Schneefuchs-Vorgabe erfüllt: „Wenn es still steht – dann logge lauter.“
+Maus-Kommentar 🐭: Entscheidungskriterium für isNewTarget präzisiert. Statt schwammiger Schwellen nun klare, stufenweise Logik:
+1. Ziel darf sich nicht nur in Index unterscheiden, sondern muss sich *qualitativ* lohnen (Score).
+2. Entropie-Gewinn oder Kontrastgewinn allein reichen nicht mehr – der Score muss auch *signifikant* besser sein.
+3. Das vermeidet Springen bei geringem Zoom-Gewinn. Schneefuchs-Vorgabe erfüllt: „Wenn du springst, dann mit Sinn.“
 */
 #include "pch.hpp"
 #include "zoom_logic.hpp"
@@ -103,12 +106,14 @@ ZoomResult evaluateZoomTarget(
 
     bool forcedSwitch = (result.perTileContrast[result.bestIndex] < 0.001f && result.distance > result.minDistance * 5.0f);
 
+    // Neue Zielentscheidungslogik
     result.isNewTarget =
-        (result.bestIndex != currentIndex &&
-         result.relEntropyGain > 0.01f &&
-         result.relContrastGain > 0.01f &&
-         result.distance > result.minDistance)
-         || forcedSwitch;
+        (
+            result.bestIndex != currentIndex &&
+            result.perTileContrast[result.bestIndex] > currentContrast * 1.05f && // signifikanter Scoregewinn
+            result.distance > result.minDistance
+        )
+        || forcedSwitch;
 
     result.shouldZoom = result.isNewTarget;
 
