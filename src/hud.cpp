@@ -1,5 +1,5 @@
 // Datei: src/hud.cpp
-// Zeilen: 208
+// Zeilen: 209
 // 🐭 Maus-Kommentar: HUD-Overlay mit Textanzeige via STB-Easy-Font und GLSL-Shadern. Zeigt FPS, Offset und nun den Zoom-Faktor als wissenschaftliche 10er-Potenz. Zugriff auf `state.currentFPS` und `state.deltaTime * 1000.0f` ersetzt veraltete Membernamen (`fps`, `frameTimeMs`). Schneefuchs hätte gesagt: „Der MausZoom verdient saubere Anzeige!“
 
 #include "pch.hpp"
@@ -127,7 +127,10 @@ void draw(RendererState& state) {
     char hudText1[256];
     char hudText2[256];
 
-    float logZoom = std::log10(1.0f / state.zoom); // z. B. 1e-7 → logZoom = 7
+    // ❌ Alt: float logZoom = log10f(1.0f / state.zoom);
+    // ✅ Neu:
+    float logZoom = -log10f(state.zoom); // z. B. Zoom = 1e-7 → logZoom = 7
+
     float fps = state.currentFPS;
     float frameTimeMs = state.deltaTime * 1000.0f;
 

@@ -22,7 +22,11 @@ void RendererState::reset() {
     baseIterations = Settings::INITIAL_ITERATIONS;
     maxIterations = Settings::MAX_ITERATIONS_CAP;
 
-    targetOffset = make_double2(static_cast<float>(offset.x), static_cast<float>(offset.y));
+    // ❌ Alt: float-Casts bei make_double2
+    // targetOffset = make_double2(static_cast<float>(offset.x), static_cast<float>(offset.y));
+
+    // ✅ Neu: Präzisionssicher direkt als double
+    targetOffset = make_double2(offset.x, offset.y);
     filteredTargetOffset = { offset.x, offset.y };  // 🆕 EMA-Initialisierung
 
     currentFPS = 0.0f;
@@ -41,10 +45,11 @@ void RendererState::updateOffsetTarget(double2 newOffset) {
     filteredTargetOffset.y = (1.0 - alpha) * filteredTargetOffset.y + alpha * static_cast<double>(newOffset.y);
 
     // ⛵ Zielposition für Kamera: weich verfolgt
-    targetOffset = make_double2(
-        static_cast<float>(filteredTargetOffset.x),
-        static_cast<float>(filteredTargetOffset.y)
-    );
+    // ❌ Alt: float-Casts bei Übergabe
+    // targetOffset = make_double2(static_cast<float>(filteredTargetOffset.x), static_cast<float>(filteredTargetOffset.y));
+
+    // ✅ Neu: Direkt mit double
+    targetOffset = make_double2(filteredTargetOffset.x, filteredTargetOffset.y);
 }
 
 void RendererState::adaptIterationCount() {

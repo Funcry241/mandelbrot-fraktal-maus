@@ -1,5 +1,5 @@
 // Datei: src/renderer_window.cpp
-// Zeilen: 71
+// Zeilen: 74
 // 🐭 Maus-Kommentar: Fenster-Erstellung ist jetzt fehlerbehandelbar – kein `std::exit` mehr, sondern nullptr-Rückgabe bei Misserfolg. Aufrufende Instanzen (z. B. Renderer) können reagieren. Schneefuchs: „Nicht jedes Scheitern ist fatal – außer du beendest dich selbst.“
 
 #include "pch.hpp"
@@ -26,6 +26,9 @@ GLFWwindow* createGLFWWindow(int width, int height) {
         glfwTerminate();
         return nullptr;
     }
+
+    // 🆕 Fensterposition aus Settings setzen (falls gültig)
+    glfwSetWindowPos(window, Settings::windowPosX, Settings::windowPosY);
 
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // Enable VSync
