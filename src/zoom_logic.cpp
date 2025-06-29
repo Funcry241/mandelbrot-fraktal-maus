@@ -1,7 +1,7 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 221
+// Zeilen: 131
 /*
-🐭 Maus-Kommentar: Entscheidungskriterium für isNewTarget erweitert. Nun erlaubt: Wechsel auch bei identischem Index, sofern Score erheblich besser ist. Ziel: Beweglichkeit auch ohne Ortswechsel. Schneefuchs: „Nicht der Ort macht den Unterschied, sondern die Entropie.“
+🐭 Maus-Kommentar: Bereinigte Version. Nur ZoomLogik – kein CudaInterop mehr hier drin! Schneefuchs: „Was nicht hierher gehört, fliegt raus – sauber bleibt sauber.“
 */
 
 #include "pch.hpp"
@@ -109,12 +109,13 @@ ZoomResult evaluateZoomTarget(
 
     bool forcedSwitch = (result.perTileContrast[result.bestIndex] < 0.001f && result.distance > result.minDistance * 5.0f);
 
-    // ✨ Neue Logik: auch bei gleichem Index darf gewechselt werden, wenn der Score deutlich besser ist.
     result.isNewTarget =
         (
-            result.perTileContrast[result.bestIndex] > currentContrast * 1.10f &&
-            result.distance > result.minDistance * 0.25f
-        ) || forcedSwitch;
+            result.bestIndex != currentIndex &&
+            result.perTileContrast[result.bestIndex] > currentContrast * 1.05f &&
+            result.distance > result.minDistance
+        )
+        || forcedSwitch;
 
     result.shouldZoom = result.isNewTarget;
 
