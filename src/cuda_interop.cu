@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 204
+// Zeilen: 208
 // 🐭 Maus-Kommentar: CUDA-Interop mit kompaktem ASCII-Logging für Zoomanalyse. Jetzt mit dO (OffsetDist), dPx (Bildschirmpixel), Score, Entropie, Kontrast und Zielstatus – alles CSV-freundlich. Schneefuchs sieht klar: Kein Wildsprung bleibt unbemerkt.
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
@@ -14,7 +14,7 @@
 namespace CudaInterop {
 
 static cudaGraphicsResource_t cudaPboResource = nullptr;
-static bool pauseZoom = false;
+static bool pauseZoom = false;  // Standard: Auto-Zoom aktiv
 
 void registerPBO(unsigned int pbo) {
     if (cudaPboResource != nullptr) {
@@ -77,6 +77,10 @@ void renderCudaFrame(
 ) {
     if (!cudaPboResource) {
         throw std::runtime_error("[FATAL] CUDA PBO not registered before renderCudaFrame.");
+    }
+
+    if (Settings::debugLogging) {
+        std::printf("[Zoom] Auto-Zoom is %s\n", pauseZoom ? "PAUSED" : "ACTIVE");
     }
 
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
