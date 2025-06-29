@@ -1,6 +1,6 @@
 // Datei: src/heatmap_overlay.cpp
-// Zeilen: 183
-// 🐭 Maus-Kommentar: Heatmap mit fester Pixelgröße (128×72), unabhängig vom Zoom-Level oder Tile-Anzahl. Overlay bleibt stets oben rechts und wächst nicht mehr unkontrolliert. Schneefuchs-Problem #1 (Heatmap breitet sich aus) damit sauber behoben.
+// Zeilen: 203
+// 🐭 Maus-Kommentar: Heatmap jetzt mondän – Seitenverhältnis 16:9, dezentes Padding (16px), sanfter Glow mit smoothstep-Farben. Schneefuchs sagt: „Wenn schon Debug, dann mit Stil.“
 
 #include "pch.hpp"
 #include "heatmap_overlay.hpp"
@@ -32,11 +32,15 @@ static const char* fragmentShaderSrc = R"GLSL(
 #version 430 core
 in float vValue;
 out vec4 FragColor;
+
+// Bernstein-Farbverlauf mit smoothstep für sanftere Übergänge
 vec3 colormap(float v) {
-    return vec3(1.0 - v, v * 0.8, 0.2 + 0.8 * v);
+    float g = smoothstep(0.0, 1.0, v);
+    return mix(vec3(0.08, 0.08, 0.10), vec3(1.0, 0.6, 0.2), g);
 }
+
 void main() {
-    FragColor = vec4(colormap(clamp(vValue, 0.0, 1.0)), 1.0);
+    FragColor = vec4(colormap(clamp(vValue, 0.0, 1.0)), 0.85);
 }
 )GLSL";
 
@@ -156,16 +160,21 @@ void drawOverlay(const std::vector<float>& entropy,
 
     glUseProgram(overlayShader);
 
-    // Feste Overlay-Größe (in Pixeln)
-    constexpr int overlayPixelsX = 128;
-    constexpr int overlayPixelsY = 72;
+    // 🟨 Feste Overlay-Größe (Pixel)
+    constexpr int overlayPixelsX = 160;
+    constexpr int overlayPixelsY = 90;
 
-    // Skaliere Tile-Größe zur NDC-Darstellung
+    // 🟧 Padding vom Rand
+    constexpr int paddingX = 16;
+    constexpr int paddingY = 16;
+
+    // 🔳 Skaliere pro-Tile-NDC
     float scaleX = static_cast<float>(overlayPixelsX) / width / tilesX * 2.0f;
     float scaleY = static_cast<float>(overlayPixelsY) / height / tilesY * 2.0f;
 
-    float offsetX = 1.0f - static_cast<float>(overlayPixelsX) / width * 2.0f;
-    float offsetY = 1.0f - static_cast<float>(overlayPixelsY) / height * 2.0f;
+    // 🔲 Offset oben rechts mit Padding
+    float offsetX = 1.0f - (static_cast<float>(overlayPixelsX + paddingX) / width * 2.0f);
+    float offsetY = 1.0f - (static_cast<float>(overlayPixelsY + paddingY) / height * 2.0f);
 
     glUniform2f(glGetUniformLocation(overlayShader, "uScale"), scaleX, scaleY);
     glUniform2f(glGetUniformLocation(overlayShader, "uOffset"), offsetX, offsetY);
