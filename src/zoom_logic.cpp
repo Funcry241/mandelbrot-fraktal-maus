@@ -1,7 +1,7 @@
 // Datei: src/zoom_logic.cpp
 // Zeilen: 221
 /*
-🐭 Maus-Kommentar: Entscheidungskriterium für isNewTarget präzisiert. Neu mit erweitertem ASCII-Debug-Log zur Score-, Distanz- und Wechselanalyse. Keine Sonderzeichen, kompatibel mit PowerShell. Schneefuchs: „Nur wer besser ist UND weit genug – darf springen.“
+🐭 Maus-Kommentar: Entscheidungskriterium für isNewTarget erweitert. Nun erlaubt: Wechsel auch bei identischem Index, sofern Score erheblich besser ist. Ziel: Beweglichkeit auch ohne Ortswechsel. Schneefuchs: „Nicht der Ort macht den Unterschied, sondern die Entropie.“
 */
 
 #include "pch.hpp"
@@ -109,13 +109,12 @@ ZoomResult evaluateZoomTarget(
 
     bool forcedSwitch = (result.perTileContrast[result.bestIndex] < 0.001f && result.distance > result.minDistance * 5.0f);
 
+    // ✨ Neue Logik: auch bei gleichem Index darf gewechselt werden, wenn der Score deutlich besser ist.
     result.isNewTarget =
         (
-            result.bestIndex != currentIndex &&
-            result.perTileContrast[result.bestIndex] > currentContrast * 1.05f &&
-            result.distance > result.minDistance
-        )
-        || forcedSwitch;
+            result.perTileContrast[result.bestIndex] > currentContrast * 1.10f &&
+            result.distance > result.minDistance * 0.25f
+        ) || forcedSwitch;
 
     result.shouldZoom = result.isNewTarget;
 
