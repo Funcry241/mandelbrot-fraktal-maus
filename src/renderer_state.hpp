@@ -36,8 +36,7 @@ public:
 
     // 🧩 Adaptive Tile-Größe + Entropie-/Kontrastspeicher
     int lastTileSize;
-    std::vector<float> h_entropy;   // 🔢 Entropie pro Tile
-    std::vector<float> h_contrast;  // 🌈 Kontrast pro Tile – für Heatmap-Overlay
+    std::vector<float> h_entropy;   // 🔢 Entropie pro Tiles
 
     // 🔗 CUDA-Puffer (Geräteseite)
     int* d_iterations = nullptr;
