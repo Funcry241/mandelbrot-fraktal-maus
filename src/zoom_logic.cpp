@@ -105,10 +105,9 @@ ZoomResult evaluateZoomTarget(
         result.relContrastGain > 0.01f &&
         result.distance > result.minDistance;
 
-    // Schneefuchs Notbremse: Entropie sehr niedrig? Dann trotzdem weiter.
-    if (!result.isNewTarget && result.bestEntropy < 0.25f && zoom < 1e6) {
-        result.isNewTarget = true;
-    }
+        
+    result.isNewTarget = true;
+    
 
     result.shouldZoom = result.isNewTarget;
 
