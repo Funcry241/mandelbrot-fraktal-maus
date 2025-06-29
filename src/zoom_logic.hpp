@@ -7,7 +7,7 @@
 #include "settings.hpp"
 #include <vector>
 
-#define ENABLE_ZOOM_LOGGING 1
+#define ENABLE_ZOOM_LOGGING 0
 
 namespace ZoomLogic {
 
