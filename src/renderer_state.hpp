@@ -1,5 +1,5 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 87
+// Zeilen: 92
 // 🐭 Maus-Kommentar: Der Renderer merkt sich nun Entropie, Kontrast, Index und Score (zoomResult) – für Analyse, Visualisierung oder Heatmap. Schneefuchs: „Wer messen will, muss erinnern.“
 
 #pragma once
@@ -56,6 +56,11 @@ public:
 
     // 🧠 Letzte Ziel-Auswertung als Struktur (für Kontrastanalyse etc.)
     ZoomLogic::ZoomResult zoomResult;
+
+    // 🧠 Letzte gemerkte Werte für Entropieanalyse
+    float lastEntropy = 0.0f;
+    float lastContrast = 0.0f;
+    int   lastIndex = -1;
 
     // 🆕 Merker für Analyse nach Zielwechsel
     bool justZoomed = false;

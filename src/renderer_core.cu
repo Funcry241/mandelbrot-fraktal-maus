@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 113
-// 👝 Maus-Kommentar: Kompaktlogik für Zoomanalyse inkl. Zielstabilität. `Jumped` zeigt Zielwechsel, `Stayed` zählt verbleibende Frames am selben Ziel. Schneefuchs: „Nur wer bleibt, hat Ziel.“
+// Zeilen: 123
+// 🧠 Maus-Kommentar: Erweiterte Zoomlogik: Kompakter Frame-Zustandsdump inkl. Entropie-Gewinn, Kontrast-Gewinn, Distanz, Schwelle, Zielwechsel. Ideal zur Stagnationsanalyse. Schneefuchs-geeicht!
 
 #include "pch.hpp"
 
@@ -22,7 +22,7 @@ Renderer::Renderer(int width, int height)
 
 Renderer::~Renderer() {
     if (glInitialized) {
-        cleanup();  // ✅ Nur wenn GL-Kontext erfolgreich initialisiert wurde
+        cleanup();
     } else if (Settings::debugLogging) {
         std::puts("[DEBUG] cleanup() übersprungen – OpenGL nicht initialisiert");
     }
@@ -42,12 +42,10 @@ bool Renderer::initGL() {
         return false;
     }
 
-    // ✅ Callbacks wurden bereits in createWindow(...) gesetzt
-
     RendererPipeline::init();
 
     if (Settings::debugLogging) std::puts("[DEBUG] OpenGL-Initialisierung abgeschlossen");
-    glInitialized = true;  // 🟢 Flag setzen
+    glInitialized = true;
     return true;
 }
 
@@ -81,8 +79,25 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         stayCounter++;
     }
 
-    std::printf("ZoomLog FrameZ Z %.5e Dist %.6f Jumped %d Stayed %d\n",
-        state.zoom, dist, jumped ? 1 : 0, stayCounter);
+    const auto& zr = state.zoomResult;
+    std::printf(
+        "ZoomLog Z %.5e Idx %3d Ent %.5f Ctr %.5f dE %.5f dC %.5f Dist %.6f Thresh %.6f RelE %.3f RelC %.3f New %d Stayed %d\n",
+        state.zoom,
+        zr.bestIndex,
+        zr.bestEntropy,
+        zr.bestContrast,
+        zr.bestEntropy - state.lastEntropy,
+        zr.bestContrast - state.lastContrast,
+        zr.distance,
+        zr.minDistance,
+        zr.relEntropyGain,
+        zr.relContrastGain,
+        zr.isNewTarget ? 1 : 0,
+        stayCounter
+    );
+
+    state.lastEntropy  = zr.bestEntropy;
+    state.lastContrast = zr.bestContrast;
 
     if (state.justZoomed) {
         CudaInterop::logZoomEvaluation(state.d_iterations, state.width, state.height, state.maxIterations, state.zoom);
@@ -106,8 +121,6 @@ void Renderer::freeDeviceBuffers() {
 void Renderer::resize(int newW, int newH) {
     std::printf("[INFO] Resized to %d x %d\n", newW, newH);
     state.resize(newW, newH);
-
-    // 🟢 Viewport korrekt setzen – wichtig nach Fenstergröße-Änderung
     glViewport(0, 0, newW, newH);
 }
 
