@@ -1,5 +1,5 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 147
+// Zeilen: 155
 /*
 👝 Maus-Kommentar: Fix laut Schneefuchs! Korrekte Umrechnung der Tile-Koordinaten nun zoom-basiert statt fensterbasiert. Kein „Springen“ mehr im Deep-Zoom. Undefinierte overloads entfernt. Logik jetzt stabil und glasklar.
 */
@@ -13,6 +13,7 @@
 
 namespace ZoomLogic {
 
+// Entropiekontrast über alle Tiles – aktuell nicht verwendet
 float computeEntropyContrast(const std::vector<float>& entropy, int width, int height, int tileSize) {
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
@@ -81,13 +82,13 @@ ZoomResult evaluateZoomTarget(
         float distWeight = 1.0f / (1.0f + dist * std::sqrt(zoom));
         float score = entropy * distWeight;
 
-        if (Settings::debugLogging) {
-            std::printf("[ZoomPick] i=%d tx=%d ty=%d score=%.4f entropy=%.4f dist=%.6f offset=(%.6f %.6f)%s\n",
-                i, tx, ty, score, entropy, dist,
-                candidateOffset.x, candidateOffset.y,
-                (i == result.bestIndex ? " *BEST*" : "")
-            );
-        }
+#if ENABLE_ZOOM_LOGGING
+        std::printf("[ZoomPick] i=%d tx=%d ty=%d score=%.4f entropy=%.4f dist=%.6f offset=(%.6f %.6f)%s\n",
+            i, tx, ty, score, entropy, dist,
+            candidateOffset.x, candidateOffset.y,
+            (i == result.bestIndex ? " *BEST*" : "")
+        );
+#endif
 
         result.perTileContrast[i] = score;
 
@@ -121,18 +122,18 @@ ZoomResult evaluateZoomTarget(
 
     result.shouldZoom = result.isNewTarget;
 
-    if (Settings::debugLogging) {
-        std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d\n",
-            result.bestIndex,
-            result.relEntropyGain,
-            result.relContrastGain,
-            result.perTileContrast[result.bestIndex],
-            currentContrast,
-            result.distance,
-            result.minDistance,
-            result.isNewTarget ? 1 : 0
-        );
-    }
+#if ENABLE_ZOOM_LOGGING
+    std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d\n",
+        result.bestIndex,
+        result.relEntropyGain,
+        result.relContrastGain,
+        result.perTileContrast[result.bestIndex],
+        currentContrast,
+        result.distance,
+        result.minDistance,
+        result.isNewTarget ? 1 : 0
+    );
+#endif
 
     return result;
 }
