@@ -1,6 +1,6 @@
-/*
-Maus-Kommentar 🐭: Heatmap-Overlay mit OpenGL und GLSL – nun **oben rechts** statt unten rechts. Shaderfehler werden nun korrekt geprüft und im Log ausgegeben. Schneefuchs kann so sicher sein, dass kein schwarzer Bildschirm auf leere Shader zurückgeht.
-*/
+// Datei: src/heatmap_overlay.cpp
+// Zeilen: 183
+// 🐭 Maus-Kommentar: Heatmap mit fester Pixelgröße (128×72), unabhängig vom Zoom-Level oder Tile-Anzahl. Overlay bleibt stets oben rechts und wächst nicht mehr unkontrolliert. Schneefuchs-Problem #1 (Heatmap breitet sich aus) damit sauber behoben.
 
 #include "pch.hpp"
 #include "heatmap_overlay.hpp"
@@ -110,7 +110,7 @@ void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width, int height,
                  int tileSize,
-                 GLuint /*textureId*/) {
+                 [[maybe_unused]] GLuint textureId) {
     if (!showOverlay) return;
 
     const int tilesX = (width + tileSize - 1) / tileSize;
@@ -156,14 +156,19 @@ void drawOverlay(const std::vector<float>& entropy,
 
     glUseProgram(overlayShader);
 
-    const float scale = 4.0f;
-    float overlayWidth = tilesX * scale;
-    float overlayHeight = tilesY * scale;
+    // Feste Overlay-Größe (in Pixeln)
+    constexpr int overlayPixelsX = 128;
+    constexpr int overlayPixelsY = 72;
 
-    glUniform2f(glGetUniformLocation(overlayShader, "uScale"), scale * 2.0f / width, scale * 2.0f / height);
-    glUniform2f(glGetUniformLocation(overlayShader, "uOffset"),
-                1.0f - overlayWidth * 2.0f / width,
-                1.0f - overlayHeight * 2.0f / height);
+    // Skaliere Tile-Größe zur NDC-Darstellung
+    float scaleX = static_cast<float>(overlayPixelsX) / width / tilesX * 2.0f;
+    float scaleY = static_cast<float>(overlayPixelsY) / height / tilesY * 2.0f;
+
+    float offsetX = 1.0f - static_cast<float>(overlayPixelsX) / width * 2.0f;
+    float offsetY = 1.0f - static_cast<float>(overlayPixelsY) / height * 2.0f;
+
+    glUniform2f(glGetUniformLocation(overlayShader, "uScale"), scaleX, scaleY);
+    glUniform2f(glGetUniformLocation(overlayShader, "uOffset"), offsetX, offsetY);
 
     glBindVertexArray(overlayVAO);
     glBindBuffer(GL_ARRAY_BUFFER, overlayVBO);
