@@ -1,5 +1,5 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 123
+// Zeilen: 127
 // 🧠 Maus-Kommentar: Erweiterte Zoomlogik: Kompakter Frame-Zustandsdump inkl. Entropie-Gewinn, Kontrast-Gewinn, Distanz, Schwelle, Zielwechsel. Ideal zur Stagnationsanalyse. Schneefuchs-geeicht!
 
 #include "pch.hpp"
@@ -14,6 +14,7 @@
 #include "hud.hpp"
 #include "cuda_interop.hpp"
 #include "zoom_logic.hpp"
+#include "heatmap_overlay.hpp"  // 🆕 für Cleanup-Aufruf
 
 #define ENABLE_ZOOM_LOGGING 0  // Set to 0 to disable local zoom analysis logs
 
@@ -127,7 +128,6 @@ void Renderer::resize(int newW, int newH) {
 void Renderer::cleanup() {
     Hud::cleanup();
     RendererPipeline::cleanup();
-
     CudaInterop::unregisterPBO();
 
     glDeleteBuffers(1, &state.pbo);
@@ -136,6 +136,9 @@ void Renderer::cleanup() {
     RendererWindow::destroyWindow(state.window);
 
     freeDeviceBuffers();
+
+    // 🆕 Heatmap-Ressourcen freigeben
+    HeatmapOverlay::cleanup();
 
     glfwTerminate();
 }
