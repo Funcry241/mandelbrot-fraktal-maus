@@ -1,7 +1,7 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 131
+// Zeilen: 145
 /*
-🐭 Maus-Kommentar: Bereinigte Version. Nur ZoomLogik – kein CudaInterop mehr hier drin! Schneefuchs: „Was nicht hierher gehört, fliegt raus – sauber bleibt sauber.“
+🐭 Maus-Kommentar: Bereinigte Version mit Settings-gesteuerter Logik. ZoomLogging jetzt sauber über Settings::debugLogging geregelt. Schneefuchs sagte: „Wer loggt, soll auch fragen, ob er darf.“
 */
 
 #include "pch.hpp"
@@ -81,11 +81,13 @@ ZoomResult evaluateZoomTarget(
         float distWeight = 1.0f / (1.0f + dist * std::sqrt(zoom));
         float score = entropy * distWeight;
 
-        std::printf("[ZoomPick] i=%d tx=%d ty=%d score=%.4f entropy=%.4f dist=%.6f offset=(%.6f %.6f)%s\n",
-            i, tx, ty, score, entropy, dist,
-            candidateOffset.x, candidateOffset.y,
-            (i == result.bestIndex ? " *BEST*" : "")
-        );
+        if (Settings::debugLogging) {
+            std::printf("[ZoomPick] i=%d tx=%d ty=%d score=%.4f entropy=%.4f dist=%.6f offset=(%.6f %.6f)%s\n",
+                i, tx, ty, score, entropy, dist,
+                candidateOffset.x, candidateOffset.y,
+                (i == result.bestIndex ? " *BEST*" : "")
+            );
+        }
 
         result.perTileContrast[i] = score;
 
@@ -119,16 +121,18 @@ ZoomResult evaluateZoomTarget(
 
     result.shouldZoom = result.isNewTarget;
 
-    std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d\n",
-        result.bestIndex,
-        result.relEntropyGain,
-        result.relContrastGain,
-        result.perTileContrast[result.bestIndex],
-        currentContrast,
-        result.distance,
-        result.minDistance,
-        result.isNewTarget ? 1 : 0
-    );
+    if (Settings::debugLogging) {
+        std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d\n",
+            result.bestIndex,
+            result.relEntropyGain,
+            result.relContrastGain,
+            result.perTileContrast[result.bestIndex],
+            currentContrast,
+            result.distance,
+            result.minDistance,
+            result.isNewTarget ? 1 : 0
+        );
+    }
 
     return result;
 }

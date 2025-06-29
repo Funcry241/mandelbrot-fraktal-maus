@@ -11,8 +11,6 @@
 #include "zoom_logic.hpp"
 #include "heatmap_overlay.hpp"  // 🔥 Overlay-Toggle per Taste
 
-#define ENABLE_ZOOM_LOGGING 0  // Set to 0 to disable local zoom analysis logs
-
 namespace CudaInterop {
 
 static cudaGraphicsResource_t cudaPboResource = nullptr;
@@ -34,7 +32,8 @@ void unregisterPBO() {
 }
 
 void logZoomEvaluation(const int* d_iterations, int width, int height, int maxIterations, double zoom) {
-#if ENABLE_ZOOM_LOGGING
+    if (!Settings::debugLogging) return;
+
     std::vector<int> h_iters(width * height);
     CUDA_CHECK(cudaMemcpy(h_iters.data(), d_iterations, h_iters.size() * sizeof(int), cudaMemcpyDeviceToHost));
 
@@ -60,7 +59,6 @@ void logZoomEvaluation(const int* d_iterations, int width, int height, int maxIt
 
     std::printf("ZoomEval Z %.1e MeanIt %.2f VarIt %.2f Escape %.3f Min %d Max %d Valid %d\n",
         zoom, mean, variance, escapeRatio, minIt, maxIt, valid ? 1 : 0);
-#endif
 }
 
 void renderCudaFrame(
@@ -120,36 +118,36 @@ void renderCudaFrame(
             shouldZoom = result.isNewTarget;
         }
 
-#if ENABLE_ZOOM_LOGGING
-        if (result.bestIndex >= 0) {
-            float minJump = Settings::MIN_JUMP_DISTANCE / zoom_f;
-            std::printf(
-                "Zoom Z %.1e I %d E %.3f C %.3f S %.3f dO %.2e dPx %.1f minJ %.2e dE %.3f dC %.3f RelE %.2f RelC %.2f New %d\n",
-                zoom_f,
-                result.bestIndex,
-                result.bestEntropy,
-                result.bestContrast,
-                result.bestScore,
-                result.distance,
-                result.distance * zoom_f * width,
-                minJump,
-                result.bestEntropy - state.zoomResult.bestEntropy,
-                result.bestContrast - state.zoomResult.bestContrast,
-                result.relEntropyGain,
-                result.relContrastGain,
-                result.isNewTarget ? 1 : 0
-            );
-        } else {
-            float avgEntropy = 0.0f;
-            int countAbove = 0;
-            for (float h : h_entropy) {
-                avgEntropy += h;
-                if (h > Settings::VARIANCE_THRESHOLD) countAbove++;
+        if (Settings::debugLogging) {
+            if (result.bestIndex >= 0) {
+                float minJump = Settings::MIN_JUMP_DISTANCE / zoom_f;
+                std::printf(
+                    "Zoom Z %.1e I %d E %.3f C %.3f S %.3f dO %.2e dPx %.1f minJ %.2e dE %.3f dC %.3f RelE %.2f RelC %.2f New %d\n",
+                    zoom_f,
+                    result.bestIndex,
+                    result.bestEntropy,
+                    result.bestContrast,
+                    result.bestScore,
+                    result.distance,
+                    result.distance * zoom_f * width,
+                    minJump,
+                    result.bestEntropy - state.zoomResult.bestEntropy,
+                    result.bestContrast - state.zoomResult.bestContrast,
+                    result.relEntropyGain,
+                    result.relContrastGain,
+                    result.isNewTarget ? 1 : 0
+                );
+            } else {
+                float avgEntropy = 0.0f;
+                int countAbove = 0;
+                for (float h : h_entropy) {
+                    avgEntropy += h;
+                    if (h > Settings::VARIANCE_THRESHOLD) countAbove++;
+                }
+                avgEntropy /= h_entropy.size();
+                std::printf("Zoom NoZoom TilesAbove %d AvgEntropy %.5f\n", countAbove, avgEntropy);
             }
-            avgEntropy /= h_entropy.size();
-            std::printf("Zoom NoZoom TilesAbove %d AvgEntropy %.5f\n", countAbove, avgEntropy);
         }
-#endif
 
         state.zoomResult = result;
     }
