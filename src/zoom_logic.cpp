@@ -105,13 +105,14 @@ ZoomResult evaluateZoomTarget(
     result.minDistance = Settings::MIN_JUMP_DISTANCE / zoom;
     result.relEntropyGain = result.bestEntropy - currentEntropy;
     result.relContrastGain = result.perTileContrast[result.bestIndex] - currentContrast;
+    result.bestScore = result.perTileContrast[result.bestIndex];
 
     bool forcedSwitch = (result.perTileContrast[result.bestIndex] < 0.001f && result.distance > result.minDistance * 5.0f);
 
     result.isNewTarget =
         (
             result.bestIndex != currentIndex &&
-            result.perTileContrast[result.bestIndex] > currentContrast * 1.05f && // signifikanter Scoregewinn
+            result.perTileContrast[result.bestIndex] > currentContrast * 1.05f &&
             result.distance > result.minDistance
         )
         || forcedSwitch;
