@@ -1,13 +1,14 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 174
+// Zeilen: 192
 /*
-Maus-Kommentar 🐭: Zielanalyse entklemmt – Score-Gewichtung nutzt jetzt sqrt(zoom), damit sie bei hohen Zoomlevels nicht abgewürgt wird. Zusätzlich: Sanity-Check für Score = 0 + Notfall-Zielwechsel bei großer Distanz. Schneefuchs-Siegel für präzises Entwirren.
+Maus-Kommentar 🐭: Zielanalyse entklemmt – Score-Gewichtung nutzt jetzt sqrt(zoom), damit sie bei hohen Zoomlevels nicht abgewürgt wird. Zusätzlich: Sanity-Check für Score = 0 + Notfall-Zielwechsel bei großer Distanz. Jetzt mit Tiefenlogik zur Koordinatenprüfung. Schneefuchs: „Logge, was Du nicht siehst.“
 */
 
 #include "pch.hpp"
 #include "zoom_logic.hpp"
 #include "settings.hpp"
 #include <cmath>
+#include <cstdio>
 
 namespace ZoomLogic {
 
@@ -82,6 +83,9 @@ ZoomResult evaluateZoomTarget(
         result.perTileContrast[i] = score;  // Heatmap-Wert
 
         if (score > maxScore) {
+            std::printf("[ZOOMDBG] i %d tx %d ty %d score %.4f entropy %.4f dist %.6f offset %.6f %.6f\n",
+                        i, tx, ty, score, entropy, dist, candidateOffset.x, candidateOffset.y);
+
             maxScore = score;
             result.bestIndex     = i;
             result.bestEntropy   = entropy;
