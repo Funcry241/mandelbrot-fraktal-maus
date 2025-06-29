@@ -116,4 +116,3 @@ ZoomResult evaluateZoomTarget(
 }
 
 } // namespace ZoomLogic
-

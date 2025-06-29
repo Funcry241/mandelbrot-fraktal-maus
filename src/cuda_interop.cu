@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 191
+// Zeilen: 204
 // 🐭 Maus-Kommentar: CUDA-Interop mit kompaktem ASCII-Logging für Zoomanalyse. Jetzt mit dO (OffsetDist), dPx (Bildschirmpixel), Score, Entropie, Kontrast und Zielstatus – alles CSV-freundlich. Schneefuchs sieht klar: Kein Wildsprung bleibt unbemerkt.
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
@@ -122,8 +122,9 @@ void renderCudaFrame(
 
 #if ENABLE_ZOOM_LOGGING
         if (result.bestIndex >= 0) {
+            float minJump = Settings::MIN_JUMP_DISTANCE / zoom_f;
             std::printf(
-                "Zoom Z %.1e I %d E %.3f C %.3f S %.3f dO %.2e dPx %.1f dE %.3f dC %.3f RelE %.2f RelC %.2f New %d\n",
+                "Zoom Z %.1e I %d E %.3f C %.3f S %.3f dO %.2e dPx %.1f minJ %.2e dE %.3f dC %.3f RelE %.2f RelC %.2f New %d\n",
                 zoom_f,
                 result.bestIndex,
                 result.bestEntropy,
@@ -131,6 +132,7 @@ void renderCudaFrame(
                 result.bestScore,
                 result.distance,
                 result.distance * zoom_f * width,
+                minJump,
                 result.bestEntropy - state.zoomResult.bestEntropy,
                 result.bestContrast - state.zoomResult.bestContrast,
                 result.relEntropyGain,
