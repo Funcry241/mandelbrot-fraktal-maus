@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 184
-// 🐭 Maus-Kommentar: CUDA-Interop delegiert Zielanalyse jetzt an ZoomLogic. Kompakter, modularer, klarer. Schneefuchs: „Nur wer delegiert, bleibt flexibel.“
+// Zeilen: 191
+// 🐭 Maus-Kommentar: CUDA-Interop mit kompaktem ASCII-Logging für Zoomanalyse. Jetzt mit dO (OffsetDist), dPx (Bildschirmpixel), Score, Entropie, Kontrast und Zielstatus – alles CSV-freundlich. Schneefuchs sieht klar: Kein Wildsprung bleibt unbemerkt.
 
 #include "pch.hpp"  // 💡 Muss als erstes stehen!
 #include "cuda_interop.hpp"
@@ -117,24 +117,24 @@ void renderCudaFrame(
 
         if (result.bestIndex >= 0) {
             newOffset = result.newOffset;
-
-            // 🔧 Fix: immer zoomen, wenn Zielwechsel (New=1), selbst bei Score knapp
-            if (result.isNewTarget) {
-                shouldZoom = true;
-            } else {
-                shouldZoom = false;
-            }
+            shouldZoom = result.isNewTarget;
         }
 
 #if ENABLE_ZOOM_LOGGING
         if (result.bestIndex >= 0) {
             std::printf(
-                "ZoomLog Z %.5e Idx %d Ent %.5f S %.5f Dist %.6f Min %.6f dE %.4f dC %.4f RelE %.3f RelC %.3f dI %d New %d\n",
-                zoom_f, result.bestIndex, result.bestEntropy, result.bestScore, result.distance, result.minDistance,
+                "Zoom Z %.1e I %d E %.3f C %.3f S %.3f dO %.2e dPx %.1f dE %.3f dC %.3f RelE %.2f RelC %.2f New %d\n",
+                zoom_f,
+                result.bestIndex,
+                result.bestEntropy,
+                result.bestContrast,
+                result.bestScore,
+                result.distance,
+                result.distance * zoom_f * width,
                 result.bestEntropy - state.zoomResult.bestEntropy,
                 result.bestContrast - state.zoomResult.bestContrast,
-                result.relEntropyGain, result.relContrastGain,
-                (result.bestIndex != state.zoomResult.bestIndex) ? 1 : 0,
+                result.relEntropyGain,
+                result.relContrastGain,
                 result.isNewTarget ? 1 : 0
             );
         } else {
@@ -145,7 +145,7 @@ void renderCudaFrame(
                 if (h > Settings::VARIANCE_THRESHOLD) countAbove++;
             }
             avgEntropy /= h_entropy.size();
-            std::printf("ZoomLog NoZoom TilesAbove %d AvgEntropy %.5f\n", countAbove, avgEntropy);
+            std::printf("Zoom NoZoom TilesAbove %d AvgEntropy %.5f\n", countAbove, avgEntropy);
         }
 #endif
 
