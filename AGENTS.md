@@ -28,6 +28,13 @@ Das Projekt verwendet folgende Agents und Werkzeuge:
 
 ---
 
+### ⚠️ CUDA erforderlich
+
+> ❗ **Hinweis:** Für den Build ist eine **lokal installierte CUDA-Toolchain (z. B. `nvcc`) zwingend erforderlich**.  
+> Ohne CUDA kann der Buildprozess **nicht gestartet** werden.
+
+---
+
 ## ⚙️ Lokaler Build
 
 ### 🪟 Windows
