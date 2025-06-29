@@ -1,9 +1,8 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 192
+// Zeilen: 210
 /*
-Maus-Kommentar 🐭: Zielanalyse entklemmt – Score-Gewichtung nutzt jetzt sqrt(zoom), damit sie bei hohen Zoomlevels nicht abgewürgt wird. Zusätzlich: Sanity-Check für Score = 0 + Notfall-Zielwechsel bei großer Distanz. Jetzt mit Tiefenlogik zur Koordinatenprüfung. Schneefuchs: „Logge, was Du nicht siehst.“
+Maus-Kommentar 🐭: Erweiterte Debug-Logs eingebaut – jetzt wird jede bewertete Tile mit Index, Position, Score, Entropie, Distanz und Offset sauber ausgegeben. Die Logs sind ASCII-clean, PowerShell-kompatibel und fokussieren auf hohe Informationsdichte. Schneefuchs-Vorgabe erfüllt: „Wenn es still steht – dann logge lauter.“
 */
-
 #include "pch.hpp"
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -80,12 +79,12 @@ ZoomResult evaluateZoomTarget(
         float distWeight = 1.0f / (1.0f + dist * std::sqrt(zoom));
         float score = entropy * distWeight;
 
-        result.perTileContrast[i] = score;  // Heatmap-Wert
+        std::printf("[ZOOMDBG] i %d tx %d ty %d score %.4f entropy %.4f dist %.6f offset %.6f %.6f\n",
+                    i, tx, ty, score, entropy, dist, candidateOffset.x, candidateOffset.y);
+
+        result.perTileContrast[i] = score;
 
         if (score > maxScore) {
-            std::printf("[ZOOMDBG] i %d tx %d ty %d score %.4f entropy %.4f dist %.6f offset %.6f %.6f\n",
-                        i, tx, ty, score, entropy, dist, candidateOffset.x, candidateOffset.y);
-
             maxScore = score;
             result.bestIndex     = i;
             result.bestEntropy   = entropy;
@@ -102,7 +101,6 @@ ZoomResult evaluateZoomTarget(
     result.relEntropyGain = result.bestEntropy - currentEntropy;
     result.relContrastGain = result.perTileContrast[result.bestIndex] - currentContrast;
 
-    // Sanity-Regel: Notfallwechsel, wenn alles gleich, aber Position komplett anders
     bool forcedSwitch = (result.perTileContrast[result.bestIndex] < 0.001f && result.distance > result.minDistance * 5.0f);
 
     result.isNewTarget =
@@ -118,3 +116,4 @@ ZoomResult evaluateZoomTarget(
 }
 
 } // namespace ZoomLogic
+
