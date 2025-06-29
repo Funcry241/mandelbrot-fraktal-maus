@@ -1,7 +1,7 @@
 // Datei: src/zoom_logic.cpp
 // Zeilen: 147
 /*
-🐭 Maus-Kommentar: Erzwingt nun vollständige ZoomEval-Ausgabe – auch wenn debugLogging deaktiviert ist. Hilft, Zoom-Stillstände zu analysieren. Schneefuchs sagte: „Wenn nichts zoot, muss alles raus – auch der letzte Wert.“
+👝 Maus-Kommentar: Fix laut Schneefuchs! Korrekte Umrechnung der Tile-Koordinaten nun zoom-basiert statt fensterbasiert. Kein „Springen“ mehr im Deep-Zoom. Undefinierte overloads entfernt. Logik jetzt stabil und glasklar.
 */
 
 #include "pch.hpp"
@@ -70,8 +70,8 @@ ZoomResult evaluateZoomTarget(
         int ty = i / tilesX;
 
         float2 candidateOffset = {
-            static_cast<float>(offset.x + tileSize * (tx + 0.5f - tilesX / 2.0f) / width),
-            static_cast<float>(offset.y + tileSize * (ty + 0.5f - tilesY / 2.0f) / height)
+            static_cast<float>(offset.x + tileSize * (tx + 0.5f - tilesX / 2.0f) / zoom),
+            static_cast<float>(offset.y + tileSize * (ty + 0.5f - tilesY / 2.0f) / zoom)
         };
 
         float dx = candidateOffset.x - currentOffset.x;
@@ -121,18 +121,18 @@ ZoomResult evaluateZoomTarget(
 
     result.shouldZoom = result.isNewTarget;
 
-    // 🛠 Erzwinge Debug-Ausgabe, unabhängig von Settings::debugLogging
-    std::printf("[ZoomEval] currentIndex=%d bestIndex=%d\n", currentIndex, result.bestIndex);
-    std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d\n",
-        result.bestIndex,
-        result.relEntropyGain,
-        result.relContrastGain,
-        result.perTileContrast[result.bestIndex],
-        currentContrast,
-        result.distance,
-        result.minDistance,
-        result.isNewTarget ? 1 : 0
-    );
+    if (Settings::debugLogging) {
+        std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d\n",
+            result.bestIndex,
+            result.relEntropyGain,
+            result.relContrastGain,
+            result.perTileContrast[result.bestIndex],
+            currentContrast,
+            result.distance,
+            result.minDistance,
+            result.isNewTarget ? 1 : 0
+        );
+    }
 
     return result;
 }

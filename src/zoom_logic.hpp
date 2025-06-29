@@ -1,13 +1,11 @@
 // Datei: src/zoom_logic.hpp
-// Zeilen: 66
+// Zeilen: 41
 // 🐭 Maus-Kommentar: Nur noch Deklarationen! Für saubere Trennung von Interface und Implementation. CUDA-tauglich, kompakt. Schneefuchs: „Header macht Angebot, nicht Geschäft.“
 
 #pragma once
 #include "common.hpp"
 #include "settings.hpp"
 #include <vector>
-
-#define ENABLE_ZOOM_LOGGING 0
 
 namespace ZoomLogic {
 
@@ -27,25 +25,10 @@ struct ZoomResult {
     std::vector<float> perTileContrast;  // 🔥 Kontrastwerte für HeatmapOverlay
 };
 
-// Nur Deklarationen – Definitionen siehe .cpp
-float computeEntropyContrast(float center, float neighbors[4]);
-float computeEntropyContrast(const std::vector<float>& h, int index, int tilesX, int tilesY);
+// Kontrastberechnung aus Nachbarentropien (nur eine definierte Version bleibt)
+float computeEntropyContrast(const std::vector<float>& entropy, int width, int height, int tileSize);
 
-bool selectZoomTarget(
-    float zoom,
-    int currentIndex,
-    float currentEntropy,
-    float currentContrast,
-    const float2& currentTarget,
-    const float2& candidateTarget,
-    int candidateIndex,
-    float candidateEntropy,
-    float candidateContrast,
-    float candidateScore,
-    float2& newTarget,
-    bool& isNewTarget
-);
-
+// Hauptentscheidung: neues Zoom-Ziel ja/nein
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& h_entropy,
     double2 offset,
