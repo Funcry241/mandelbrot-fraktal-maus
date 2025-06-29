@@ -1,7 +1,7 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 145
+// Zeilen: 147
 /*
-🐭 Maus-Kommentar: Bereinigte Version mit Settings-gesteuerter Logik. ZoomLogging jetzt sauber über Settings::debugLogging geregelt. Schneefuchs sagte: „Wer loggt, soll auch fragen, ob er darf.“
+🐭 Maus-Kommentar: Erzwingt nun vollständige ZoomEval-Ausgabe – auch wenn debugLogging deaktiviert ist. Hilft, Zoom-Stillstände zu analysieren. Schneefuchs sagte: „Wenn nichts zoot, muss alles raus – auch der letzte Wert.“
 */
 
 #include "pch.hpp"
@@ -121,18 +121,18 @@ ZoomResult evaluateZoomTarget(
 
     result.shouldZoom = result.isNewTarget;
 
-    if (Settings::debugLogging) {
-        std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d\n",
-            result.bestIndex,
-            result.relEntropyGain,
-            result.relContrastGain,
-            result.perTileContrast[result.bestIndex],
-            currentContrast,
-            result.distance,
-            result.minDistance,
-            result.isNewTarget ? 1 : 0
-        );
-    }
+    // 🛠 Erzwinge Debug-Ausgabe, unabhängig von Settings::debugLogging
+    std::printf("[ZoomEval] currentIndex=%d bestIndex=%d\n", currentIndex, result.bestIndex);
+    std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d\n",
+        result.bestIndex,
+        result.relEntropyGain,
+        result.relContrastGain,
+        result.perTileContrast[result.bestIndex],
+        currentContrast,
+        result.distance,
+        result.minDistance,
+        result.isNewTarget ? 1 : 0
+    );
 
     return result;
 }
