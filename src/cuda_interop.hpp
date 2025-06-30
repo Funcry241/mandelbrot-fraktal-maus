@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.hpp
-// Zeilen: 51
-// 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL Interop – `globalRendererState` entfernt, `RendererState&` wird direkt übergeben. Schneefuchs: „Ein Zustand, der wandert, ist keiner, der lauert.“
+// Zeilen: 53
+// 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL Interop – Signatur für `renderCudaFrame` auf 13 Argumente aktualisiert (inkl. `supersampling`, `RendererState&`) – Schneefuchs: „Ein Zustand, der wandert, ist keiner, der lauert.“
 
 #ifndef CUDA_INTEROP_HPP
 #define CUDA_INTEROP_HPP
@@ -32,6 +32,7 @@ void renderCudaFrame(
     double2& newOffset,     // ✅ FIXED: war fälschlich float2 – jetzt korrekt
     bool& shouldZoom,
     int tileSize,
+    int supersampling,      // ✅ NEU: Supersampling-Faktor
     RendererState& state    // ✅ explizit übergeben
 );
 

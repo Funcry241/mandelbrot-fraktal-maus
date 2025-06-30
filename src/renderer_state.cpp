@@ -22,10 +22,6 @@ void RendererState::reset() {
     baseIterations = Settings::INITIAL_ITERATIONS;
     maxIterations = Settings::MAX_ITERATIONS_CAP;
 
-    // ❌ Alt: float-Casts bei make_double2
-    // targetOffset = make_double2(static_cast<float>(offset.x), static_cast<float>(offset.y));
-
-    // ✅ Neu: Präzisionssicher direkt als double
     targetOffset = make_double2(offset.x, offset.y);
     filteredTargetOffset = { offset.x, offset.y };  // 🆕 EMA-Initialisierung
 
@@ -35,20 +31,18 @@ void RendererState::reset() {
 
     frameCount = 0;
     lastTime = glfwGetTime();  // 🔄 Präzise als double speichern
+
+    supersampling = 1;           // 🆕 notwendig für FrameContext
+    overlayEnabled = false;     // 🆕 Heatmap-Steuerung
+    lastTileIndex = -1;         // 🆕 für ZoomCommand
 }
 
 void RendererState::updateOffsetTarget(double2 newOffset) {
     constexpr double alpha = 0.2;  // 🧮 Glättungsfaktor: kleiner = langsamer, weicher
 
-    // 💧 Exponentieller Filter auf double-Basis
     filteredTargetOffset.x = (1.0 - alpha) * filteredTargetOffset.x + alpha * static_cast<double>(newOffset.x);
     filteredTargetOffset.y = (1.0 - alpha) * filteredTargetOffset.y + alpha * static_cast<double>(newOffset.y);
 
-    // ⛵ Zielposition für Kamera: weich verfolgt
-    // ❌ Alt: float-Casts bei Übergabe
-    // targetOffset = make_double2(static_cast<float>(filteredTargetOffset.x), static_cast<float>(filteredTargetOffset.y));
-
-    // ✅ Neu: Direkt mit double
     targetOffset = make_double2(filteredTargetOffset.x, filteredTargetOffset.y);
 }
 
@@ -72,20 +66,17 @@ void RendererState::setupCudaBuffers() {
 }
 
 void RendererState::resize(int newWidth, int newHeight) {
-    // 🧼 Alte CUDA-Puffer freigeben
     if (d_iterations) {
-        CUDA_CHECK(cudaFree(d_iterations));  // ✅ Sicher freigeben
+        CUDA_CHECK(cudaFree(d_iterations));
         d_iterations = nullptr;
     }
     if (d_entropy) {
-        CUDA_CHECK(cudaFree(d_entropy));     // ✅ Sicher freigeben
+        CUDA_CHECK(cudaFree(d_entropy));
         d_entropy = nullptr;
     }
 
-    // 🧽 PBO deregistrieren
     CudaInterop::unregisterPBO();
 
-    // 🗑️ Alte OpenGL-Ressourcen löschen
     if (pbo != 0) {
         glDeleteBuffers(1, &pbo);
         pbo = 0;
@@ -95,21 +86,16 @@ void RendererState::resize(int newWidth, int newHeight) {
         tex = 0;
     }
 
-    // 📐 Neue Größe setzen
     width = newWidth;
     height = newHeight;
 
-    // 🆕 Neue Ressourcen erzeugen
     pbo = OpenGLUtils::createPBO(width, height);
     tex = OpenGLUtils::createTexture(width, height);
 
-    // 🔗 CUDA-Interop neu registrieren
     CudaInterop::registerPBO(pbo);
 
-    // 🔁 CUDA-Puffer neu allokieren
     setupCudaBuffers();
 
-    // 🔒 TileSize stabilisieren – verhindert Resize-Loop
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
 
     if (Settings::debugLogging) {

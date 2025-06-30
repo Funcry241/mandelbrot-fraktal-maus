@@ -1,5 +1,5 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 92
+// Zeilen: 95
 // 🐭 Maus-Kommentar: Der Renderer merkt sich nun Entropie, Kontrast, Index und Score (zoomResult) – für Analyse, Visualisierung oder Heatmap. Schneefuchs: „Wer messen will, muss erinnern.“
 
 #pragma once
@@ -63,6 +63,15 @@ public:
 
     // 🆕 Merker für Analyse nach Zielwechsel
     bool justZoomed = false;
+
+    // 📏 Supersampling-Faktor (z. B. 1 = aus, 2 = 2x2, 4 = 4x4 etc.)
+    int supersampling = 1;
+
+    // 🔥 Heatmap Overlay aktiv?
+    bool overlayEnabled = false;
+
+    // 🧭 Index des zuletzt gewählten Ziel-Tiles (für Zoom-Tracking)
+    int lastTileIndex = -1;
 
     // 🔁 Konstruktor & Methoden zur Zustandspflege
     RendererState(int w, int h);

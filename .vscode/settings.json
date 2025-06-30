@@ -95,5 +95,5 @@
       "xutility": "cpp"
     },
     "files.insertFinalNewline": true,
-    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/${buildKit}/compile_commands.json"
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json"
 }

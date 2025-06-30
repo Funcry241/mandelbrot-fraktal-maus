@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 228
+// Zeilen: 229
 // 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms. Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
 
 #include "pch.hpp"
@@ -10,8 +10,13 @@
 #include "renderer_pipeline.hpp"
 #include "renderer_resources.hpp"
 #include "heatmap_overlay.hpp"  // ✅ Heatmap integriert
+#include "frame_pipeline.hpp"   // 🧠 Neu: deterministische Frame-Steuerung
+#include "zoom_command.hpp"
 
 namespace RendererLoop {
+
+static FrameContext ctx;
+static CommandBus zoomBus;
 
 void initResources(RendererState& state) {
     if (state.pbo != 0 || state.tex != 0) {
@@ -47,128 +52,36 @@ void beginFrame(RendererState& state) {
     }
 }
 
-void updateTileSize(RendererState& state) {
-    int newSize = computeTileSizeFromZoom(state.zoom);
-    if (newSize != state.lastTileSize || state.lastTileSize == 0) {
-        state.lastTileSize = newSize;
-
-        OpenGLUtils::setGLResourceContext("tileSizeChange");
-        state.resize(state.width, state.height);
-
-        if (Settings::debugLogging) {
-            std::printf("[DEBUG] TileSize changed -> resize to %dx%d with tileSize=%d\n", state.width, state.height, newSize);
-        }
-    }
-}
-
-void computeCudaFrame(RendererState& state) {
-    double2 newOffset = make_double2(0.0, 0.0);
-    bool shouldZoom = false;
-
-    CudaInterop::renderCudaFrame(
-        state.d_iterations,
-        state.d_entropy,
-        state.width,
-        state.height,
-        static_cast<double>(state.zoom),
-        make_double2(state.offset.x, state.offset.y),
-        state.maxIterations,
-        state.h_entropy,
-        newOffset,
-        shouldZoom,
-        state.lastTileSize,
-        state
-    );
-
-    RendererPipeline::updateTexture(state.pbo, state.tex, state.width, state.height);
-    state.shouldZoom = shouldZoom;
-
-    if (shouldZoom) {
-        state.updateOffsetTarget(newOffset);
-        if (Settings::debugLogging) {
-            std::printf("[DEBUG] Target updated to (%.10f, %.10f)\n", newOffset.x, newOffset.y);
-        }
-    }
-}
-
-void updateAutoZoom(RendererState& state) {
-    if (!state.shouldZoom) return;
-
-    state.zoom *= Settings::AUTOZOOM_SPEED;
-
-    double2 delta = {
-        state.targetOffset.x - state.offset.x,
-        state.targetOffset.y - state.offset.y
-    };
-
-    double dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-
-    if (dist < Settings::DEADZONE) {
-        if (Settings::debugLogging) {
-            std::printf("[DEBUG] Target reached: delta=%.3e < DEADZONE (%.1e)\n", dist, Settings::DEADZONE);
-        }
-        return;
-    }
-
-    double rawTanh = std::tanh(Settings::OFFSET_TANH_SCALE * dist);
-    double factor = Settings::my_clamp(rawTanh * Settings::MAX_OFFSET_FRACTION, 0.0, 1.0);
-
-    double moveX = delta.x * factor;
-    double moveY = delta.y * factor;
-
-    if (Settings::debugLogging) {
-        std::printf("[ZoomMove] Z=%.2e  dist=%.2e  move=(%.2e, %.2e)  factor=%.3f  → target=(%.10f, %.10f)\n",
-            state.zoom,
-            dist,
-            moveX,
-            moveY,
-            factor,
-            state.targetOffset.x,
-            state.targetOffset.y
-        );
-    }
-
-    state.offset.x += moveX;
-    state.offset.y += moveY;
-    state.justZoomed = true;
-
-    if (Settings::debugLogging) {
-        std::printf("[DEBUG] Zoom update: offset -> (%.10f, %.10f)\n", state.offset.x, state.offset.y);
-    }
-}
-
-void drawFrame(RendererState& state) {
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    RendererPipeline::drawFullscreenQuad(state.tex);
-
-    if (!state.h_entropy.empty() && !state.zoomResult.perTileContrast.empty()) {
-        HeatmapOverlay::drawOverlay(
-            state.h_entropy,
-            state.zoomResult.perTileContrast,
-            state.width,
-            state.height,
-            state.lastTileSize,
-            state.tex
-        );
-    }
-
-    Hud::draw(state);
-    glfwSwapBuffers(state.window);
-}
-
 void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
-    beginFrame(state);
-    updateTileSize(state);
-    state.adaptIterationCount();
-    computeCudaFrame(state);
+    // Update Kontext-Daten aus State
+    ctx.width = state.width;
+    ctx.height = state.height;
+    ctx.zoom = state.zoom;
+    ctx.offset = state.offset;
+    ctx.maxIterations = state.maxIterations;
+    ctx.tileSize = state.lastTileSize;
+    ctx.supersampling = state.supersampling;
+    ctx.d_iterations = state.d_iterations;
+    ctx.d_entropy = state.d_entropy;
+    ctx.h_entropy = state.h_entropy;
+    ctx.overlayActive = state.overlayEnabled;
+    ctx.lastEntropy = state.lastEntropy;
+    ctx.lastContrast = state.lastContrast;
+    ctx.lastTileIndex = state.lastTileIndex;
 
-    if (autoZoomEnabled) {
-        updateAutoZoom(state);
-    }
+    beginFrame(ctx);
+    computeCudaFrame(ctx, state); // ✅ FIXED: Übergabe von RendererState ergänzt
+    if (autoZoomEnabled) applyZoomLogic(ctx, zoomBus);
+    drawFrame(ctx, state.tex);
 
-    drawFrame(state);
+    // Synchronisiere zurück
+    state.zoom = ctx.zoom;
+    state.offset = ctx.offset;
+    state.h_entropy = ctx.h_entropy;
+    state.shouldZoom = ctx.shouldZoom;
+    state.lastEntropy = ctx.lastEntropy;
+    state.lastContrast = ctx.lastContrast;
+    state.lastTileIndex = ctx.lastTileIndex;
 }
 
 void renderFrame(RendererState& state, bool autoZoomEnabled) {

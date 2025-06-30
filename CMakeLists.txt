@@ -1,15 +1,17 @@
 # Datei: CMakeLists.txt
-# Zeilen: 146
+# Zeilen: 150
 # 🐭 Maus-Kommentar: Modularisierung + CUDA/OpenGL-Interop Fix. Ergänzt Workaround für fehlende cuda_gl_interop.h – notwendig für Windows-Installationen, bei denen der Header nicht durch CUDAToolkit automatisch gefunden wird. Schneefuchs: „Workaround ist, wenn du weißt, was du tust – und es trotzdem tust.“
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
+
+# Aktiviert die Ausgabe von compile_commands.json
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Nur setzen, wenn nicht von außen definiert (z. B. Preset oder -D)
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 86 CACHE STRING "Default architecture if none provided")
 endif()
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(OtterDreamMandelbrot LANGUAGES CXX CUDA)
 
 # ---------------------------------------------------------
@@ -61,7 +63,7 @@ endif()
 include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
 
 # ---------------------------------------------------------
-# 🛠 Executable
+# 🛠 Executable: zentrale Dateien des Mandelbrot-Renderers
 add_executable(mandelbrot_otterdream
     # 🧠 Core Logic
     src/main.cpp
@@ -77,12 +79,14 @@ add_executable(mandelbrot_otterdream
     src/opengl_utils.cpp
     src/heatmap_overlay.cpp
 
-    # ⚙️ CUDA
+    # ⚙️ CUDA-Kernel + Interop
     src/cuda_interop.cu
     src/core_kernel.cu
 
-    # 🔎 Zoom
+    # 🔎 Zoom-Logik & Analyse
     src/zoom_logic.cpp
+    src/zoom_command.cpp      # 🆕 ZoomCommand & CommandBus
+    src/frame_pipeline.cpp    # 🆕 Modulare Renderlogik pro Frame
 )
 
 # Precompiled Header (MSVC-only)
@@ -134,6 +138,7 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
     Threads::Threads
 )
 
+# CUDA-Dateien explizit als solche markieren (für separable compilation)
 set_source_files_properties(
     src/renderer_core.cu    
     src/cuda_interop.cu
@@ -154,6 +159,5 @@ set(CMAKE_CUDA_FLAGS_DEBUG "-G -g")
 set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --fmad=false --prec-div=true")
 
 # ---------------------------------------------------------
-# Installiere direkt in dist/, nicht dist/bin/
+# 📦 Zielpfad: installiere direkt in dist/, nicht dist/bin/
 install(TARGETS mandelbrot_otterdream RUNTIME DESTINATION .)
-

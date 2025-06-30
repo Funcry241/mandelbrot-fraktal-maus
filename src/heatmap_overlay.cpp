@@ -1,5 +1,5 @@
 // Datei: src/heatmap_overlay.cpp
-// Zeilen: 157
+// Zeilen: 158
 // 🐭 Maus-Kommentar: Heatmap jetzt mondän – Seitenverhältnis 16:9, dezentes Padding (16px), sanfter Glow mit smoothstep-Farben. Cleanup korrekt: VAO/VBO/Shader werden bei Shutdown freigegeben. Schneefuchs sagt: „Wenn schon Debug, dann ohne Lecks.“
 
 #include "pch.hpp"

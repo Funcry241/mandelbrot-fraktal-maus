@@ -1,5 +1,5 @@
 // Datei: src/pch.hpp
-// Zeilen: 32
+// Zeilen: 42
 // 🐭 Maus-Kommentar: Precompiled Header – klar strukturiert: Windows-Header mit WIN32-Defines, dann OpenGL (GLEW+GLFW), dann CUDA-Runtime, dann STL. Achtung: `windows.h` nur mit `NOMINMAX`, `GLEW` nur vor `GLFW`. Schneefuchs bestand darauf, dass CUDA *nur* Runtime einbindet – nie `cuda.h` – sonst PCH-Krater.
 
 #pragma once
@@ -29,3 +29,12 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <algorithm> // optional für std::max etc.
+
+// 🧠 Projektmodule für IntelliSense-Boost (PCH-safe)
+#include "settings.hpp"
+#include "math_utils.hpp"
+#include "frame_context.hpp"
+#include "zoom_command.hpp"
+#include "frame_pipeline.hpp"
+#include "heatmap_overlay.hpp"

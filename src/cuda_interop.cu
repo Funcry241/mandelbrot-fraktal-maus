@@ -1,20 +1,24 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 208
-// 🐭 Maus-Kommentar: CUDA-Interop mit kompaktem ASCII-Logging für Zoomanalyse. Jetzt mit dO (OffsetDist), dPx (Bildschirmpixel), Score, Entropie, Kontrast und Zielstatus – alles CSV-freundlich. Schneefuchs sieht klar: Kein Wildsprung bleibt unbemerkt.
+// Zeilen: 230
+/* 🐭 Maus-Kommentar: CUDA-Interop mit kompaktem ASCII-Logging für Zoomanalyse.
+   Jetzt mit dO (OffsetDist), dPx (Bildschirmpixel), Score, Entropie, Kontrast und Zielstatus – alles CSV-freundlich.
+   Schneefuchs sieht klar: Kein Wildsprung bleibt unbemerkt.
+   → Signatur fixiert: renderCudaFrame(...) mit double / double2 für präzise Tiefe. Linker-Link ist happy.
+*/
 
-#include "pch.hpp"  // 💡 Muss als erstes stehen!
+#include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
 #include "common.hpp"
 #include "renderer_state.hpp"
 #include "zoom_logic.hpp"
-#include "heatmap_overlay.hpp"  // 🔥 Overlay-Toggle per Taste
+#include "heatmap_overlay.hpp"
 
 namespace CudaInterop {
 
 static cudaGraphicsResource_t cudaPboResource = nullptr;
-static bool pauseZoom = false;  // Standard: Auto-Zoom aktiv
+static bool pauseZoom = false;
 
 void registerPBO(unsigned int pbo) {
     if (cudaPboResource != nullptr) {
@@ -31,36 +35,6 @@ void unregisterPBO() {
     }
 }
 
-void logZoomEvaluation(const int* d_iterations, int width, int height, int maxIterations, double zoom) {
-    if (!Settings::debugLogging) return;
-
-    std::vector<int> h_iters(width * height);
-    CUDA_CHECK(cudaMemcpy(h_iters.data(), d_iterations, h_iters.size() * sizeof(int), cudaMemcpyDeviceToHost));
-
-    double sum = 0.0, sumSq = 0.0;
-    int minIt = maxIterations;
-    int maxIt = 0;
-    int escapeCount = 0;
-
-    for (int it : h_iters) {
-        sum += it;
-        sumSq += it * it;
-        if (it < minIt) minIt = it;
-        if (it > maxIt) maxIt = it;
-        if (it < 5) escapeCount++;
-    }
-
-    const int total = static_cast<int>(h_iters.size());
-    const double mean = sum / total;
-    const double variance = (sumSq / total) - (mean * mean);
-    const double escapeRatio = static_cast<double>(escapeCount) / total;
-
-    bool valid = (escapeRatio < 0.98) && (variance > 0.05) && (mean > 5.0);
-
-    std::printf("ZoomEval Z %.1e MeanIt %.2f VarIt %.2f Escape %.3f Min %d Max %d Valid %d\n",
-        zoom, mean, variance, escapeRatio, minIt, maxIt, valid ? 1 : 0);
-}
-
 void renderCudaFrame(
     int* d_iterations,
     float* d_entropy,
@@ -73,6 +47,7 @@ void renderCudaFrame(
     double2& newOffset,
     bool& shouldZoom,
     int tileSize,
+    int supersampling,
     RendererState& state
 ) {
     if (!cudaPboResource) {

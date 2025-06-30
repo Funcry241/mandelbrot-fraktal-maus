@@ -1,5 +1,5 @@
 // Datei: src/heatmap_overlay.hpp
-// Zeilen: 30
+// Zeilen: 31
 /*
 Maus-Kommentar 🐭: Nur relevante Schnittstellen bleiben – kein toter Code, kein Overhead. Overlay wird direkt per `drawOverlay(...)` gerendert. Schneefuchs: „Weniger ist manchmal Wärmebild.“
 */
@@ -17,10 +17,10 @@ void toggle();
 void cleanup();
 
 // Zeichnet das Debug-Overlay über dem Fraktalbild.
-// entropy + contrast: Tile-Daten
-// width, height: Bildabmessungen
+// entropy + contrast: Tile-Daten (gleiche Länge)
+// width, height: Bildgröße in Pixel
 // tileSize: Größe eines Tiles in Pixeln
-// textureId: aktuell nicht genutzt (zukunftssicher)
+// textureId: Fraktal-Textur (für optionales Blending)
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width,
