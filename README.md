@@ -98,6 +98,26 @@ cmake --install build/linux --prefix ./dist
 
 ---
 
+### ⌨️ Keyboard Controls
+
+- `P` or `Space`: Pause/resume automatic zoom
+- `H`: Toggle heatmap overlay (entropy/contrast)
+
+---
+
+### ⚙️ Customizing CUDA Architectures
+
+By default, this project targets CUDA compute capabilities 8.0, 8.6, and 8.9.  
+If your GPU has a different compute capability (e.g. RTX 4090 with Arch 90), override it like this:
+
+```bash
+cmake --preset windows-release -DCMAKE_CUDA_ARCHITECTURES=90
+```
+
+Find your GPU's capability [here](https://developer.nvidia.com/cuda-gpus).
+
+---
+
 ## 📄 Lizenz
 
 Dieses Projekt steht unter der MIT-Lizenz – siehe [LICENSE](LICENSE) für Details.

@@ -28,7 +28,7 @@ set(CMAKE_CUDA_EXTENSIONS OFF)
 # ---------------------------------------------------------
 # 🫠 CUDA-Architekturen (via Preset oder extern)
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  message(WARNING "CMAKE_CUDA_ARCHITECTURES not defined. Recommended: -DCMAKE_CUDA_ARCHITECTURES=80;86;89")
+  message(WARNING "CMAKE_CUDA_ARCHITECTURES not defined. Recommended: -DCMAKE_CUDA_ARCHITECTURES=80;86;89;90")
 endif()
 
 # ---------------------------------------------------------

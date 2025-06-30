@@ -1,3 +1,7 @@
+<!-- Datei: AGENTS.md -->
+<!-- Zeilen: 109 -->
+<!-- 🐭 Maus-Kommentar: Dokumentiert Buildprozesse und Toolchains für OtterDream. Jetzt mit Hotkey-Doku und CUDA-Architektur-Hinweis. Schneefuchs flüstert: „Ein Agent kennt auch die versteckten Knöpfe.“ -->
+
 # 👩‍💻 OtterDream Build Agents
 
 Diese Datei dokumentiert die automatisierten Prozesse und Tools für den Build und die Pflege des OtterDream Mandelbrot-Renderers.
@@ -32,6 +36,31 @@ Das Projekt verwendet folgende Agents und Werkzeuge:
 
 > ❗ **Hinweis:** Für den Build ist eine **lokal installierte CUDA-Toolchain (z. B. `nvcc`) zwingend erforderlich**.  
 > Ohne CUDA kann der Buildprozess **nicht gestartet** werden.
+
+---
+
+## ⌨️ Keyboard Controls
+
+Diese Tastenkürzel sind während der Laufzeit verfügbar:
+
+| Taste     | Funktion                                |
+|-----------|-----------------------------------------|
+| `P`       | Auto-Zoom pausieren oder fortsetzen     |
+| `Space`   | Alternativ zu `P`                       |
+| `H`       | Heatmap-Overlay ein-/ausschalten        |
+
+---
+
+## 🧠 CUDA Architekturen
+
+Standardmäßig ist in den CMake-Presets die Architektur `80;86;89` gesetzt.  
+Für andere GPUs kann diese wie folgt überschrieben werden:
+
+```bash
+cmake --preset windows-release -DCMAKE_CUDA_ARCHITECTURES=90
+```
+
+Die passende Architektur für deine GPU findest du auf der [offiziellen NVIDIA-Liste](https://developer.nvidia.com/cuda-gpus).
 
 ---
 

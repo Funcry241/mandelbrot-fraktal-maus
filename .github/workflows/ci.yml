@@ -56,7 +56,7 @@ jobs:
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_STANDARD=23 \
-            -DCMAKE_CUDA_ARCHITECTURES=80\;86\;89 \
+            -DCMAKE_CUDA_ARCHITECTURES=80\;86\;89;90 \
             -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
 
       - name: Build project

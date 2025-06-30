@@ -94,7 +94,7 @@ New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 # CMake configure (clean call)
 Write-Host "[INFO] CMake version: $(cmake --version | Select-String -Pattern 'cmake version')"
 Write-Host "[BUILD] Configuring project..."
-$cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=80;86;89"
+$cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=80;86;89;90"
 $cmakeArgs = @(
     "-S", ".", "-B", "build", "-G", "Ninja",
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
