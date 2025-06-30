@@ -33,7 +33,6 @@
 
 // 🧠 Projektmodule für IntelliSense-Boost (PCH-safe)
 #include "settings.hpp"
-#include "math_utils.hpp"
 #include "frame_context.hpp"
 #include "zoom_command.hpp"
 #include "frame_pipeline.hpp"

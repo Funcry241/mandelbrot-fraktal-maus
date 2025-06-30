@@ -30,12 +30,6 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
 # ---------------------------------------------------------
-# 🫠 CUDA-Architekturen (via Preset oder extern)
-if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  message(WARNING "CMAKE_CUDA_ARCHITECTURES not defined. Recommended: -DCMAKE_CUDA_ARCHITECTURES=80;86;89;90")
-endif()
-
-# ---------------------------------------------------------
 # 📚 Pakete
 find_package(OpenGL REQUIRED)
 find_package(glew CONFIG REQUIRED)

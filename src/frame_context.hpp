@@ -13,8 +13,6 @@
 #include <vector>
 #include <cuda_runtime.h>
 #include "settings.hpp"        // für Settings::tileSize, debugLogging etc.
-#include "math_utils.hpp"      // für float2, double2
-#include "zoom_command.hpp"    // demnächst
 
 struct FrameContext {
     // Bilddimensionen

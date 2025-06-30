@@ -1,18 +1,19 @@
 // Datei: src/zoom_command.hpp
-// Zeilen: 63
+// Zeilen: 65
 /* 🐭 interner Maus-Kommentar:
    Diese Datei enthält die Struktur `ZoomCommand`, die jede Auto-Zoom-Entscheidung
    eindeutig beschreibt. Sie wird pro Frame erzeugt, gespeichert und ggf. reproduzierbar
    wiederverwendet. Der `CommandBus` speichert sie für Replay, Logging oder Tests.
    → Grundlage für deterministischen Zoomfluss, Analyse, Undo etc.
+   → FIX: math_utils.hpp entfernt – stattdessen direkter CUDA-Typ-Import (float2 aus <vector_types.h>)
 */
 
 #pragma once
-#include "math_utils.hpp"
 #include <vector>
 #include <optional>
 #include <string>
 #include <cstdio>
+#include <vector_types.h> // ✅ notwendig für float2
 
 struct ZoomCommand {
     int frameIndex = 0;           // globaler Frame-Zähler
