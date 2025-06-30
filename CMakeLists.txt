@@ -154,5 +154,6 @@ set(CMAKE_CUDA_FLAGS_DEBUG "-G -g")
 set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --fmad=false --prec-div=true")
 
 # ---------------------------------------------------------
-# 📦 Install-Ziel
-install(TARGETS mandelbrot_otterdream RUNTIME DESTINATION bin)
+# Installiere direkt in dist/, nicht dist/bin/
+install(TARGETS mandelbrot_otterdream RUNTIME DESTINATION .)
+

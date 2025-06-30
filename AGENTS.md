@@ -1,5 +1,5 @@
 <!-- Datei: AGENTS.md -->
-<!-- Zeilen: 109 -->
+<!-- Zeilen: 110 -->
 <!-- 🐭 Maus-Kommentar: Dokumentiert Buildprozesse und Toolchains für OtterDream. Jetzt mit Hotkey-Doku und CUDA-Architektur-Hinweis. Schneefuchs flüstert: „Ein Agent kennt auch die versteckten Knöpfe.“ -->
 
 # 👩‍💻 OtterDream Build Agents
@@ -53,7 +53,7 @@ Diese Tastenkürzel sind während der Laufzeit verfügbar:
 
 ## 🧠 CUDA Architekturen
 
-Standardmäßig ist in den CMake-Presets die Architektur `80;86;89` gesetzt.  
+Standardmäßig ist in den CMake-Presets die Architektur `80;86;89;90` gesetzt.  
 Für andere GPUs kann diese wie folgt überschrieben werden:
 
 ```bash
@@ -72,6 +72,7 @@ Die passende Architektur für deine GPU findest du auf der [offiziellen NVIDIA-L
 cmake --preset windows-msvc
 cmake --build --preset windows-msvc
 cmake --install build/windows --prefix ./dist
+.\dist\mandelbrot_otterdream.exe
 ```
 
 ### 🐗 Linux
@@ -102,7 +103,7 @@ cmake --install build/linux --prefix ./dist
 4. **Starten**:
 
 ```bash
-./dist/bin/mandelbrot_otterdream
+./dist/mandelbrot_otterdream
 ```
 
 ---
