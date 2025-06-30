@@ -93,7 +93,7 @@ sudo apt install build-essential cmake ninja-build libglfw3-dev libglew-dev libx
 cmake --preset linux-build
 cmake --build --preset linux-build
 cmake --install build/linux --prefix ./dist
-./dist/bin/mandelbrot_otterdream
+./dist/mandelbrot_otterdream
 ```
 
 ---
@@ -107,7 +107,7 @@ cmake --install build/linux --prefix ./dist
 
 ### ⚙️ Customizing CUDA Architectures
 
-By default, this project targets CUDA compute capabilities 8.0, 8.6, and 8.9.  
+By default, this project targets CUDA compute capabilities 8.0, 8.6, 8.9, and 9.0 (i.e. architectures 80;86;89;90).
 If your GPU has a different compute capability (e.g. RTX 4090 with Arch 90), override it like this:
 
 ```bash
