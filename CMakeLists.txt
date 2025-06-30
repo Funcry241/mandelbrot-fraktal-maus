@@ -4,8 +4,10 @@
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
-# 🩹 GitHub CI Fix: CUDA-Architektur manuell setzen
-set(CMAKE_CUDA_ARCHITECTURES 86)
+# Nur setzen, wenn nicht von außen definiert (z. B. Preset oder -D)
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES 86 CACHE STRING "Default architecture if none provided")
+endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(OtterDreamMandelbrot LANGUAGES CXX CUDA)
