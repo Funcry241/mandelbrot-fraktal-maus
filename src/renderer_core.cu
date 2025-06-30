@@ -22,11 +22,10 @@ Renderer::Renderer(int width, int height)
     : state(width, height), glInitialized(false) {}
 
 Renderer::~Renderer() {
-    if (glInitialized) {
-        cleanup();
-    } else if (Settings::debugLogging) {
-        std::puts("[DEBUG] cleanup() übersprungen – OpenGL nicht initialisiert");
+    if (Settings::debugLogging && !glInitialized) {
+        std::puts("[DEBUG] cleanup() wird trotz fehlender OpenGL-Initialisierung aufgerufen");
     }
+    cleanup();
 }
 
 bool Renderer::initGL() {
