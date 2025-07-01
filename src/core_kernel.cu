@@ -76,7 +76,9 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     int avgIter = totalIter / (S * S);
 
     if (Settings::debugGradient) {
-        output[y * width + x] = make_uchar4(255, 0, 255, 255); // Magenta
+        float val = (avgIter > 0) ? avgIter / (float)maxIterations : 0.0f;
+        val = fminf(fmaxf(val, 0.0f), 1.0f);
+        output[y * width + x] = make_uchar4(val * 255, val * 255, val * 255, 255);
         return;
     }
 
@@ -154,6 +156,10 @@ extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
                                       width, height,
                                       zoom, offset,
                                       maxIterations);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
+    }
     cudaDeviceSynchronize();
 }
 
