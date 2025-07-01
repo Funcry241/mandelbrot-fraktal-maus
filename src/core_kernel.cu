@@ -53,7 +53,7 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
 
     if (x >= width || y >= height) return;
 
-    output[y * width + x] = make_uchar4(255, 0, 0, 255);
+    output[y * width + x] = make_uchar4(x % 256, y % 256, 128, 255);  // Testmuster
     iterationsOut[y * width + x] = 1;
     return;
 
