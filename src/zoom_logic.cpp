@@ -1,7 +1,7 @@
+// Zeilen: 161
 // Datei: src/zoom_logic.cpp
-// Zeilen: 158
 /*
-👝 Maus-Kommentar: Fix laut Schneefuchs! Korrekte Umrechnung der Tile-Koordinaten nun zoom-basiert statt fensterbasiert. Kein „Springen“ mehr im Deep-Zoom. Undefinierte overloads entfernt. Logik jetzt stabil und glasklar.
+👝 Maus-Kommentar: Fix laut Schneefuchs! Korrekte Umrechnung der Tile-Koordinaten nun zoom-basiert statt fensterbasiert. Kein „Springen“ mehr im Deep-Zoom. Undefinierte overloads entfernt. Logik jetzt stabil und glasklar. Jetzt auch: Kontrastwert im Zoom-Log sichtbar.
 */
 
 #include "pch.hpp"
@@ -96,6 +96,7 @@ ZoomResult evaluateZoomTarget(
             maxScore = score;
             result.bestIndex     = i;
             result.bestEntropy   = entropy;
+            result.bestContrast  = score;  // 🐭 Maus: Sichtbarer Kontrastwert für Zoom-Log
             result.newOffset     = make_double2(candidateOffset.x, candidateOffset.y);
         }
     }

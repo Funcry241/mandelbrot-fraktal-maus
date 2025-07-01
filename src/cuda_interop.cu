@@ -1,5 +1,5 @@
+// Zeilen: 241
 // Datei: src/cuda_interop.cu
-// Zeilen: 230
 /* 🐭 Maus-Kommentar: CUDA-Interop mit kompaktem ASCII-Logging für Zoomanalyse.
    Jetzt mit dO (OffsetDist), dPx (Bildschirmpixel), Score, Entropie, Kontrast und Zielstatus – alles CSV-freundlich.
    Schneefuchs sieht klar: Kein Wildsprung bleibt unbemerkt.
@@ -82,7 +82,7 @@ void renderCudaFrame(
     }
 
     computeTileEntropy(d_iterations, d_entropy, width, height, tileSize, maxIterations);
-    
+
     if (Settings::debugLogging) {
         std::puts("[DEBUG] PBO unmapped");
     }
@@ -92,7 +92,7 @@ void renderCudaFrame(
     const int numTiles = tilesX * tilesY;
 
     h_entropy.resize(numTiles);
-    CUDA_CHECK(cudaDeviceSynchronize());  // 🧯 Zeigt Kernelfehler sofort
+    CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
     shouldZoom = false;
@@ -114,6 +114,13 @@ void renderCudaFrame(
         if (result.bestIndex >= 0) {
             newOffset = result.newOffset;
             shouldZoom = result.isNewTarget;
+
+            if (result.isNewTarget) {
+                // 🐭 Maus: Zielwechsel erkannt – Zustand wird aktualisiert für sauberes dE/dC-Tracking
+                state.zoomResult.bestEntropy  = result.bestEntropy;
+                state.zoomResult.bestContrast = result.bestContrast;
+                state.zoomResult.bestIndex    = result.bestIndex;
+            }
         }
 
         if (Settings::debugLogging) {
@@ -147,7 +154,10 @@ void renderCudaFrame(
             }
         }
 
-        state.zoomResult = result;
+        // 🐅 Maus: Nur wenn kein Wechsel stattfand, übernehmen wir andere (nicht-kontrastrelevante) Felder
+        if (!result.isNewTarget) {
+            state.zoomResult = result;
+        }
     }
 
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
