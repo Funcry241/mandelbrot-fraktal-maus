@@ -1,5 +1,5 @@
-// Zeilen: 241
 // Datei: src/cuda_interop.cu
+// Zeilen: 244
 /* 🐭 Maus-Kommentar: CUDA-Interop mit kompaktem ASCII-Logging für Zoomanalyse.
    Jetzt mit dO (OffsetDist), dPx (Bildschirmpixel), Score, Entropie, Kontrast und Zielstatus – alles CSV-freundlich.
    Schneefuchs sieht klar: Kein Wildsprung bleibt unbemerkt.
@@ -136,8 +136,8 @@ void renderCudaFrame(
                     result.distance,
                     result.distance * zoom_f * width,
                     minJump,
-                    result.bestEntropy - state.zoomResult.bestEntropy,
-                    result.bestContrast - state.zoomResult.bestContrast,
+                    result.relEntropyGain,
+                    result.relContrastGain,
                     result.relEntropyGain,
                     result.relContrastGain,
                     result.isNewTarget ? 1 : 0
