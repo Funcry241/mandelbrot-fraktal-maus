@@ -1,6 +1,7 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 233
+// Zeilen: 245
 // 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms. Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
+// Otter-Fix: Zweites renderCudaFrame nach applyZoomLogic() → Bild zeigt direkt das neue Ziel!
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -70,12 +71,25 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     ctx.lastTileIndex = state.lastTileIndex;
 
     beginFrame(state);
-    computeCudaFrame(ctx, state); // ✅ CUDA: Fraktal und Entropie
-    RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height); // 🆕 Bild in Textur!
-    if (autoZoomEnabled) applyZoomLogic(ctx, zoomBus);
+
+    // 🔁 Erstes CUDA-Rendering – Grundlage für Entropieanalyse
+    computeCudaFrame(ctx, state);
+
+    // 🔁 Wenn Auto-Zoom aktiv ist → neuen Zielbereich wählen
+    if (autoZoomEnabled) {
+        applyZoomLogic(ctx, zoomBus);
+
+        // 🩹 Otter: Direktes Re-Rendern nach Zoom-Änderung → damit neuer Bildausschnitt sofort sichtbar
+        computeCudaFrame(ctx, state);
+    }
+
+    // 🎯 GPU → OpenGL Textur übertragen
+    RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
+
+    // 🖼 Bild (und ggf. Heatmap) zeichnen
     drawFrame(ctx, state.tex);
 
-    // Synchronisiere zurück
+    // 🔁 Rückübertragung in RendererState
     state.zoom = ctx.zoom;
     state.offset = ctx.offset;
     state.h_entropy = ctx.h_entropy;
