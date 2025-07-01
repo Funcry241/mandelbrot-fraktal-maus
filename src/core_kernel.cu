@@ -43,8 +43,23 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  float zoom, float2 offset,
                                  int maxIterations,
                                  int supersampling) {
+
+
+
+
+
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+
+    output[y * width + x] = make_uchar4(255, 0, 0, 255);  // Knallrot
+iterationsOut[y * width + x] = 1;
+return;
+
+
+
+
+
     if (x >= width || y >= height) return;
 
     int S = supersampling;
@@ -77,8 +92,9 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     int avgIter = totalIter / (S * S);
 
     if (Settings::debugGradient) {
-        output[y * width + x] = make_uchar4(255, 0, 0, 255); // signalisiere überhaupt Sichtbarkeit
-        iterationsOut[y * width + x] = avgIter;
+        float val = (avgIter > 0) ? avgIter / (float)maxIterations : 0.0f;
+        val = fminf(fmaxf(val, 0.0f), 1.0f);
+        output[y * width + x] = make_uchar4(val * 255, val * 255, val * 255, 255);
         return;
     }
 
