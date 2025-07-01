@@ -51,16 +51,11 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-
-    output[y * width + x] = make_uchar4(255, 0, 0, 255);  // Knallrot
-iterationsOut[y * width + x] = 1;
-return;
-
-
-
-
-
     if (x >= width || y >= height) return;
+
+    output[y * width + x] = make_uchar4(255, 0, 0, 255);
+    iterationsOut[y * width + x] = 1;
+    return;
 
     int S = supersampling;
     float totalColor = 0.0f;
