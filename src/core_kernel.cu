@@ -41,12 +41,13 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fina
 __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  int width, int height,
                                  float zoom, float2 offset,
-                                 int maxIterations) {
+                                 int maxIterations,
+                                 int supersampling) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= width || y >= height) return;
 
-    constexpr int S = SUPERSAMPLING_COUNT;
+    int S = supersampling;
     float totalColor = 0.0f;
     int validSamples = 0;
     int totalIter = 0;
@@ -75,13 +76,16 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
     float avgColor = (validSamples > 0) ? (totalColor / validSamples) : -1.0f;
     int avgIter = totalIter / (S * S);
 
-    output[y * width + x] = make_uchar4(255, 255, 0, 255);  // GELB – muss sichtbar sein
-    iterationsOut[y * width + x] = 42;                     // willkürlich
-    return;
-
-        output[y * width + x] = elegantColor(avgColor);
-        iterationsOut[y * width + x] = avgIter;
+    if (Settings::debugGradient) {
+        float val = (avgIter > 0) ? avgIter / (float)maxIterations : 0.0f;
+        val = fminf(fmaxf(val, 0.0f), 1.0f);
+        output[y * width + x] = make_uchar4(val * 255, val * 255, val * 255, 255);
+        return;
     }
+
+    output[y * width + x] = elegantColor(avgColor);
+    iterationsOut[y * width + x] = avgIter;
+}
 
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
                               int width, int height, int tileSize,
@@ -143,7 +147,8 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
 extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
                                         int width, int height,
                                         float zoom, float2 offset,
-                                        int maxIterations) {
+                                        int maxIterations,
+                                        int supersampling) {
     int tileSize = computeTileSizeFromZoom(zoom);
     dim3 block(tileSize, tileSize);
     dim3 grid((width + block.x - 1) / block.x,
@@ -152,7 +157,8 @@ extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
     mandelbrotKernel<<<grid, block>>>(output, d_iterations,
                                       width, height,
                                       zoom, offset,
-                                      maxIterations);
+                                      maxIterations,
+                                      supersampling);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));

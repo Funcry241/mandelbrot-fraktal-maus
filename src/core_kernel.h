@@ -22,7 +22,8 @@ extern "C" {
 void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
                              int width, int height,
                              float zoom, float2 offset,
-                             int maxIterations);
+                             int maxIterations,
+                             int supersampling);
 
 // 📊 Entropie jedes Tiles berechnen (Iterationen → Verteilung → Entropie)
 void computeTileEntropy(const int* d_iterations,

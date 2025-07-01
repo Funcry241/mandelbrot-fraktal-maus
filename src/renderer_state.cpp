@@ -32,9 +32,9 @@ void RendererState::reset() {
     frameCount = 0;
     lastTime = glfwGetTime();  // 🔄 Präzise als double speichern
 
-    supersampling = 1;           // 🆕 notwendig für FrameContext
+    supersampling = Settings::defaultSupersampling;           
     overlayEnabled = false;     // 🆕 Heatmap-Steuerung
-    lastTileIndex = -1;         // 🆕 für ZoomCommand
+    lastTileIndex = -1;         // 🆕 für ZoomCommand    
 }
 
 void RendererState::updateOffsetTarget(double2 newOffset) {

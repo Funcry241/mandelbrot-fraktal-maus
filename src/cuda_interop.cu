@@ -66,7 +66,7 @@ void renderCudaFrame(
     float zoom_f = static_cast<float>(zoom);
     float2 offset_f = make_float2(static_cast<float>(offset.x), static_cast<float>(offset.y));
 
-    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom_f, offset_f, maxIterations);
+    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom_f, offset_f, maxIterations, supersampling);
     computeTileEntropy(d_iterations, d_entropy, width, height, tileSize, maxIterations);
 
     const int tilesX = (width + tileSize - 1) / tileSize;

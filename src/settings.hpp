@@ -10,10 +10,13 @@
 
 namespace Settings {
 
-// 🧪 Anzahl Samples pro Pixel (1 = kein Supersampling, 4 = 2×2, 16 = 4×4)
-// Datei: settings.hpp (Ziel: CUDA-kompatibel)
-// 🐭 Hinweis: Muss als Makro definiert werden, sonst sieht NVCC es nicht!
-#define SUPERSAMPLING_COUNT 1
+// Empfohlene Werte: 1 (aus), 2, 3 oder 4
+// 1  = Kein Supersampling, schnellste Darstellung
+// 2+ = Mehrere Subpixel pro Pixel (2×2, 3×3, etc.)
+// Erhöhung verbessert Bildqualität (Antialiasing), erhöht aber auch die Renderzeit quadratisch.
+// Bei 4 z. B. → 16-facher Aufwand!
+// Hinweis: Wird bei Start in `RendererState::reset()` gesetzt und bis zum CUDA-Kernel durchgereicht.
+inline constexpr int defaultSupersampling = 1;
 
 // 🔍 Debug-Modi: visuelle Darstellung & Konsolen-Ausgabe aktivieren
 inline constexpr bool debugGradient = true; // Aktiviert reine Entropie-Ansicht (keine Farben) – nur zu Analysezwecken
