@@ -22,6 +22,11 @@ inline constexpr int defaultSupersampling = 1;
 inline constexpr bool debugGradient = false; // Aktiviert reine Entropie-Ansicht (keine Farben) – nur zu Analysezwecken
 inline constexpr bool debugLogging  = true;  // Aktiviert Konsolenausgaben für Auto-Zoom, Tile-Entropie etc.
 
+// 🔥 Sichtbarkeit des Heatmap-Overlays beim Programmstart
+// true  = Heatmap (Entropie-Kontrast) ist sofort sichtbar
+// false = Muss per Taste H aktiviert werden
+inline constexpr bool heatmapOverlayEnabled = true; // Otter: standardmäßig an
+
 // 💥 Fensterkonfiguration (Initialgröße und Position auf dem Bildschirm)
 inline constexpr int width      = 1024;  // Breite des Fensters in Pixel – empfohlen: 800 bis 1600
 inline constexpr int height     = 768;   // Höhe des Fensters in Pixel – empfohlen: 600 bis 1200

@@ -25,6 +25,10 @@ int main() {
 
     RendererLoop::initResources(renderer.getState());
 
+    
+    // 🟢 Heatmap-Overlay initial aktivieren, falls gewünscht
+    HeatmapOverlay::setEnabled(Settings::heatmapOverlayEnabled);
+
     // ⏯️ Auto-Zoom explizit aktivieren beim Start
     CudaInterop::setPauseZoom(false);
 

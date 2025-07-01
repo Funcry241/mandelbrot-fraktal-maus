@@ -1,9 +1,10 @@
+// Zeilen: 161
 // Datei: src/heatmap_overlay.cpp
-// Zeilen: 158
-// 🐭 Maus-Kommentar: Heatmap jetzt mondän – Seitenverhältnis 16:9, dezentes Padding (16px), sanfter Glow mit smoothstep-Farben. Cleanup korrekt: VAO/VBO/Shader werden bei Shutdown freigegeben. Schneefuchs sagt: „Wenn schon Debug, dann ohne Lecks.“
+// 🐭 Maus-Kommentar: Heatmap jetzt mondän – Seitenverhältnis 16:9, dezentes Padding (16px), sanfter Glow mit smoothstep-Farben. Cleanup korrekt: VAO/VBO/Shader werden bei Shutdown freigegeben. Overlay-Standardwert kommt jetzt aus Settings. Schneefuchs nickt.
 
 #include "pch.hpp"
 #include "heatmap_overlay.hpp"
+#include "settings.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -12,7 +13,9 @@ namespace HeatmapOverlay {
 static GLuint overlayVAO = 0;
 static GLuint overlayVBO = 0;
 static GLuint overlayShader = 0;
-static bool showOverlay = true;
+
+// 🐅 Maus-Kommentar: Overlay-Standardwert aus Settings übernommen. Keine willkürlichen Defaults mehr – Schneefuchs lächelt.
+static bool showOverlay = Settings::heatmapOverlayEnabled;
 
 static const char* vertexShaderSrc = R"GLSL(
 #version 430 core
@@ -78,6 +81,10 @@ static GLuint createShaderProgram() {
 
 void toggle() {
     showOverlay = !showOverlay;
+}
+
+void setEnabled(bool enabled) {
+    showOverlay = enabled;
 }
 
 void cleanup() {

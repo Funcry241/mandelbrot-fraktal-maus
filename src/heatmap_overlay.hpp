@@ -1,5 +1,5 @@
+// Zeilen: 33
 // Datei: src/heatmap_overlay.hpp
-// Zeilen: 31
 /*
 Maus-Kommentar 🐭: Nur relevante Schnittstellen bleiben – kein toter Code, kein Overhead. Overlay wird direkt per `drawOverlay(...)` gerendert. Schneefuchs: „Weniger ist manchmal Wärmebild.“
 */
@@ -12,6 +12,9 @@ namespace HeatmapOverlay {
 
 // Overlay ein-/ausblenden (z. B. via Tastendruck)
 void toggle();
+
+// Overlay explizit setzen (z. B. aus Settings laden)
+void setEnabled(bool enabled); // Otter: Initialzustand kommt jetzt aus settings.hpp
 
 // Gibt GPU-Ressourcen (VAO, VBO, Shader) frei
 void cleanup();
