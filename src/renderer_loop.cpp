@@ -1,8 +1,8 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 245
-// 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms.
-// Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
+// Zeilen: 249
+// 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms. Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
 // Otter-Fix: Zweites renderCudaFrame nach applyZoomLogic() → Bild zeigt direkt das neue Ziel!
+// 🐭 FIX: HUD-Overlay wird nun korrekt pro Frame gerendert – stand bisher im Schatten.
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -89,6 +89,9 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
 
     // 🖼 Bild (und ggf. Heatmap) zeichnen
     drawFrame(ctx, state.tex);
+
+    // 💡 NEU: HUD-Zeichnung nach allem anderen
+    Hud::draw(state);
 
     // 🔁 Rückübertragung in RendererState
     state.zoom = ctx.zoom;
