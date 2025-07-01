@@ -44,12 +44,12 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  int maxIterations,
                                  int supersampling) {
 
-
-
-
-
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x == 0 && y == 0) {
+        printf("[TEST] Kernel reached: zoom=%.3f\n", zoom);
+    }
 
     if (x >= width || y >= height) return;
 
