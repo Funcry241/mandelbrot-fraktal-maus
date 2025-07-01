@@ -1,5 +1,5 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 213
+// Zeilen: 221
 // 🐭 Maus-Kommentar: Mandelbrot-Kernel mit stabilisierter Supersampling-Farbmittelung – nutzt nur gültige Escape-Punkte für Farbberechnung. Kein Grün-Drift mehr! Schneefuchs: „Nur wer das Ende kennt, darf mit Farbe reden.“
 
 #include <cuda_runtime.h>
@@ -74,6 +74,14 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
 
     float avgColor = (validSamples > 0) ? (totalColor / validSamples) : -1.0f;
     int avgIter = totalIter / (S * S);
+
+    if (Settings::debugGradient) {
+        float val = (avgIter > 0) ? avgIter / (float)maxIterations : 0.0f;
+        val = fminf(fmaxf(val, 0.0f), 1.0f);
+        output[y * width + x] = make_uchar4(val * 255, val * 255, val * 255, 255);
+        return;
+    }
+
     output[y * width + x] = elegantColor(avgColor);
     iterationsOut[y * width + x] = avgIter;
 }
