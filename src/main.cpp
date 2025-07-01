@@ -29,7 +29,7 @@ int main() {
     CudaInterop::setPauseZoom(false);
 
     while (!renderer.shouldClose()) {
-        renderer.renderFrame(true);
+        renderer.renderFrame_impl(true);
         glfwPollEvents();
     }
 

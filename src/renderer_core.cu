@@ -53,10 +53,6 @@ bool Renderer::shouldClose() const {
     return RendererWindow::shouldClose(state.window);
 }
 
-void Renderer::renderFrame(bool autoZoomEnabled) {
-    RendererLoop::renderFrame(state, autoZoomEnabled);
-}
-
 void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     RendererLoop::renderFrame_impl(state, autoZoomEnabled);
 

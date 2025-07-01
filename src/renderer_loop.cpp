@@ -84,8 +84,4 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     state.lastTileIndex = ctx.lastTileIndex;
 }
 
-void renderFrame(RendererState& state, bool autoZoomEnabled) {
-    renderFrame_impl(state, autoZoomEnabled);
-}
-
 } // namespace RendererLoop

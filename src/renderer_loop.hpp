@@ -33,7 +33,4 @@ void drawFrame(RendererState& state);
 // 🔁 Interner Ablauf: Alle Render-Schritte eines Frames
 void renderFrame_impl(RendererState& state, bool autoZoomEnabled);
 
-// 🚪 Externe API: Wird von `renderer_core.cu` oder `main.cpp` aufgerufen
-void renderFrame(RendererState& state, bool autoZoomEnabled);
-
 } // namespace RendererLoop
