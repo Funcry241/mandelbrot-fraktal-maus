@@ -78,6 +78,7 @@ void renderCudaFrame(
     const int numTiles = tilesX * tilesY;
 
     h_entropy.resize(numTiles);
+    CUDA_CHECK(cudaDeviceSynchronize());  // 🧯 Zeigt Kernelfehler sofort
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
     shouldZoom = false;
