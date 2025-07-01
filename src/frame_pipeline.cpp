@@ -1,5 +1,5 @@
 // Datei: src/frame_pipeline.cpp
-// Zeilen: 93
+// Zeilen: 97
 /* 🐭 interner Maus-Kommentar:
    Diese Datei definiert die logische Render-Pipeline:
    - Klar getrennte Schritte (beginFrame, computeCudaFrame, applyZoomLogic, drawFrame)
