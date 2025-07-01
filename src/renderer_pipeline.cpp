@@ -1,6 +1,5 @@
-// Datei: src/renderer_pipeline.cpp
-// Zeilen: 87
-// 🐭 Maus-Kommentar: Shaderfehler werden nun korrekt erkannt – keine stille OpenGL-Misere mehr. Otter-VAO bleibt, doch Schneefuchs flüstert: „Abstürzen ist keine Option.“
+// 🐭 Maus-Kommentar: Shaderfehler werden nun korrekt erkannt – keine stille OpenGL-Misere mehr.
+// Otter-VAO bleibt, doch Schneefuchs flüstert: „Abstürzen ist keine Option.“
 
 #include "pch.hpp"
 

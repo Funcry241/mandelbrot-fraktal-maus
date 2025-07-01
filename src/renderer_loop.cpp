@@ -1,6 +1,7 @@
 // Datei: src/renderer_loop.cpp
 // Zeilen: 245
-// 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms. Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
+// 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms.
+// Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
 // Otter-Fix: Zweites renderCudaFrame nach applyZoomLogic() → Bild zeigt direkt das neue Ziel!
 
 #include "pch.hpp"
