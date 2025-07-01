@@ -31,6 +31,7 @@ int main() {
     while (!renderer.shouldClose()) {
         renderer.renderFrame_impl(true);
         glfwPollEvents();
+        glfwSwapBuffers(renderer.getState().window); 
     }
 
     return 0;
