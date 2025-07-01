@@ -1,5 +1,5 @@
 // Datei: src/frame_pipeline.cpp
-// Zeilen: 90
+// Zeilen: 93
 /* 🐭 interner Maus-Kommentar:
    Diese Datei definiert die logische Render-Pipeline:
    - Klar getrennte Schritte (beginFrame, computeCudaFrame, applyZoomLogic, drawFrame)
@@ -11,6 +11,7 @@
    - FIX: HeatmapOverlay::drawOverlay korrekt eingebunden (kein drawOverlayTexture mehr)
    - FIX: float2 durch double2 ersetzt – volle Präzision laut frame_context.hpp
    - FIX: RendererState& state als finaler Parameter eingeführt (wegen Schneefuchs' Analyse)
+   - FIX: RendererPipeline::updateTexture eingefügt nach CUDA-Kernel (Otter-Fund)
 */
 
 #include "frame_context.hpp"
@@ -52,6 +53,9 @@ void computeCudaFrame(FrameContext& ctx, RendererState& state) {
         ctx.supersampling,
         state // ✅ notwendig für Zielwahl und Zoomlogik
     );
+
+    // ✅ FIX (Otter): Übertrage CUDA-Ausgabe ins Texture-Objekt für OpenGL
+    RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
 }
 
 void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus) {
