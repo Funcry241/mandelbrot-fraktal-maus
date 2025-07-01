@@ -16,7 +16,7 @@ namespace Settings {
 #define SUPERSAMPLING_COUNT 1
 
 // 🔍 Debug-Modi: visuelle Darstellung & Konsolen-Ausgabe aktivieren
-inline constexpr bool debugGradient = false; // Aktiviert reine Entropie-Ansicht (keine Farben) – nur zu Analysezwecken
+inline constexpr bool debugGradient = true; // Aktiviert reine Entropie-Ansicht (keine Farben) – nur zu Analysezwecken
 inline constexpr bool debugLogging  = true;  // Aktiviert Konsolenausgaben für Auto-Zoom, Tile-Entropie etc.
 
 // 💥 Fensterkonfiguration (Initialgröße und Position auf dem Bildschirm)
