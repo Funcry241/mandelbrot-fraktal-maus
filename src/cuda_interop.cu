@@ -62,6 +62,9 @@ void renderCudaFrame(
     uchar4* devPtr = nullptr;
     size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] PBO mapped: %p (size = %zu)\n", (void*)devPtr, size);
+    }
 
     float zoom_f = static_cast<float>(zoom);
     float2 offset_f = make_float2(static_cast<float>(offset.x), static_cast<float>(offset.y));
@@ -71,7 +74,18 @@ void renderCudaFrame(
     }
 
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom_f, offset_f, maxIterations, supersampling);
+
+    cudaDeviceSynchronize();  // sicherstellen, dass Fehler jetzt sichtbar sind
+    cudaError_t kernelErr = cudaGetLastError();
+    if (kernelErr != cudaSuccess) {
+        std::fprintf(stderr, "[CUDA ERROR] MandelbrotKernel launch failed: %s\n", cudaGetErrorString(kernelErr));
+    }
+
     computeTileEntropy(d_iterations, d_entropy, width, height, tileSize, maxIterations);
+    
+    if (Settings::debugLogging) {
+        std::puts("[DEBUG] PBO unmapped");
+    }
 
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;

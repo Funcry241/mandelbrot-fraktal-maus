@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 229
+// Zeilen: 233
 // 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms. Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
 
 #include "pch.hpp"
@@ -69,8 +69,9 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     ctx.lastContrast = state.lastContrast;
     ctx.lastTileIndex = state.lastTileIndex;
 
-    beginFrame(ctx);
-    computeCudaFrame(ctx, state); // ✅ FIXED: Übergabe von RendererState ergänzt
+    beginFrame(state);
+    computeCudaFrame(ctx, state); // ✅ CUDA: Fraktal und Entropie
+    RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height); // 🆕 Bild in Textur!
     if (autoZoomEnabled) applyZoomLogic(ctx, zoomBus);
     drawFrame(ctx, state.tex);
 
