@@ -1,5 +1,5 @@
-// Zeilen: 161
 // Datei: src/zoom_logic.cpp
+// Zeilen: 168
 /*
 👝 Maus-Kommentar: Fix laut Schneefuchs! Korrekte Umrechnung der Tile-Koordinaten nun zoom-basiert statt fensterbasiert. Kein „Springen“ mehr im Deep-Zoom. Undefinierte overloads entfernt. Logik jetzt stabil und glasklar. Jetzt auch: Kontrastwert im Zoom-Log sichtbar.
 */
@@ -121,7 +121,12 @@ ZoomResult evaluateZoomTarget(
         )
         || forcedSwitch;
 
-    result.shouldZoom = result.isNewTarget;
+    // ❗ Maus-Fix: Auch wenn kein neues Ziel, aber wir sind noch unterwegs → weitermachen
+    if (!result.isNewTarget && result.distance >= Settings::DEADZONE) {
+        result.shouldZoom = true;
+    } else {
+        result.shouldZoom = result.isNewTarget;
+    }
 
 #if ENABLE_ZOOM_LOGGING
     std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d\n",
