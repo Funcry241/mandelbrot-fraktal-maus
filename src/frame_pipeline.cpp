@@ -24,6 +24,19 @@
 #include <GL/gl.h>
 #include <GLFW/glfw3.h>
 
+// ⚙️ Host-side operators for double2 – notwendig für Subtraktion & Skalierung
+inline double2 operator-(const double2& a, const double2& b) {
+    return make_double2(a.x - b.x, a.y - b.y);
+}
+
+inline double2 operator+(const double2& a, const double2& b) {
+    return make_double2(a.x + b.x, a.y + b.y);
+}
+
+inline double2 operator*(const double2& a, double s) {
+    return make_double2(a.x * s, a.y * s);
+}
+
 static int globalFrameCounter = 0;
 
 void beginFrame(FrameContext& ctx) {
@@ -59,21 +72,51 @@ void computeCudaFrame(FrameContext& ctx, RendererState& state) {
 }
 
 void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus) {
+    // 🐭 Maus-Debug: Berechne Distanz zum Ziel
+    double2 diff = ctx.newOffset - ctx.offset;
+    double dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
+
+    printf("[Logic] Start | shouldZoom=%d | Zoom=%.2f | dO=%.4e\n",
+           ctx.shouldZoom, ctx.zoom, dist);
+
+    // Kein Zielwechsel → nichts zu tun
     if (!ctx.shouldZoom) return;
 
+    // Nahe genug am Ziel? Dann abbrechen
+    if (dist < Settings::DEADZONE) {
+        printf("[Logic] Offset in DEADZONE (%.4e) → no movement\n", dist);
+        return;
+    }
+
+    // Glättung: tanh-Dämpfung + Max-Step
+    double stepScale = std::tanh(Settings::OFFSET_TANH_SCALE * dist);
+    double2 step = diff * (stepScale * Settings::MAX_OFFSET_FRACTION);
+
+    // 🐭 Debugausgabe für Bewegung
+    printf("[Logic] Step len=%.4e | Zoom += %.5f\n",
+           std::sqrt(step.x * step.x + step.y * step.y),
+           Settings::AUTOZOOM_SPEED);
+
+    // Offset bewegen
+    ctx.offset.x += step.x;
+    ctx.offset.y += step.y;
+
+    // Zoom erhöhen
+    ctx.zoom *= Settings::AUTOZOOM_SPEED;
+
+    // ZoomCommand für Logging/Replay
     ZoomCommand cmd;
     cmd.frameIndex = globalFrameCounter;
     cmd.oldOffset = make_float2(static_cast<float>(ctx.offset.x), static_cast<float>(ctx.offset.y));
     cmd.newOffset = make_float2(static_cast<float>(ctx.newOffset.x), static_cast<float>(ctx.newOffset.y));
-    cmd.zoomBefore = static_cast<float>(ctx.zoom);
-    cmd.zoomAfter = static_cast<float>(ctx.zoom * Settings::AUTOZOOM_SPEED);
+    cmd.zoomBefore = static_cast<float>(ctx.zoom / Settings::AUTOZOOM_SPEED); // Vorher
+    cmd.zoomAfter = static_cast<float>(ctx.zoom); // Nachher
     cmd.entropy = ctx.lastEntropy;
     cmd.contrast = ctx.lastContrast;
     cmd.tileIndex = ctx.lastTileIndex;
 
     zoomBus.push(cmd);
-    ctx.offset = ctx.newOffset;
-    ctx.zoom = cmd.zoomAfter;
+
     ctx.timeSinceLastZoom = 0.0;
 }
 
