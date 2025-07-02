@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 216
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit stabilisierter Supersampling-Farbmittelung – nutzt nur gültige Escape-Punkte für Farbberechnung. Kein Grün-Drift mehr! Schneefuchs: „Nur wer das Ende kennt, darf mit Farbe reden.“
+// Zeilen: 221
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel jetzt mit echter double-Präzision bei `zoom` und `offset` – Bewegungsstagnation im Deep-Zoom behoben. Schneefuchs: „Halbe Präzision ist halbe Wahrheit.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -8,9 +8,8 @@
 #include <cmath>
 #include "common.hpp"
 #include "core_kernel.h"
-#include "settings.hpp"  // Enthält globale Parameter, falls nötig
+#include "settings.hpp"
 
-// 🔧 Lokale Debug-Schalter
 #define ENABLE_ENTROPY_LOGGING 0
 constexpr float ENTROPY_LOG_THRESHOLD [[maybe_unused]] = 3.25f;
 constexpr int LOG_TILE_MODULO [[maybe_unused]] = 32;
@@ -24,12 +23,12 @@ __device__ __forceinline__ uchar4 elegantColor(float t) {
     return make_uchar4(r * 255, g * 255, b * 255, 255);
 }
 
-__device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& finalX, float& finalY) {
-    float x = 0.0f, y = 0.0f;
+__device__ int mandelbrotIterations(double x0, double y0, int maxIter, double& finalX, double& finalY) {
+    double x = 0.0, y = 0.0;
     int iter = 0;
-    while (x * x + y * y <= 4.0f && iter < maxIter) {
-        float xtemp = x * x - y * y + x0;
-        y = 2.0f * x * y + y0;
+    while (x * x + y * y <= 4.0 && iter < maxIter) {
+        double xtemp = x * x - y * y + x0;
+        y = 2.0 * x * y + y0;
         x = xtemp;
         ++iter;
     }
@@ -40,7 +39,7 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fina
 
 __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  int width, int height,
-                                 float zoom, float2 offset,
+                                 double zoom, double2 offset,
                                  int maxIterations,
                                  int supersampling) {
 
@@ -56,19 +55,19 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
 
     for (int i = 0; i < S; ++i) {
         for (int j = 0; j < S; ++j) {
-            float dx = (i + 0.5f) / S;
-            float dy = (j + 0.5f) / S;
+            double dx = (i + 0.5) / S;
+            double dy = (j + 0.5) / S;
 
-            float jx = (x + dx - width / 2.0f) / zoom + offset.x;
-            float jy = (y + dy - height / 2.0f) / zoom + offset.y;
+            double jx = (x + dx - width / 2.0) / zoom + offset.x;
+            double jy = (y + dy - height / 2.0) / zoom + offset.y;
 
-            float zx, zy;
+            double zx, zy;
             int iter = mandelbrotIterations(jx, jy, maxIterations, zx, zy);
             totalIter += iter;
 
             if (iter < maxIterations) {
-                float norm = zx * zx + zy * zy;
-                float t = (iter + 1.0f - log2f(log2f(norm))) / maxIterations;
+                double norm = zx * zx + zy * zy;
+                float t = (float)((iter + 1.0 - log2(log2(norm))) / maxIterations);
                 totalColor += t;
                 ++validSamples;
             }
@@ -156,9 +155,10 @@ extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
     dim3 grid((width + block.x - 1) / block.x,
               (height + block.y - 1) / block.y);
 
+    // Aufruf jetzt mit explizitem Cast auf double
     mandelbrotKernel<<<grid, block>>>(output, d_iterations,
                                       width, height,
-                                      zoom, offset,
+                                      (double)zoom, make_double2(offset.x, offset.y),
                                       maxIterations,
                                       supersampling);
     cudaError_t err = cudaGetLastError();
