@@ -1,8 +1,9 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 249
+// Zeilen: 252
 // 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms. Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
 // Otter-Fix: Zweites renderCudaFrame nach applyZoomLogic() → Bild zeigt direkt das neue Ziel!
 // 🐭 FIX: HUD-Overlay wird nun korrekt pro Frame gerendert – stand bisher im Schatten.
+// 🐭 FIX: ctx.offset und ctx.zoom werden nicht mehr jedes Frame überschrieben – nur initial.
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -19,6 +20,7 @@ namespace RendererLoop {
 
 static FrameContext ctx;
 static CommandBus zoomBus;
+static bool isFirstFrame = true;
 
 void initResources(RendererState& state) {
     if (state.pbo != 0 || state.tex != 0) {
@@ -55,11 +57,16 @@ void beginFrame(RendererState& state) {
 }
 
 void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
-    // Update Kontext-Daten aus State
+    // ⚠️ Nur beim ersten Frame initialisieren wir Zoom + Offset aus RendererState
+    if (isFirstFrame) {
+        ctx.zoom = state.zoom;
+        ctx.offset = state.offset;
+        isFirstFrame = false;
+    }
+
+    // 💡 Update aller weiteren Kontextdaten (ausgenommen: zoom + offset)
     ctx.width = state.width;
     ctx.height = state.height;
-    ctx.zoom = state.zoom;
-    ctx.offset = state.offset;
     ctx.maxIterations = state.maxIterations;
     ctx.tileSize = state.lastTileSize;
     ctx.supersampling = state.supersampling;
@@ -93,7 +100,7 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     // 💡 NEU: HUD-Zeichnung nach allem anderen
     Hud::draw(state);
 
-    // 🔁 Rückübertragung in RendererState
+    // 🔁 Rückübertragung in RendererState (Zoom & Offset aktualisiert!)
     state.zoom = ctx.zoom;
     state.offset = ctx.offset;
     state.h_entropy = ctx.h_entropy;
