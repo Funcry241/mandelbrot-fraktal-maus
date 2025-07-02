@@ -104,10 +104,13 @@ void drawOverlay(const std::vector<float>& entropy,
                  RendererState& ctx) {
     if (!ctx.overlayEnabled) return;
 
-    // Immer prüfen, um Abstürze bei leerem Vector zu verhindern
+    // 🐭 Maus-Memo: Ausgabe nur einmalig pro Session, um Log-Flut zu vermeiden.
+    static bool warned = false;
+
     if (entropy.empty() || contrast.empty()) {
-        if (Settings::debugLogging) {
+        if (Settings::debugLogging && !warned) {
             std::fprintf(stderr, "[DEBUG] HeatmapOverlay: entropy or contrast vector is empty.\n");
+            warned = true;
         }
         return;
     }
