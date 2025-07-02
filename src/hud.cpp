@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 209
-// 🐭 Maus-Kommentar: HUD-Overlay mit Textanzeige via STB-Easy-Font und GLSL-Shadern. Zeigt FPS, Offset und nun den Zoom-Faktor als wissenschaftliche 10er-Potenz. Zugriff auf `state.currentFPS` und `state.deltaTime * 1000.0f` ersetzt veraltete Membernamen (`fps`, `frameTimeMs`). Schneefuchs hätte gesagt: „Der MausZoom verdient saubere Anzeige!“
+// Zeilen: 213
+// 🐭 Maus-Kommentar: HUD-Overlay mit Textanzeige via STB-Easy-Font und GLSL-Shadern. Zeigt FPS, Offset, Zoom-Faktor als wissenschaftliche Potenz sowie Overlay-Status. Schneefuchs: „Alles sichtbar, nichts verborgen.“
 
 #include "pch.hpp"
 
@@ -126,11 +126,9 @@ void drawText(const std::string& text, float x, float y, float width, float heig
 void draw(RendererState& state) {
     char hudText1[256];
     char hudText2[256];
+    char hudText3[64];
 
-    // ❌ Alt: float logZoom = log10f(1.0f / state.zoom);
-    // ✅ Neu:
     float logZoom = -log10f(state.zoom); // z. B. Zoom = 1e-7 → logZoom = 7
-
     float fps = state.currentFPS;
     float frameTimeMs = state.deltaTime * 1000.0f;
 
@@ -141,8 +139,12 @@ void draw(RendererState& state) {
     std::snprintf(hudText2, sizeof(hudText2),
                   "Frame Time: %.2f ms", frameTimeMs);
 
+    std::snprintf(hudText3, sizeof(hudText3),
+                  "[H] Overlay: %s", state.overlayEnabled ? "ON" : "OFF");
+
     drawText(hudText1, 10.0f, 20.0f, static_cast<float>(state.width), static_cast<float>(state.height));
     drawText(hudText2, 10.0f, 50.0f, static_cast<float>(state.width), static_cast<float>(state.height));
+    drawText(hudText3, 10.0f, 80.0f, static_cast<float>(state.width), static_cast<float>(state.height));
 }
 
 void cleanup() {

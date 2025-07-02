@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.hpp
-// Zeilen: 53
-// 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL Interop – Signatur für `renderCudaFrame` auf 13 Argumente aktualisiert (inkl. `supersampling`, `RendererState&`) – Schneefuchs: „Ein Zustand, der wandert, ist keiner, der lauert.“
+// Zeilen: 54
+// 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL Interop – Signatur für `renderCudaFrame` auf 14 Argumente aktualisiert (inkl. Kontrastpuffer und `RendererState&`) – Schneefuchs: „Ein Zustand, der wandert, ist keiner, der lauert.“
 
 #ifndef CUDA_INTEROP_HPP
 #define CUDA_INTEROP_HPP
@@ -19,28 +19,30 @@ namespace CudaInterop {
 void registerPBO(unsigned int pbo);
 void unregisterPBO();
 
-// 🔁 Haupt-Renderfunktion – mit double-Precision + direkter Übergabe des Zustands
+// 🔁 Haupt-Renderfunktion – mit double-Precision, Supersampling, Kontrastanalyse und Zustand
 void renderCudaFrame(    
     int* d_iterations,
     float* d_entropy,
+    float* d_contrast,                   // ✅ NEU: GPU-Puffer für Kontrast
     int width,
     int height,
     double zoom,
     double2 offset,
     int maxIterations,
     std::vector<float>& h_entropy,
-    double2& newOffset,     // ✅ FIXED: war fälschlich float2 – jetzt korrekt
+    std::vector<float>& h_contrast,     // ✅ NEU: Host-Kontrastdaten
+    double2& newOffset,
     bool& shouldZoom,
     int tileSize,
-    int supersampling,      // ✅ NEU: Supersampling-Faktor
-    RendererState& state    // ✅ explizit übergeben
+    int supersampling,
+    RendererState& state
 );
 
 void setPauseZoom(bool pause);
 bool getPauseZoom();
 
 // 🧪 Evaluation nach Zielwechsel – Frame-Analyse direkt aus GPU-Buffer
-void logZoomEvaluation(const int* d_iterations, int width, int height, int maxIterations, double zoom);
+void logZoomEvaluation(const int* d_iterations, int width, int height, int tileSize, double zoom);
 
 } // namespace CudaInterop
 

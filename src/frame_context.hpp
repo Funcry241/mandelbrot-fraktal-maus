@@ -1,5 +1,5 @@
 // Datei: src/frame_context.hpp
-// Zeilen: 75
+// Zeilen: 76
 /* 🐭 interner Maus-Kommentar:
    Diese Datei definiert `FrameContext`, den zentralen Container pro Frame.
    Alle Module greifen ausschließlich über dieses Objekt auf aktuelle Zustände zu.
@@ -37,6 +37,7 @@ struct FrameContext {
     std::vector<float> h_entropy;   // hostseitig – pro Tile
     std::vector<float> h_contrast;  // Kontrast pro Tile – für Heatmap
     float* d_entropy = nullptr;     // device-seitig
+    float* d_contrast = nullptr;    // ✅ NEU: Kontrastwerte auf GPU
     int* d_iterations = nullptr;    // Iterationstiefe je Pixel
 
     // Statuswerte zur Analyse / Logging
@@ -64,6 +65,7 @@ struct FrameContext {
         h_entropy.clear();
         h_contrast.clear();
         d_entropy = nullptr;
+        d_contrast = nullptr;      // ✅ mit aufräumen
         d_iterations = nullptr;
         shouldZoom = false;
         lastTileIndex = -1;

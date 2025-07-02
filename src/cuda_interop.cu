@@ -1,9 +1,10 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 278
-/* 🐭 Maus-Kommentar: CUDA-Interop mit kompaktem ASCII-Logging für Zoomanalyse.
-   Jetzt mit dO (OffsetDist), dPx (Bildschirmpixel), Score, Entropie, Kontrast und Zielstatus – alles CSV-freundlich.
-   Schneefuchs sieht klar: Kein Wildsprung bleibt unbemerkt.
-   → Signatur fixiert: renderCudaFrame(...) mit double / double2 für präzise Tiefe. Linker-Link ist happy.
+// Zeilen: 308
+/* 🐭 Maus-Kommentar: CUDA-Interop mit Entropie und Kontrast für Heatmap und Auto-Zoom.
+   Panda-Erweiterung: computeEntropyContrast ersetzt computeTileEntropy.
+   h_contrast wird hostseitig gepflegt, d_contrast GPU-seitig verwaltet.
+   Schneefuchs sagte: „Kontrast ist das Gewürz der Struktur.“
+   Log bleibt ASCII-pur.
 */
 
 #include "pch.hpp"
@@ -40,12 +41,14 @@ void unregisterPBO() {
 void renderCudaFrame(
     int* d_iterations,
     float* d_entropy,
+    float* d_contrast,
     int width,
     int height,
     double zoom,
     double2 offset,
     int maxIterations,
     std::vector<float>& h_entropy,
+    std::vector<float>& h_contrast,
     double2& newOffset,
     bool& shouldZoom,
     int tileSize,
@@ -64,6 +67,7 @@ void renderCudaFrame(
     uchar4* devPtr = nullptr;
     size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
+
     if (Settings::debugLogging) {
         std::printf("[DEBUG] PBO mapped: %p (size = %zu)\n", (void*)devPtr, size);
     }
@@ -77,37 +81,35 @@ void renderCudaFrame(
 
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom_f, offset_f, maxIterations, supersampling);
 
-    cudaDeviceSynchronize();  // sicherstellen, dass Fehler jetzt sichtbar sind
+    cudaDeviceSynchronize();
     cudaError_t kernelErr = cudaGetLastError();
     if (kernelErr != cudaSuccess) {
         std::fprintf(stderr, "[CUDA ERROR] MandelbrotKernel launch failed: %s\n", cudaGetErrorString(kernelErr));
     }
 
-    computeTileEntropy(d_iterations, d_entropy, width, height, tileSize, maxIterations);
-
-    if (Settings::debugLogging) {
-        std::puts("[DEBUG] PBO unmapped");
-    }
+    computeEntropyContrast(d_iterations, d_entropy, d_contrast, width, height, tileSize, maxIterations);
 
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int numTiles = tilesX * tilesY;
 
     h_entropy.resize(numTiles);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    h_contrast.resize(numTiles);
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
     shouldZoom = false;
 
     if (!pauseZoom) {
         ZoomLogic::ZoomResult result = ZoomLogic::evaluateZoomTarget(
             h_entropy,
-            offset,
-            zoom_f,
+            h_contrast,
+            offset,                          // double2
+            zoom,                            // double
             width,
             height,
             tileSize,
-            make_float2(static_cast<float>(state.offset.x), static_cast<float>(state.offset.y)),
+            state.offset,                    // float2
             state.zoomResult.bestIndex,
             state.zoomResult.bestEntropy,
             state.zoomResult.bestContrast
@@ -171,8 +173,6 @@ bool getPauseZoom() {
     return pauseZoom;
 }
 
-// 🐭 Maus-Kommentar: CSV-Log-Ausgabe aller Tile-Iterationen eines Frames – dient Analyse der Tiefenverteilung.
-// Schneefuchs: Nur ASCII, keine GPU-Belastung, immer verständlich.
 void logZoomEvaluation(const int* d_iterations, int width, int height, int tileSize, double zoom) {
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;

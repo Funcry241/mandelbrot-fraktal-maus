@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.h
-// Zeilen: 33
-// 🐭 Maus-Kommentar: Schnittstelle zwischen CPU und CUDA-Kernel. Deklariert `launch_mandelbrotHybrid` (Fraktalrendering) und `computeTileEntropy` (Entropieanalyse pro Tile). Entfernt direkte CUDA-Includes, um Build-Probleme mit PCH und IntelliSense zu vermeiden. Schneefuchs sagte einst: „Die saubere Trennung macht den Unterschied.“
+// Zeilen: 34
+// 🐭 Maus-Kommentar: Schnittstelle zwischen CPU und CUDA-Kernel. Jetzt mit Panda: `computeEntropyContrast` liefert Entropie und Kontrast pro Tile – für Heatmap und Zielwahl. Schneefuchs sagte: „Struktur ist der Anfang von Neugier.“
 
 #pragma once
 
@@ -25,12 +25,13 @@ void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
                              int maxIterations,
                              int supersampling);
 
-// 📊 Entropie jedes Tiles berechnen (Iterationen → Verteilung → Entropie)
-void computeTileEntropy(const int* d_iterations,
-                        float* d_entropyOut,
-                        int width, int height,
-                        int tileSize,
-                        int maxIter);
+// 🐼 Entropie + Kontrast jedes Tiles berechnen (für Heatmap + Zielwahl)
+void computeEntropyContrast(const int* d_iterations,
+                            float* d_entropyOut,
+                            float* d_contrastOut,
+                            int width, int height,
+                            int tileSize,
+                            int maxIter);
 
 #ifdef __cplusplus
 }

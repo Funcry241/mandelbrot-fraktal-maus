@@ -1,85 +1,79 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 95
+// Zeilen: 99
 // 🐭 Maus-Kommentar: Der Renderer merkt sich nun Entropie, Kontrast, Index und Score (zoomResult) – für Analyse, Visualisierung oder Heatmap. Schneefuchs: „Wer messen will, muss erinnern.“
 
 #pragma once
 
-#include "pch.hpp"  // 🧠 Enthält <cuda_runtime.h>, das float2 definiert – keine eigene Definition mehr nötig!
-#include "zoom_logic.hpp"  // 📦 Enthält ZoomResult für Auto-Zoom-Auswertung
+#include "pch.hpp"              // 🧠 Enthält <cuda_runtime.h>, float2 etc.
+#include "zoom_logic.hpp"       // 📦 ZoomResult für Auto-Zoom-Auswertung
 
 class RendererState {
 public:
     // 🖼️ Fensterdimensionen
     int width;
     int height;
-    GLFWwindow* window = nullptr;  // 🔲 OpenGL-Fensterhandle
+    GLFWwindow* window = nullptr;
 
-    // 🔍 Aktueller Zoom & Bildverschiebung (jetzt double für Präzision)
+    // 🔍 Zoom & Bildausschnitt
     double zoom;
     double2 offset;
 
-    // 🧮 Iterationsparameter (für progressive Darstellung)
+    // 🧮 Iterationen
     int baseIterations;
     int maxIterations;
 
-    // 🎯 Zielwert für Auto-Zoom (wird mit LERP angenähert)
+    // 🎯 Zielkoordinaten & Glättung
     double2 targetOffset;
-    double2 filteredTargetOffset = { 0.0, 0.0 };  // 🎯 Double-präzises geglättetes Ziel
-
-    // 📌 Auto-Zoom-Ziel (geglättet über CUDA-Auswertung)
+    double2 filteredTargetOffset = { 0.0, 0.0 };
     float2 smoothedTargetOffset = { 0.0f, 0.0f };
     float smoothedTargetScore = -1.0f;
 
-    // 📈 FPS und Framezeit zur Anzeige im HUD
+    // 📈 Anzeige
     float currentFPS = 0.0f;
     float deltaTime = 0.0f;
 
-    // 🧩 Adaptive Tile-Größe + Entropie-/Kontrastspeicher
+    // 🧩 Entropie & Kontrast
     int lastTileSize;
-    std::vector<float> h_entropy;   // 🔢 Entropie pro Tiles
+    std::vector<float> h_entropy;    // 🔢 Entropie pro Tile
+    std::vector<float> h_contrast;   // 🐼 Kontrast pro Tile
 
     // 🔗 CUDA-Puffer (Geräteseite)
     int* d_iterations = nullptr;
-    float* d_entropy = nullptr;
+    float* d_entropy   = nullptr;
+    float* d_contrast  = nullptr;    // 🐼 Panda: device-Kontrastdaten
 
-    // 🎥 OpenGL-Puffer (direkt im State enthalten)
-    unsigned int pbo = 0;  // Pixel Buffer Object
-    unsigned int tex = 0;  // Textur-ID für CUDA-Ausgabe
+    // 🎥 OpenGL-Puffer
+    unsigned int pbo = 0;
+    unsigned int tex = 0;
 
-    // 🕒 Frame-Zählung und Zeit für FPS-Berechnung
+    // 🕒 Zeit
     int frameCount = 0;
     double lastTime = 0.0;
 
-    // 🔁 Auto-Zoom Status
+    // 🔁 Auto-Zoom
     bool shouldZoom = false;
 
-    // 🧠 Letzte Ziel-Auswertung als Struktur (für Kontrastanalyse etc.)
+    // 🧠 Analyse
     ZoomLogic::ZoomResult zoomResult;
-
-    // 🧠 Letzte gemerkte Werte für Entropieanalyse
     float lastEntropy = 0.0f;
     float lastContrast = 0.0f;
     int   lastIndex = -1;
-
-    // 🆕 Merker für Analyse nach Zielwechsel
     bool justZoomed = false;
 
-    // 📏 Supersampling-Faktor (z. B. 1 = aus, 2 = 2x2, 4 = 4x4 etc.)
+    // 📏 Supersampling
     int supersampling = 1;
 
-    // 🔥 Heatmap Overlay aktiv?
+    // 🔥 Overlay-Steuerung
     bool overlayEnabled = false;
 
-    // 🧭 Index des zuletzt gewählten Ziel-Tiles (für Zoom-Tracking)
+    // 📌 Ziel-Tile-Index
     int lastTileIndex = -1;
 
-    // 🔁 Konstruktor & Methoden zur Zustandspflege
+    // 🧽 Verwaltung
     RendererState(int w, int h);
     void reset();
     void updateOffsetTarget(double2 newOffset);
     void adaptIterationCount();
     void setupCudaBuffers();
-
-    // 🧽 Dynamischer Resize inkl. GPU-Ressourcen
     void resize(int newWidth, int newHeight);
 };

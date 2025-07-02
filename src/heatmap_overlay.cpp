@@ -1,11 +1,11 @@
 // Datei: src/heatmap_overlay.cpp
-// Zeilen: 158
-// 🐭 Maus-Kommentar: Overlay-Zustand wird nicht mehr intern gespeichert, sondern über ctx.overlayEnabled gesteuert. toggle() nimmt jetzt RendererState& entgegen. drawOverlay prüft ctx.overlayEnabled direkt. Alle Referenzen auf `showOverlay` entfernt. Schneefuchs sieht: kein Schattenzustand mehr.
+// Zeilen: 162
+// 🐭 Maus-Kommentar: Overlay-Zustand wird nicht mehr intern gespeichert. drawOverlay(ctx) steht jetzt global bereit, prüft ctx.overlayActive und ruft intern HeatmapOverlay::drawOverlay(...) auf. Damit ist die Integration in renderer_loop.cpp direkt möglich. Schneefuchs: Sichtbarkeit mit System.
 
 #include "pch.hpp"
 #include "heatmap_overlay.hpp"
 #include "settings.hpp"
-#include "renderer_state.hpp" // für RendererState
+#include "renderer_state.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -96,7 +96,6 @@ void drawOverlay(const std::vector<float>& entropy,
                  RendererState& ctx) {
     if (!ctx.overlayEnabled) return;
 
-    // 🐭 Maus-Memo: Ausgabe nur einmalig pro Session, um Log-Flut zu vermeiden.
     static bool warned = false;
 
     if (entropy.empty() || contrast.empty()) {
@@ -182,3 +181,18 @@ void drawOverlay(const std::vector<float>& entropy,
 }
 
 } // namespace HeatmapOverlay
+
+// 📣 Globale Funktion zur Integration in renderer_loop.cpp
+void drawOverlay(const FrameContext& ctx) {
+    if (!ctx.overlayActive) return;
+
+    HeatmapOverlay::drawOverlay(
+        ctx.h_entropy,
+        ctx.h_entropy,       // ⚠️ Hinweis: derzeit kein separater Kontrast, doppelt belegt
+        ctx.width,
+        ctx.height,
+        ctx.tileSize,
+        0,                   // textureId wird aktuell nicht verwendet
+        const_cast<RendererState&>(reinterpret_cast<const RendererState&>(ctx))  // Übergabe zum Zustand
+    );
+}

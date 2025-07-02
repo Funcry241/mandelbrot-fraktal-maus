@@ -1,7 +1,8 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 216
-// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit stabilisierter Supersampling-Farbmittelung – nutzt nur gültige Escape-Punkte für Farbberechnung. Kein Grün-Drift mehr! Schneefuchs: „Nur wer das Ende kennt, darf mit Farbe reden.“
-
+// Zeilen: 281
+// 🐭 Maus-Kommentar: Mandelbrot-Kernel mit Supersampling und Entropie-Kontrastanalyse (Panda-Modul aktiv).
+// Kombiniert: mandelbrotKernel, computeTileEntropy, contrastKernel, computeEntropyContrast.
+// Schneefuchs sagt: „Kontrast schärft die Tiefe – und Panda sorgt für Klarheit.“
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
@@ -10,7 +11,6 @@
 #include "core_kernel.h"
 #include "settings.hpp"  // Enthält globale Parameter, falls nötig
 
-// 🔧 Lokale Debug-Schalter
 #define ENABLE_ENTROPY_LOGGING 0
 constexpr float ENTROPY_LOG_THRESHOLD [[maybe_unused]] = 3.25f;
 constexpr int LOG_TILE_MODULO [[maybe_unused]] = 32;
@@ -43,10 +43,8 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
                                  float zoom, float2 offset,
                                  int maxIterations,
                                  int supersampling) {
-
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-
     if (x >= width || y >= height) return;
 
     int S = supersampling;
@@ -58,7 +56,6 @@ __global__ void mandelbrotKernel(uchar4* output, int* iterationsOut,
         for (int j = 0; j < S; ++j) {
             float dx = (i + 0.5f) / S;
             float dy = (j + 0.5f) / S;
-
             float jx = (x + dx - width / 2.0f) / zoom + offset.x;
             float jy = (y + dy - height / 2.0f) / zoom + offset.y;
 
@@ -146,6 +143,33 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     }
 }
 
+__global__ void contrastKernel(const float* entropy, float* contrastOut,
+                               int tilesX, int tilesY) {
+    int tx = blockIdx.x * blockDim.x + threadIdx.x;
+    int ty = blockIdx.y * blockDim.y + threadIdx.y;
+    if (tx >= tilesX || ty >= tilesY) return;
+
+    int idx = ty * tilesX + tx;
+    float center = entropy[idx];
+
+    float sumDiff = 0.0f;
+    int count = 0;
+
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            if (dx == 0 && dy == 0) continue;
+            int nx = tx + dx;
+            int ny = ty + dy;
+            if (nx < 0 || ny < 0 || nx >= tilesX || ny >= tilesY) continue;
+            int nIdx = ny * tilesX + nx;
+            sumDiff += fabsf(entropy[nIdx] - center);
+            count++;
+        }
+    }
+
+    contrastOut[idx] = (count > 0) ? sumDiff / count : 0.0f;
+}
+
 extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
                                         int width, int height,
                                         float zoom, float2 offset,
@@ -173,19 +197,8 @@ extern "C" void computeTileEntropy(const int* d_iterations,
                                    int width, int height,
                                    int tileSize,
                                    int maxIter) {
-    if (tileSize <= 0 || width <= 0 || height <= 0 || maxIter <= 0) {
-        std::fprintf(stderr, "[FATAL] computeTileEntropy: Invalid input – tileSize=%d, width=%d, height=%d, maxIter=%d\n",
-                     tileSize, width, height, maxIter);
-        return;
-    }
-
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
-
-    if (tilesX == 0 || tilesY == 0) {
-        std::fprintf(stderr, "[FATAL] computeTileEntropy: tile grid is zero-sized! tilesX=%d, tilesY=%d\n", tilesX, tilesY);
-        return;
-    }
 
     dim3 grid(tilesX, tilesY);
     dim3 block(128);
@@ -193,5 +206,25 @@ extern "C" void computeTileEntropy(const int* d_iterations,
     entropyKernel<<<grid, block>>>(d_iterations, d_entropyOut,
                                    width, height,
                                    tileSize, maxIter);
+    cudaDeviceSynchronize();
+}
+
+extern "C" void computeEntropyContrast(const int* d_iterations,
+                                       float* d_entropyOut,
+                                       float* d_contrastOut,
+                                       int width, int height,
+                                       int tileSize,
+                                       int maxIter) {
+    // 🐼 Entropie berechnen (wie zuvor)
+    computeTileEntropy(d_iterations, d_entropyOut, width, height, tileSize, maxIter);
+
+    // 🐼 Kontrast aus Entropie ableiten
+    int tilesX = (width + tileSize - 1) / tileSize;
+    int tilesY = (height + tileSize - 1) / tileSize;
+
+    dim3 grid((tilesX + 15) / 16, (tilesY + 15) / 16);
+    dim3 block(16, 16);
+
+    contrastKernel<<<grid, block>>>(d_entropyOut, d_contrastOut, tilesX, tilesY);
     cudaDeviceSynchronize();
 }

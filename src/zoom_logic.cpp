@@ -1,7 +1,7 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 168
+// Zeilen: 177
 /*
-👝 Maus-Kommentar: Fix laut Schneefuchs! Korrekte Umrechnung der Tile-Koordinaten nun zoom-basiert statt fensterbasiert. Kein „Springen“ mehr im Deep-Zoom. Undefinierte overloads entfernt. Logik jetzt stabil und glasklar. Jetzt auch: Kontrastwert im Zoom-Log sichtbar.
+👝 Maus-Kommentar: Fix laut Schneefuchs! Korrekte Umrechnung der Tile-Koordinaten nun zoom-basiert statt fensterbasiert. Kein „Springen“ mehr im Deep-Zoom. Undefinierte overloads entfernt. Logik jetzt stabil und glasklar. Jetzt auch: Kontrastwert im Zoom-Log sichtbar. Panda-Version: 13 Argumente.
 */
 
 #include "pch.hpp"
@@ -13,7 +13,6 @@
 
 namespace ZoomLogic {
 
-// Entropiekontrast über alle Tiles – aktuell nicht verwendet
 float computeEntropyContrast(const std::vector<float>& entropy, int width, int height, int tileSize) {
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
@@ -39,16 +38,17 @@ float computeEntropyContrast(const std::vector<float>& entropy, int width, int h
 }
 
 ZoomResult evaluateZoomTarget(
-    const std::vector<float>& h_entropy,
-    double2 offset,
-    double zoom,
+    const std::vector<float>& entropy,
+    const std::vector<float>& contrast,
+    double2 currentOffset,
+    float zoom,
     int width,
     int height,
     int tileSize,
-    float2 currentOffset,
-    int currentIndex,
-    float currentEntropy,
-    float currentContrast
+    double2 previousOffset,
+    int previousIndex,
+    float previousEntropy,
+    float previousContrast
 ) {
     ZoomResult result;
 
@@ -56,35 +56,36 @@ ZoomResult evaluateZoomTarget(
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int tileCount = tilesX * tilesY;
 
-    result.bestIndex     = currentIndex;
-    result.bestEntropy   = currentEntropy;
-    result.bestContrast  = currentContrast;
-    result.newOffset     = make_double2(currentOffset.x, currentOffset.y);
+    result.bestIndex     = previousIndex;
+    result.bestEntropy   = previousEntropy;
+    result.bestContrast  = previousContrast;
+    result.newOffset     = previousOffset;
     result.perTileContrast.resize(tileCount, 0.0f);
 
     float maxScore = -1.0f;
 
     for (int i = 0; i < tileCount; ++i) {
-        float entropy = h_entropy[i];
+        float e = entropy[i];
+        float c = contrast[i];
 
         int tx = i % tilesX;
         int ty = i / tilesX;
 
-        float2 candidateOffset = {
-            static_cast<float>(offset.x + tileSize * (tx + 0.5f - tilesX / 2.0f) / zoom),
-            static_cast<float>(offset.y + tileSize * (ty + 0.5f - tilesY / 2.0f) / zoom)
+        double2 candidateOffset = {
+            currentOffset.x + tileSize * (tx + 0.5 - tilesX / 2.0) / zoom,
+            currentOffset.y + tileSize * (ty + 0.5 - tilesY / 2.0) / zoom
         };
 
-        float dx = candidateOffset.x - currentOffset.x;
-        float dy = candidateOffset.y - currentOffset.y;
-        float dist = std::sqrt(dx * dx + dy * dy);
+        double dx = candidateOffset.x - previousOffset.x;
+        double dy = candidateOffset.y - previousOffset.y;
+        double dist = std::sqrt(dx * dx + dy * dy);
 
-        float distWeight = 1.0f / (1.0f + dist * std::sqrt(zoom));
-        float score = entropy * distWeight;
+        float distWeight = 1.0f / (1.0f + static_cast<float>(dist * std::sqrt(zoom)));
+        float score = e * distWeight;
 
 #if ENABLE_ZOOM_LOGGING
         std::printf("[ZoomPick] i=%d tx=%d ty=%d score=%.4f entropy=%.4f dist=%.6f offset=(%.6f %.6f)%s\n",
-            i, tx, ty, score, entropy, dist,
+            i, tx, ty, score, e, dist,
             candidateOffset.x, candidateOffset.y,
             (i == result.bestIndex ? " *BEST*" : "")
         );
@@ -95,33 +96,32 @@ ZoomResult evaluateZoomTarget(
         if (score > maxScore) {
             maxScore = score;
             result.bestIndex     = i;
-            result.bestEntropy   = entropy;
-            result.bestContrast  = score;  // 🐭 Maus: Sichtbarer Kontrastwert für Zoom-Log
-            result.newOffset     = make_double2(candidateOffset.x, candidateOffset.y);
+            result.bestEntropy   = e;
+            result.bestContrast  = c;
+            result.newOffset     = candidateOffset;
         }
     }
 
-    float dx = static_cast<float>(result.newOffset.x - currentOffset.x);
-    float dy = static_cast<float>(result.newOffset.y - currentOffset.y);
-    float dist = std::sqrt(dx * dx + dy * dy);
+    double dx = result.newOffset.x - previousOffset.x;
+    double dy = result.newOffset.y - previousOffset.y;
+    double dist = std::sqrt(dx * dx + dy * dy);
 
-    result.distance = dist;
+    result.distance = static_cast<float>(dist);
     result.minDistance = Settings::MIN_JUMP_DISTANCE / zoom;
-    result.relEntropyGain = result.bestEntropy - currentEntropy;
-    result.relContrastGain = result.perTileContrast[result.bestIndex] - currentContrast;
+    result.relEntropyGain = result.bestEntropy - previousEntropy;
+    result.relContrastGain = result.bestContrast - previousContrast;
     result.bestScore = result.perTileContrast[result.bestIndex];
 
     bool forcedSwitch = (result.perTileContrast[result.bestIndex] < 0.001f && result.distance > result.minDistance * 5.0f);
 
     result.isNewTarget =
         (
-            result.bestIndex != currentIndex &&
-            result.perTileContrast[result.bestIndex] > currentContrast * 1.05f &&
+            result.bestIndex != previousIndex &&
+            result.perTileContrast[result.bestIndex] > previousContrast * 1.05f &&
             result.distance > result.minDistance
         )
         || forcedSwitch;
 
-    // ❗ Maus-Fix: Auch wenn kein neues Ziel, aber wir sind noch unterwegs → weitermachen
     if (!result.isNewTarget && result.distance >= Settings::DEADZONE) {
         result.shouldZoom = true;
     } else {
@@ -134,7 +134,7 @@ ZoomResult evaluateZoomTarget(
         result.relEntropyGain,
         result.relContrastGain,
         result.perTileContrast[result.bestIndex],
-        currentContrast,
+        previousContrast,
         result.distance,
         result.minDistance,
         result.isNewTarget ? 1 : 0
