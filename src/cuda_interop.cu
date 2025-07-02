@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 244
+// Zeilen: 278
 /* 🐭 Maus-Kommentar: CUDA-Interop mit kompaktem ASCII-Logging für Zoomanalyse.
    Jetzt mit dO (OffsetDist), dPx (Bildschirmpixel), Score, Entropie, Kontrast und Zielstatus – alles CSV-freundlich.
    Schneefuchs sieht klar: Kein Wildsprung bleibt unbemerkt.
@@ -14,6 +14,8 @@
 #include "renderer_state.hpp"
 #include "zoom_logic.hpp"
 #include "heatmap_overlay.hpp"
+#include <vector>
+#include <cstdio>
 
 namespace CudaInterop {
 
@@ -113,10 +115,9 @@ void renderCudaFrame(
 
         if (result.bestIndex >= 0) {
             newOffset = result.newOffset;
-            shouldZoom = result.isNewTarget;
+            shouldZoom = result.shouldZoom;
 
             if (result.isNewTarget) {
-                // 🐭 Maus: Zielwechsel erkannt – Zustand wird aktualisiert für sauberes dE/dC-Tracking
                 state.zoomResult.bestEntropy  = result.bestEntropy;
                 state.zoomResult.bestContrast = result.bestContrast;
                 state.zoomResult.bestIndex    = result.bestIndex;
@@ -154,7 +155,6 @@ void renderCudaFrame(
             }
         }
 
-        // 🐅 Maus: Nur wenn kein Wechsel stattfand, übernehmen wir andere (nicht-kontrastrelevante) Felder
         if (!result.isNewTarget) {
             state.zoomResult = result;
         }
@@ -183,6 +183,36 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
             if (Settings::debugLogging) {
                 std::puts("[DEBUG] Heatmap overlay toggled (H)");
             }
+        }
+    }
+}
+
+// 🐭 Maus-Kommentar: CSV-Log-Ausgabe aller Tile-Iterationen eines Frames – dient Analyse der Tiefenverteilung.
+// Schneefuchs: Nur ASCII, keine GPU-Belastung, immer verständlich.
+void logZoomEvaluation(const int* d_iterations, int width, int height, int tileSize, double zoom) {
+    const int tilesX = (width + tileSize - 1) / tileSize;
+    const int tilesY = (height + tileSize - 1) / tileSize;
+
+    std::vector<int> h_iterations(width * height);
+    cudaMemcpy(h_iterations.data(), d_iterations, sizeof(int) * width * height, cudaMemcpyDeviceToHost);
+
+    for (int ty = 0; ty < tilesY; ++ty) {
+        for (int tx = 0; tx < tilesX; ++tx) {
+            int sum = 0;
+            int count = 0;
+
+            for (int dy = 0; dy < tileSize; ++dy) {
+                for (int dx = 0; dx < tileSize; ++dx) {
+                    int x = tx * tileSize + dx;
+                    int y = ty * tileSize + dy;
+                    if (x >= width || y >= height) continue;
+                    sum += h_iterations[y * width + x];
+                    ++count;
+                }
+            }
+
+            float avg = (count > 0) ? (float)sum / count : 0.0f;
+            std::printf("[ZoomEvalCSV] %d,%d,%.4f,%.2f\n", tx, ty, zoom, avg);
         }
     }
 }
