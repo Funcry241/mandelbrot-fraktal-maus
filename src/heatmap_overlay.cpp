@@ -1,5 +1,5 @@
-// Zeilen: 158
 // Datei: src/heatmap_overlay.cpp
+// Zeilen: 158
 // 🐭 Maus-Kommentar: Overlay-Zustand wird nicht mehr intern gespeichert, sondern über ctx.overlayEnabled gesteuert. toggle() nimmt jetzt RendererState& entgegen. drawOverlay prüft ctx.overlayEnabled direkt. Alle Referenzen auf `showOverlay` entfernt. Schneefuchs sieht: kein Schattenzustand mehr.
 
 #include "pch.hpp"
@@ -104,6 +104,13 @@ void drawOverlay(const std::vector<float>& entropy,
                  RendererState& ctx) {
     if (!ctx.overlayEnabled) return;
 
+    if (Settings::debugLogging) {
+        if (entropy.empty() || contrast.empty()) {
+            std::fprintf(stderr, "[DEBUG] HeatmapOverlay: entropy or contrast vector is empty.\n");
+            return;
+        }
+    }
+
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int quadCount = tilesX * tilesY;
@@ -166,6 +173,11 @@ void drawOverlay(const std::vector<float>& entropy,
     glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)(2 * sizeof(float)));
 
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(data.size() / 3));
+
+    GLenum err = glGetError();
+    if (Settings::debugLogging && err != GL_NO_ERROR) {
+        std::fprintf(stderr, "[DEBUG] HeatmapOverlay: OpenGL error 0x%x\n", err);
+    }
 
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
