@@ -104,11 +104,12 @@ void drawOverlay(const std::vector<float>& entropy,
                  RendererState& ctx) {
     if (!ctx.overlayEnabled) return;
 
-    if (Settings::debugLogging) {
-        if (entropy.empty() || contrast.empty()) {
+    // Immer prüfen, um Abstürze bei leerem Vector zu verhindern
+    if (entropy.empty() || contrast.empty()) {
+        if (Settings::debugLogging) {
             std::fprintf(stderr, "[DEBUG] HeatmapOverlay: entropy or contrast vector is empty.\n");
-            return;
         }
+        return;
     }
 
     const int tilesX = (width + tileSize - 1) / tileSize;
