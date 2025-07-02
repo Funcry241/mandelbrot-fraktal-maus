@@ -110,7 +110,7 @@ void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus) {
     ctx.timeSinceLastZoom = 0.0;
 }
 
-void drawFrame(FrameContext& ctx, GLuint tex) {
+void drawFrame(FrameContext& ctx, GLuint tex, RendererState& state) {
     if (ctx.overlayActive) {
         HeatmapOverlay::drawOverlay(
             ctx.h_entropy,
@@ -118,7 +118,8 @@ void drawFrame(FrameContext& ctx, GLuint tex) {
             ctx.width,
             ctx.height,
             ctx.tileSize,
-            tex
+            tex,
+            state // WICHTIG: RendererState übergeben
         );
     }
 

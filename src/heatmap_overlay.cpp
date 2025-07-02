@@ -1,10 +1,11 @@
-// Zeilen: 161
+// Zeilen: 158
 // Datei: src/heatmap_overlay.cpp
-// 🐭 Maus-Kommentar: Heatmap jetzt mondän – Seitenverhältnis 16:9, dezentes Padding (16px), sanfter Glow mit smoothstep-Farben. Cleanup korrekt: VAO/VBO/Shader werden bei Shutdown freigegeben. Overlay-Standardwert kommt jetzt aus Settings. Schneefuchs nickt.
+// 🐭 Maus-Kommentar: Overlay-Zustand wird nicht mehr intern gespeichert, sondern über ctx.overlayEnabled gesteuert. toggle() nimmt jetzt RendererState& entgegen. drawOverlay prüft ctx.overlayEnabled direkt. Alle Referenzen auf `showOverlay` entfernt. Schneefuchs sieht: kein Schattenzustand mehr.
 
 #include "pch.hpp"
 #include "heatmap_overlay.hpp"
 #include "settings.hpp"
+#include "renderer_state.hpp" // für RendererState
 #include <algorithm>
 #include <cmath>
 
@@ -13,9 +14,6 @@ namespace HeatmapOverlay {
 static GLuint overlayVAO = 0;
 static GLuint overlayVBO = 0;
 static GLuint overlayShader = 0;
-
-// 🐅 Maus-Kommentar: Overlay-Standardwert aus Settings übernommen. Keine willkürlichen Defaults mehr – Schneefuchs lächelt.
-static bool showOverlay = Settings::heatmapOverlayEnabled;
 
 static const char* vertexShaderSrc = R"GLSL(
 #version 430 core
@@ -79,12 +77,8 @@ static GLuint createShaderProgram() {
     return prog;
 }
 
-void toggle() {
-    showOverlay = !showOverlay;
-}
-
-void setEnabled(bool enabled) {
-    showOverlay = enabled;
+void toggle(RendererState& ctx) {
+    ctx.overlayEnabled = !ctx.overlayEnabled;
 }
 
 void cleanup() {
@@ -97,16 +91,18 @@ void cleanup() {
 void drawOverlayTexture(const std::vector<float>& entropy,
                         const std::vector<float>& contrast,
                         int width, int height,
-                        int tileSize) {
-    drawOverlay(entropy, contrast, width, height, tileSize, 0);
+                        int tileSize,
+                        RendererState& ctx) {
+    drawOverlay(entropy, contrast, width, height, tileSize, 0, ctx);
 }
 
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width, int height,
                  int tileSize,
-                 [[maybe_unused]] GLuint textureId) {
-    if (!showOverlay) return;
+                 [[maybe_unused]] GLuint textureId,
+                 RendererState& ctx) {
+    if (!ctx.overlayEnabled) return;
 
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;

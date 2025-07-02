@@ -1,5 +1,5 @@
 // Datei: src/frame_pipeline.hpp
-// Zeilen: 42
+// Zeilen: 43
 /* 🐭 interner Maus-Kommentar:
    Schnittstelle für die modulare Frame-Pipeline.
    Deklariert klar getrennte Schritte:
@@ -9,12 +9,13 @@
    - Bildausgabe (Heatmap & Fraktal)
    → Alles basiert auf FrameContext, keine globalen Zustände.
    ❤️ FIX: computeCudaFrame explizit mit RendererState – Maus liebt Präzision, Schneefuchs liebt Klarheit.
+   ❤️ FIX: drawFrame braucht jetzt RendererState für HeatmapOverlay (neuer Parameter).
 */
 
 #pragma once
 #include "frame_context.hpp"
 #include "zoom_command.hpp"
-#include "renderer_state.hpp"   // ✅ Für computeCudaFrame – explizit nötig
+#include "renderer_state.hpp"   // ✅ Für computeCudaFrame & drawFrame – explizit nötig
 #include <GL/glew.h>
 
 void beginFrame(FrameContext& ctx);
@@ -26,4 +27,4 @@ void computeCudaFrame(FrameContext& ctx, RendererState& state);
 void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus);
 
 // Zeichnet das Bild auf den Bildschirm (inkl. Heatmap bei Bedarf).
-void drawFrame(FrameContext& ctx, GLuint tex);
+void drawFrame(FrameContext& ctx, GLuint tex, RendererState& state);

@@ -1,7 +1,6 @@
+// Zeilen: 35
 // Datei: src/main.cpp
-// Zeilen: 34
-// 🐭 Maus-Kommentar: Hauptprogramm – entfernt globalRendererState komplett. RendererState wird nun direkt weitergereicht. Schneefuchs: „Globale Zustände? Nur wenn du die Welt regierst.“
-// 🔄 Auto-Zoom wird nun beim Start explizit aktiviert – kein manuelles SPACE/P nötig.
+// 🐭 Maus-Kommentar: `HeatmapOverlay::setEnabled(...)` ist gestrichen – Overlay wird direkt über RendererState gesteuert. Wir initialisieren den Overlay-Zustand korrekt aus settings.hpp. Schneefuchs: „Was sichtbar ist, beginnt im State.“
 
 #include "pch.hpp"
 
@@ -25,9 +24,8 @@ int main() {
 
     RendererLoop::initResources(renderer.getState());
 
-    
-    // 🟢 Heatmap-Overlay initial aktivieren, falls gewünscht
-    HeatmapOverlay::setEnabled(Settings::heatmapOverlayEnabled);
+    // 🟢 Heatmap-Overlay: Initialzustand aus Settings übernehmen
+    renderer.getState().overlayEnabled = Settings::heatmapOverlayEnabled;
 
     // ⏯️ Auto-Zoom explizit aktivieren beim Start
     CudaInterop::setPauseZoom(false);

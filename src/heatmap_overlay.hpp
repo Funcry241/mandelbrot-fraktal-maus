@@ -1,20 +1,19 @@
-// Zeilen: 33
+// Zeilen: 32
 // Datei: src/heatmap_overlay.hpp
 /*
-Maus-Kommentar 🐭: Nur relevante Schnittstellen bleiben – kein toter Code, kein Overhead. Overlay wird direkt per `drawOverlay(...)` gerendert. Schneefuchs: „Weniger ist manchmal Wärmebild.“
+Maus-Kommentar 🐭: Overlay ist jetzt vollständig zustandslos – kein interner bool mehr. Alle Kontrollfunktionen arbeiten direkt mit RendererState&. drawOverlay-API akzeptiert ctx. Schneefuchs: „Kein Schatten, nur Klarheit.“
 */
 
 #pragma once
 #include <vector>
 #include <GL/glew.h>
 
+struct RendererState;
+
 namespace HeatmapOverlay {
 
-// Overlay ein-/ausblenden (z. B. via Tastendruck)
-void toggle();
-
-// Overlay explizit setzen (z. B. aus Settings laden)
-void setEnabled(bool enabled); // Otter: Initialzustand kommt jetzt aus settings.hpp
+// Overlay ein-/ausblenden via Tastendruck (setzt ctx.overlayEnabled um)
+void toggle(RendererState& ctx);
 
 // Gibt GPU-Ressourcen (VAO, VBO, Shader) frei
 void cleanup();
@@ -23,12 +22,22 @@ void cleanup();
 // entropy + contrast: Tile-Daten (gleiche Länge)
 // width, height: Bildgröße in Pixel
 // tileSize: Größe eines Tiles in Pixeln
-// textureId: Fraktal-Textur (für optionales Blending)
+// textureId: Fraktal-Textur (optional, wird ignoriert)
+// ctx: Zustandsobjekt mit overlayEnabled-Flag
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width,
                  int height,
                  int tileSize,
-                 GLuint textureId);
+                 GLuint textureId,
+                 RendererState& ctx);
+
+// Convenience-Version ohne textureId
+void drawOverlayTexture(const std::vector<float>& entropy,
+                        const std::vector<float>& contrast,
+                        int width,
+                        int height,
+                        int tileSize,
+                        RendererState& ctx);
 
 } // namespace HeatmapOverlay

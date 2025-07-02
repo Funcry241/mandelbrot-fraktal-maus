@@ -1,9 +1,7 @@
+// Zeilen: 277
 // Datei: src/renderer_loop.cpp
-// Zeilen: 252
-// 👝 Maus-Kommentar: Heatmap integriert! Zeigt oben rechts im Bild die Entropie- und Kontrastverteilung – live während des Auto-Zooms. Schneefuchs sagt: „Wer sehen will, was Zoom sieht, muss glühnen lassen.“
-// Otter-Fix: Zweites renderCudaFrame nach applyZoomLogic() → Bild zeigt direkt das neue Ziel!
-// 🐭 FIX: HUD-Overlay wird nun korrekt pro Frame gerendert – stand bisher im Schatten.
-// 🐭 FIX: ctx.offset und ctx.zoom werden nicht mehr jedes Frame überschrieben – nur initial.
+// 🐭 Maus-Kommentar: Heatmap ist jetzt vollständig zustandslos – ctx.overlayEnabled steuert alles. toggle() aufgerufen mit Referenz. drawFrame() nutzt drawOverlay(..., ctx).
+// 🐭 Neu: KeyCallback mit Zugriff auf RendererState via glfwGetWindowUserPointer. Tastendruck H togglet Heatmap, P pausiert Zoom. Schneefuchs: „Wer steuert, hat den Blick.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -95,9 +93,12 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
 
     // 🖼 Bild (und ggf. Heatmap) zeichnen
-    drawFrame(ctx, state.tex);
+    drawFrame(ctx, state.tex, state);
 
-    // 💡 NEU: HUD-Zeichnung nach allem anderen
+    // ✅ Heatmap Overlay – sichtbar, wenn ctx.overlayEnabled aktiv
+    HeatmapOverlay::drawOverlayTexture(ctx.h_entropy, {}, ctx.width, ctx.height, ctx.tileSize, state);
+
+    // 💡 HUD-Zeichnung nach allem anderen
     Hud::draw(state);
 
     // 🔁 Rückübertragung in RendererState (Zoom & Offset aktualisiert!)
@@ -108,6 +109,27 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     state.lastEntropy = ctx.lastEntropy;
     state.lastContrast = ctx.lastContrast;
     state.lastTileIndex = ctx.lastTileIndex;
+}
+
+// Neue KeyCallback-Funktion für Tastaturereignisse
+void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    if (action != GLFW_PRESS) return;
+
+    // Hole RendererState aus User-Pointer
+    RendererState* state = static_cast<RendererState*>(glfwGetWindowUserPointer(window));
+    if (!state) return;
+
+    switch (key) {
+        case GLFW_KEY_H:
+            HeatmapOverlay::toggle(*state);
+            break;
+        case GLFW_KEY_P:
+            CudaInterop::setPauseZoom(!CudaInterop::getPauseZoom());
+            break;
+        // hier weitere Tasten hinzufügen, falls nötig
+        default:
+            break;
+    }
 }
 
 } // namespace RendererLoop

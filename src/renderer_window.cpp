@@ -1,11 +1,12 @@
 // Datei: src/renderer_window.cpp
 // Zeilen: 74
-// 🐭 Maus-Kommentar: Fenster-Erstellung ist jetzt fehlerbehandelbar – kein `std::exit` mehr, sondern nullptr-Rückgabe bei Misserfolg. Aufrufende Instanzen (z. B. Renderer) können reagieren. Schneefuchs: „Nicht jedes Scheitern ist fatal – außer du beendest dich selbst.“
+// 🐭 Maus-Kommentar: Fenster-Erstellung mit stabiler Fehlerbehandlung und sauberer Callback-Registrierung. KeyCallback jetzt aus RendererLoop, um RendererState zu erreichen. Schneefuchs: „State first, dann Taste.“
 
 #include "pch.hpp"
 #include "renderer_window.hpp"
 #include "renderer_core.hpp"
 #include "settings.hpp"
+#include "renderer_loop.hpp"   // für RendererLoop::keyCallback
 #include "cuda_interop.hpp"
 
 namespace RendererInternals {
@@ -46,7 +47,8 @@ void configureWindowCallbacks(GLFWwindow* window, void* userPointer) {
         }
     });
 
-    glfwSetKeyCallback(window, CudaInterop::keyCallback);
+    // 🔄 KeyCallback aus RendererLoop, nicht mehr aus CudaInterop
+    glfwSetKeyCallback(window, RendererLoop::keyCallback);
 }
 
 } // namespace RendererInternals

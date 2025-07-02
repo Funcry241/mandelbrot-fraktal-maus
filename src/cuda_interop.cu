@@ -171,22 +171,6 @@ bool getPauseZoom() {
     return pauseZoom;
 }
 
-void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (action == GLFW_PRESS) {
-        if (key == GLFW_KEY_P || key == GLFW_KEY_SPACE) {
-            pauseZoom = !pauseZoom;
-            std::cout << "[Zoom] Auto-Zoom " << (pauseZoom ? "paused" : "resumed") << "\n";
-        }
-
-        if (key == GLFW_KEY_H) {
-            HeatmapOverlay::toggle();
-            if (Settings::debugLogging) {
-                std::puts("[DEBUG] Heatmap overlay toggled (H)");
-            }
-        }
-    }
-}
-
 // 🐭 Maus-Kommentar: CSV-Log-Ausgabe aller Tile-Iterationen eines Frames – dient Analyse der Tiefenverteilung.
 // Schneefuchs: Nur ASCII, keine GPU-Belastung, immer verständlich.
 void logZoomEvaluation(const int* d_iterations, int width, int height, int tileSize, double zoom) {

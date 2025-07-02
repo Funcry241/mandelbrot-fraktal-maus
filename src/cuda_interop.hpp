@@ -39,8 +39,6 @@ void renderCudaFrame(
 void setPauseZoom(bool pause);
 bool getPauseZoom();
 
-void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
-
 // 🧪 Evaluation nach Zielwechsel – Frame-Analyse direkt aus GPU-Buffer
 void logZoomEvaluation(const int* d_iterations, int width, int height, int maxIterations, double zoom);
 
