@@ -95,9 +95,6 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     // 🖼 Bild (und ggf. Heatmap) zeichnen
     drawFrame(ctx, state.tex, state);
 
-    // ✅ Heatmap Overlay – sichtbar, wenn ctx.overlayEnabled aktiv
-    HeatmapOverlay::drawOverlayTexture(ctx.h_entropy, {}, ctx.width, ctx.height, ctx.tileSize, state);
-
     // 💡 HUD-Zeichnung nach allem anderen
     Hud::draw(state);
 

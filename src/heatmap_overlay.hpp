@@ -32,12 +32,4 @@ void drawOverlay(const std::vector<float>& entropy,
                  GLuint textureId,
                  RendererState& ctx);
 
-// Convenience-Version ohne textureId
-void drawOverlayTexture(const std::vector<float>& entropy,
-                        const std::vector<float>& contrast,
-                        int width,
-                        int height,
-                        int tileSize,
-                        RendererState& ctx);
-
 } // namespace HeatmapOverlay

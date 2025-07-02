@@ -88,14 +88,6 @@ void cleanup() {
     overlayVAO = overlayVBO = overlayShader = 0;
 }
 
-void drawOverlayTexture(const std::vector<float>& entropy,
-                        const std::vector<float>& contrast,
-                        int width, int height,
-                        int tileSize,
-                        RendererState& ctx) {
-    drawOverlay(entropy, contrast, width, height, tileSize, 0, ctx);
-}
-
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width, int height,
