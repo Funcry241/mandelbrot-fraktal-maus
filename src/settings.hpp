@@ -66,7 +66,7 @@ inline constexpr float MAX_OFFSET_FRACTION = 0.1f; // empfohlen: 0.05 bis 0.2 �
 
 // 📈 Bonusgewichtung für Tiles, die nah am aktuellen Offset liegen (für stabileres Auto-Zoom)
 // 0.0 = keine Bevorzugung, 1.0 = starker Bias auf Nähe
-inline constexpr float ENTROPY_NEARBY_BIAS = 0.5f; // empfohlen: 0.0 bis 0.6 – höher = weniger Hüpfen
+inline constexpr float ENTROPY_NEARBY_BIAS = 0.3f; // empfohlen: 0.0 bis 0.6 – höher = weniger Hüpfen
 
 // 🦕 Skaliert die Offset-Distanz vor Anwendung von tanh (nonlineare Dämpfung)
 // Kleinere Werte = stärkere Dämpfung bei kleinen Bewegungen
