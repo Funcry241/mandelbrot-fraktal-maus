@@ -60,7 +60,11 @@ ZoomResult evaluateZoomTarget(
     result.bestEntropy   = previousEntropy;
     result.bestContrast  = previousContrast;
     result.newOffset     = previousOffset;
-    result.perTileContrast.resize(tileCount, 0.0f);
+
+    if (result.perTileContrast.capacity() < tileCount) {
+        result.perTileContrast.reserve(tileCount);
+    }
+    result.perTileContrast.assign(tileCount, 0.0f);
 
     float maxScore = -1.0f;
 
