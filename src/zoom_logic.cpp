@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <chrono> // ⏱ für Timing
 
+#define ENABLE_ZOOM_LOGGING 1  // Set to 0 to disable local zoom analysis logs
+
 namespace ZoomLogic {
 
 float computeEntropyContrast(const std::vector<float>& entropy, int width, int height, int tileSize) {
