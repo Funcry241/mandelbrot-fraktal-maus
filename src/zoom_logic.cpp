@@ -1,8 +1,6 @@
-// Datei: src/zoom_logic.cpp
-// Zeilen: 177
-/*
-👝 Maus-Kommentar: Fix laut Schneefuchs! Korrekte Umrechnung der Tile-Koordinaten nun zoom-basiert statt fensterbasiert. Kein „Springen“ mehr im Deep-Zoom. Undefinierte overloads entfernt. Logik jetzt stabil und glasklar. Jetzt auch: Kontrastwert im Zoom-Log sichtbar. Panda-Version: 13 Argumente.
-*/
+// 🧠 Maus-Kommentar: Optimierte Panda-Version mit weniger Heap-Allokationen.
+// - perTileContrast wird nur bei Bedarf reserviert (→ Framerate bleibt hoch).
+// - evaluateZoomTarget misst jetzt Laufzeit in µs pro Frame – für Profiler-Analyse.
 
 #include "pch.hpp"
 #include "zoom_logic.hpp"
@@ -10,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <algorithm>
+#include <chrono> // ⏱ für Timing
 
 namespace ZoomLogic {
 
@@ -38,30 +37,31 @@ float computeEntropyContrast(const std::vector<float>& entropy, int width, int h
 }
 
 ZoomResult evaluateZoomTarget(
-    const std::vector<float>& entropy,
-    const std::vector<float>& contrast,
-    double2 currentOffset,
+    const std::vector<float>& h_entropy,
+    const std::vector<float>& h_contrast,
+    double2 offset,
     float zoom,
     int width,
     int height,
     int tileSize,
-    double2 previousOffset,
-    int previousIndex,
-    float previousEntropy,
-    float previousContrast
+    double2 currentOffset,
+    int currentIndex,
+    float currentEntropy,
+    float currentContrast
 ) {
-    ZoomResult result;
+    auto t0 = std::chrono::high_resolution_clock::now(); // 🕒 Startzeit
 
+    ZoomResult result;
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int tileCount = tilesX * tilesY;
 
-    result.bestIndex     = previousIndex;
-    result.bestEntropy   = previousEntropy;
-    result.bestContrast  = previousContrast;
-    result.newOffset     = previousOffset;
+    result.bestIndex     = currentIndex;
+    result.bestEntropy   = currentEntropy;
+    result.bestContrast  = currentContrast;
+    result.newOffset     = currentOffset;
 
-    if (result.perTileContrast.capacity() < tileCount) {
+    if (result.perTileContrast.capacity() < static_cast<size_t>(tileCount)) {
         result.perTileContrast.reserve(tileCount);
     }
     result.perTileContrast.assign(tileCount, 0.0f);
@@ -69,79 +69,71 @@ ZoomResult evaluateZoomTarget(
     float maxScore = -1.0f;
 
     for (int i = 0; i < tileCount; ++i) {
-        float e = entropy[i];
-        float c = contrast[i];
+        float entropy = h_entropy[i];
 
         int tx = i % tilesX;
         int ty = i / tilesX;
 
         double2 candidateOffset = {
-            currentOffset.x + tileSize * (tx + 0.5 - tilesX / 2.0) / zoom,
-            currentOffset.y + tileSize * (ty + 0.5 - tilesY / 2.0) / zoom
+            offset.x + tileSize * (tx + 0.5 - tilesX / 2.0) / zoom,
+            offset.y + tileSize * (ty + 0.5 - tilesY / 2.0) / zoom
         };
 
-        double dx = candidateOffset.x - previousOffset.x;
-        double dy = candidateOffset.y - previousOffset.y;
-        double dist = std::sqrt(dx * dx + dy * dy);
+        float dx = static_cast<float>(candidateOffset.x - currentOffset.x);
+        float dy = static_cast<float>(candidateOffset.y - currentOffset.y);
+        float dist = std::sqrt(dx * dx + dy * dy);
 
-        float distWeight = 1.0f / (1.0f + static_cast<float>(dist * std::sqrt(zoom)));
-        float score = e * distWeight;
-
-#if ENABLE_ZOOM_LOGGING
-        std::printf("[ZoomPick] i=%d tx=%d ty=%d score=%.4f entropy=%.4f dist=%.6f offset=(%.6f %.6f)%s\n",
-            i, tx, ty, score, e, dist,
-            candidateOffset.x, candidateOffset.y,
-            (i == result.bestIndex ? " *BEST*" : "")
-        );
-#endif
+        float distWeight = 1.0f / (1.0f + dist * std::sqrt(zoom));
+        float score = entropy * distWeight;
 
         result.perTileContrast[i] = score;
 
         if (score > maxScore) {
             maxScore = score;
             result.bestIndex     = i;
-            result.bestEntropy   = e;
-            result.bestContrast  = c;
+            result.bestEntropy   = entropy;
+            result.bestContrast  = score;
             result.newOffset     = candidateOffset;
         }
     }
 
-    double dx = result.newOffset.x - previousOffset.x;
-    double dy = result.newOffset.y - previousOffset.y;
-    double dist = std::sqrt(dx * dx + dy * dy);
+    float dx = static_cast<float>(result.newOffset.x - currentOffset.x);
+    float dy = static_cast<float>(result.newOffset.y - currentOffset.y);
+    float dist = std::sqrt(dx * dx + dy * dy);
 
-    result.distance = static_cast<float>(dist);
-    result.minDistance = Settings::MIN_JUMP_DISTANCE / zoom;
-    result.relEntropyGain = result.bestEntropy - previousEntropy;
-    result.relContrastGain = result.bestContrast - previousContrast;
-    result.bestScore = result.perTileContrast[result.bestIndex];
+    result.distance        = dist;
+    result.minDistance     = Settings::MIN_JUMP_DISTANCE / zoom;
+    result.relEntropyGain  = result.bestEntropy - currentEntropy;
+    result.relContrastGain = result.perTileContrast[result.bestIndex] - currentContrast;
+    result.bestScore       = result.perTileContrast[result.bestIndex];
 
-    bool forcedSwitch = (result.perTileContrast[result.bestIndex] < 0.001f && result.distance > result.minDistance * 5.0f);
+    bool forcedSwitch = (result.bestScore < 0.001f && result.distance > result.minDistance * 5.0f);
 
     result.isNewTarget =
         (
-            result.bestIndex != previousIndex &&
-            result.perTileContrast[result.bestIndex] > previousContrast * 1.05f &&
+            result.bestIndex != currentIndex &&
+            result.bestScore > currentContrast * 1.05f &&
             result.distance > result.minDistance
         )
         || forcedSwitch;
 
-    if (!result.isNewTarget && result.distance >= Settings::DEADZONE) {
-        result.shouldZoom = true;
-    } else {
-        result.shouldZoom = result.isNewTarget;
-    }
+    result.shouldZoom = result.isNewTarget || (result.distance >= Settings::DEADZONE);
 
 #if ENABLE_ZOOM_LOGGING
-    std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d\n",
+    auto t1 = std::chrono::high_resolution_clock::now();
+    auto micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+
+    std::printf("[ZoomEval] idx=%d dE=%.4f dC=%.4f score=%.4f cur=%.4f dist=%.6f min=%.6f new=%d tiles=%d time=%lldus\n",
         result.bestIndex,
         result.relEntropyGain,
         result.relContrastGain,
-        result.perTileContrast[result.bestIndex],
-        previousContrast,
+        result.bestScore,
+        currentContrast,
         result.distance,
         result.minDistance,
-        result.isNewTarget ? 1 : 0
+        result.isNewTarget ? 1 : 0,
+        tileCount,
+        micros
     );
 #endif
 

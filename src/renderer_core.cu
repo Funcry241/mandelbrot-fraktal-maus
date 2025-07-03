@@ -16,7 +16,7 @@
 #include "zoom_logic.hpp"
 #include "heatmap_overlay.hpp"  // 🆕 für Cleanup-Aufruf
 
-#define ENABLE_ZOOM_LOGGING 0  // Set to 0 to disable local zoom analysis logs
+#define ENABLE_ZOOM_LOGGING 1  // Set to 0 to disable local zoom analysis logs
 
 Renderer::Renderer(int width, int height)
     : state(width, height), glInitialized(false) {}
