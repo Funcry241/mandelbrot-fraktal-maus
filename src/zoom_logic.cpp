@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <chrono> // ⏱ für Timing
 
-#define ENABLE_ZOOM_LOGGING 1  // Set to 0 to disable local zoom analysis logs
+#define ENABLE_ZOOM_LOGGING 0  // Set to 0 to disable local zoom analysis logs
 
 namespace ZoomLogic {
 
