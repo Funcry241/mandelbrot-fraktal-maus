@@ -1,10 +1,10 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 308
+// Zeilen: 316
 /* 🐭 Maus-Kommentar: CUDA-Interop mit Entropie und Kontrast für Heatmap und Auto-Zoom.
-   Panda-Erweiterung: computeEntropyContrast ersetzt computeTileEntropy.
-   h_contrast wird hostseitig gepflegt, d_contrast GPU-seitig verwaltet.
-   Schneefuchs sagte: „Kontrast ist das Gewürz der Struktur.“
-   Log bleibt ASCII-pur.
+   Flugente: Alle Koordinaten sind jetzt float2! Kein double2 mehr im Spiel.
+   Panda: Entropie+Kontrast-Analyse bleibt vollständig erhalten.
+   Schneefuchs: „Wer float kann, braucht kein double – solange keine Galaxie explodiert.“
+   Log bleibt ASCII-only.
 */
 
 #include "pch.hpp"
@@ -44,12 +44,12 @@ void renderCudaFrame(
     float* d_contrast,
     int width,
     int height,
-    double zoom,
-    double2 offset,
+    float zoom,
+    float2 offset,
     int maxIterations,
     std::vector<float>& h_entropy,
     std::vector<float>& h_contrast,
-    double2& newOffset,
+    float2& newOffset,
     bool& shouldZoom,
     int tileSize,
     int supersampling,
@@ -72,14 +72,11 @@ void renderCudaFrame(
         std::printf("[DEBUG] PBO mapped: %p (size = %zu)\n", (void*)devPtr, size);
     }
 
-    float zoom_f = static_cast<float>(zoom);
-    float2 offset_f = make_float2(static_cast<float>(offset.x), static_cast<float>(offset.y));
-
     if (Settings::debugLogging) {
         std::printf("[DEBUG] Launch MandelbrotKernel zoom %.2f maxIter %d supersampling %d\n", zoom, maxIterations, supersampling);
     }
 
-    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom_f, offset_f, maxIterations, supersampling);
+    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, supersampling);
 
     cudaDeviceSynchronize();
     cudaError_t kernelErr = cudaGetLastError();
@@ -101,22 +98,23 @@ void renderCudaFrame(
     shouldZoom = false;
 
     if (!pauseZoom) {
+        // Volle Flugente: float2 überall!
         ZoomLogic::ZoomResult result = ZoomLogic::evaluateZoomTarget(
             h_entropy,
             h_contrast,
-            offset,                          // double2
-            zoom,                            // double
+            offset,
+            zoom,
             width,
             height,
             tileSize,
-            state.offset,                    // float2
+            state.offset,
             state.zoomResult.bestIndex,
             state.zoomResult.bestEntropy,
             state.zoomResult.bestContrast
         );
 
         if (result.bestIndex >= 0) {
-            newOffset = result.newOffset;
+            newOffset = result.newOffset;   // float2 zu float2 – keine Umwandlung
             shouldZoom = result.shouldZoom;
 
             if (result.isNewTarget) {
@@ -128,16 +126,16 @@ void renderCudaFrame(
 
         if (Settings::debugLogging) {
             if (result.bestIndex >= 0) {
-                float minJump = Settings::MIN_JUMP_DISTANCE / zoom_f;
+                float minJump = Settings::MIN_JUMP_DISTANCE / zoom;
                 std::printf(
                     "Zoom Z %.1e I %d E %.3f C %.3f S %.3f dO %.2e dPx %.1f minJ %.2e dE %.3f dC %.3f RelE %.2f RelC %.2f New %d\n",
-                    zoom_f,
+                    zoom,
                     result.bestIndex,
                     result.bestEntropy,
                     result.bestContrast,
                     result.bestScore,
                     result.distance,
-                    result.distance * zoom_f * width,
+                    result.distance * zoom * width,
                     minJump,
                     result.relEntropyGain,
                     result.relContrastGain,
@@ -173,7 +171,7 @@ bool getPauseZoom() {
     return pauseZoom;
 }
 
-void logZoomEvaluation(const int* d_iterations, int width, int height, int tileSize, double zoom) {
+void logZoomEvaluation(const int* d_iterations, int width, int height, int tileSize, float zoom) {
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
 

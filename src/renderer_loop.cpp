@@ -1,6 +1,9 @@
 // Datei: src/renderer_loop.cpp
 // Zeilen: 282
-// 🐭 Maus-Kommentar: HeatmapOverlay wird korrekt gezeichnet – drawOverlay(ctx) ist aktiv, ctx.d_contrast ist nun gesetzt. Damit ist der vollständige Datenfluss von Kontrastwerten GPU → CPU → Heatmap sichergestellt.
+// 🐭 Maus-Kommentar: HeatmapOverlay wird korrekt gezeichnet – drawOverlay(ctx) ist aktiv, ctx.d_contrast ist nun gesetzt. 
+// Flugente: offset ist wieder float2, ctx bleibt synchron zu FrameContext. 
+// Panda vollständig intakt: Heatmap, Kontrastdaten, Supersampling bleiben erhalten.
+
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
@@ -55,7 +58,7 @@ void beginFrame(RendererState& state) {
 void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     if (isFirstFrame) {
         ctx.zoom = state.zoom;
-        ctx.offset = state.offset;
+        ctx.offset = state.offset;  // Flugente: float2 direkt übernehmen
         isFirstFrame = false;
     }
 
@@ -68,6 +71,7 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     ctx.d_entropy = state.d_entropy;
     ctx.d_contrast = state.d_contrast;  // ✅ NEU: Kontrastdaten setzen
     ctx.h_entropy = state.h_entropy;
+    ctx.h_contrast = state.h_contrast;
     ctx.overlayActive = state.overlayEnabled;
     ctx.lastEntropy = state.lastEntropy;
     ctx.lastContrast = state.lastContrast;
@@ -87,8 +91,9 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     Hud::draw(state);
 
     state.zoom = ctx.zoom;
-    state.offset = ctx.offset;
+    state.offset = ctx.offset;  // Flugente: float2 direkt übernehmen
     state.h_entropy = ctx.h_entropy;
+    state.h_contrast = ctx.h_contrast;
     state.shouldZoom = ctx.shouldZoom;
     state.lastEntropy = ctx.lastEntropy;
     state.lastContrast = ctx.lastContrast;

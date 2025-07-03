@@ -2,11 +2,10 @@
 // Zeilen: 76
 /* 🐭 interner Maus-Kommentar:
    Diese Datei definiert `FrameContext`, den zentralen Container pro Frame.
-   Alle Module greifen ausschließlich über dieses Objekt auf aktuelle Zustände zu.
-   Damit wird Auto-Zoom, HUD, Heatmap und Rendering deterministisch und modular.
-   → Grundlage für CommandBus und Replay.
-   → Alle Koordinaten und Entropiedaten liegen hier zentral.
-   → FIX: zoom, offset, newOffset jetzt double/double2 – volle Präzision für tiefe Zoomstufen (Schneefuchs-Fund)
+   Flugente-konform: zoom, offset und newOffset wurden zurück auf float/float2 gestellt.
+   Hintergrund: double-Präzision war nicht nötig und kostete unnötig FPS.
+   Alle Entropie- und Kontrastdaten bleiben erhalten.
+   Schneefuchs sagte: „Wer zu genau sieht, sieht weniger schnell.“
 */
 
 #pragma once
@@ -25,13 +24,13 @@ struct FrameContext {
     int supersampling = 1;
 
     // Kamera / Fraktalkoordinaten
-    double zoom = 1.0;
-    double2 offset = {0.0, 0.0};
+    float zoom = 1.0f;
+    float2 offset = {0.0f, 0.0f};
 
     // Auto-Zoom-Steuerung
     bool pauseZoom = false;
     bool shouldZoom = false;
-    double2 newOffset = {0.0, 0.0}; // neues Ziel (wenn shouldZoom = true)
+    float2 newOffset = {0.0f, 0.0f}; // neues Ziel (wenn shouldZoom = true)
 
     // Entropie-Daten
     std::vector<float> h_entropy;   // hostseitig – pro Tile

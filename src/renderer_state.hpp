@@ -1,6 +1,8 @@
 // Datei: src/renderer_state.hpp
 // Zeilen: 99
-// 🐭 Maus-Kommentar: Der Renderer merkt sich nun Entropie, Kontrast, Index und Score (zoomResult) – für Analyse, Visualisierung oder Heatmap. Schneefuchs: „Wer messen will, muss erinnern.“
+// 🐭 Maus-Kommentar: Der Renderer merkt sich nun Entropie, Kontrast, Index und Score (zoomResult) – für Analyse, Visualisierung oder Heatmap. 
+// Flugente: offset zurück auf float2 für Performance. 
+// Schneefuchs: „Wer messen will, muss erinnern.“
 
 #pragma once
 
@@ -16,7 +18,7 @@ public:
 
     // 🔍 Zoom & Bildausschnitt
     double zoom;
-    double2 offset;
+    float2 offset;                    // 🦆 Flugente: war double2 → jetzt float2
 
     // 🧮 Iterationen
     int baseIterations;

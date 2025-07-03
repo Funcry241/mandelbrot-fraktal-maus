@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
 // Zeilen: 127
-// 🧠 Maus-Kommentar: Erweiterte Zoomlogik: Kompakter Frame-Zustandsdump inkl. Entropie-Gewinn, Kontrast-Gewinn, Distanz, Schwelle, Zielwechsel. Ideal zur Stagnationsanalyse. Schneefuchs-geeicht!
+// 🐭 Maus-Kommentar: Flugente aktiviert! float2 statt double2 zur Wiederherstellung der FPS. Zoomlogik bleibt intakt, Performance steigt. Schneefuchs: „Präzision ist gut, Geschwindigkeit ist besser.“
 
 #include "pch.hpp"
 
@@ -57,15 +57,15 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
     RendererLoop::renderFrame_impl(state, autoZoomEnabled);
 
 #if ENABLE_ZOOM_LOGGING
-    double ox = state.offset.x;
-    double oy = state.offset.y;
-    double tx = state.smoothedTargetOffset.x;
-    double ty = state.smoothedTargetOffset.y;
-    double dx = tx - ox;
-    double dy = ty - oy;
-    double dist = std::sqrt(dx * dx + dy * dy);
+    float ox = state.offset.x;
+    float oy = state.offset.y;
+    float tx = state.smoothedTargetOffset.x;
+    float ty = state.smoothedTargetOffset.y;
+    float dx = tx - ox;
+    float dy = ty - oy;
+    float dist = std::sqrt(dx * dx + dy * dy);
 
-    static double2 lastTarget = { 0.0, 0.0 };
+    static float2 lastTarget = { 0.0f, 0.0f };
     static int stayCounter = 0;
     bool jumped = (tx != lastTarget.x || ty != lastTarget.y);
     if (jumped) {

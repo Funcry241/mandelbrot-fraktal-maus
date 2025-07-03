@@ -1,6 +1,8 @@
+// Datei: src/zoom_logic.cpp
+// Zeilen: 140
 // 🧠 Maus-Kommentar: Optimierte Panda-Version mit weniger Heap-Allokationen.
-// - perTileContrast wird nur bei Bedarf reserviert (→ Framerate bleibt hoch).
-// - evaluateZoomTarget misst jetzt Laufzeit in µs pro Frame – für Profiler-Analyse.
+// Flugente-konform: Koordinaten sind wieder float-basiert (offset, zoom etc.).
+// evaluateZoomTarget misst µs pro Frame – klar für Heatmap, Auto-Zoom und Debug-Auswertung.
 
 #include "pch.hpp"
 #include "zoom_logic.hpp"
@@ -41,12 +43,12 @@ float computeEntropyContrast(const std::vector<float>& entropy, int width, int h
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& h_entropy,
     const std::vector<float>& h_contrast,
-    double2 offset,
+    float2 offset,              // Flugente: float2 statt double2
     float zoom,
     int width,
     int height,
     int tileSize,
-    double2 currentOffset,
+    float2 currentOffset,       // Flugente: float2 statt double2
     int currentIndex,
     float currentEntropy,
     float currentContrast
@@ -76,13 +78,13 @@ ZoomResult evaluateZoomTarget(
         int tx = i % tilesX;
         int ty = i / tilesX;
 
-        double2 candidateOffset = {
-            offset.x + tileSize * (tx + 0.5 - tilesX / 2.0) / zoom,
-            offset.y + tileSize * (ty + 0.5 - tilesY / 2.0) / zoom
+        float2 candidateOffset = {
+            offset.x + tileSize * (tx + 0.5f - tilesX / 2.0f) / zoom,
+            offset.y + tileSize * (ty + 0.5f - tilesY / 2.0f) / zoom
         };
 
-        float dx = static_cast<float>(candidateOffset.x - currentOffset.x);
-        float dy = static_cast<float>(candidateOffset.y - currentOffset.y);
+        float dx = candidateOffset.x - currentOffset.x;
+        float dy = candidateOffset.y - currentOffset.y;
         float dist = std::sqrt(dx * dx + dy * dy);
 
         float distWeight = 1.0f / (1.0f + dist * std::sqrt(zoom));
@@ -99,8 +101,8 @@ ZoomResult evaluateZoomTarget(
         }
     }
 
-    float dx = static_cast<float>(result.newOffset.x - currentOffset.x);
-    float dy = static_cast<float>(result.newOffset.y - currentOffset.y);
+    float dx = result.newOffset.x - currentOffset.x;
+    float dy = result.newOffset.y - currentOffset.y;
     float dist = std::sqrt(dx * dx + dy * dy);
 
     result.distance        = dist;
