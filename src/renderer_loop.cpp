@@ -78,6 +78,16 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     beginFrame(state);
     computeCudaFrame(ctx, state);
 
+    // Dachs-Debug: Buffers vor Heatmap nullen
+    {
+        size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
+        size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
+        size_t tilesCount = tilesX * tilesY;
+        size_t memSize = tilesCount * sizeof(float);
+        CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, memSize));
+        CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, memSize));
+    }
+
     // Projekt Dachs: Heatmap-Daten berechnen
     CudaInterop::computeCudaEntropyContrast(
         ctx.d_iterations,
@@ -90,11 +100,13 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     );
 
     // Daten Device -> Host kopieren für Heatmap-Overlay
-    size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
-    size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
-    size_t tilesCount = tilesX * tilesY;
-    CUDA_CHECK(cudaMemcpy(ctx.h_entropy.data(), ctx.d_entropy, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(ctx.h_contrast.data(), ctx.d_contrast, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
+    {
+        size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
+        size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
+        size_t tilesCount = tilesX * tilesY;
+        CUDA_CHECK(cudaMemcpy(ctx.h_entropy.data(), ctx.d_entropy, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(ctx.h_contrast.data(), ctx.d_contrast, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
+    }
 
     // Debug: Werte prüfen
     if (Settings::debugLogging) {
@@ -110,7 +122,7 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
 
     RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
     drawFrame(ctx, state.tex, state);
-    drawOverlay(ctx);
+    drawOverlay(ctx);  // Schneefuchs sagt: Overlay nutzt Kontextdaten automatisch
     Hud::draw(state);
 
     // State zurückschreiben
