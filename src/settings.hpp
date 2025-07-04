@@ -20,7 +20,7 @@ inline constexpr int defaultSupersampling = 1;
 
 // 🔍 Debug-Modi: visuelle Darstellung & Konsolen-Ausgabe aktivieren
 inline constexpr bool debugGradient = false; // Aktiviert reine Entropie-Ansicht (keine Farben) – nur zu Analysezwecken
-inline constexpr bool debugLogging  = false;  // Aktiviert Konsolenausgaben für Auto-Zoom, Tile-Entropie etc.
+inline constexpr bool debugLogging  = true;  // Aktiviert Konsolenausgaben für Auto-Zoom, Tile-Entropie etc.
 
 // Legt fest, wie stark die Supersampling-Stufe bei hoher Entropie skaliert wird.
 // HIGH: ab diesem Wert 4x4 Supersampling, LOW: ab diesem Wert 2x2 Supersampling.
