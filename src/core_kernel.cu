@@ -134,15 +134,11 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     __syncthreads();
 
     if (threadIdx.x == 0 && localCount > 0) {
-        float entropy = 0.0f;
-        for (int i = 0; i < 256; ++i) {
-            float p = histo[i] / (float)localCount;
-            if (p > 0.0f)
-                entropy -= p * log2f(p);
-        }
+        // Dachs-Test: Stub-Wert fix setzen, um Ausführung zu prüfen
         int tilesX = (width + tileSize - 1) / tileSize;
         int tileIndex = tileY * tilesX + tileX;
-        entropyOut[tileIndex] = entropy;
+        entropyOut[tileIndex] = 123.456f;
+        return;
     }
 }
 
