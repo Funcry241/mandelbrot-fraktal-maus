@@ -55,7 +55,7 @@ void beginFrame(RendererState& state) {
 void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     if (isFirstFrame) {
         ctx.zoom = state.zoom;
-        ctx.offset = state.offset;  // Flugente: float2 direkt übernehmen
+        ctx.offset = state.offset;
         isFirstFrame = false;
     }
 
@@ -78,7 +78,7 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     beginFrame(state);
     computeCudaFrame(ctx, state);
 
-    // Capybara: Buffers vor Entropie-/Kontrastberechnung nullen
+    // Capybara: Buffers før Entropie-/Kontrastberechnung nullen
     {
         size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
         size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
@@ -108,7 +108,6 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     }
 
     if (Settings::debugLogging) {
-        // Debug: Werte prüfen
         float e0 = ctx.h_entropy.empty() ? 0.0f : ctx.h_entropy[0];
         float c0 = ctx.h_contrast.empty() ? 0.0f : ctx.h_contrast[0];
         std::printf("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n", e0, c0);
@@ -118,8 +117,17 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
     drawFrame(ctx, state.tex, state);
 
-    // Overlay: nutzt h_entropy & h_contrast aus ctx
-    drawOverlay(ctx);
+    // Capybara: Heatmap-Overlay direkt aufrufen (Entropie + Kontrast)
+    HeatmapOverlay::drawOverlay(
+        ctx.h_entropy,
+        ctx.h_contrast,
+        ctx.width,
+        ctx.height,
+        ctx.tileSize,
+        0,       // textureId unused
+        state    // aktueller RendererState
+    );
+
     Hud::draw(state);
 
     // State zurückschreiben

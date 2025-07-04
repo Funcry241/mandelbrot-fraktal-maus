@@ -182,17 +182,4 @@ void drawOverlay(const std::vector<float>& entropy,
 
 } // namespace HeatmapOverlay
 
-// 📣 Globale Funktion zur Integration in renderer_loop.cpp
-void drawOverlay(const FrameContext& ctx) {
-    if (!ctx.overlayActive) return;
-
-    HeatmapOverlay::drawOverlay(
-        ctx.h_entropy,
-        ctx.h_entropy,       // ⚠️ Hinweis: derzeit kein separater Kontrast, doppelt belegt
-        ctx.width,
-        ctx.height,
-        ctx.tileSize,
-        0,                   // textureId wird aktuell nicht verwendet
-        const_cast<RendererState&>(reinterpret_cast<const RendererState&>(ctx))  // Übergabe zum Zustand
-    );
-}
+// 📣 Globale Funktion removed: use explicit HeatmapOverlay::drawOverlay in render-loop
