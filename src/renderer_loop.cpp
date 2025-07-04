@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 310
-// 🐭 Maus-Kommentar: Projekt Capybara Phase 2 - Konsistente Heatmap-Daten-Fluss. Otter sagt: „Capybara wahrt Konsistenz, bevor Feintuning folgt.“
+// Zeilen: 318
+// 🐭 Maus-Kommentar: Projekt Capybara Phase 2 - Konsistente Heatmap-Daten-Fluss mit Null-Initialisierung.
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
@@ -78,7 +78,16 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     beginFrame(state);
     computeCudaFrame(ctx, state);
 
-    // Capybara: Heatmap-Daten berechnen und in Host-Puffer kopieren
+    // Capybara: Buffers vor Entropie-/Kontrastberechnung nullen
+    {
+        size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
+        size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
+        size_t tilesCount = tilesX * tilesY;
+        CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
+        CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
+    }
+
+    // Capybara: Heatmap-Daten berechnen
     CudaInterop::computeCudaEntropyContrast(
         ctx.d_iterations,
         ctx.d_entropy,
@@ -89,13 +98,17 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
         ctx.maxIterations
     );
 
-    size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
-    size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
-    size_t tilesCount = tilesX * tilesY;
-    CUDA_CHECK(cudaMemcpy(ctx.h_entropy.data(), ctx.d_entropy, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(ctx.h_contrast.data(), ctx.d_contrast, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
+    // Capybara: Device->Host kopieren
+    {
+        size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
+        size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
+        size_t tilesCount = tilesX * tilesY;
+        CUDA_CHECK(cudaMemcpy(ctx.h_entropy.data(), ctx.d_entropy, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(ctx.h_contrast.data(), ctx.d_contrast, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
+    }
 
     if (Settings::debugLogging) {
+        // Debug: Werte prüfen
         float e0 = ctx.h_entropy.empty() ? 0.0f : ctx.h_entropy[0];
         float c0 = ctx.h_contrast.empty() ? 0.0f : ctx.h_contrast[0];
         std::printf("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n", e0, c0);
@@ -105,7 +118,7 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
     drawFrame(ctx, state.tex, state);
 
-    // Overlay nutzt ctx.h_entropy und ctx.h_contrast automatisch
+    // Overlay: nutzt h_entropy & h_contrast aus ctx
     drawOverlay(ctx);
     Hud::draw(state);
 
