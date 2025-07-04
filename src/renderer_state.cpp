@@ -1,8 +1,9 @@
 // Datei: src/renderer_state.cpp
-// Zeilen: 101
-// 🐭 Maus-Kommentar: Zustand des Renderers – jetzt mit geglättetem Ziel per EMA. `filteredTargetOffset` puffert sanft. Schneefuchs: „Ein Otter schlägt nicht abrupt den Kurs – er lässt Strömung zu.“
-// Patch Schneefuchs Punkt 3: `cudaFree` wird jetzt sauber mit `CUDA_CHECK` abgesichert.
-// 🐼 Panda integriert: setupCudaBuffers und resize verwalten jetzt auch d_contrast / h_contrast
+// Zeilen: 113
+// 🐭 Maus-Kommentar: Kolibri integriert! Zustand des Renderers verwaltet adaptives Supersampling.
+// EMA-geglättetes Ziel bleibt erhalten. Schneefuchs: „Kolibri spart Ressourcen, Otter navigiert sanft.“
+// Patch Schneefuchs Punkt 3: `cudaFree` immer mit `CUDA_CHECK` gesichert.
+// 🐼 Panda integriert: Kontrastdaten verwaltet.
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -62,10 +63,12 @@ void RendererState::setupCudaBuffers() {
 
     CUDA_CHECK(cudaMalloc(&d_iterations, totalPixels * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&d_entropy,    numTiles   * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_contrast,   numTiles   * sizeof(float)));  // 🐼 Panda: GPU-Kontrastdaten
+    CUDA_CHECK(cudaMalloc(&d_contrast,   numTiles   * sizeof(float)));  // 🐼 Panda
+    CUDA_CHECK(cudaMalloc(&d_tileSupersampling, numTiles * sizeof(int))); // 🦜 Kolibri GPU-Puffer
 
     h_entropy.resize(numTiles);
-    h_contrast.resize(numTiles);  // 🐼 Panda: Host-Kontrastpuffer
+    h_contrast.resize(numTiles);  // 🐼 Panda
+    h_tileSupersampling.resize(numTiles); // 🦜 Kolibri CPU-Puffer
 }
 
 void RendererState::resize(int newWidth, int newHeight) {
@@ -78,8 +81,12 @@ void RendererState::resize(int newWidth, int newHeight) {
         d_entropy = nullptr;
     }
     if (d_contrast) {
-        CUDA_CHECK(cudaFree(d_contrast));  // 🐼 Panda: Kontrast freigeben
+        CUDA_CHECK(cudaFree(d_contrast));  // 🐼 Panda
         d_contrast = nullptr;
+    }
+    if (d_tileSupersampling) {
+        CUDA_CHECK(cudaFree(d_tileSupersampling));  // 🦜 Kolibri
+        d_tileSupersampling = nullptr;
     }
 
     CudaInterop::unregisterPBO();

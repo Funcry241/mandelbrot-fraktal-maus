@@ -1,20 +1,19 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 316
-/* 🐭 Maus-Kommentar: CUDA-Interop mit Entropie und Kontrast für Heatmap und Auto-Zoom.
-   Flugente: Alle Koordinaten sind jetzt float2! Kein double2 mehr im Spiel.
-   Panda: Entropie+Kontrast-Analyse bleibt vollständig erhalten.
-   Schneefuchs: „Wer float kann, braucht kein double – solange keine Galaxie explodiert.“
+// Zeilen: 336
+/* 🐭 Maus-Kommentar: Kolibri vollständig integriert: Adaptives Supersampling pro Tile.
+   Flugente aktiv: float2 für maximale Performance. Panda-Modul (Entropie+Kontrast) vollständig erhalten.
+   Schneefuchs: „Wer intelligent supersampelt, spart Performance für mehr Zoom.“
    Log bleibt ASCII-only.
 */
 
 #include "pch.hpp"
 #include "cuda_interop.hpp"
-#include "core_kernel.h"
+#include "core_kernel.h"       // Deklaration von launch_mandelbrotHybrid, computeCudaEntropyContrast
 #include "settings.hpp"
 #include "common.hpp"
 #include "renderer_state.hpp"
 #include "zoom_logic.hpp"
-#include "heatmap_overlay.hpp"
+#include <cuda_gl_interop.h>
 #include <vector>
 #include <cstdio>
 
@@ -25,7 +24,7 @@ static bool pauseZoom = false;
 
 void registerPBO(unsigned int pbo) {
     if (cudaPboResource != nullptr) {
-        std::cerr << "[ERROR] registerPBO called but resource is already registered!\n";
+        std::fprintf(stderr, "[ERROR] registerPBO called but resource is already registered!\n");
         return;
     }
     CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard));
@@ -52,114 +51,72 @@ void renderCudaFrame(
     float2& newOffset,
     bool& shouldZoom,
     int tileSize,
-    int supersampling,
-    RendererState& state
+    int /*supersampling*/, // globaler Fallback, intern ignoriert
+    RendererState& state,
+    int* d_tileSupersampling,
+    std::vector<int>& h_tileSupersampling
 ) {
     if (!cudaPboResource) {
         throw std::runtime_error("[FATAL] CUDA PBO not registered before renderCudaFrame.");
     }
 
-    if (Settings::debugLogging) {
-        std::printf("[Zoom] Auto-Zoom is %s\n", pauseZoom ? "PAUSED" : "ACTIVE");
-    }
-
+    // Map OpenGL PBO to CUDA pointer
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
     uchar4* devPtr = nullptr;
     size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
-    if (Settings::debugLogging) {
-        std::printf("[DEBUG] PBO mapped: %p (size = %zu)\n", (void*)devPtr, size);
-    }
+    // Berechne Entropie und Kontrast per CUDA
+    computeCudaEntropyContrast(d_iterations, d_entropy, d_contrast,
+                               width, height, tileSize, maxIterations);
 
-    if (Settings::debugLogging) {
-        std::printf("[DEBUG] Launch MandelbrotKernel zoom %.2f maxIter %d supersampling %d\n", zoom, maxIterations, supersampling);
-    }
+    int tilesX = (width + tileSize - 1) / tileSize;
+    int tilesY = (height + tileSize - 1) / tileSize;
+    int numTiles = tilesX * tilesY;
 
-    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, supersampling);
-
-    cudaDeviceSynchronize();
-    cudaError_t kernelErr = cudaGetLastError();
-    if (kernelErr != cudaSuccess) {
-        std::fprintf(stderr, "[CUDA ERROR] MandelbrotKernel launch failed: %s\n", cudaGetErrorString(kernelErr));
-    }
-
-    computeEntropyContrast(d_iterations, d_entropy, d_contrast, width, height, tileSize, maxIterations);
-
-    const int tilesX = (width + tileSize - 1) / tileSize;
-    const int tilesY = (height + tileSize - 1) / tileSize;
-    const int numTiles = tilesX * tilesY;
-
+    // Kopiere Analyse-Daten auf Host
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
-    shouldZoom = false;
+    // 🦜 Kolibri: Adaptive Supersampling-Stufen pro Tile setzen
+    h_tileSupersampling.resize(numTiles);
+    for (int i = 0; i < numTiles; ++i) {
+        h_tileSupersampling[i] = (h_entropy[i] > Settings::ENTROPY_THRESHOLD_HIGH) ? 4 :
+                                 (h_entropy[i] > Settings::ENTROPY_THRESHOLD_LOW ) ? 2 : 1;
+    }
+    CUDA_CHECK(cudaMemcpy(d_tileSupersampling, h_tileSupersampling.data(), numTiles * sizeof(int), cudaMemcpyHostToDevice));
 
+    // Starte Mandelbrot-Kernel mit adaptivem Supersampling
+    launch_mandelbrotHybrid(devPtr, d_iterations,
+                            width, height,
+                            zoom, offset,
+                            maxIterations,
+                            tileSize,
+                            d_tileSupersampling);
+
+    // Auto-Zoom-Logik
+    shouldZoom = false;
     if (!pauseZoom) {
-        // Volle Flugente: float2 überall!
         ZoomLogic::ZoomResult result = ZoomLogic::evaluateZoomTarget(
-            h_entropy,
-            h_contrast,
-            offset,
-            zoom,
-            width,
-            height,
+            h_entropy, h_contrast,
+            offset, zoom,
+            width, height,
             tileSize,
             state.offset,
             state.zoomResult.bestIndex,
             state.zoomResult.bestEntropy,
             state.zoomResult.bestContrast
         );
-
         if (result.bestIndex >= 0) {
-            newOffset = result.newOffset;   // float2 zu float2 – keine Umwandlung
+            newOffset = result.newOffset;
             shouldZoom = result.shouldZoom;
-
-            if (result.isNewTarget) {
-                state.zoomResult.bestEntropy  = result.bestEntropy;
-                state.zoomResult.bestContrast = result.bestContrast;
-                state.zoomResult.bestIndex    = result.bestIndex;
-            }
-        }
-
-        if (Settings::debugLogging) {
-            if (result.bestIndex >= 0) {
-                float minJump = Settings::MIN_JUMP_DISTANCE / zoom;
-                std::printf(
-                    "Zoom Z %.1e I %d E %.3f C %.3f S %.3f dO %.2e dPx %.1f minJ %.2e dE %.3f dC %.3f RelE %.2f RelC %.2f New %d\n",
-                    zoom,
-                    result.bestIndex,
-                    result.bestEntropy,
-                    result.bestContrast,
-                    result.bestScore,
-                    result.distance,
-                    result.distance * zoom * width,
-                    minJump,
-                    result.relEntropyGain,
-                    result.relContrastGain,
-                    result.relEntropyGain,
-                    result.relContrastGain,
-                    result.isNewTarget ? 1 : 0
-                );
-            } else {
-                float avgEntropy = 0.0f;
-                int countAbove = 0;
-                for (float h : h_entropy) {
-                    avgEntropy += h;
-                    if (h > Settings::VARIANCE_THRESHOLD) countAbove++;
-                }
-                avgEntropy /= h_entropy.size();
-                std::printf("Zoom NoZoom TilesAbove %d AvgEntropy %.5f\n", countAbove, avgEntropy);
-            }
-        }
-
-        if (!result.isNewTarget) {
-            state.zoomResult = result;
+            if (result.isNewTarget) state.zoomResult = result;
         }
     }
 
+    // Unmap PBO
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
 }
 
@@ -169,34 +126,6 @@ void setPauseZoom(bool pause) {
 
 bool getPauseZoom() {
     return pauseZoom;
-}
-
-void logZoomEvaluation(const int* d_iterations, int width, int height, int tileSize, float zoom) {
-    const int tilesX = (width + tileSize - 1) / tileSize;
-    const int tilesY = (height + tileSize - 1) / tileSize;
-
-    std::vector<int> h_iterations(width * height);
-    cudaMemcpy(h_iterations.data(), d_iterations, sizeof(int) * width * height, cudaMemcpyDeviceToHost);
-
-    for (int ty = 0; ty < tilesY; ++ty) {
-        for (int tx = 0; tx < tilesX; ++tx) {
-            int sum = 0;
-            int count = 0;
-
-            for (int dy = 0; dy < tileSize; ++dy) {
-                for (int dx = 0; dx < tileSize; ++dx) {
-                    int x = tx * tileSize + dx;
-                    int y = ty * tileSize + dy;
-                    if (x >= width || y >= height) continue;
-                    sum += h_iterations[y * width + x];
-                    ++count;
-                }
-            }
-
-            float avg = (count > 0) ? (float)sum / count : 0.0f;
-            std::printf("[ZoomEvalCSV] %d,%d,%.4f,%.2f\n", tx, ty, zoom, avg);
-        }
-    }
 }
 
 } // namespace CudaInterop

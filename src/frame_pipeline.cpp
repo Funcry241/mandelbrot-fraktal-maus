@@ -1,5 +1,5 @@
 // Datei: src/frame_pipeline.cpp
-// Zeilen: 99
+// Zeilen: 120
 /* 🐭 interner Maus-Kommentar:
    Diese Datei definiert die logische Render-Pipeline:
    - Klar getrennte Schritte (beginFrame, computeCudaFrame, applyZoomLogic, drawFrame)
@@ -25,6 +25,8 @@
 #include <GL/gl.h>
 #include <GLFW/glfw3.h>
 #include <cmath>  // ✅ ersetzt manuelle sqrt/tanh-Berechnungen
+#include <vector_types.h> // für float2
+#include <vector>
 
 static int globalFrameCounter = 0;
 
@@ -35,34 +37,47 @@ void beginFrame(FrameContext& ctx) {
     ctx.timeSinceLastZoom += ctx.frameTime;
     ctx.shouldZoom = false;
     ctx.newOffset = ctx.offset;
-    ctx.frameTime = std::max(0.001, ctx.frameTime); // keine 0-Div
+    ctx.frameTime = std::max(0.001, ctx.frameTime);
     ++globalFrameCounter;
 }
 
 void computeCudaFrame(FrameContext& ctx, RendererState& state) {
+    // 🦜 Kolibri: Konvertiere double2 zu float2 für GPU
+    float2 gpuOffset = make_float2(static_cast<float>(ctx.offset.x), static_cast<float>(ctx.offset.y));
+    float2 gpuNewOffset;
+
     CudaInterop::renderCudaFrame(
         ctx.d_iterations,
         ctx.d_entropy,
         ctx.d_contrast,
         ctx.width,
         ctx.height,
-        ctx.zoom,
-        ctx.offset,
+        static_cast<float>(ctx.zoom),
+        gpuOffset,
         ctx.maxIterations,
         ctx.h_entropy,
         ctx.h_contrast,
-        ctx.newOffset,
+        gpuNewOffset,
         ctx.shouldZoom,
         ctx.tileSize,
         ctx.supersampling,
-        state
+        state,
+        state.d_tileSupersampling,
+        state.h_tileSupersampling
     );
 
+    // Übertrage das neue Offset zurück zum Context
+    if (ctx.shouldZoom) {
+        ctx.newOffset.x = gpuNewOffset.x;
+        ctx.newOffset.y = gpuNewOffset.y;
+    }
+
     if (Settings::debugLogging) {
-        printf("[CUDA] Input: offset=(%.10f, %.10f) | zoom=%.2f\n",
+        std::printf("[CUDA] Input: offset=(%.10f, %.10f) | zoom=%.2f\n",
                ctx.offset.x, ctx.offset.y, ctx.zoom);
     }
 
+    // Renderer-Pipeline updaten
     RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
 }
 
@@ -71,15 +86,15 @@ void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus) {
     double dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
 
     if (Settings::debugLogging) {
-        printf("[Logic] Start | shouldZoom=%d | Zoom=%.2f | dO=%.4e\n",
-               ctx.shouldZoom, ctx.zoom, dist);
+        std::printf("[Logic] Start | shouldZoom=%d | Zoom=%.2f | dO=%.4e\n",
+               ctx.shouldZoom ? 1 : 0, ctx.zoom, dist);
     }
 
     if (!ctx.shouldZoom) return;
 
     if (dist < Settings::DEADZONE) {
         if (Settings::debugLogging) {
-            printf("[Logic] Offset in DEADZONE (%.4e) → no movement\n", dist);
+            std::printf("[Logic] Offset in DEADZONE (%.4e) → no movement\n", dist);
         }
         return;
     }
@@ -90,7 +105,7 @@ void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus) {
 
     if (Settings::debugLogging) {
         double stepLen = std::sqrt(step.x * step.x + step.y * step.y);
-        printf("[Logic] Step len=%.4e | Zoom += %.5f\n",
+        std::printf("[Logic] Step len=%.4e | Zoom += %.5f\n",
                stepLen, Settings::AUTOZOOM_SPEED);
     }
 
@@ -121,7 +136,7 @@ void drawFrame(FrameContext& ctx, GLuint tex, RendererState& state) {
             ctx.height,
             ctx.tileSize,
             tex,
-            state // WICHTIG: RendererState übergeben
+            state
         );
     }
 

@@ -1,13 +1,14 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 99
-// 🐭 Maus-Kommentar: Der Renderer merkt sich nun Entropie, Kontrast, Index und Score (zoomResult) – für Analyse, Visualisierung oder Heatmap. 
-// Flugente: offset zurück auf float2 für Performance. 
+// Zeilen: 84
+// 🐭 Maus-Kommentar: Der Renderer merkt sich nun Entropie, Kontrast, Index und Score (zoomResult) – für Analyse, Visualisierung oder Heatmap.
+// Flugente: offset zurück auf float2 für Performance.
 // Schneefuchs: „Wer messen will, muss erinnern.“
 
 #pragma once
 
 #include "pch.hpp"              // 🧠 Enthält <cuda_runtime.h>, float2 etc.
 #include "zoom_logic.hpp"       // 📦 ZoomResult für Auto-Zoom-Auswertung
+#include <vector>
 
 class RendererState {
 public:
@@ -43,6 +44,10 @@ public:
     int* d_iterations = nullptr;
     float* d_entropy   = nullptr;
     float* d_contrast  = nullptr;    // 🐼 Panda: device-Kontrastdaten
+    int* d_tileSupersampling = nullptr; // 🦜 Kolibri: adaptives Supersampling
+
+    // 🎛️ CPU-Puffer für Supersampling
+    std::vector<int> h_tileSupersampling; // 🦜 Kolibri: CPU-Puffer
 
     // 🎥 OpenGL-Puffer
     unsigned int pbo = 0;
@@ -62,7 +67,7 @@ public:
     int   lastIndex = -1;
     bool justZoomed = false;
 
-    // 📏 Supersampling
+    // 📏 Supersampling global default
     int supersampling = 1;
 
     // 🔥 Overlay-Steuerung

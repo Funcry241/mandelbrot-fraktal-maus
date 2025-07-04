@@ -1,37 +1,37 @@
 // Datei: src/core_kernel.h
-// Zeilen: 34
-// 🐭 Maus-Kommentar: Schnittstelle zwischen CPU und CUDA-Kernel. Jetzt mit Panda: `computeEntropyContrast` liefert Entropie und Kontrast pro Tile – für Heatmap und Zielwahl. Schneefuchs sagte: „Struktur ist der Anfang von Neugier.“
-
+// Zeilen: 32
 #pragma once
 
-#include <vector_types.h>  // für float2
-
-// 🧠 Kompatibilität für Host/Device-Makros in Nicht-CUDA-Kontexten
-#ifndef __host__
-#define __host__
-#endif
-#ifndef __device__
-#define __device__
-#endif
+#include <cuda_runtime.h>  // uchar4
+#include <vector_types.h>   // float2
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// 🚀 Fraktal + Iterationen rendern (für spätere Analyse und Farbgebung)
-void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
-                             int width, int height,
-                             float zoom, float2 offset,
-                             int maxIterations,
-                             int supersampling);
+// Fraktal-Rendering mit adaptivem Supersampling pro Tile
+void launch_mandelbrotHybrid(
+    uchar4* output,
+    int* d_iterations,
+    int width,
+    int height,
+    float zoom,
+    float2 offset,
+    int maxIterations,
+    int tileSize,
+    const int* d_tileSupersampling
+);
 
-// 🐼 Entropie + Kontrast jedes Tiles berechnen (für Heatmap + Zielwahl)
-void computeEntropyContrast(const int* d_iterations,
-                            float* d_entropyOut,
-                            float* d_contrastOut,
-                            int width, int height,
-                            int tileSize,
-                            int maxIter);
+// Entropie + Kontrast jedes Tiles berechnen (Host-Aufruf, implementiert in core_kernel.cu)
+void computeCudaEntropyContrast(
+    const int* d_iterations,
+    float* d_entropyOut,
+    float* d_contrastOut,
+    int width,
+    int height,
+    int tileSize,
+    int maxIter
+);
 
 #ifdef __cplusplus
 }

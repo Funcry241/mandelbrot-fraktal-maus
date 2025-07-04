@@ -22,6 +22,11 @@ inline constexpr int defaultSupersampling = 1;
 inline constexpr bool debugGradient = false; // Aktiviert reine Entropie-Ansicht (keine Farben) – nur zu Analysezwecken
 inline constexpr bool debugLogging  = false;  // Aktiviert Konsolenausgaben für Auto-Zoom, Tile-Entropie etc.
 
+// Legt fest, wie stark die Supersampling-Stufe bei hoher Entropie skaliert wird.
+// HIGH: ab diesem Wert 4x4 Supersampling, LOW: ab diesem Wert 2x2 Supersampling.
+inline constexpr float ENTROPY_THRESHOLD_HIGH = 3.0f; // Empfehlung: 2.5 – 4.0
+inline constexpr float ENTROPY_THRESHOLD_LOW  = 1.5f; // Empfehlung: 1.0 – 2.5
+
 // 🔥 Sichtbarkeit des Heatmap-Overlays beim Programmstart
 // true  = Heatmap (Entropie-Kontrast) ist sofort sichtbar
 // false = Muss per Taste H aktiviert werden
