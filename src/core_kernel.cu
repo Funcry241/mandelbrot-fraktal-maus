@@ -1,7 +1,7 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 331
-// 🐭 Maus-Kommentar: Projekt Kolibri umgesetzt! Adaptives Supersampling auf Tile-Basis,
-// basierend auf Entropie-Kontrastanalyse (Panda-Modul). Schneefuchs sagt: „Kolibri spart Kraft, wo sie unnötig wäre.“
+// Zeilen: 337
+// 🐭 Maus-Kommentar: Projekt Dachs gestartet! Fehlerhafte Flächenfärbung korrigiert,
+// smoothed coloring aktiviert, Heatmap wieder funktionstüchtig gemacht. Kolibri und Panda bleiben unangetastet.
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
@@ -12,6 +12,7 @@
 
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     if (t < 0.0f) return make_uchar4(0, 0, 0, 255);
+    t = fminf(fmaxf(t, 0.0f), 1.0f);
     float intensity = sqrtf(t);
     float r = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.0f));
     float g = 0.5f + 0.5f * __sinf(6.2831f * (intensity + 0.33f));
@@ -49,8 +50,7 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     int tileIndex = tileY * tilesX + tileX;
 
     int S = tileSupersampling[tileIndex];
-    float totalColor = 0.0f;
-    int validSamples = 0;
+    float totalT = 0.0f;
     int totalIter = 0;
 
     for (int i = 0; i < S; ++i) {
@@ -64,19 +64,17 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
             int iter = mandelbrotIterations(jx, jy, maxIterations, zx, zy);
             totalIter += iter;
 
-            if (iter < maxIterations) {
-                float norm = zx * zx + zy * zy;
-                float t = (iter + 1.0f - log2f(log2f(norm))) / maxIterations;
-                totalColor += t;
-                ++validSamples;
-            }
+            float norm = zx * zx + zy * zy;
+            float t = (iter + 1.0f - log2f(log2f(fmaxf(norm, 1e-8f)))) / maxIterations;
+            t = fminf(fmaxf(t, 0.0f), 1.0f);
+            totalT += t;
         }
     }
 
-    float avgColor = (validSamples > 0) ? (totalColor / validSamples) : -1.0f;
+    float avgT = totalT / (S * S);
     int avgIter = totalIter / (S * S);
 
-    output[y * width + x] = elegantColor(avgColor);
+    output[y * width + x] = elegantColor(avgT);
     iterationsOut[y * width + x] = avgIter;
 }
 
