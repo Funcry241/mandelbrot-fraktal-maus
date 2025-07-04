@@ -1,7 +1,7 @@
 // Datei: src/cuda_interop.hpp
 // Zeilen: 75
 // 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL-Interop – Kolibri+Panda integriert, Flugente-konform mit float2.
-// Schneefuchs: „Präzision darf rasten, wenn Performance eilt.“
+// Capybara Phase 2: Einheitliche Heatmap-Datenübertragung und Kontrastberechnung. Otter sagt: „Capybara wahrt Konsistenz, bevor Feintuning folgt.“
 
 #ifndef CUDA_INTEROP_HPP
 #define CUDA_INTEROP_HPP
@@ -9,6 +9,7 @@
 #include <vector>
 #include <GLFW/glfw3.h>
 #include <vector_types.h> // float2
+#include "core_kernel.h"  // Deklariert extern "C" computeCudaEntropyContrast
 
 // 🧠 Vorwärtsdeklaration für RendererState
 class RendererState;
@@ -56,7 +57,7 @@ bool getPauseZoom();
 // 🧪 CSV-Ausgabe für Zielanalyse
 void logZoomEvaluation(const int* d_iterations, int width, int height, int tileSize, float zoom);
 
-// 🛠 Projekt Dachs Phase 2: Entropie- und Kontrastberechnung
+// 🛠 Capybara Phase 2: Einheitliche Entropie- und Kontrastberechnung
 /// Berechnet und füllt Device-Puffer für Entropie und Kontrast-Heatmap.
 void computeCudaEntropyContrast(
     const int* d_iterations,
@@ -68,6 +69,21 @@ void computeCudaEntropyContrast(
     int maxIter
 );
 
+
+    // Capybara Phase 2: Namespace-Wrapper für extern "C"-Funktion
+    // Vermittelt zwischen C++-Namespace und C-Funktion in core_kernel.cu
+    inline void computeCudaEntropyContrast(
+        const int* d_iterations,
+        float* d_entropyOut,
+        float* d_contrastOut,
+        int width,
+        int height,
+        int tileSize,
+        int maxIter
+    ) {
+        ::computeCudaEntropyContrast(d_iterations, d_entropyOut, d_contrastOut,
+                                     width, height, tileSize, maxIter);
+    }
 } // namespace CudaInterop
 
 #endif // CUDA_INTEROP_HPP

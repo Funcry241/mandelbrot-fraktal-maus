@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
 // Zeilen: 337
-// 🐭 Maus-Kommentar: Projekt Dachs Phase 2 - Heatmap-Bewegung aktiviert. Otter sagt: „Dachs sorgt für Dynamik, ohne Altbewährtes infrage zu stellen.“
+// 🐭 Maus-Kommentar: Projekt Capybara Phase 2 - Konsistente Iterationsspeicherung für saubere Heatmap-Berechnung. Otter sagt: „Capybara bewahrt Integrität, bevor wir Feintuning wagen.“
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
@@ -8,7 +8,6 @@
 #include "common.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
-#include "cuda_interop.hpp"  // für namespace CudaInterop
 
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     if (t < 0.0f) return make_uchar4(0, 0, 0, 255);
@@ -51,29 +50,32 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
 
     int S = tileSupersampling[tileIndex];
     float totalT = 0.0f;
+    int totalIter = 0;
 
     for (int i = 0; i < S; ++i) {
         for (int j = 0; j < S; ++j) {
             float dx = (i + 0.5f) / S;
             float dy = (j + 0.5f) / S;
-            float jx = (x + dx - width / 2.0f) / zoom + offset.x;
-            float jy = (y + dy - height / 2.0f) / zoom + offset.y;
+            float jx = (x + dx - width * 0.5f) / zoom + offset.x;
+            float jy = (y + dy - height * 0.5f) / zoom + offset.y;
 
             float zx, zy;
             int iter = mandelbrotIterations(jx, jy, maxIterations, zx, zy);
+            totalIter += iter;
 
             float norm = zx * zx + zy * zy;
             float t = (iter + 1.0f - log2f(log2f(fmaxf(norm, 1e-8f)))) / maxIterations;
             t = fminf(fmaxf(t, 0.0f), 1.0f);
             totalT += t;
-
-            int smoothBin = int(t * 1023.0f);
-            iterationsOut[y * width + x] = smoothBin;
         }
     }
 
     float avgT = totalT / (S * S);
+    int avgIter = totalIter / (S * S);
+
     output[y * width + x] = elegantColor(avgT);
+    // Projekt Capybara: Schreibe echte Iterationswerte zurück
+    iterationsOut[y * width + x] = avgIter;
 }
 
 extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
@@ -92,7 +94,6 @@ extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
                                               maxIterations,
                                               tileSize,
                                               d_tileSupersampling);
-
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
@@ -100,7 +101,7 @@ extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
     cudaDeviceSynchronize();
 }
 
-// Entropie-Kernel: Histogramm-basierte Tile-Entropie
+// Entropie-Kernel: Histogramm-basierte Tile-Entropie (Bins lokal berechnen)
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
                               int width, int height, int tileSize,
                               int maxIter) {
@@ -109,8 +110,8 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     int startX = tileX * tileSize;
     int startY = tileY * tileSize;
 
-    __shared__ int histo[1024];
-    for (int i = threadIdx.x; i < 1024; i += blockDim.x)
+    __shared__ int histo[256];
+    for (int i = threadIdx.x; i < 256; i += blockDim.x)
         histo[i] = 0;
     __syncthreads();
 
@@ -126,7 +127,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         int y = startY + dy;
         if (x >= width || y >= height) continue;
         int iter = iterations[y * width + x];
-        int bin = min(iter, 1023);
+        int bin = min(iter * 256 / (maxIter + 1), 255);
         atomicAdd(&histo[bin], 1);
         localCount++;
     }
@@ -134,7 +135,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
 
     if (threadIdx.x == 0 && localCount > 0) {
         float entropy = 0.0f;
-        for (int i = 0; i < 1024; ++i) {
+        for (int i = 0; i < 256; ++i) {
             float p = histo[i] / (float)localCount;
             if (p > 0.0f)
                 entropy -= p * log2f(p);
@@ -145,7 +146,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     }
 }
 
-// Kontrast-Kernel: mittlere Abweichung der Entropie zu Nachbarn
+// Kontrast-Kernel: mittlere Abweichung der Entropie zu Nachbarn (unverändert)
 __global__ void contrastKernel(const float* entropy, float* contrastOut,
                                int tilesX, int tilesY) {
     int tx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -170,10 +171,8 @@ __global__ void contrastKernel(const float* entropy, float* contrastOut,
     contrastOut[idx] = (count > 0) ? sumDiff / count : 0.0f;
 }
 
-// Projekt Dachs Phase 2: Entropie- und Kontrastberechnung im Namespace
-namespace CudaInterop {
-
-void computeCudaEntropyContrast(
+// Globale C-Funktion zur Entropie- und Kontrastberechnung für Kolibri (unverändert)
+extern "C" void computeCudaEntropyContrast(
     const int* d_iterations,
     float* d_entropyOut,
     float* d_contrastOut,
@@ -182,6 +181,7 @@ void computeCudaEntropyContrast(
     int tileSize,
     int maxIter
 ) {
+    // Erst Entropie
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     dim3 gridE(tilesX, tilesY);
@@ -189,10 +189,9 @@ void computeCudaEntropyContrast(
     entropyKernel<<<gridE, blockE>>>(d_iterations, d_entropyOut, width, height, tileSize, maxIter);
     cudaDeviceSynchronize();
 
+    // Dann Kontrast
     dim3 gridC((tilesX + 15) / 16, (tilesY + 15) / 16);
     dim3 blockC(16, 16);
     contrastKernel<<<gridC, blockC>>>(d_entropyOut, d_contrastOut, tilesX, tilesY);
     cudaDeviceSynchronize();
 }
-
-} // namespace CudaInterop
