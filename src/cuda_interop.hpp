@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.hpp
-// Zeilen: 65
+// Zeilen: 75
 // 🐭 Maus-Kommentar: Schnittstelle zur CUDA/OpenGL-Interop – Kolibri+Panda integriert, Flugente-konform mit float2.
 // Schneefuchs: „Präzision darf rasten, wenn Performance eilt.“
 
@@ -55,6 +55,18 @@ bool getPauseZoom();
 
 // 🧪 CSV-Ausgabe für Zielanalyse
 void logZoomEvaluation(const int* d_iterations, int width, int height, int tileSize, float zoom);
+
+// 🛠 Projekt Dachs Phase 2: Entropie- und Kontrastberechnung
+/// Berechnet und füllt Device-Puffer für Entropie und Kontrast-Heatmap.
+void computeCudaEntropyContrast(
+    const int* d_iterations,
+    float* d_entropyOut,
+    float* d_contrastOut,
+    int width,
+    int height,
+    int tileSize,
+    int maxIter
+);
 
 } // namespace CudaInterop
 

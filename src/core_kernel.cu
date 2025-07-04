@@ -8,6 +8,7 @@
 #include "common.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
+#include "cuda_interop.hpp"  // für namespace CudaInterop
 
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     if (t < 0.0f) return make_uchar4(0, 0, 0, 255);
@@ -50,7 +51,6 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
 
     int S = tileSupersampling[tileIndex];
     float totalT = 0.0f;
-    int totalIter = 0;
 
     for (int i = 0; i < S; ++i) {
         for (int j = 0; j < S; ++j) {
@@ -61,21 +61,18 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
 
             float zx, zy;
             int iter = mandelbrotIterations(jx, jy, maxIterations, zx, zy);
-            totalIter += iter;
 
             float norm = zx * zx + zy * zy;
             float t = (iter + 1.0f - log2f(log2f(fmaxf(norm, 1e-8f)))) / maxIterations;
             t = fminf(fmaxf(t, 0.0f), 1.0f);
             totalT += t;
 
-            // Phase 2: Smoothed-Wert für Heatmap speichern
-            int smoothBin = int(t * 1023.0f); // 0..1023 für feine Histogramme
+            int smoothBin = int(t * 1023.0f);
             iterationsOut[y * width + x] = smoothBin;
         }
     }
 
     float avgT = totalT / (S * S);
-    
     output[y * width + x] = elegantColor(avgT);
 }
 
@@ -112,7 +109,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     int startX = tileX * tileSize;
     int startY = tileY * tileSize;
 
-    __shared__ int histo[1024]; // angepasste Bin-Größe
+    __shared__ int histo[1024];
     for (int i = threadIdx.x; i < 1024; i += blockDim.x)
         histo[i] = 0;
     __syncthreads();
@@ -173,8 +170,10 @@ __global__ void contrastKernel(const float* entropy, float* contrastOut,
     contrastOut[idx] = (count > 0) ? sumDiff / count : 0.0f;
 }
 
-// Globale C-Funktion zur Entropie- und Kontrastberechnung für Kolibri
-extern "C" void computeCudaEntropyContrast(
+// Projekt Dachs Phase 2: Entropie- und Kontrastberechnung im Namespace
+namespace CudaInterop {
+
+void computeCudaEntropyContrast(
     const int* d_iterations,
     float* d_entropyOut,
     float* d_contrastOut,
@@ -183,7 +182,6 @@ extern "C" void computeCudaEntropyContrast(
     int tileSize,
     int maxIter
 ) {
-    // Erst Entropie
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     dim3 gridE(tilesX, tilesY);
@@ -191,9 +189,10 @@ extern "C" void computeCudaEntropyContrast(
     entropyKernel<<<gridE, blockE>>>(d_iterations, d_entropyOut, width, height, tileSize, maxIter);
     cudaDeviceSynchronize();
 
-    // Dann Kontrast
     dim3 gridC((tilesX + 15) / 16, (tilesY + 15) / 16);
     dim3 blockC(16, 16);
     contrastKernel<<<gridC, blockC>>>(d_entropyOut, d_contrastOut, tilesX, tilesY);
     cudaDeviceSynchronize();
 }
+
+} // namespace CudaInterop

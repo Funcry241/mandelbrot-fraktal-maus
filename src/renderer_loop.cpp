@@ -1,9 +1,6 @@
 // Datei: src/renderer_loop.cpp
 // Zeilen: 282
-// 🐭 Maus-Kommentar: HeatmapOverlay wird korrekt gezeichnet – drawOverlay(ctx) ist aktiv, ctx.d_contrast ist nun gesetzt. 
-// Flugente: offset ist wieder float2, ctx bleibt synchron zu FrameContext. 
-// Panda vollständig intakt: Heatmap, Kontrastdaten, Supersampling bleiben erhalten.
-
+// 🐭 Maus-Kommentar: Projekt Dachs Phase 2 - Heatmap-Bewegung aktiviert. Otter sagt: „Dachs sorgt für Dynamik, ohne Altbewährtes infrage zu stellen.“
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
@@ -78,7 +75,18 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     ctx.lastTileIndex = state.lastTileIndex;
 
     beginFrame(state);
-    computeCudaFrame(ctx, state);
+    computeCudaFrame(ctx, state);  
+    
+    // Projekt Dachs: Heatmap-Daten berechnen
+    CudaInterop::computeCudaEntropyContrast(
+        ctx.d_iterations,
+        ctx.d_entropy,
+        ctx.d_contrast,
+        ctx.width,
+        ctx.height,
+        ctx.tileSize,
+        ctx.maxIterations
+    );
 
     if (autoZoomEnabled) {
         applyZoomLogic(ctx, zoomBus);
