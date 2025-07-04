@@ -136,7 +136,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     if (threadIdx.x == 0 && localCount > 0) {
         float entropy = 0.0f;
         for (int i = 0; i < 256; ++i) {
-            float p = histo[i] / (float)localCount;
+            float p = histo[i] / (float)total;
             if (p > 0.0f)
                 entropy -= p * log2f(p);
         }
@@ -146,7 +146,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     }
 }
 
-// Kontrast-Kernel: mittlere Abweichung der Entropie zu Nachbarn (unverändert) (unverändert)
+// Kontrast-Kernel: mittlere Abweichung der Entropie zu Nachbarn (unverändert)
 __global__ void contrastKernel(const float* entropy, float* contrastOut,
                                int tilesX, int tilesY) {
     int tx = blockIdx.x * blockDim.x + threadIdx.x;
