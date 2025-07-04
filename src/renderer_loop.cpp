@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 282
+// Zeilen: 295
 // 🐭 Maus-Kommentar: Projekt Dachs Phase 2 - Heatmap-Bewegung aktiviert. Otter sagt: „Dachs sorgt für Dynamik, ohne Altbewährtes infrage zu stellen.“
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -59,6 +59,7 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
         isFirstFrame = false;
     }
 
+    // Context aktualisieren
     ctx.width = state.width;
     ctx.height = state.height;
     ctx.maxIterations = state.maxIterations;
@@ -75,8 +76,8 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     ctx.lastTileIndex = state.lastTileIndex;
 
     beginFrame(state);
-    computeCudaFrame(ctx, state);  
-    
+    computeCudaFrame(ctx, state);
+
     // Projekt Dachs: Heatmap-Daten berechnen
     CudaInterop::computeCudaEntropyContrast(
         ctx.d_iterations,
@@ -88,6 +89,13 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
         ctx.maxIterations
     );
 
+    // Daten Device -> Host kopieren für Heatmap-Overlay
+    size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
+    size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
+    size_t tilesCount = tilesX * tilesY;
+    CUDA_CHECK(cudaMemcpy(ctx.h_entropy.data(), ctx.d_entropy, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(ctx.h_contrast.data(), ctx.d_contrast, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
+
     if (autoZoomEnabled) {
         applyZoomLogic(ctx, zoomBus);
         computeCudaFrame(ctx, state);
@@ -98,6 +106,7 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     drawOverlay(ctx);
     Hud::draw(state);
 
+    // State zurückschreiben
     state.zoom = ctx.zoom;
     state.offset = ctx.offset;  // Flugente: float2 direkt übernehmen
     state.h_entropy = ctx.h_entropy;
