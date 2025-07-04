@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 295
+// Zeilen: 310
 // 🐭 Maus-Kommentar: Projekt Dachs Phase 2 - Heatmap-Bewegung aktiviert. Otter sagt: „Dachs sorgt für Dynamik, ohne Altbewährtes infrage zu stellen.“
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -95,6 +95,13 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     size_t tilesCount = tilesX * tilesY;
     CUDA_CHECK(cudaMemcpy(ctx.h_entropy.data(), ctx.d_entropy, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(ctx.h_contrast.data(), ctx.d_contrast, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
+
+    // Debug: Werte prüfen
+    if (Settings::debugLogging) {
+        float e0 = ctx.h_entropy.empty() ? 0.0f : ctx.h_entropy[0];
+        float c0 = ctx.h_contrast.empty() ? 0.0f : ctx.h_contrast[0];
+        std::printf("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n", e0, c0);
+    }
 
     if (autoZoomEnabled) {
         applyZoomLogic(ctx, zoomBus);
