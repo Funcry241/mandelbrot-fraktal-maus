@@ -134,15 +134,19 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     __syncthreads();
 
     if (threadIdx.x == 0 && localCount > 0) {
-        // Dachs-Test: Stub-Wert fix setzen, um Ausführung zu prüfen
+        float entropy = 0.0f;
+        for (int i = 0; i < 256; ++i) {
+            float p = histo[i] / (float)localCount;
+            if (p > 0.0f)
+                entropy -= p * log2f(p);
+        }
         int tilesX = (width + tileSize - 1) / tileSize;
         int tileIndex = tileY * tilesX + tileX;
-        entropyOut[tileIndex] = 123.456f;
-        return;
+        entropyOut[tileIndex] = entropy;
     }
 }
 
-// Kontrast-Kernel: mittlere Abweichung der Entropie zu Nachbarn (unverändert)
+// Kontrast-Kernel: mittlere Abweichung der Entropie zu Nachbarn (unverändert) (unverändert)
 __global__ void contrastKernel(const float* entropy, float* contrastOut,
                                int tilesX, int tilesY) {
     int tx = blockIdx.x * blockDim.x + threadIdx.x;
