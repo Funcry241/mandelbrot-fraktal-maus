@@ -79,8 +79,8 @@ add_executable(mandelbrot_otterdream
 
     # 🔎 Zoom-Logik & Analyse
     src/zoom_logic.cpp
-    src/zoom_command.cpp      # 🆕 ZoomCommand & CommandBus
-    src/frame_pipeline.cpp    # 🆕 Modulare Renderlogik pro Frame
+    src/zoom_command.cpp
+    src/frame_pipeline.cpp
 )
 
 # Precompiled Header (MSVC-only)
