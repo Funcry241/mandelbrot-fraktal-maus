@@ -1,11 +1,20 @@
 // Datei: src/hud.cpp
-// Zeilen: 213
+// Zeilen: 219
 // 🐭 Maus-Kommentar: HUD-Overlay mit Textanzeige via STB-Easy-Font und GLSL-Shadern. Zeigt FPS, Offset, Zoom-Faktor als wissenschaftliche Potenz sowie Overlay-Status. Schneefuchs: „Alles sichtbar, nichts verborgen.“
+// Otter-Fix: C4505-Warnung unterdrückt (nur für Font-Header); float-Casts überall für MSVC /W4 /WX.
 
 #include "pch.hpp"
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4505)
+#endif
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
 #include "hud.hpp"
 #include "renderer_state.hpp" // 🧠 Für Zugriff auf RendererState
 
@@ -128,13 +137,16 @@ void draw(RendererState& state) {
     char hudText2[256];
     char hudText3[64];
 
-    float logZoom = -log10f(state.zoom); // z. B. Zoom = 1e-7 → logZoom = 7
-    float fps = state.currentFPS;
-    float frameTimeMs = state.deltaTime * 1000.0f;
+    // Fix: Casts von double auf float bei logZoom und drawText-Aufrufen
+    float logZoom = -log10f(static_cast<float>(state.zoom)); // Zoom (double) auf float casten
+    float fps = static_cast<float>(state.currentFPS);        // Falls currentFPS double ist
+    float frameTimeMs = static_cast<float>(state.deltaTime * 1000.0); // deltaTime (double) auf float
 
     std::snprintf(hudText1, sizeof(hudText1),
                   "FPS: %.1f | Zoom: 1e%.1f | Offset: (%.3f, %.3f)",
-                  fps, logZoom, state.offset.x, state.offset.y);
+                  fps, logZoom,
+                  static_cast<float>(state.offset.x),
+                  static_cast<float>(state.offset.y));
 
     std::snprintf(hudText2, sizeof(hudText2),
                   "Frame Time: %.2f ms", frameTimeMs);
@@ -142,9 +154,13 @@ void draw(RendererState& state) {
     std::snprintf(hudText3, sizeof(hudText3),
                   "[H] Overlay: %s", state.overlayEnabled ? "ON" : "OFF");
 
-    drawText(hudText1, 10.0f, 20.0f, static_cast<float>(state.width), static_cast<float>(state.height));
-    drawText(hudText2, 10.0f, 50.0f, static_cast<float>(state.width), static_cast<float>(state.height));
-    drawText(hudText3, 10.0f, 80.0f, static_cast<float>(state.width), static_cast<float>(state.height));
+    // Casts bei drawText:
+    drawText(hudText1, 10.0f, 20.0f,
+             static_cast<float>(state.width), static_cast<float>(state.height));
+    drawText(hudText2, 10.0f, 50.0f,
+             static_cast<float>(state.width), static_cast<float>(state.height));
+    drawText(hudText3, 10.0f, 80.0f,
+             static_cast<float>(state.width), static_cast<float>(state.height));
 }
 
 void cleanup() {

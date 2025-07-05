@@ -2,8 +2,7 @@
 // Zeilen: 127
 // 🐭 Maus-Kommentar: Kiwi – Heatmap-Logik nur nach Render, alle Daten aktuell. Keine DrawOverlay-Altpfade mehr. Schneefuchs validiert: Framedaten, Overlay und CUDA sauber synchron.
 // Alpha 42: Explizite Includes für Namespace-Auflösung (Otter-Fix für VSCode-IntelliSense).
-// Otter-Sonderlog: Host-seitige Kernel-Parameter vor jedem Render für Debug-Analyse.
-
+// Otter-Sonderlog: Host-seitige Kernel-Parameter vor jedem Render für Debug-Analyse
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
@@ -20,13 +19,14 @@
 static int globalFrameCounter = 0;
 
 void beginFrame(FrameContext& ctx) {
-    ctx.frameTime = glfwGetTime();
-    ctx.frameTime -= ctx.totalTime;
-    ctx.totalTime += ctx.frameTime;
-    ctx.timeSinceLastZoom += ctx.frameTime;
+    // Fix für C4244: explizite float-Casts auf alle double -> float Umwandlungen
+    float delta = static_cast<float>(glfwGetTime() - ctx.totalTime);
+    ctx.frameTime = delta;
+    ctx.totalTime += delta;
+    ctx.timeSinceLastZoom += delta;
     ctx.shouldZoom = false;
     ctx.newOffset = ctx.offset;
-    ctx.frameTime = std::max(0.001, ctx.frameTime);
+    if (ctx.frameTime < 0.001f) ctx.frameTime = 0.001f;
     ++globalFrameCounter;
 }
 
@@ -102,8 +102,9 @@ void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus) {
                stepLen, Settings::AUTOZOOM_SPEED);
     }
 
-    ctx.offset.x += step.x;
-    ctx.offset.y += step.y;
+    // Explizite Casts um C4244 zu vermeiden (double->float)
+    ctx.offset.x = static_cast<float>(ctx.offset.x + step.x);
+    ctx.offset.y = static_cast<float>(ctx.offset.y + step.y);
     ctx.zoom *= Settings::AUTOZOOM_SPEED;
 
     ZoomCommand cmd;
@@ -117,11 +118,11 @@ void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus) {
     cmd.tileIndex = ctx.lastTileIndex;
 
     zoomBus.push(cmd);
-    ctx.timeSinceLastZoom = 0.0;
+    ctx.timeSinceLastZoom = 0.0f;
 }
 
 void drawFrame(FrameContext& ctx, GLuint tex, RendererState& state) {
-    // 🥝 Kiwi: Overlay wird **nur** hier aufgerufen, basierend auf aktuellem Buffer nach Render
+    // 🥝 Kiwi: Overlay wird nur hier aufgerufen, basierend auf aktuellem Buffer nach Render
     if (ctx.overlayActive) {
         HeatmapOverlay::drawOverlay(
             ctx.h_entropy,

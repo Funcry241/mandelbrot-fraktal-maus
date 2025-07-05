@@ -1,8 +1,6 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 140
-// 🧠 Maus-Kommentar: Optimierte Panda-Version mit weniger Heap-Allokationen.
-// Flugente-konform: Koordinaten sind wieder float-basiert (offset, zoom etc.).
-// evaluateZoomTarget misst µs pro Frame – klar für Heatmap, Auto-Zoom und Debug-Auswertung.
+// Zeilen: 163
+// 🧠 Maus-Kommentar: Panda+OtterFix – Hotspot-Score jetzt als gewichtete Mischung aus Entropie & Kontrast. Auto-Zoom springt auf Tiles mit wirklich lokalem Detail. Alpha/Beta steuerbar für Feintuning. Debug-Log für Hotspot-Score.
 
 #include "pch.hpp"
 #include "zoom_logic.hpp"
@@ -12,9 +10,12 @@
 #include <algorithm>
 #include <chrono> // ⏱ für Timing
 
-#define ENABLE_ZOOM_LOGGING 0  // Set to 0 to disable local zoom analysis logs
+#define ENABLE_ZOOM_LOGGING 0  // Set to 1 für Score-Log pro Frame
 
 namespace ZoomLogic {
+
+constexpr float SCORE_ALPHA = 0.5f; // Gewicht für Entropie
+constexpr float SCORE_BETA  = 0.5f; // Gewicht für Kontrast
 
 float computeEntropyContrast(const std::vector<float>& entropy, int width, int height, int tileSize) {
     const int tilesX = (width + tileSize - 1) / tileSize;
@@ -43,12 +44,12 @@ float computeEntropyContrast(const std::vector<float>& entropy, int width, int h
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& h_entropy,
     const std::vector<float>& h_contrast,
-    float2 offset,              // Flugente: float2 statt double2
+    float2 offset,
     float zoom,
     int width,
     int height,
     int tileSize,
-    float2 currentOffset,       // Flugente: float2 statt double2
+    float2 currentOffset,
     int currentIndex,
     float currentEntropy,
     float currentContrast
@@ -73,7 +74,8 @@ ZoomResult evaluateZoomTarget(
     float maxScore = -1.0f;
 
     for (int i = 0; i < tileCount; ++i) {
-        float entropy = h_entropy[i];
+        float entropy  = h_entropy[i];
+        float contrast = h_contrast.size() > i ? h_contrast[i] : 0.0f;
 
         int tx = i % tilesX;
         int ty = i / tilesX;
@@ -88,7 +90,9 @@ ZoomResult evaluateZoomTarget(
         float dist = std::sqrt(dx * dx + dy * dy);
 
         float distWeight = 1.0f / (1.0f + dist * std::sqrt(zoom));
-        float score = entropy * distWeight;
+
+        // --- Kombinierter Hotspot-Score
+        float score = (SCORE_ALPHA * entropy + SCORE_BETA * contrast) * distWeight;
 
         result.perTileContrast[i] = score;
 
@@ -96,7 +100,7 @@ ZoomResult evaluateZoomTarget(
             maxScore = score;
             result.bestIndex     = i;
             result.bestEntropy   = entropy;
-            result.bestContrast  = score;
+            result.bestContrast  = contrast;
             result.newOffset     = candidateOffset;
         }
     }
@@ -108,7 +112,7 @@ ZoomResult evaluateZoomTarget(
     result.distance        = dist;
     result.minDistance     = Settings::MIN_JUMP_DISTANCE / zoom;
     result.relEntropyGain  = result.bestEntropy - currentEntropy;
-    result.relContrastGain = result.perTileContrast[result.bestIndex] - currentContrast;
+    result.relContrastGain = result.bestContrast - currentContrast;
     result.bestScore       = result.perTileContrast[result.bestIndex];
 
     bool forcedSwitch = (result.bestScore < 0.001f && result.distance > result.minDistance * 5.0f);

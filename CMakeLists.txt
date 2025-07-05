@@ -1,6 +1,6 @@
 # Datei: CMakeLists.txt
-# Zeilen: 150
-# 🐭 Maus-Kommentar: Modularisierung + CUDA/OpenGL-Interop Fix. Ergänzt Workaround für fehlende cuda_gl_interop.h – notwendig für Windows-Installationen, bei denen der Header nicht durch CUDAToolkit automatisch gefunden wird. Schneefuchs: „Workaround ist, wenn du weißt, was du tust – und es trotzdem tust.“
+# Zeilen: 154
+# 🐭 Maus-Kommentar: Modularisierung + CUDA/OpenGL-Interop Fix. Ergänzt kompromisslose Warnungsbehandlung für MSVC/GCC/Clang/CUDA. Workaround für fehlende cuda_gl_interop.h – notwendig für Windows- und Linux-Setups. Schneefuchs: „Wer Fehler duldet, bekommt sie!“
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
@@ -112,14 +112,14 @@ set_target_properties(mandelbrot_otterdream PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
 )
 
-# Compile Flags
+# Compile Flags: Kompromisslos!
 target_compile_features(mandelbrot_otterdream PRIVATE cxx_std_23)
 
 target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
     $<$<COMPILE_LANGUAGE:CXX>:
-        $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /Zc:__cplusplus>
-        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Wno-unknown-pragmas>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /permissive- /Zc:__cplusplus>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Werror>
     >
 )
 
