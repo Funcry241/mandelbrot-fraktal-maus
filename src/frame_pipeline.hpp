@@ -16,7 +16,6 @@
 #include "frame_context.hpp"
 #include "zoom_command.hpp"
 #include "renderer_state.hpp"   // ✅ Für computeCudaFrame & drawFrame – explizit nötig
-#include <GL/glew.h>
 
 void beginFrame(FrameContext& ctx);
 

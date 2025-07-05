@@ -1,4 +1,5 @@
 // Datei: src/renderer_resources.hpp
+// Zeilen: 28
 // ⏱️ Nach wie vor modularisiert – jetzt mit Kontextsteuerung für Logging
 
 #pragma once

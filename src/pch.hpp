@@ -1,5 +1,5 @@
 // Datei: src/pch.hpp
-// Zeilen: 42
+// Zeilen: 45
 // 🐭 Maus-Kommentar: Precompiled Header – klar strukturiert: Windows-Header mit WIN32-Defines, dann OpenGL (GLEW+GLFW), dann CUDA-Runtime, dann STL. Achtung: `windows.h` nur mit `NOMINMAX`, `GLEW` nur vor `GLFW`. Schneefuchs bestand darauf, dass CUDA *nur* Runtime einbindet – nie `cuda.h` – sonst PCH-Krater.
 
 #pragma once
@@ -14,8 +14,9 @@
   #include <windows.h>
 #endif
 
-// OpenGL: Reihenfolge essenziell
-#include <GL/glew.h>         // Muss **vor** glfw3.h kommen
+// OpenGL: GLEW IMMER vor GLFW einbinden!
+#define GLFW_INCLUDE_NONE
+#include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
 // CUDA: nur Runtime/Interop – kein cuda.h, kein driver_api

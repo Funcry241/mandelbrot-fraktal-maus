@@ -8,8 +8,6 @@
 #include "renderer_pipeline.hpp"
 #include "heatmap_overlay.hpp"
 #include "settings.hpp"
-#include <GL/glew.h>
-#include <GL/gl.h>
 #include <GLFW/glfw3.h>
 #include <cmath>
 #include <vector_types.h>

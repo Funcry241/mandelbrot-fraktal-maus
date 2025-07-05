@@ -6,7 +6,6 @@ Maus-Kommentar 🐭: Overlay ist jetzt vollständig zustandslos – kein interne
 
 #pragma once
 #include <vector>
-#include <GL/glew.h>
 
 struct RendererState;
 

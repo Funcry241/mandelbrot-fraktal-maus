@@ -1,17 +1,12 @@
 // Datei: src/opengl_utils.hpp
-// Zeilen: 28
-// 🐭 Maus-Kommentar: Aufgeräumt – keine Altlasten mehr. Nur noch moderne Shader-/Quad-Erzeugung mit expliziter VAO-Nutzung. Schneefuchs meinte: „Globals raus, Klartext rein.“
+// Zeilen: 24
+// 🐭 Maus-Kommentar: Robbe-Edition – keine Altlasten mehr. Nur noch moderne Shader-/Quad-Erzeugung mit expliziter VAO-Nutzung. GLEW/GLFW jetzt IMMER zentral im PCH. Schneefuchs: „Header bleibt schlank, sonst beißt die Robbe!“
 
 #pragma once
 #ifndef OPENGL_UTILS_HPP
 #define OPENGL_UTILS_HPP
 
-#ifdef __CUDACC__
-// CUDA-Compiler mag <GL/glew.h> nicht, aber wir brauchen trotzdem GLuint
-typedef unsigned int GLuint;
-#else
-#include <GL/glew.h>
-#endif
+#include "pch.hpp" // Enthält GLEW, GLFW, CUDA usw.
 
 namespace OpenGLUtils {
 

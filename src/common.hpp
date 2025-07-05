@@ -24,7 +24,6 @@
   #define GLEW_NO_GLU
 #endif
 
-#include <GL/glew.h>
 #include <cuda_gl_interop.h>
 
 // 🧠 C++ Standardbibliothek
