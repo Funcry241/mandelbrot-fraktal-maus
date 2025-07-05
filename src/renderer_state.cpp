@@ -1,5 +1,5 @@
 // Datei: src/renderer_state.cpp
-// Zeilen: 116
+// Zeilen: 119
 // 🐭 Maus-Kommentar: Kolibri integriert! Zustand des Renderers verwaltet adaptives Supersampling.
 // EMA-geglättetes Ziel bleibt erhalten. Schneefuchs: „Kolibri spart Ressourcen, Otter navigiert sanft.“
 // Patch Schneefuchs Punkt 3: `cudaFree` immer mit `CUDA_CHECK` gesichert.

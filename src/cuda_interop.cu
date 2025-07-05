@@ -5,6 +5,7 @@
 // Schneefuchs: „Wer intelligent supersampelt, spart Performance für mehr Zoom.“
 // Log bleibt ASCII-only.
 // Kiwi: Reihenfolge der Heatmap-Berechnung korrigiert – Entropie/Kontrast jetzt nach dem Rendern ermittelt.
+
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "core_kernel.h"       // Deklaration von launch_mandelbrotHybrid, computeCudaEntropyContrast
@@ -118,7 +119,7 @@ void renderCudaFrame(
                     numTiles > 1 ? h_tileSupersampling[1] : -1,
                     numTiles > 2 ? h_tileSupersampling[2] : -1);
         std::vector<int> devCheck(numTiles);
-        CUDA_CHECK(cudaMemcpy(devCheck.data(), d_tileSupersampling, numTiles * sizeof(int), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(devCheck.data(), d_tileSupersampling, numTiles * sizeof(int), cudaMemcpyHostToDevice));
         std::printf("[SUPERSAMPLE] d_tileSupersampling[0]=%d [1]=%d [2]=%d\n",
                     devCheck[0],
                     numTiles > 1 ? devCheck[1] : -1,

@@ -214,8 +214,13 @@ extern "C" void launch_mandelbrotHybrid(
     if (Settings::debugLogging) {
         int iters_dbg[10] = {0};
         cudaMemcpy(iters_dbg, d_iterations, 10 * sizeof(int), cudaMemcpyDeviceToHost);
+        // Log: explizit auf -1 prüfen!
+        bool anyInvalid = false;
+        for (int i = 0; i < 10; ++i) if (iters_dbg[i] < 0) anyInvalid = true;
         std::printf("[KERNEL] Iterations First10: ");
         for (int i = 0; i < 10; ++i) std::printf("%d ", iters_dbg[i]);
+        if (anyInvalid)
+            std::printf("[WARN] Found <0 value! Check buffer init or kernel OOB.\n");
         std::puts("");
     }
 }
