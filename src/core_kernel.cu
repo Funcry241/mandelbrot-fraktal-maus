@@ -1,7 +1,8 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 358
+// Zeilen: 362
 // 🐭 Maus-Kommentar: Projekt Capybara Phase 2 + Kiwi: Konsistente Iterationsspeicherung, Heatmap-Berechnung nach aktuellem Frame. Fix für Thread-0-Kachelproblem am Rand. Otter: „Kiwi bringt Klarheit, Capybara hält die Linie.“
 // Maus-Logik: Nach jedem Mandelbrot-Kernel werden die ersten 10 Iterationswerte geloggt, um Kernel-Fehler sichtbar zu machen.
+
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
@@ -42,7 +43,12 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
                                          const int* tileSupersampling) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= width || y >= height) return;
+    int idx = y * width + x;
+    // **MausFix:** Schreibe immer einen Wert, auch wenn Pixel OOB
+    if (x >= width || y >= height) {
+        if (idx < width * height) iterationsOut[idx] = 0; // nie -1!
+        return;
+    }
 
     int tileX = x / tileSize;
     int tileY = y / tileSize;
@@ -74,9 +80,9 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     float avgT = totalT / (S * S);
     int avgIter = totalIter / (S * S);
 
-    output[y * width + x] = elegantColor(avgT);
+    output[idx] = elegantColor(avgT);
     // Capybara: Schreibe echte Iterationswerte zurück
-    iterationsOut[y * width + x] = avgIter;
+    iterationsOut[idx] = avgIter;
 }
 
 // Fix: Setze Entropie für *jede* Kachel, auch wenn Thread 0 keine Pixel verarbeitet (Kiwi)
