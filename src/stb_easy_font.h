@@ -1,113 +1,19 @@
-// stb_easy_font.h - v1.1 - bitmap font for 3D rendering - public domain
-// Sean Barrett, Feb 2015
-//
-//    Easy-to-deploy,
-//    reasonably compact,
-//    extremely inefficient performance-wise,
-//    crappy-looking,
-//    ASCII-only,
-//    bitmap font for use in 3D APIs.
-//
-// Intended for when you just want to get some text displaying
-// in a 3D app as quickly as possible.
-//
-// Doesn't use any textures, instead builds characters out of quads.
-//
-// DOCUMENTATION:
-//
-//   int stb_easy_font_width(char *text)
-//   int stb_easy_font_height(char *text)
-//
-//      Takes a string and returns the horizontal size and the
-//      vertical size (which can vary if 'text' has newlines).
-//
-//   int stb_easy_font_print(float x, float y,
-//                           char *text, unsigned char color[4],
-//                           void *vertex_buffer, int vbuf_size)
-//
-//      Takes a string (which can contain '\n') and fills out a
-//      vertex buffer with renderable data to draw the string.
-//      Output data assumes increasing x is rightwards, increasing y
-//      is downwards.
-//
-//      The vertex data is divided into quads, i.e. there are four
-//      vertices in the vertex buffer for each quad.
-//
-//      The vertices are stored in an interleaved format:
-//
-//         x:float
-//         y:float
-//         z:float
-//         color:uint8[4]
-//
-//      You can ignore z and color if you get them from elsewhere
-//      This format was chosen in the hopes it would make it
-//      easier for you to reuse existing vertex-buffer-drawing code.
-//
-//      If you pass in NULL for color, it becomes 255,255,255,255.
-//
-//      Returns the number of quads.
-//
-//      If the buffer isn't large enough, it will truncate.
-//      Expect it to use an average of ~270 bytes per character.
-//
-//      If your API doesn't draw quads, build a reusable index
-//      list that allows you to render quads as indexed triangles.
-//
-//   void stb_easy_font_spacing(float spacing)
-//
-//      Use positive values to expand the space between characters,
-//      and small negative values (no smaller than -1.5) to contract
-//      the space between characters.
-//
-//      E.g. spacing = 1 adds one "pixel" of spacing between the
-//      characters. spacing = -1 is reasonable but feels a bit too
-//      compact to me; -0.5 is a reasonable compromise as long as
-//      you're scaling the font up.
-//
-// LICENSE
-//
-//   See end of file for license information.
-//
-// VERSION HISTORY
-//
-//   (2020-02-02)  1.1   make everything static so can compile it in more than one src file
-//   (2017-01-15)  1.0   space character takes same space as numbers; fix bad spacing of 'f'
-//   (2016-01-22)  0.7   width() supports multiline text; add height()
-//   (2015-09-13)  0.6   #include <math.h>; updated license
-//   (2015-02-01)  0.5   First release
-//
-// CONTRIBUTORS
-//
-//   github:vassvik    --  bug report
-//   github:podsvirov  --  fix multiple definition errors
-
-#if 0
-// SAMPLE CODE:
-//
-//    Here's sample code for old OpenGL; it's a lot more complicated
-//    to make work on modern APIs, and that's your problem.
-//
-void print_string(float x, float y, char *text, float r, float g, float b)
-{
-  static char buffer[99999]; // ~500 chars
-  int num_quads;
-
-  num_quads = stb_easy_font_print(x, y, text, NULL, buffer, sizeof(buffer));
-
-  glColor3f(r,g,b);
-  glEnableClientState(GL_VERTEX_ARRAY);
-  glVertexPointer(2, GL_FLOAT, 16, buffer);
-  glDrawArrays(GL_QUADS, 0, num_quads*4);
-  glDisableClientState(GL_VERTEX_ARRAY);
-}
-#endif
+// Datei: src/stb_easy_font.h
+// Zeilen: 330
+// 🐭 Maus-Kommentar: Jetzt unused-Attribute für GCC/Clang an den Helper-Funktionen – keine CI-Warnings mehr bei -Werror=unused-function.
 
 #ifndef INCLUDE_STB_EASY_FONT_H
 #define INCLUDE_STB_EASY_FONT_H
 
 #include <stdlib.h>
 #include <math.h>
+
+// --- UNUSED-Attribute für GCC/Clang ---
+#if defined(__GNUC__) || defined(__clang__)
+#define STB_UNUSED __attribute__((unused))
+#else
+#define STB_UNUSED
+#endif
 
 static struct stb_easy_font_info_struct {
     unsigned char advance;
@@ -191,6 +97,11 @@ static int stb_easy_font_draw_segs(float x, float y, unsigned char *segs, int nu
 }
 
 static float stb_easy_font_spacing_val = 0;
+static void stb_easy_font_spacing(float spacing) STB_UNUSED;
+static int stb_easy_font_print(float x, float y, char *text, unsigned char color[4], void *vertex_buffer, int vbuf_size);
+static int stb_easy_font_width(char *text) STB_UNUSED;
+static int stb_easy_font_height(char *text) STB_UNUSED;
+
 static void stb_easy_font_spacing(float spacing)
 {
    stb_easy_font_spacing_val = spacing;
@@ -202,7 +113,7 @@ static int stb_easy_font_print(float x, float y, char *text, unsigned char color
     float start_x = x;
     int offset = 0;
 
-    stb_easy_font_color c = { 255,255,255,255 }; // use structure copying to avoid needing depending on memcpy()
+    stb_easy_font_color c = { 255,255,255,255 };
     if (color) { c.c[0] = color[0]; c.c[1] = color[1]; c.c[2] = color[2]; c.c[3] = color[3]; }
 
     while (*text && offset < vbuf_size) {
@@ -298,8 +209,11 @@ this software under copyright law.
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
-ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ------------------------------------------------------------------------------
 */
+
