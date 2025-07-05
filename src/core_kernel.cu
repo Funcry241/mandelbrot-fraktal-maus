@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 370
-// 🐭 Maus-Kommentar: Projekt Capybara Phase 2 + Kiwi: Jetzt robuster OOB-Guard – keine -1-Werte mehr im Iterationsbuffer. Otter sagt: „Jeder Pixel kriegt eine echte Iteration.“ MausLog: Debug prüft Initialisierungsproblem explizit. OOB-Schutz jetzt garantiert: Jeder Kernel-Thread (auch OOB) schreibt 0!
+// Zeilen: 378
+// 🐭 Maus-Kommentar: Capybara+Kiwi+MausZoom – Grid/Block-Logging, OOB-Guard, Iter-Check. Alle Parameter explizit, Block/Grid sichtbar im Log, Debuglogging kontrolliert alles!
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -195,6 +195,15 @@ extern "C" void launch_mandelbrotHybrid(
     dim3 block(16, 16);
     dim3 grid((width + block.x - 1) / block.x,
               (height + block.y - 1) / block.y);
+
+    // --- DEBUG: Log Kernel-Parameter (nur wenn debugLogging aktiv)
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] Mandelbrot-Kernel Call: width=%d, height=%d, maxIter=%d, zoom=%.2f, offset=(%.10f, %.10f), tileSize=%d, supersampling=%d, block=(%d,%d), grid=(%d,%d)\n",
+            width, height, maxIterations, zoom, offset.x, offset.y, tileSize,
+            (d_tileSupersampling ? -42 : 1), // Falls du S sichtbar loggen willst, sonst entfernen
+            block.x, block.y, grid.x, grid.y
+        );
+    }
 
     mandelbrotKernelAdaptive<<<grid, block>>>(output, d_iterations,
                                               width, height,
