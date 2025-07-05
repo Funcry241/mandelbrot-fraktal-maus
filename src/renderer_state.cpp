@@ -1,10 +1,6 @@
 // Datei: src/renderer_state.cpp
-// Zeilen: 119
-// 🐭 Maus-Kommentar: Kolibri integriert! Zustand des Renderers verwaltet adaptives Supersampling.
-// EMA-geglättetes Ziel bleibt erhalten. Schneefuchs: „Kolibri spart Ressourcen, Otter navigiert sanft.“
-// Patch Schneefuchs Punkt 3: `cudaFree` immer mit `CUDA_CHECK` gesichert.
-// 🐼 Panda integriert: Kontrastdaten verwaltet.
-// Fix Otter: d_iterations immer auf 0 initialisiert (cudaMemset direkt nach cudaMalloc).
+// Zeilen: 121
+// 🐭 Maus-Kommentar: Kolibri integriert! Buffer-Init jetzt robust: d_iterations wird IMMER auf 0 initialisiert, auch nach resize. Nach jedem setupCudaBuffers() erfolgt explizites cudaMemset. Schneefuchs: „Kein Schattenwert bleibt im System.“ Otter validiert für Capybara v2.
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -63,8 +59,7 @@ void RendererState::setupCudaBuffers() {
     const int numTiles = tilesX * tilesY;
 
     CUDA_CHECK(cudaMalloc(&d_iterations, totalPixels * sizeof(int)));
-    // --- Fix Otter: Buffer immer auf 0 initialisieren, sonst OOB-Werte!
-    CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
+    CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int))); // MausFix: Immer 0
 
     CUDA_CHECK(cudaMalloc(&d_entropy,    numTiles   * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_contrast,   numTiles   * sizeof(float)));  // 🐼 Panda
@@ -113,6 +108,11 @@ void RendererState::resize(int newWidth, int newHeight) {
     CudaInterop::registerPBO(pbo);
 
     setupCudaBuffers();
+
+    // --- MausFix: Buffer-Init auch nach Resize erzwingen!
+    if (d_iterations) {
+        CUDA_CHECK(cudaMemset(d_iterations, 0, width * height * sizeof(int)));
+    }
 
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
 

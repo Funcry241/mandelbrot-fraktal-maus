@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 325
-// 🐭 Maus-Kommentar: Projekt Kiwi - Heatmap-Analyse erfolgt nach dem Rendering! Overlay jetzt synchron mit aktueller Iteration. Kein veraltetes Feedback mehr. Capybara/Flugente bleiben unberührt. Schneefuchs validiert.
+// Zeilen: 332
+// 🐭 Maus-Kommentar: Projekt Kiwi+Capybara: Buffer-Init maximal sicher – Iterationsbuffer, Entropy, Contrast werden zu Framebeginn explizit genullt. Otter-Logik: Keine OOB-Werte mehr nach Resize, kein Schattenwert bei Renderstart. Schneefuchs kontrolliert jede Iteration.
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -78,6 +78,15 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
 
     beginFrame(state);
 
+    // --- MAUS: Vor jedem CUDA-Frame Iterationsbuffer, Entropy und Contrast Nullen!
+    size_t totalPixels = ctx.width * ctx.height;
+    size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
+    size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
+    size_t tilesCount = tilesX * tilesY;
+    CUDA_CHECK(cudaMemset(ctx.d_iterations, 0, totalPixels * sizeof(int)));
+    CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
+    CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
+
     // 1. CUDA Fraktalberechnung & Iterations-Buffer aktualisieren
     computeCudaFrame(ctx, state);
 
@@ -87,9 +96,7 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
 
     // 3. Heatmap/Overlay-Analyse erst jetzt! (Kiwi)
     {
-        size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
-        size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
-        size_t tilesCount = tilesX * tilesY;
+        // Hier nochmal Nullen für Heatmap-Kohärenz
         CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
         CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
 

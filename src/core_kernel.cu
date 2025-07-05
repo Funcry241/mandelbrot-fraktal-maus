@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 366
-// 🐭 Maus-Kommentar: Projekt Capybara Phase 2 + Kiwi: Jetzt robuster OOB-Guard – keine -1-Werte mehr im Iterationsbuffer. Otter sagt: „Jeder Pixel kriegt eine echte Iteration.“ MausLog: Debug prüft Initialisierungsproblem explizit.
+// Zeilen: 370
+// 🐭 Maus-Kommentar: Projekt Capybara Phase 2 + Kiwi: Jetzt robuster OOB-Guard – keine -1-Werte mehr im Iterationsbuffer. Otter sagt: „Jeder Pixel kriegt eine echte Iteration.“ MausLog: Debug prüft Initialisierungsproblem explizit. OOB-Schutz jetzt garantiert: Jeder Kernel-Thread (auch OOB) schreibt 0!
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -44,7 +44,7 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * width + x;
 
-    // **MausFix v2:** Schreibe IMMER einen gültigen Wert (0) – auch für OOB-Pixel!
+    // MausFix v3: Schreibe *immer* einen gültigen Wert (0) für OOB-Pixel, damit keine -1 entstehen!
     if (x >= width || y >= height) {
         if (idx < width * height && iterationsOut)
             iterationsOut[idx] = 0;
@@ -58,7 +58,7 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     int tilesX = (width + tileSize - 1) / tileSize;
     int tileIndex = tileY * tilesX + tileX;
 
-    int S = tileSupersampling[tileIndex];
+    int S = tileSupersampling ? tileSupersampling[tileIndex] : 1;
     float totalT = 0.0f;
     int totalIter = 0;
 
@@ -84,7 +84,7 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     int avgIter = totalIter / (S * S);
 
     output[idx] = elegantColor(avgT);
-    iterationsOut[idx] = avgIter;
+    iterationsOut[idx] = max(0, avgIter);
 }
 
 // Fix: Setze Entropie für *jede* Kachel, auch wenn Thread 0 keine Pixel verarbeitet (Kiwi)
@@ -113,13 +113,13 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         int y = startY + dy;
         if (x >= width || y >= height) continue;
         int iter = iterations[y * width + x];
+        iter = max(0, iter); // Fix: Keine negativen Werte
         int bin = min(iter * 256 / (maxIter + 1), 255);
         atomicAdd(&histo[bin], 1);
         localCount++;
     }
     __syncthreads();
 
-    // Kiwi: Setze Entropie immer, auch wenn localCount == 0 für thread 0, damit Werte definiert bleiben!
     if (threadIdx.x == 0) {
         float entropy = 0.0f;
         int usedCount = 0;
@@ -131,7 +131,6 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         }
         int tilesX = (width + tileSize - 1) / tileSize;
         int tileIndex = tileY * tilesX + tileX;
-        // Setze Entropie auf 0 falls keine Pixel im Tile waren
         entropyOut[tileIndex] = (usedCount > 0) ? entropy : 0.0f;
     }
 }
@@ -214,7 +213,6 @@ extern "C" void launch_mandelbrotHybrid(
     if (Settings::debugLogging) {
         int iters_dbg[10] = {0};
         cudaMemcpy(iters_dbg, d_iterations, 10 * sizeof(int), cudaMemcpyDeviceToHost);
-        // Log: explizit auf -1 prüfen!
         bool anyInvalid = false;
         for (int i = 0; i < 10; ++i) if (iters_dbg[i] < 0) anyInvalid = true;
         std::printf("[KERNEL] Iterations First10: ");

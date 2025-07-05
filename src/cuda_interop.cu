@@ -1,14 +1,10 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 352
-// 🐭 Maus-Kommentar: Kolibri vollständig integriert: Adaptives Supersampling pro Tile.
-// Flugente aktiv: float2 für maximale Performance. Panda-Modul (Entropie+Kontrast) vollständig erhalten.
-// Schneefuchs: „Wer intelligent supersampelt, spart Performance für mehr Zoom.“
-// Log bleibt ASCII-only.
-// Kiwi: Reihenfolge der Heatmap-Berechnung korrigiert – Entropie/Kontrast jetzt nach dem Rendern ermittelt.
+// Zeilen: 359
+// 🐭 Maus-Kommentar: Kolibri+Kiwi robust: Vor jedem CUDA-Frame werden alle relevanten Buffer genullt (Iterations, Entropy, Contrast, Supersampling). Otter: Kein OOB, keine Schattenwerte – alles sauber. Schneefuchs: ASCII-Log erkennt Invalids sofort.
 
 #include "pch.hpp"
 #include "cuda_interop.hpp"
-#include "core_kernel.h"       // Deklaration von launch_mandelbrotHybrid, computeCudaEntropyContrast
+#include "core_kernel.h"
 #include "settings.hpp"
 #include "common.hpp"
 #include "renderer_state.hpp"
@@ -51,7 +47,7 @@ void renderCudaFrame(
     float2& newOffset,
     bool& shouldZoom,
     int tileSize,
-    int /*supersampling*/, // globaler Fallback, intern ignoriert
+    int /*supersampling*/,
     RendererState& state,
     int* d_tileSupersampling,
     std::vector<int>& h_tileSupersampling
@@ -60,15 +56,21 @@ void renderCudaFrame(
         throw std::runtime_error("[FATAL] CUDA PBO not registered before renderCudaFrame.");
     }
 
+    // --- [MausGuard] Vor jedem Frame Buffer komplett nullen!
+    const int totalPixels = width * height;
+    const int tilesX = (width + tileSize - 1) / tileSize;
+    const int tilesY = (height + tileSize - 1) / tileSize;
+    const int numTiles = tilesX * tilesY;
+    CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
+    CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_tileSupersampling, 0, numTiles * sizeof(int)));
+
     // Map OpenGL PBO to CUDA pointer
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
     uchar4* devPtr = nullptr;
     size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
-
-    int tilesX = (width + tileSize - 1) / tileSize;
-    int tilesY = (height + tileSize - 1) / tileSize;
-    int numTiles = tilesX * tilesY;
 
     // --- DEBUG: Vorher Buffer auslesen
     if (Settings::debugLogging) {
@@ -90,7 +92,12 @@ void renderCudaFrame(
     if (Settings::debugLogging) {
         int dbg_after[3] = {-12345, -12345, -12345};
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
-        std::printf("[DEBUG] d_iterations AFTER Kernel: [%d, %d, %d]\n", dbg_after[0], dbg_after[1], dbg_after[2]);
+        bool anyInvalid = false;
+        for (int i = 0; i < 3; ++i) if (dbg_after[i] < 0) anyInvalid = true;
+        std::printf("[DEBUG] d_iterations AFTER Kernel: [%d, %d, %d]", dbg_after[0], dbg_after[1], dbg_after[2]);
+        if (anyInvalid)
+            std::printf(" [WARN] Found <0 value! Check buffer init or kernel OOB.\n");
+        std::puts("");
     }
 
     // 2. Berechne Entropie und Kontrast per CUDA auf Basis aktueller Iterationen
@@ -119,7 +126,7 @@ void renderCudaFrame(
                     numTiles > 1 ? h_tileSupersampling[1] : -1,
                     numTiles > 2 ? h_tileSupersampling[2] : -1);
         std::vector<int> devCheck(numTiles);
-        CUDA_CHECK(cudaMemcpy(devCheck.data(), d_tileSupersampling, numTiles * sizeof(int), cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(devCheck.data(), d_tileSupersampling, numTiles * sizeof(int), cudaMemcpyDeviceToHost));
         std::printf("[SUPERSAMPLE] d_tileSupersampling[0]=%d [1]=%d [2]=%d\n",
                     devCheck[0],
                     numTiles > 1 ? devCheck[1] : -1,
@@ -146,7 +153,6 @@ void renderCudaFrame(
         }
     }
 
-    // Unmap PBO
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
 }
 
