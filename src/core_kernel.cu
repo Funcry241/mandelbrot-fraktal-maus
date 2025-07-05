@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
 // Zeilen: 337
-// 🐭 Maus-Kommentar: Projekt Capybara Phase 2 - Konsistente Iterationsspeicherung für saubere Heatmap-Berechnung. Otter sagt: „Capybara bewahrt Integrität, bevor wir Feintuning wagen.“
+// 🐭 Maus-Kommentar: Projekt Capybara Phase 2 + Kiwi: Konsistente Iterationsspeicherung, Heatmap-Berechnung nach aktuellem Frame. Fix für Thread-0-Kachelproblem am Rand. Otter: „Kiwi bringt Klarheit, Capybara hält die Linie.“
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
@@ -74,34 +74,11 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     int avgIter = totalIter / (S * S);
 
     output[y * width + x] = elegantColor(avgT);
-    // Projekt Capybara: Schreibe echte Iterationswerte zurück
+    // Capybara: Schreibe echte Iterationswerte zurück
     iterationsOut[y * width + x] = avgIter;
 }
 
-extern "C" void launch_mandelbrotHybrid(uchar4* output, int* d_iterations,
-                                        int width, int height,
-                                        float zoom, float2 offset,
-                                        int maxIterations,
-                                        int tileSize,
-                                        const int* d_tileSupersampling) {
-    dim3 block(16, 16);
-    dim3 grid((width + block.x - 1) / block.x,
-              (height + block.y - 1) / block.y);
-
-    mandelbrotKernelAdaptive<<<grid, block>>>(output, d_iterations,
-                                              width, height,
-                                              zoom, offset,
-                                              maxIterations,
-                                              tileSize,
-                                              d_tileSupersampling);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
-    }
-    cudaDeviceSynchronize();
-}
-
-// Entropie-Kernel: Histogramm-basierte Tile-Entropie (Bins lokal berechnen)
+// Fix: Setze Entropie für *jede* Kachel, auch wenn Thread 0 keine Pixel verarbeitet (Kiwi)
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
                               int width, int height, int tileSize,
                               int maxIter) {
@@ -133,20 +110,23 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
     }
     __syncthreads();
 
-    if (threadIdx.x == 0 && localCount > 0) {
+    // Kiwi: Setze Entropie immer, auch wenn localCount == 0 für thread 0, damit Werte definiert bleiben!
+    if (threadIdx.x == 0) {
         float entropy = 0.0f;
+        int usedCount = 0;
         for (int i = 0; i < 256; ++i) {
-            float p = histo[i] / (float)total;
+            float p = (localCount > 0 ? histo[i] / (float)total : 0.0f);
             if (p > 0.0f)
                 entropy -= p * log2f(p);
+            usedCount += histo[i];
         }
         int tilesX = (width + tileSize - 1) / tileSize;
         int tileIndex = tileY * tilesX + tileX;
-        entropyOut[tileIndex] = entropy;
+        // Setze Entropie auf 0 falls keine Pixel im Tile waren
+        entropyOut[tileIndex] = (usedCount > 0) ? entropy : 0.0f;
     }
 }
 
-// Kontrast-Kernel: mittlere Abweichung der Entropie zu Nachbarn (unverändert)
 __global__ void contrastKernel(const float* entropy, float* contrastOut,
                                int tilesX, int tilesY) {
     int tx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -171,7 +151,6 @@ __global__ void contrastKernel(const float* entropy, float* contrastOut,
     contrastOut[idx] = (count > 0) ? sumDiff / count : 0.0f;
 }
 
-// Globale C-Funktion zur Entropie- und Kontrastberechnung für Kolibri (unverändert)
 extern "C" void computeCudaEntropyContrast(
     const int* d_iterations,
     float* d_entropyOut,
@@ -181,7 +160,6 @@ extern "C" void computeCudaEntropyContrast(
     int tileSize,
     int maxIter
 ) {
-    // Erst Entropie
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     dim3 gridE(tilesX, tilesY);
@@ -189,9 +167,37 @@ extern "C" void computeCudaEntropyContrast(
     entropyKernel<<<gridE, blockE>>>(d_iterations, d_entropyOut, width, height, tileSize, maxIter);
     cudaDeviceSynchronize();
 
-    // Dann Kontrast
     dim3 gridC((tilesX + 15) / 16, (tilesY + 15) / 16);
     dim3 blockC(16, 16);
     contrastKernel<<<gridC, blockC>>>(d_entropyOut, d_contrastOut, tilesX, tilesY);
     cudaDeviceSynchronize();
 }
+
+extern "C" void launch_mandelbrotHybrid(
+    uchar4* output,
+    int* d_iterations,
+    int width,
+    int height,
+    float zoom,
+    float2 offset,
+    int maxIterations,
+    int tileSize,
+    const int* d_tileSupersampling
+) {
+    dim3 block(16, 16);
+    dim3 grid((width + block.x - 1) / block.x,
+              (height + block.y - 1) / block.y);
+
+    mandelbrotKernelAdaptive<<<grid, block>>>(output, d_iterations,
+                                              width, height,
+                                              zoom, offset,
+                                              maxIterations,
+                                              tileSize,
+                                              d_tileSupersampling);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
+    }
+    cudaDeviceSynchronize();
+}
+

@@ -1,15 +1,12 @@
 // Datei: src/renderer_loop.hpp
-// Zeilen: 25
-// 🐭 Maus-Kommentar: Definiert den Render-Loop und die Darstellung pro Frame. Steuert FPS-Zähler, Auto-Zoom-Logik, HUD und Eingabe. Schneefuchs sagt: „Der Taktgeber des Fraktal-Tanzes mit Blick für Tasten.“
+// Zeilen: 24
+// 🐭 Maus-Kommentar: Definiert den Render-Loop und die Darstellung pro Frame. Steuert FPS-Zähler, Auto-Zoom-Logik, HUD und Eingabe. Schneefuchs: „Der Taktgeber des Fraktal-Tanzes mit Blick für Tasten.“ (Kiwi: drawOverlay nicht mehr global!)
 
 #pragma once
 
 #include <GLFW/glfw3.h>
 #include "renderer_state.hpp"
-#include "frame_context.hpp"  // Für drawOverlay(...)
-
-// 🔥 Zeichnet das Heatmap-Overlay, wenn ctx.overlayActive == true
-void drawOverlay(const FrameContext& ctx);
+#include "frame_context.hpp"
 
 namespace RendererLoop {
 

@@ -1,6 +1,7 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 318
-// 🐭 Maus-Kommentar: Projekt Capybara Phase 2 - Konsistente Heatmap-Daten-Fluss mit Null-Initialisierung.
+// Zeilen: 325
+// 🐭 Maus-Kommentar: Projekt Kiwi - Heatmap-Analyse erfolgt nach dem Rendering! Overlay jetzt synchron mit aktueller Iteration. Kein veraltetes Feedback mehr. Capybara/Flugente bleiben unberührt. Schneefuchs validiert.
+
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
@@ -76,33 +77,32 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
     ctx.lastTileIndex = state.lastTileIndex;
 
     beginFrame(state);
+
+    // 1. CUDA Fraktalberechnung & Iterations-Buffer aktualisieren
     computeCudaFrame(ctx, state);
 
-    // Capybara: Buffers før Entropie-/Kontrastberechnung nullen
+    // 2. Fraktalbild anzeigen (Bilddaten aus PBO → Texture)
+    RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
+    drawFrame(ctx, state.tex, state);
+
+    // 3. Heatmap/Overlay-Analyse erst jetzt! (Kiwi)
     {
         size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
         size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
         size_t tilesCount = tilesX * tilesY;
         CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
         CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
-    }
 
-    // Capybara: Heatmap-Daten berechnen
-    CudaInterop::computeCudaEntropyContrast(
-        ctx.d_iterations,
-        ctx.d_entropy,
-        ctx.d_contrast,
-        ctx.width,
-        ctx.height,
-        ctx.tileSize,
-        ctx.maxIterations
-    );
+        CudaInterop::computeCudaEntropyContrast(
+            ctx.d_iterations,
+            ctx.d_entropy,
+            ctx.d_contrast,
+            ctx.width,
+            ctx.height,
+            ctx.tileSize,
+            ctx.maxIterations
+        );
 
-    // Capybara: Device->Host kopieren
-    {
-        size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
-        size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
-        size_t tilesCount = tilesX * tilesY;
         CUDA_CHECK(cudaMemcpy(ctx.h_entropy.data(), ctx.d_entropy, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
         CUDA_CHECK(cudaMemcpy(ctx.h_contrast.data(), ctx.d_contrast, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
     }
@@ -113,11 +113,7 @@ void renderFrame_impl(RendererState& state, bool autoZoomEnabled) {
         std::printf("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n", e0, c0);
     }
 
-    // Draw fractal
-    RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
-    drawFrame(ctx, state.tex, state);
-
-    // Capybara: Heatmap-Overlay direkt aufrufen (Entropie + Kontrast)
+    // 4. Overlay-Rendering (jetzt wirklich synchron zur aktuellen Iteration!)
     HeatmapOverlay::drawOverlay(
         ctx.h_entropy,
         ctx.h_contrast,

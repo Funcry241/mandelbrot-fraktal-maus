@@ -1,11 +1,10 @@
 // Datei: src/cuda_interop.cu
 // Zeilen: 336
-/* 🐭 Maus-Kommentar: Kolibri vollständig integriert: Adaptives Supersampling pro Tile.
-   Flugente aktiv: float2 für maximale Performance. Panda-Modul (Entropie+Kontrast) vollständig erhalten.
-   Schneefuchs: „Wer intelligent supersampelt, spart Performance für mehr Zoom.“
-   Log bleibt ASCII-only.
-*/
-
+// 🐭 Maus-Kommentar: Kolibri vollständig integriert: Adaptives Supersampling pro Tile.
+// Flugente aktiv: float2 für maximale Performance. Panda-Modul (Entropie+Kontrast) vollständig erhalten.
+// Schneefuchs: „Wer intelligent supersampelt, spart Performance für mehr Zoom.“
+// Log bleibt ASCII-only.
+// Kiwi: Reihenfolge der Heatmap-Berechnung korrigiert – Entropie/Kontrast jetzt nach dem Rendern ermittelt.
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "core_kernel.h"       // Deklaration von launch_mandelbrotHybrid, computeCudaEntropyContrast
@@ -66,29 +65,12 @@ void renderCudaFrame(
     size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
-    // Berechne Entropie und Kontrast per CUDA
-    computeCudaEntropyContrast(d_iterations, d_entropy, d_contrast,
-                               width, height, tileSize, maxIterations);
-
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     int numTiles = tilesX * tilesY;
 
-    // Kopiere Analyse-Daten auf Host
-    h_entropy.resize(numTiles);
-    h_contrast.resize(numTiles);
-    CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
-
-    // 🦜 Kolibri: Adaptive Supersampling-Stufen pro Tile setzen
-    h_tileSupersampling.resize(numTiles);
-    for (int i = 0; i < numTiles; ++i) {
-        h_tileSupersampling[i] = (h_entropy[i] > Settings::ENTROPY_THRESHOLD_HIGH) ? 4 :
-                                 (h_entropy[i] > Settings::ENTROPY_THRESHOLD_LOW ) ? 2 : 1;
-    }
-    CUDA_CHECK(cudaMemcpy(d_tileSupersampling, h_tileSupersampling.data(), numTiles * sizeof(int), cudaMemcpyHostToDevice));
-
-    // Starte Mandelbrot-Kernel mit adaptivem Supersampling
+    // 1. Starte Mandelbrot-Kernel (aktualisiert d_iterations)
+    if (Settings::debugLogging) std::puts("[DEBUG] Mandelbrot-Kernel...");
     launch_mandelbrotHybrid(devPtr, d_iterations,
                             width, height,
                             zoom, offset,
@@ -96,7 +78,26 @@ void renderCudaFrame(
                             tileSize,
                             d_tileSupersampling);
 
-    // Auto-Zoom-Logik
+    // 2. Berechne Entropie und Kontrast per CUDA auf Basis aktueller Iterationen
+    if (Settings::debugLogging) std::puts("[DEBUG] Entropy-Kernel...");
+    computeCudaEntropyContrast(d_iterations, d_entropy, d_contrast,
+                               width, height, tileSize, maxIterations);
+
+    // 3. Kopiere Analyse-Daten auf Host
+    h_entropy.resize(numTiles);
+    h_contrast.resize(numTiles);
+    CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
+
+    // 4. Adaptive Supersampling-Stufen pro Tile setzen (Kolibri)
+    h_tileSupersampling.resize(numTiles);
+    for (int i = 0; i < numTiles; ++i) {
+        h_tileSupersampling[i] = (h_entropy[i] > Settings::ENTROPY_THRESHOLD_HIGH) ? 4 :
+                                 (h_entropy[i] > Settings::ENTROPY_THRESHOLD_LOW ) ? 2 : 1;
+    }
+    CUDA_CHECK(cudaMemcpy(d_tileSupersampling, h_tileSupersampling.data(), numTiles * sizeof(int), cudaMemcpyHostToDevice));
+
+    // 5. Auto-Zoom-Logik wie gehabt
     shouldZoom = false;
     if (!pauseZoom) {
         ZoomLogic::ZoomResult result = ZoomLogic::evaluateZoomTarget(

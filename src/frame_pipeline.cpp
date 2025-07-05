@@ -1,19 +1,6 @@
 // Datei: src/frame_pipeline.cpp
-// Zeilen: 120
-/* 🐭 interner Maus-Kommentar:
-   Diese Datei definiert die logische Render-Pipeline:
-   - Klar getrennte Schritte (beginFrame, computeCudaFrame, applyZoomLogic, drawFrame)
-   - Alle verwenden `FrameContext& ctx`
-   - Ziel: deterministisch, testbar, modular – Grundlage für Replay & Analyse.
-   - Kein OpenGL/GUI-Code direkt hier – nur Logik!
-   - FIX: renderCudaFrame nun explizit mit Namespace (Schneefuchs-Fund)
-   - FIX: zoomFactor ersetzt durch AUTOZOOM_SPEED (Schneefuchs-Empfehlung)
-   - FIX: HeatmapOverlay::drawOverlay korrekt eingebunden (kein drawOverlayTexture mehr)
-   - FIX: float2 durch double2 ersetzt – volle Präzision laut frame_context.hpp
-   - FIX: RendererState& state als finaler Parameter eingeführt (wegen Schneefuchs' Analyse)
-   - FIX: RendererPipeline::updateTexture eingefügt nach CUDA-Kernel (Otter-Fund)
-   - FIX: <cmath> eingebunden, manuelle Operatorfunktionen entfernt (Otter)
-*/
+// Zeilen: 121
+// 🐭 Maus-Kommentar: Kiwi – Heatmap-Logik nur nach Render, alle Daten aktuell. Keine DrawOverlay-Altpfade mehr. Schneefuchs validiert: Framedaten, Overlay und CUDA sauber synchron.
 
 #include "frame_context.hpp"
 #include "zoom_command.hpp"
@@ -24,8 +11,8 @@
 #include <GL/glew.h>
 #include <GL/gl.h>
 #include <GLFW/glfw3.h>
-#include <cmath>  // ✅ ersetzt manuelle sqrt/tanh-Berechnungen
-#include <vector_types.h> // für float2
+#include <cmath>
+#include <vector_types.h>
 #include <vector>
 
 static int globalFrameCounter = 0;
@@ -42,10 +29,11 @@ void beginFrame(FrameContext& ctx) {
 }
 
 void computeCudaFrame(FrameContext& ctx, RendererState& state) {
-    // 🦜 Kolibri: Konvertiere double2 zu float2 für GPU
+    // 🥝 Kiwi: Zuerst Mandelbrot-Kernel, dann Entropie/Kontrast-Analyse auf aktuellem Bild
     float2 gpuOffset = make_float2(static_cast<float>(ctx.offset.x), static_cast<float>(ctx.offset.y));
-    float2 gpuNewOffset;
+    float2 gpuNewOffset = gpuOffset;
 
+    // 1. Starte Mandelbrot-Kernel, liefert Iterationsbuffer für Heatmap-Analyse
     CudaInterop::renderCudaFrame(
         ctx.d_iterations,
         ctx.d_entropy,
@@ -65,8 +53,7 @@ void computeCudaFrame(FrameContext& ctx, RendererState& state) {
         state.d_tileSupersampling,
         state.h_tileSupersampling
     );
-
-    // Übertrage das neue Offset zurück zum Context
+    // 2. Offset-Update nach erfolgreichem Zoom
     if (ctx.shouldZoom) {
         ctx.newOffset.x = gpuNewOffset.x;
         ctx.newOffset.y = gpuNewOffset.y;
@@ -74,10 +61,9 @@ void computeCudaFrame(FrameContext& ctx, RendererState& state) {
 
     if (Settings::debugLogging) {
         std::printf("[CUDA] Input: offset=(%.10f, %.10f) | zoom=%.2f\n",
-               ctx.offset.x, ctx.offset.y, ctx.zoom);
+            ctx.offset.x, ctx.offset.y, ctx.zoom);
     }
 
-    // Renderer-Pipeline updaten
     RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
 }
 
@@ -128,6 +114,7 @@ void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus) {
 }
 
 void drawFrame(FrameContext& ctx, GLuint tex, RendererState& state) {
+    // 🥝 Kiwi: Overlay wird **nur** hier aufgerufen, basierend auf aktuellem Buffer nach Render
     if (ctx.overlayActive) {
         HeatmapOverlay::drawOverlay(
             ctx.h_entropy,
@@ -139,6 +126,5 @@ void drawFrame(FrameContext& ctx, GLuint tex, RendererState& state) {
             state
         );
     }
-
     RendererPipeline::drawFullscreenQuad(tex);
 }
