@@ -1,6 +1,7 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 337
+// Zeilen: 358
 // 🐭 Maus-Kommentar: Projekt Capybara Phase 2 + Kiwi: Konsistente Iterationsspeicherung, Heatmap-Berechnung nach aktuellem Frame. Fix für Thread-0-Kachelproblem am Rand. Otter: „Kiwi bringt Klarheit, Capybara hält die Linie.“
+// Maus-Logik: Nach jedem Mandelbrot-Kernel werden die ersten 10 Iterationswerte geloggt, um Kernel-Fehler sichtbar zu machen.
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
@@ -199,5 +200,13 @@ extern "C" void launch_mandelbrotHybrid(
         std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
     }
     cudaDeviceSynchronize();
-}
 
+    // --- DEBUG: Iterations-Buffer nach Kernel prüfen (Settings::debugLogging)
+    if (Settings::debugLogging) {
+        int iters_dbg[10] = {0};
+        cudaMemcpy(iters_dbg, d_iterations, 10 * sizeof(int), cudaMemcpyDeviceToHost);
+        std::printf("[KERNEL] Iterations First10: ");
+        for (int i = 0; i < 10; ++i) std::printf("%d ", iters_dbg[i]);
+        std::puts("");
+    }
+}
