@@ -1,6 +1,6 @@
 <!-- Datei: README.md -->
-<!-- Zeilen: 129 -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 20 – Build-Anleitung jetzt vollständig und CI-kompatibel, mit klarem vcpkg-Weg und aktualisierter CMake-Version. Schneefuchs: „Wer bauen will, muss vorher graben – im richtigen Verzeichnis.“ -->
+<!-- Zeilen: 139 -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 41 – Build-Anleitung, API-Regeln und Robbe-Prinzip jetzt explizit, damit kein Drift mehr entsteht. Schneefuchs: „Erst bauen, dann waten.“ -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
@@ -86,8 +86,9 @@ cmake --install build/windows --prefix ./dist
 
 ```bash
 sudo apt update
-sudo apt install build-essential cmake ninja-build libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config
+sudo apt install build-essential cmake ninja-build libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config libcuda1-525
 ```
+> *Hinweis:* Je nach Distribution kann die CUDA-Runtime-Bibliothek anders heißen (z.B. `libcuda1-545`).
 
 ```bash
 cmake --preset linux-build
@@ -100,8 +101,8 @@ cmake --install build/linux --prefix ./dist
 
 ### ⌨️ Keyboard Controls
 
-- `P` or `Space`: Pause/resume automatic zoom
-- `H`: Toggle heatmap overlay (entropy/contrast)
+- `P` oder `Space`: Auto-Zoom pausieren/fortsetzen
+- `H`: Heatmap-Overlay ein-/ausschalten
 
 ---
 
@@ -115,6 +116,14 @@ cmake --preset windows-release -DCMAKE_CUDA_ARCHITECTURES=90
 ```
 
 Find your GPU's capability [here](https://developer.nvidia.com/cuda-gpus).
+
+---
+
+## 🌊 Das Robbe-Prinzip (API-Synchronität)
+
+**Ab Alpha 41 gilt:**  
+**Header und Source werden immer synchron gepflegt. Kein Drift, kein API-Bruch. Die Robbe wacht.**  
+> „API-Änderung ohne Header-Update? Dann OOU-OOU und Build-Fehler!“
 
 ---
 

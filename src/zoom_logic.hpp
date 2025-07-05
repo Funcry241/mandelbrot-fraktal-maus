@@ -32,18 +32,18 @@ struct ZoomResult {
 float computeEntropyContrast(const std::vector<float>& entropy, int width, int height, int tileSize);  
 
 // 🧠 Entscheidung: neues Ziel auswählen (Flugente-Version, 13 Argumente)  
-ZoomResult evaluateZoomTarget(  
-    const std::vector<float>& entropy,  
-    const std::vector<float>& contrast,  
-    float2 currentOffset,   // Flugente!  
-    float zoom,  
-    int width,  
-    int height,  
-    int tileSize,  
-    float2 previousOffset,  // Flugente!  
-    int previousIndex,  
-    float previousEntropy,  
-    float previousContrast  
-);  
+ZoomResult evaluateZoomTarget(
+    const std::vector<float>& entropy,
+    const std::vector<float>& contrast,
+    float2 offset,
+    float zoom,
+    int width,
+    int height,
+    int tileSize,
+    float2 currentOffset,
+    int currentIndex,
+    float currentEntropy,
+    float currentContrast
+);
 
 } // namespace ZoomLogic
