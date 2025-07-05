@@ -1,7 +1,8 @@
 // Datei: src/frame_pipeline.cpp
-// Zeilen: 124
+// Zeilen: 127
 // 🐭 Maus-Kommentar: Kiwi – Heatmap-Logik nur nach Render, alle Daten aktuell. Keine DrawOverlay-Altpfade mehr. Schneefuchs validiert: Framedaten, Overlay und CUDA sauber synchron.
 // Alpha 42: Explizite Includes für Namespace-Auflösung (Otter-Fix für VSCode-IntelliSense).
+// Otter-Sonderlog: Host-seitige Kernel-Parameter vor jedem Render für Debug-Analyse.
 
 #include "pch.hpp"
 #include "cuda_interop.hpp"
@@ -33,6 +34,13 @@ void computeCudaFrame(FrameContext& ctx, RendererState& state) {
     // 🥝 Kiwi: Zuerst Mandelbrot-Kernel, dann Entropie/Kontrast-Analyse auf aktuellem Bild
     float2 gpuOffset = make_float2(static_cast<float>(ctx.offset.x), static_cast<float>(ctx.offset.y));
     float2 gpuNewOffset = gpuOffset;
+
+    // Otter-Log: Host-seitig, ALLE Kernel-Parameter ausgeben
+    if (Settings::debugLogging) {
+        std::printf("[DEBUG] Mandelbrot-Kernel Call: width=%d, height=%d, maxIter=%d, zoom=%.2f, offset=(%.10f, %.10f), tileSize=%d, supersampling=%d\n",
+            ctx.width, ctx.height, ctx.maxIterations, ctx.zoom,
+            ctx.offset.x, ctx.offset.y, ctx.tileSize, ctx.supersampling);
+    }
 
     // 1. Starte Mandelbrot-Kernel, liefert Iterationsbuffer für Heatmap-Analyse
     CudaInterop::renderCudaFrame(
