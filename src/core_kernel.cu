@@ -1,7 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 362
-// 🐭 Maus-Kommentar: Projekt Capybara Phase 2 + Kiwi: Konsistente Iterationsspeicherung, Heatmap-Berechnung nach aktuellem Frame. Fix für Thread-0-Kachelproblem am Rand. Otter: „Kiwi bringt Klarheit, Capybara hält die Linie.“
-// Maus-Logik: Nach jedem Mandelbrot-Kernel werden die ersten 10 Iterationswerte geloggt, um Kernel-Fehler sichtbar zu machen.
+// Zeilen: 366
+// 🐭 Maus-Kommentar: Projekt Capybara Phase 2 + Kiwi: Jetzt robuster OOB-Guard – keine -1-Werte mehr im Iterationsbuffer. Otter sagt: „Jeder Pixel kriegt eine echte Iteration.“ MausLog: Debug prüft Initialisierungsproblem explizit.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -44,9 +43,13 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * width + x;
-    // **MausFix:** Schreibe immer einen Wert, auch wenn Pixel OOB
+
+    // **MausFix v2:** Schreibe IMMER einen gültigen Wert (0) – auch für OOB-Pixel!
     if (x >= width || y >= height) {
-        if (idx < width * height) iterationsOut[idx] = 0; // nie -1!
+        if (idx < width * height && iterationsOut)
+            iterationsOut[idx] = 0;
+        if (output && idx < width * height)
+            output[idx] = make_uchar4(0, 0, 0, 255);
         return;
     }
 
@@ -81,7 +84,6 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     int avgIter = totalIter / (S * S);
 
     output[idx] = elegantColor(avgT);
-    // Capybara: Schreibe echte Iterationswerte zurück
     iterationsOut[idx] = avgIter;
 }
 
@@ -201,7 +203,7 @@ extern "C" void launch_mandelbrotHybrid(
                                               maxIterations,
                                               tileSize,
                                               d_tileSupersampling);
-                                              
+
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
