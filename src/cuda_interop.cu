@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 336
+// Zeilen: 352
 // 🐭 Maus-Kommentar: Kolibri vollständig integriert: Adaptives Supersampling pro Tile.
 // Flugente aktiv: float2 für maximale Performance. Panda-Modul (Entropie+Kontrast) vollständig erhalten.
 // Schneefuchs: „Wer intelligent supersampelt, spart Performance für mehr Zoom.“
@@ -69,6 +69,13 @@ void renderCudaFrame(
     int tilesY = (height + tileSize - 1) / tileSize;
     int numTiles = tilesX * tilesY;
 
+    // --- DEBUG: Vorher Buffer auslesen
+    if (Settings::debugLogging) {
+        int dbg_before[3] = {-12345, -12345, -12345};
+        CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
+        std::printf("[DEBUG] d_iterations BEFORE Kernel: [%d, %d, %d]\n", dbg_before[0], dbg_before[1], dbg_before[2]);
+    }
+
     // 1. Starte Mandelbrot-Kernel (aktualisiert d_iterations)
     if (Settings::debugLogging) std::puts("[DEBUG] Mandelbrot-Kernel...");
     launch_mandelbrotHybrid(devPtr, d_iterations,
@@ -77,6 +84,13 @@ void renderCudaFrame(
                             maxIterations,
                             tileSize,
                             d_tileSupersampling);
+
+    // --- DEBUG: Nachher Buffer auslesen
+    if (Settings::debugLogging) {
+        int dbg_after[3] = {-12345, -12345, -12345};
+        CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
+        std::printf("[DEBUG] d_iterations AFTER Kernel: [%d, %d, %d]\n", dbg_after[0], dbg_after[1], dbg_after[2]);
+    }
 
     // 2. Berechne Entropie und Kontrast per CUDA auf Basis aktueller Iterationen
     if (Settings::debugLogging) std::puts("[DEBUG] Entropy-Kernel...");
@@ -96,6 +110,20 @@ void renderCudaFrame(
                                  (h_entropy[i] > Settings::ENTROPY_THRESHOLD_LOW ) ? 2 : 1;
     }
     CUDA_CHECK(cudaMemcpy(d_tileSupersampling, h_tileSupersampling.data(), numTiles * sizeof(int), cudaMemcpyHostToDevice));
+
+    // --- DEBUG: Supersampling-Buffer loggen
+    if (Settings::debugLogging && numTiles > 0) {
+        std::printf("[SUPERSAMPLE] h_tileSupersampling[0]=%d [1]=%d [2]=%d\n",
+                    h_tileSupersampling[0],
+                    numTiles > 1 ? h_tileSupersampling[1] : -1,
+                    numTiles > 2 ? h_tileSupersampling[2] : -1);
+        std::vector<int> devCheck(numTiles);
+        CUDA_CHECK(cudaMemcpy(devCheck.data(), d_tileSupersampling, numTiles * sizeof(int), cudaMemcpyDeviceToHost));
+        std::printf("[SUPERSAMPLE] d_tileSupersampling[0]=%d [1]=%d [2]=%d\n",
+                    devCheck[0],
+                    numTiles > 1 ? devCheck[1] : -1,
+                    numTiles > 2 ? devCheck[2] : -1);
+    }
 
     // 5. Auto-Zoom-Logik wie gehabt
     shouldZoom = false;
