@@ -1,10 +1,20 @@
 // Datei: src/frame_pipeline.cpp
-// Zeilen: 122
-// 🐭 Maus-Kommentar: Kiwi – PCH jetzt am Kopf, garantiert korrekte OpenGL-Include-Reihenfolge für alle Plattformen. Kein doppeltes GLEW/GLFW-Headerchaos mehr. Schneefuchs approved!
+// Zeilen: 124
+// 🐭 Maus-Kommentar: Kiwi – Heatmap-Logik nur nach Render, alle Daten aktuell. Keine DrawOverlay-Altpfade mehr. Schneefuchs validiert: Framedaten, Overlay und CUDA sauber synchron.
+// Alpha 42: Explizite Includes für Namespace-Auflösung (Otter-Fix für VSCode-IntelliSense).
 
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
+
+#include "frame_context.hpp"
+#include "zoom_command.hpp"
+#include "heatmap_overlay.hpp"
+#include "settings.hpp"
+#include <GLFW/glfw3.h>
+#include <cmath>
+#include <vector_types.h>
+#include <vector>
 
 static int globalFrameCounter = 0;
 
