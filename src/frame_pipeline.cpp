@@ -60,9 +60,7 @@ void computeCudaFrame(FrameContext& ctx, RendererState& state) {
     if (Settings::debugLogging) {
         std::printf("[CUDA] Input: offset=(%.10f, %.10f) | zoom=%.2f\n",
             ctx.offset.x, ctx.offset.y, ctx.zoom);
-    }
-
-    RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
+    }    
 }
 
 void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus) {

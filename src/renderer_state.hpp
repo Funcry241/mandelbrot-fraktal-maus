@@ -79,8 +79,6 @@ public:
     // 🧽 Verwaltung
     RendererState(int w, int h);
     void reset();
-    void updateOffsetTarget(double2 newOffset);
-    void adaptIterationCount();
     void setupCudaBuffers();
     void resize(int newWidth, int newHeight);
 };

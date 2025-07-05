@@ -36,21 +36,6 @@ void RendererState::reset() {
     lastTileIndex = -1;
 }
 
-void RendererState::updateOffsetTarget(double2 newOffset) {
-    constexpr double alpha = 0.2;
-
-    filteredTargetOffset.x = (1.0 - alpha) * filteredTargetOffset.x + alpha * static_cast<double>(newOffset.x);
-    filteredTargetOffset.y = (1.0 - alpha) * filteredTargetOffset.y + alpha * static_cast<double>(newOffset.y);
-
-    targetOffset = make_double2(filteredTargetOffset.x, filteredTargetOffset.y);
-}
-
-void RendererState::adaptIterationCount() {
-    double logZoom = std::log10(zoom);
-    maxIterations = static_cast<int>(baseIterations + logZoom * 200.0);
-    maxIterations = std::min(maxIterations, Settings::MAX_ITERATIONS_CAP);
-}
-
 void RendererState::setupCudaBuffers() {
     const int totalPixels = width * height;
     const int tileSize = lastTileSize;

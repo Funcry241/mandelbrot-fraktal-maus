@@ -72,3 +72,5 @@ OtterDream_Project.zip
 # ----------------------------------------------------------------------
 # 🚫 CI-Output-Artefakte sicher ignorieren
 /dist/*
+
+wupp.txt
