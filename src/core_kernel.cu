@@ -195,6 +195,7 @@ extern "C" void launch_mandelbrotHybrid(
                                               maxIterations,
                                               tileSize,
                                               d_tileSupersampling);
+                                              
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
