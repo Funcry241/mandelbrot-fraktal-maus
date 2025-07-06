@@ -1,17 +1,26 @@
 // Datei: src/core_kernel.h
-// Zeilen: 32
-#pragma once
+// Zeilen: 29
+// 🐭 Maus-Kommentar: Funktionsprototypen für CUDA-Mandelbrot-Kernel (Kolibri-kompatibel mit Supersampling!)
+// Schneefuchs: "Header immer synchron zur Implementation!"
 
-#include <cuda_runtime.h>  // uchar4
-#include <vector_types.h>   // float2
+#ifndef CORE_KERNEL_H
+#define CORE_KERNEL_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <cuda_runtime.h>
+#include <vector_types.h>
 
-// Fraktal-Rendering mit adaptivem Supersampling pro Tile
+// Startet den hybriden Mandelbrot-Kernel (Bild + Iterationen + adaptives Supersampling)
+// - devPtr: Zielbild (OpenGL PBO, gemappt auf CUDA)
+// - d_iterations: Iterationsbuffer (pro Pixel)
+// - width, height: Bildgröße
+// - zoom, offset: Fraktalausschnitt
+// - maxIterations: Iterationslimit
+// - tileSize: Größe der Entropie-Tiles
+// - d_tileSupersampling: pro-Tile Supersampling-Stufe (const int* device array)
+// - supersampling: Fallback-Gesamtsupersampling (wird oft ignoriert – adaptive Puffer haben Vorrang)
+extern "C"
 void launch_mandelbrotHybrid(
-    uchar4* output,
+    uchar4* devPtr,
     int* d_iterations,
     int width,
     int height,
@@ -19,10 +28,12 @@ void launch_mandelbrotHybrid(
     float2 offset,
     int maxIterations,
     int tileSize,
-    const int* d_tileSupersampling
+    const int* d_tileSupersampling,
+    int supersampling
 );
 
-// Entropie + Kontrast jedes Tiles berechnen (Host-Aufruf, implementiert in core_kernel.cu)
+// Entropie- und Kontrastberechnung pro Tile – Panda & Capybara
+extern "C"
 void computeCudaEntropyContrast(
     const int* d_iterations,
     float* d_entropyOut,
@@ -30,9 +41,7 @@ void computeCudaEntropyContrast(
     int width,
     int height,
     int tileSize,
-    int maxIter
+    int maxIterations
 );
 
-#ifdef __cplusplus
-}
-#endif
+#endif // CORE_KERNEL_H

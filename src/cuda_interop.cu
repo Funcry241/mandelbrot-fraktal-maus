@@ -47,7 +47,7 @@ void renderCudaFrame(
     float2& newOffset,
     bool& shouldZoom,
     int tileSize,
-    int /*supersampling*/,
+    int supersampling, // <---- Name statt /*supersampling*/
     RendererState& state,
     int* d_tileSupersampling,
     std::vector<int>& h_tileSupersampling
@@ -82,11 +82,12 @@ void renderCudaFrame(
     // 1. Starte Mandelbrot-Kernel (aktualisiert d_iterations)
     if (Settings::debugLogging) std::puts("[DEBUG] Mandelbrot-Kernel...");
     launch_mandelbrotHybrid(devPtr, d_iterations,
-                            width, height,
-                            zoom, offset,
-                            maxIterations,
-                            tileSize,
-                            d_tileSupersampling);
+                        width, height,
+                        zoom, offset,
+                        maxIterations,
+                        tileSize,
+                        d_tileSupersampling,
+                        supersampling);  // <--- HIER!
 
     // --- DEBUG: Nachher Buffer auslesen
     if (Settings::debugLogging) {

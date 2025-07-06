@@ -159,7 +159,7 @@ __global__ void contrastKernel(const float* entropy, float* contrastOut,
     contrastOut[idx] = (count > 0) ? sumDiff / count : 0.0f;
 }
 
-extern "C" void computeCudaEntropyContrast(
+void computeCudaEntropyContrast(
     const int* d_iterations,
     float* d_entropyOut,
     float* d_contrastOut,
@@ -181,7 +181,7 @@ extern "C" void computeCudaEntropyContrast(
     cudaDeviceSynchronize();
 }
 
-extern "C" void launch_mandelbrotHybrid(
+void launch_mandelbrotHybrid(
     uchar4* output,
     int* d_iterations,
     int width,
@@ -190,7 +190,8 @@ extern "C" void launch_mandelbrotHybrid(
     float2 offset,
     int maxIterations,
     int tileSize,
-    const int* d_tileSupersampling
+    const int* d_tileSupersampling,
+    int supersampling
 ) {
     dim3 block(16, 16);
     dim3 grid((width + block.x - 1) / block.x,
