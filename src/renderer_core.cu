@@ -41,6 +41,9 @@ bool Renderer::initGL() {
 
     if (glewInit() != GLEW_OK) {
         std::puts("[ERROR] glewInit() fehlgeschlagen");
+        // --- Otter/Schneefuchs: Fenster-Resource freigeben! ---
+        RendererWindow::destroyWindow(state.window);
+        state.window = nullptr;
         return false;
     }
 
@@ -125,4 +128,7 @@ void Renderer::cleanup() {
     freeDeviceBuffers();
     HeatmapOverlay::cleanup();
     glfwTerminate();
+
+    // --- Otter/Schneefuchs: Jetzt ist alles wirklich „geputzt“! ---
+    glInitialized = false;
 }
