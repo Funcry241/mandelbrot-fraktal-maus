@@ -36,7 +36,6 @@ __global__ void mandelbrotKernelAdaptive(uchar4* out, int* iterOut, int w, int h
     if (x == 0 && y == 0) { iterOut[idx]=1234; out[idx]=make_uchar4(255,0,0,255);}
     if (x == 1 && y == 0) { iterOut[idx]=4321; out[idx]=make_uchar4(0,255,0,255);}
     if (x == 2 && y == 0) { iterOut[idx]=999;  out[idx]=make_uchar4(0,0,255,255);}
-    if (x < 3 && y == 0) return;
 
     int tilesX = (w + tile - 1) / tile, tileIndex = (y / tile) * tilesX + (x / tile);
     int S = super ? super[tileIndex] : 1; float tSum=0.0f; int iSum=0;
