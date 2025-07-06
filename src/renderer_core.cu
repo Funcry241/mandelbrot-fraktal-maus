@@ -41,9 +41,10 @@ bool Renderer::initGL() {
 
     if (glewInit() != GLEW_OK) {
         std::puts("[ERROR] glewInit() fehlgeschlagen");
-        // --- Otter/Schneefuchs: Fenster-Resource freigeben! ---
         RendererWindow::destroyWindow(state.window);
         state.window = nullptr;
+        // --- Otter/Schneefuchs: Jetzt auch global GLFW terminieren! ---
+        glfwTerminate();
         return false;
     }
 
