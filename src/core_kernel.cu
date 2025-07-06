@@ -94,6 +94,9 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
 
     output[idx] = elegantColor(avgT);
     iterationsOut[idx] = max(0, avgIter);
+
+    output[idx] = make_uchar4(255, 0, 0, 255);
+    iterationsOut[idx] = 7;
 }
 
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
