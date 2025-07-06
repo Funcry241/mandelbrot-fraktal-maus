@@ -14,9 +14,9 @@
 #include "hud.hpp"
 #include "cuda_interop.hpp"
 #include "zoom_logic.hpp"
-#include "heatmap_overlay.hpp" // 🆕 für Cleanup-Aufruf
+#include "heatmap_overlay.hpp"
 
-#define ENABLE_ZOOM_LOGGING 0 // Set to 0 to disable local zoom analysis logs
+#define ENABLE_ZOOM_LOGGING 0
 
 Renderer::Renderer(int width, int height)
 : state(width, height), glInitialized(false) {}
@@ -62,8 +62,7 @@ float ox = state.offset.x;
 float oy = state.offset.y;
 float tx = state.smoothedTargetOffset.x;
 float ty = state.smoothedTargetOffset.y;
-float dx = tx - ox;
-float dy = ty - oy;
+float dx = tx - ox, dy = ty - oy;
 float dist = std::sqrt(dx * dx + dy * dy);
 
 static float2 lastTarget = { 0.0f, 0.0f };
@@ -79,18 +78,10 @@ if (jumped) {
 const auto& zr = state.zoomResult;
 std::printf(
     "ZoomLog Z %.5e Idx %3d Ent %.5f Ctr %.5f dE %.5f dC %.5f Dist %.6f Thresh %.6f RelE %.3f RelC %.3f New %d Stayed %d\n",
-    state.zoom,
-    zr.bestIndex,
-    zr.bestEntropy,
-    zr.bestContrast,
-    zr.bestEntropy - state.lastEntropy,
-    zr.bestContrast - state.lastContrast,
-    zr.distance,
-    zr.minDistance,
-    zr.relEntropyGain,
-    zr.relContrastGain,
-    zr.isNewTarget ? 1 : 0,
-    stayCounter
+    state.zoom, zr.bestIndex, zr.bestEntropy, zr.bestContrast,
+    zr.bestEntropy - state.lastEntropy, zr.bestContrast - state.lastContrast,
+    zr.distance, zr.minDistance, zr.relEntropyGain, zr.relContrastGain,
+    zr.isNewTarget ? 1 : 0, stayCounter
 );
 
 state.lastEntropy  = zr.bestEntropy;
@@ -105,25 +96,13 @@ if (state.justZoomed) {
 }
 
 void Renderer::freeDeviceBuffers() {
-if (state.d_iterations) {
-CUDA_CHECK(cudaFree(state.d_iterations));
-state.d_iterations = nullptr;
-}
-if (state.d_entropy) {
-CUDA_CHECK(cudaFree(state.d_entropy));
-state.d_entropy = nullptr;
-}
-if (state.d_contrast) {
-CUDA_CHECK(cudaFree(state.d_contrast)); // 🐼 Panda fix: free all device buffers
-state.d_contrast = nullptr;
-}
-if (state.d_tileSupersampling) {
-CUDA_CHECK(cudaFree(state.d_tileSupersampling)); // 🦜 Kolibri fix: free adaptive supersampling buffer
-state.d_tileSupersampling = nullptr;
-}
+if (state.d_iterations) { CUDA_CHECK(cudaFree(state.d_iterations)); state.d_iterations = nullptr; }
+if (state.d_entropy) { CUDA_CHECK(cudaFree(state.d_entropy)); state.d_entropy = nullptr; }
+if (state.d_contrast) { CUDA_CHECK(cudaFree(state.d_contrast)); state.d_contrast = nullptr; }
+if (state.d_tileSupersampling){ CUDA_CHECK(cudaFree(state.d_tileSupersampling)); state.d_tileSupersampling = nullptr; }
 state.h_entropy.clear();
-state.h_contrast.clear(); // 🐼 Panda fix: clear host buffers
-state.h_tileSupersampling.clear(); // 🦜 Kolibri fix: clear CPU supersampling data
+state.h_contrast.clear();
+state.h_tileSupersampling.clear();
 }
 
 void Renderer::resize(int newW, int newH) {
@@ -143,10 +122,7 @@ glDeleteTextures(1, &state.tex);
 RendererWindow::destroyWindow(state.window);
 
 freeDeviceBuffers();
-
-// 🆕 Heatmap-Ressourcen freigeben
 HeatmapOverlay::cleanup();
-
 glfwTerminate();
 
 }

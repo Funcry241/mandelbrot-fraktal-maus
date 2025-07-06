@@ -1,17 +1,15 @@
 // Datei: src/frame_context.hpp
-// Zeilen: 76
+// Zeilen: 82
 /* 🐭 interner Maus-Kommentar:
-   Diese Datei definiert `FrameContext`, den zentralen Container pro Frame.
-   Flugente-konform: zoom, offset und newOffset wurden zurück auf float/float2 gestellt.
-   Hintergrund: double-Präzision war nicht nötig und kostete unnötig FPS.
-   Alle Entropie- und Kontrastdaten bleiben erhalten.
-   Schneefuchs sagte: „Wer zu genau sieht, sieht weniger schnell.“
+   FrameContext initialisiert ab sofort alle Kernwerte aus Settings.
+   Keine Magic Numbers mehr! Flugente: immer synchron, immer robust.
+   Schneefuchs: „Wartbarkeit ist, wenn Settings überall gelten.“
 */
 
 #pragma once
 #include <vector>
 #include <cuda_runtime.h>
-#include "settings.hpp"        // für Settings::tileSize, debugLogging etc.
+#include "settings.hpp"        // Settings::BASE_TILE_SIZE etc.
 
 struct FrameContext {
     // Bilddimensionen
@@ -19,13 +17,13 @@ struct FrameContext {
     int height = 0;
 
     // CUDA-Parameter
-    int maxIterations = 500;
-    int tileSize = 32;
-    int supersampling = 1;
+    int maxIterations;
+    int tileSize;
+    int supersampling;
 
     // Kamera / Fraktalkoordinaten
-    float zoom = 1.0f;
-    float2 offset = {0.0f, 0.0f};
+    float zoom;
+    float2 offset;
 
     // Auto-Zoom-Steuerung
     bool pauseZoom = false;
@@ -52,6 +50,15 @@ struct FrameContext {
     double totalTime = 0.0;
     double timeSinceLastZoom = 0.0;
 
+    // Konstruktor initialisiert alles aus Settings
+    FrameContext()
+        : maxIterations(Settings::INITIAL_ITERATIONS),
+          tileSize(Settings::BASE_TILE_SIZE),
+          supersampling(Settings::defaultSupersampling),
+          zoom(Settings::initialZoom),
+          offset{Settings::initialOffsetX, Settings::initialOffsetY}
+    {}
+
     // Debug-Ausgaben
     void printDebug() const {
         if (!Settings::debugLogging) return;
@@ -64,7 +71,7 @@ struct FrameContext {
         h_entropy.clear();
         h_contrast.clear();
         d_entropy = nullptr;
-        d_contrast = nullptr;      // ✅ mit aufräumen
+        d_contrast = nullptr;
         d_iterations = nullptr;
         shouldZoom = false;
         lastTileIndex = -1;

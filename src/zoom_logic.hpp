@@ -1,49 +1,34 @@
-// Datei: src/zoom_logic.hpp  
-// Zeilen: 50  
-// 🐭 Maus-Kommentar: Nur noch Deklarationen! Für saubere Trennung von Interface und Implementation.  
-// Flugente-konform: Koordinaten sind wieder float2 – schnell, CUDA-freundlich.  
-// Schneefuchs: „Header macht Angebot, nicht Geschäft.“  
+// Datei: src/zoom_logic.hpp
+// Zeilen: 39
+// 🐭 Maus-Kommentar: Kompakt, rein deklarativ. Nur das Interface für Hotspot-Auswertung und Scoring. Flugente/Capybara-ready, Header bleibt minimal – Schneefuchs-Nivea
+#pragma once
+#include "common.hpp"
+#include <vector>
+#include <vector_types.h> // float2
 
-#pragma once  
-#include "common.hpp"  
-#include "settings.hpp"  
-#include <vector>  
-#include <vector_types.h> // für float2  
+namespace ZoomLogic {
 
-namespace ZoomLogic {  
+struct ZoomResult {
+    int   bestIndex = -1;
+    float bestEntropy = 0.0f, bestContrast = 0.0f, bestScore = 0.0f;
+    float distance = 0.0f, minDistance = 0.0f;
+    float relEntropyGain = 0.0f, relContrastGain = 0.0f;
+    bool  isNewTarget = false, shouldZoom = false;
+    float2 newOffset = make_float2(0.0f, 0.0f);
+    std::vector<float> perTileContrast;
+};
 
-struct ZoomResult {  
-    int bestIndex = -1;  
-    float bestEntropy = 0.0f;  
-    float bestContrast = 0.0f;  
-    float bestScore = 0.0f;  
-    float distance = 0.0f;  
-    float minDistance = 0.0f;  
-    float relEntropyGain = 0.0f;  
-    float relContrastGain = 0.0f;  
-    bool isNewTarget = false;  
-    bool shouldZoom = false;  
-    float2 newOffset = make_float2(0.0f, 0.0f);  // Flugente!  
+// Nachbarkontrast: Mittelwert aus 4er-Nachbarschaft
+float computeEntropyContrast(const std::vector<float>& entropy, int width, int height, int tileSize);
 
-    std::vector<float> perTileContrast;  // 🔥 Kontrastwerte für HeatmapOverlay  
-};  
-
-// 🧠 Berechnung: mittlerer Kontrast aus Nachbarentropien  
-float computeEntropyContrast(const std::vector<float>& entropy, int width, int height, int tileSize);  
-
-// 🧠 Entscheidung: neues Ziel auswählen (Flugente-Version, 13 Argumente)  
+// Auswahl des Zoom-Hotspots (Entropie+Kontrast, 13 Args)
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,
     const std::vector<float>& contrast,
-    float2 offset,
-    float zoom,
-    int width,
-    int height,
-    int tileSize,
-    float2 currentOffset,
-    int currentIndex,
-    float currentEntropy,
-    float currentContrast
+    float2 offset, float zoom,
+    int width, int height, int tileSize,
+    float2 currentOffset, int currentIndex,
+    float currentEntropy, float currentContrast
 );
 
 } // namespace ZoomLogic

@@ -1,13 +1,11 @@
+// Zeilen: 72
 // Datei: src/renderer_state.hpp
-// Zeilen: 84
-// 🐭 Maus-Kommentar: Der Renderer merkt sich nun Entropie, Kontrast, Index und Score (zoomResult) – für Analyse, Visualisierung oder Heatmap.
-// Flugente: offset zurück auf float2 für Performance.
-// Schneefuchs: „Wer messen will, muss erinnern.“
+// 🐭 Maus-Kommentar: State-of-the-Art für Renderer-Status. Alle Entropie-/Kontrast-/Zoomdaten persistent und schnell (float2 statt double2). Overlay & Analyse direkt steuerbar. Schneefuchs: Übersicht, Otter: Performance.
 
 #pragma once
 
-#include "pch.hpp" // 🧠 Enthält <cuda_runtime.h>, float2 etc.
-#include "zoom_logic.hpp" // 📦 ZoomResult für Auto-Zoom-Auswertung
+#include "pch.hpp" // <cuda_runtime.h>, float2 etc.
+#include "zoom_logic.hpp" // ZoomResult für Auto-Zoom
 #include <vector>
 
 class RendererState {
@@ -18,15 +16,15 @@ int height;
 GLFWwindow* window = nullptr;
 
 // 🔍 Zoom & Bildausschnitt
-double zoom;
-float2 offset;                    // 🦆 Flugente: war double2 → jetzt float2
+double zoom = 1.0;
+float2 offset = { 0.0f, 0.0f };
 
 // 🧮 Iterationen
-int baseIterations;
-int maxIterations;
+int baseIterations = 100;
+int maxIterations = 1000;
 
-// 🎯 Zielkoordinaten & Glättung
-double2 targetOffset;
+// 🎯 Zielkoordinaten
+double2 targetOffset = { 0.0, 0.0 };
 double2 filteredTargetOffset = { 0.0, 0.0 };
 float2 smoothedTargetOffset = { 0.0f, 0.0f };
 float smoothedTargetScore = -1.0f;
@@ -36,44 +34,42 @@ float currentFPS = 0.0f;
 float deltaTime = 0.0f;
 
 // 🧩 Entropie & Kontrast
-int lastTileSize;
-std::vector<float> h_entropy;    // 🔢 Entropie pro Tile
-std::vector<float> h_contrast;   // 🐼 Kontrast pro Tile
+int lastTileSize = 0;
+std::vector<float> h_entropy;
+std::vector<float> h_contrast;
 
-// 🔗 CUDA-Puffer (Geräteseite)
+// 🔗 CUDA-Puffer (Device)
 int* d_iterations = nullptr;
-float* d_entropy   = nullptr;
-float* d_contrast  = nullptr;    // 🐼 Panda: device-Kontrastdaten
-int* d_tileSupersampling = nullptr; // 🦜 Kolibri: adaptives Supersampling
+float* d_entropy = nullptr;
+float* d_contrast = nullptr;
+int* d_tileSupersampling = nullptr;
 
-// 🎛️ CPU-Puffer für Supersampling
-std::vector<int> h_tileSupersampling; // 🦜 Kolibri: CPU-Puffer
+// 🎛️ Supersampling-Puffer (Host)
+std::vector<int> h_tileSupersampling;
 
 // 🎥 OpenGL-Puffer
 unsigned int pbo = 0;
 unsigned int tex = 0;
 
-// 🕒 Zeit
+// 🕒 Zeitsteuerung
 int frameCount = 0;
 double lastTime = 0.0;
 
 // 🔁 Auto-Zoom
 bool shouldZoom = false;
 
-// 🧠 Analyse
+// 🧠 Analyse & Ziel
 ZoomLogic::ZoomResult zoomResult;
 float lastEntropy = 0.0f;
 float lastContrast = 0.0f;
 int   lastIndex = -1;
 bool justZoomed = false;
 
-// 📏 Supersampling global default
+// 📏 Globales Supersampling
 int supersampling = 1;
 
-// 🔥 Overlay-Steuerung
+// 🔥 Overlay
 bool overlayEnabled = false;
-
-// 📌 Ziel-Tile-Index
 int lastTileIndex = -1;
 
 // 🧽 Verwaltung

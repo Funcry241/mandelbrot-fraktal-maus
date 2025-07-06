@@ -1,9 +1,8 @@
-// Zeilen: 35
+// Zeilen: 32
 // Datei: src/main.cpp
-// 🐭 Maus-Kommentar: `HeatmapOverlay::setEnabled(...)` ist gestrichen – Overlay wird direkt über RendererState gesteuert. Wir initialisieren den Overlay-Zustand korrekt aus settings.hpp. Schneefuchs: „Was sichtbar ist, beginnt im State.“
+// 🐭 Maus-Kommentar: Overlay wird direkt über RendererState initialisiert. Heatmap-Status aus Settings. Kompakt, klar, kein Overhead. Schneefuchs nickt.
 
 #include "pch.hpp"
-
 #include "renderer_core.hpp"
 #include "settings.hpp"
 #include "renderer_loop.hpp"
@@ -11,30 +10,25 @@
 #include "cuda_interop.hpp"
 
 int main() {
-    if (Settings::debugLogging) {
-        std::puts("[DEBUG] Mandelbrot-Otterdream gestartet");
-    }
+if (Settings::debugLogging)
+std::puts("[DEBUG] Mandelbrot-Otterdream gestartet");
 
-    Renderer renderer(Settings::width, Settings::height);
+Renderer renderer(Settings::width, Settings::height);
+if (!renderer.initGL()) {
+    std::puts("[FATAL] OpenGL-Initialisierung fehlgeschlagen – Programm wird beendet");
+    return EXIT_FAILURE;
+}
 
-    if (!renderer.initGL()) {
-        std::puts("[FATAL] OpenGL-Initialisierung fehlgeschlagen – Programm wird beendet");
-        return EXIT_FAILURE;
-    }
+RendererLoop::initResources(renderer.getState());
+renderer.getState().overlayEnabled = Settings::heatmapOverlayEnabled;
+CudaInterop::setPauseZoom(false);
 
-    RendererLoop::initResources(renderer.getState());
+while (!renderer.shouldClose()) {
+    renderer.renderFrame_impl(true);
+    glfwPollEvents();
+    glfwSwapBuffers(renderer.getState().window);
+}
 
-    // 🟢 Heatmap-Overlay: Initialzustand aus Settings übernehmen
-    renderer.getState().overlayEnabled = Settings::heatmapOverlayEnabled;
+return 0;
 
-    // ⏯️ Auto-Zoom explizit aktivieren beim Start
-    CudaInterop::setPauseZoom(false);
-
-    while (!renderer.shouldClose()) {
-        renderer.renderFrame_impl(true);
-        glfwPollEvents();
-        glfwSwapBuffers(renderer.getState().window); 
-    }
-
-    return 0;
 }

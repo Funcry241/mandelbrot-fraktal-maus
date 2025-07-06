@@ -1,12 +1,12 @@
 // Datei: src/renderer_resources.hpp
 // Zeilen: 28
-// ⏱️ Nach wie vor modularisiert – jetzt mit Kontextsteuerung für Logging
+// ⏱️ Modular und mit Logging-Kontext – Ressourcenursprung immer nachvollziehbar.
 
 #pragma once
 #ifndef RENDERER_RESOURCES_HPP
 #define RENDERER_RESOURCES_HPP
 
-#ifdef __CUDACC__
+#ifdef CUDACC
 typedef unsigned int GLuint;
 #else
 #include <GL/glew.h>
@@ -14,13 +14,13 @@ typedef unsigned int GLuint;
 
 namespace OpenGLUtils {
 
-// 🔧 Kontext für Logging – z. B. "resize", "init", "tileSizeChange"
+// 🔧 Setzt den Kontext-String für folgende Ressourcen-Log-Ausgaben (z. B. "resize", "init").
 void setGLResourceContext(const char* context);
 
-// 🧱 OpenGL-Ressourcen erzeugen
+// 🧱 Erzeugt OpenGL-Buffer/Texture (mit Logging bei Bedarf)
 GLuint createPBO(int width, int height);
 GLuint createTexture(int width, int height);
 
 } // namespace OpenGLUtils
 
-#endif // RENDERER_RESOURCES_HPP
+#endif // RENDERER_RESOURCES_HPPs

@@ -1,5 +1,5 @@
-// Zeilen: 32
 // Datei: src/heatmap_overlay.hpp
+// Zeilen: 32
 /*
 Maus-Kommentar 🐭: Overlay ist jetzt vollständig zustandslos – kein interner bool mehr. Alle Kontrollfunktionen arbeiten direkt mit RendererState&. drawOverlay-API akzeptiert ctx. Schneefuchs: „Kein Schatten, nur Klarheit.“
 */
@@ -24,11 +24,11 @@ void cleanup();
 // textureId: Fraktal-Textur (optional, wird ignoriert)
 // ctx: Zustandsobjekt mit overlayEnabled-Flag
 void drawOverlay(const std::vector<float>& entropy,
-                 const std::vector<float>& contrast,
-                 int width,
-                 int height,
-                 int tileSize,
-                 GLuint textureId,
-                 RendererState& ctx);
+const std::vector<float>& contrast,
+int width,
+int height,
+int tileSize,
+GLuint textureId,
+RendererState& ctx);
 
 } // namespace HeatmapOverlay

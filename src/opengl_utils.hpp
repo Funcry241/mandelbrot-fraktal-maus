@@ -1,12 +1,12 @@
 // Datei: src/opengl_utils.hpp
 // Zeilen: 24
-// 🐭 Maus-Kommentar: Robbe-Edition – keine Altlasten mehr. Nur noch moderne Shader-/Quad-Erzeugung mit expliziter VAO-Nutzung. GLEW/GLFW jetzt IMMER zentral im PCH. Schneefuchs: „Header bleibt schlank, sonst beißt die Robbe!“
+// 🐭 Maus-Kommentar: Robbe-Edition – keine Altlasten mehr. Moderne Shader-/Quad-Erzeugung, explizite VAO-Nutzung. GLEW/GLFW IMMER im PCH. Schneefuchs: „Header bleibt schlank, sonst beißt die Robbe!“
 
 #pragma once
 #ifndef OPENGL_UTILS_HPP
 #define OPENGL_UTILS_HPP
 
-#include "pch.hpp" // Enthält GLEW, GLFW, CUDA usw.
+#include "pch.hpp" // GLEW, GLFW, CUDA etc.
 
 namespace OpenGLUtils {
 

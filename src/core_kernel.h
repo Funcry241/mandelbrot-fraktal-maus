@@ -20,28 +20,28 @@
 // - supersampling: Fallback-Gesamtsupersampling (wird oft ignoriert – adaptive Puffer haben Vorrang)
 extern "C"
 void launch_mandelbrotHybrid(
-    uchar4* devPtr,
-    int* d_iterations,
-    int width,
-    int height,
-    float zoom,
-    float2 offset,
-    int maxIterations,
-    int tileSize,
-    int* d_tileSupersampling,
-    int supersampling
+uchar4* devPtr,
+int* d_iterations,
+int width,
+int height,
+float zoom,
+float2 offset,
+int maxIterations,
+int tileSize,
+int* d_tileSupersampling,
+int supersampling
 );
 
 // Entropie- und Kontrastberechnung pro Tile – Panda & Capybara
 extern "C"
 void computeCudaEntropyContrast(
-    const int* d_iterations,
-    float* d_entropyOut,
-    float* d_contrastOut,
-    int width,
-    int height,
-    int tileSize,
-    int maxIterations
+const int* d_iterations,
+float* d_entropyOut,
+float* d_contrastOut,
+int width,
+int height,
+int tileSize,
+int maxIterations
 );
 
 #endif // CORE_KERNEL_H

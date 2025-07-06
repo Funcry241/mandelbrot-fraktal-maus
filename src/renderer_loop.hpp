@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.hpp
 // Zeilen: 24
-// 🐭 Maus-Kommentar: Definiert den Render-Loop und die Darstellung pro Frame. Steuert FPS-Zähler, Auto-Zoom-Logik, HUD und Eingabe. Schneefuchs: „Der Taktgeber des Fraktal-Tanzes mit Blick für Tasten.“ (Kiwi: drawOverlay nicht mehr global!)
+// 🐭 Maus-Kommentar: Render-Loop, FPS, HUD, Auto-Zoom und Eingaben jetzt sauber gekapselt. drawOverlay ist nicht mehr global – Aufruf lokal im Loop. Schneefuchs: „Der Taktgeber des Fraktal-Tanzes, mit Blick für Tasten.“
 
 #pragma once
 
@@ -10,16 +10,16 @@
 
 namespace RendererLoop {
 
-// 🔧 Initialisiert OpenGL-, CUDA- und HUD-Ressourcen
+// 🔧 Initialisiert OpenGL-, CUDA- und HUD-Ressourcen (einmalig)
 void initResources(RendererState& state);
 
-// 🕒 Initialisiert Zeitmesser, misst deltaTime & berechnet FPS
+// 🕒 Startet Frame: Zeitmesser, FPS, Delta berechnen
 void beginFrame(RendererState& state);
 
-// 🎬 Führt einen vollständigen Frame-Durchlauf aus (CUDA, AutoZoom, Textur, HUD)
+// 🎬 Kompletter Frame: CUDA, Auto-Zoom, Textur, HUD, Overlay
 void renderFrame_impl(RendererState& state, bool autoZoomEnabled);
 
-// 🎹 Tastatur-Callback für GLFW (Heatmap Toggle, Zoom Pause etc.)
+// 🎹 Tastatur-Callback für GLFW (Overlay, Pause, Zoom etc.)
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 
 } // namespace RendererLoop

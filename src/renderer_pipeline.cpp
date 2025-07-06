@@ -1,54 +1,42 @@
-// Zeilen: 93
 // Datei: src/renderer_pipeline.cpp
-// 🐭 Maus-Kommentar: Shaderfehler werden nun korrekt erkannt – keine stille OpenGL-Misere mehr.
-// Otter-VAO bleibt, doch Schneefuchs flüstert: „Abstürzen ist keine Option.“
-// 🐭 FIX: drawFullscreenQuad() deaktiviert Depth-Test, Culling und Blending – HUD und Heatmap bleiben sichtbar, egal was vorher war.
-
+// Zeilen: 70
+// 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean – HUD/Heatmap bleiben garantiert sichtbar. Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines.
 #include "pch.hpp"
-
 #include "renderer_pipeline.hpp"
 #include "opengl_utils.hpp"
 #include "common.hpp"
 #include <iostream>
-#include <cstdlib>  // Für std::exit
+#include <cstdlib>
 
 namespace RendererPipeline {
 
-static GLuint program = 0;
-static GLuint VAO = 0, VBO = 0, EBO = 0;
+static GLuint program = 0, VAO = 0, VBO = 0, EBO = 0;
 
-static const char* vertexShaderSrc = R"GLSL(
+static constexpr const char* vShader = R"GLSL(
 #version 430 core
 layout(location=0) in vec2 aPos;
 layout(location=1) in vec2 aTex;
 out vec2 vTex;
-void main() {
-    vTex = aTex;
-    gl_Position = vec4(aPos, 0.0, 1.0);
-}
+void main() { vTex = aTex; gl_Position = vec4(aPos, 0.0, 1.0); }
 )GLSL";
 
-static const char* fragmentShaderSrc = R"GLSL(
+static constexpr const char* fShader = R"GLSL(
 #version 430 core
 in vec2 vTex;
 out vec4 FragColor;
 uniform sampler2D uTex;
-void main() {
-    FragColor = texture(uTex, vTex);
-}
+void main() { FragColor = texture(uTex, vTex); }
 )GLSL";
 
 void init() {
-    program = OpenGLUtils::createProgramFromSource(vertexShaderSrc, fragmentShaderSrc);
-    if (program == 0) {
+    program = OpenGLUtils::createProgramFromSource(vShader, fShader);
+    if (!program) {
         std::cerr << "[FATAL] Shaderprogramm konnte nicht erstellt werden – OpenGL-Abbruch\n";
         std::exit(EXIT_FAILURE);
     }
-
     glUseProgram(program);
     glUniform1i(glGetUniformLocation(program, "uTex"), 0);
     glUseProgram(0);
-
     OpenGLUtils::createFullscreenQuad(&VAO, &VBO, &EBO);
 }
 
@@ -62,12 +50,9 @@ void updateTexture(GLuint pbo, GLuint tex, int width, int height) {
 
 void drawFullscreenQuad(GLuint tex) {
     glUseProgram(program);
-
-    // 🐭 Sicherheitsmaßnahmen gegen unsichtbares HUD/Heatmap
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glDisable(GL_BLEND);
-
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindVertexArray(VAO);

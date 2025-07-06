@@ -1,22 +1,23 @@
 // Datei: src/renderer_window.hpp
-// Zeilen: 27
-// 🐭 Maus-Kommentar: Header für GLFW-Fensterverwaltung – Callback-Registrierung jetzt ausschließlich über `createWindow(...)`. Keine Mehrdeutigkeit, keine Überschreibgefahr. Schneefuchs: „Ein Fenster, eine Regel – keine wilden Handler mehr.“
+// Zeilen: 23
+// 🐭 Maus-Kommentar: GLFW-Fensterverwaltung als zentrale API – Callbacks nur noch über createWindow(). Keine Mehrdeutigkeit. Schneefuchs-konform.
 
 #pragma once
 
-#include "pch.hpp"               // 🧩 PCH bringt GLFW, GLEW, Windows & Standard – zentrale Verwaltung
-#include "renderer_core.hpp"     // 🔁 Für vollständige Renderer-Definition
+#include "pch.hpp" // 🧩 PCH: enthält GLFW, GLEW etc.
+#include "renderer_core.hpp" // 🔁 Für Renderer-Definition
 
 class Renderer;
 
 namespace RendererWindow {
 
-GLFWwindow* createWindow(int width, int height, Renderer* instance);  // 🟢 Erstellt Fenster und konfiguriert alle Callbacks
+// 🟢 Erstellt Fenster und registriert alle Callbacks (Größe, Tasten, etc.)
+GLFWwindow* createWindow(int width, int height, Renderer* instance);
+
+// Fragt Fenster-Schließwunsch ab
 bool shouldClose(GLFWwindow* window);
 
-void destroyWindow(GLFWwindow* window);  // 🧼 Ressourcen korrekt freigeben
-
-// 🧹 Entfernt: setResizeCallback(...)
-// 🧹 Entfernt: setKeyCallback(...)
+// Gibt Fenster und Ressourcen frei
+void destroyWindow(GLFWwindow* window);
 
 } // namespace RendererWindow

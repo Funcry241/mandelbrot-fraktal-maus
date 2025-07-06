@@ -12,18 +12,18 @@ public:
 Renderer(int width, int height);
 ~Renderer();
 
-bool initGL();  // 🟢 war void – jetzt bool für Fehlerprüfung
+bool initGL();  // 🟢 gibt Erfolg zurück
 void renderFrame_impl(bool autoZoomEnabled);
 bool shouldClose() const;
 void resize(int newW, int newH);
 
-// 🆕 Getter für Zugriff auf internen Zustand
-RendererState& getState() { return state; }
-const RendererState& getState() const { return state; }  // 🆕 nur lesend    
+// Getter für den internen Zustand
+RendererState& getState()             { return state; }
+const RendererState& getState() const { return state; }
 
 private:
-RendererState state; // 🔐 Zugriff nur über getState()
-bool glInitialized = false; // 🆕 Cleanup-Schutz für Destruktor
+RendererState state;
+bool glInitialized = false; // Cleanup-Schutz
 
 void freeDeviceBuffers();
 void cleanup();
