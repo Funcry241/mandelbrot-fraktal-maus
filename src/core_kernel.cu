@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
 // Zeilen: 293
-// 🐭 Maus-Kommentar: Capybara+Kiwi+MausZoom – Keine magische -42 mehr. Debug-Output zeigt jetzt echten Supersampling-Wert (Buffer: N/A). Otter: Klarheit, Schneefuchs: keine Log-Spielchen.
+// 🐭 Maus-Kommentar: Capybara+Kiwi+MausZoom – Mapping jetzt 100% aspect-korrekt: spanY=spanX*h/w. Keine Verzerrung mehr, Mandelbrot mittig. Otter-Check: Testpixel und Supersampling weiterhin geschützt.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -41,21 +41,23 @@ __global__ void mandelbrotKernelAdaptive(
         if (out && idx >= 0 && idx < w * h) out[idx] = make_uchar4(0, 0, 0, 255);
         return;
     }
-    // Testpixel (werden zusätzlich gesetzt, normales Bild bleibt für alle anderen!)
+    // Testpixel
     if (x == 0 && y == 0) { iterOut[idx] = 1234; out[idx] = make_uchar4(255, 0, 0, 255);}
     if (x == 1 && y == 0) { iterOut[idx] = 4321; out[idx] = make_uchar4(0, 255, 0, 255);}
     if (x == 2 && y == 0) { iterOut[idx] = 999;  out[idx] = make_uchar4(0, 0, 255, 255);}
-    // Weiter für alle anderen Pixel wie gehabt:
+    // Mandelbrot-Logik für alle anderen Pixel:
     int tilesX = (w + tile - 1) / tile;
     int tileIndex = (y / tile) * tilesX + (x / tile);
     int S = super ? super[tileIndex] : 1;
-    if (S < 1 || S > 32) S = 1; // Notbremse
+    if (S < 1 || S > 32) S = 1;
     float tSum = 0.0f; int iSum = 0;
-    float aspect = float(w) / h, scale = 1.0f / zoom, spanX = 3.5f * scale, spanY = 2.0f * scale;
+    float scale = 1.0f / zoom;
+    float spanX = 3.5f * scale;
+    float spanY = spanX * h / w; // <--- Das fixiert das Aspect Ratio!
     for (int i = 0; i < S; ++i)
         for (int j = 0; j < S; ++j) {
             float dx = (i + 0.5f) / S, dy = (j + 0.5f) / S;
-            float fx = ((x + dx) / w - 0.5f) * spanX * aspect + offset.x;
+            float fx = ((x + dx) / w - 0.5f) * spanX + offset.x;
             float fy = ((y + dy) / h - 0.5f) * spanY + offset.y;
             float zx, zy; int it = mandelbrotIterations(fx, fy, maxIter, zx, zy); iSum += it;
             float norm = zx * zx + zy * zy;
@@ -107,7 +109,6 @@ void computeCudaEntropyContrast(const int* d_it, float* d_e, float* d_c, int w, 
 // ---- HOST-WRAPPER: Mandelbrot+Supersampling ----
 void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, float2 offset, int maxIter, int tile, int* d_sup, int supersampling) {
     dim3 block(16, 16), grid((w + 15) / 16, (h + 15) / 16);
-    // Debug-Ausgabe zeigt jetzt Buffer/kein Buffer und echten Wert
     if (Settings::debugLogging) {
         if (d_sup) {
             std::printf("[DEBUG] Mandelbrot-Kernel Call: width=%d, height=%d, maxIter=%d, zoom=%.2f, offset=(%.10f,%.10f), tileSize=%d, supersampling=Buffer, block=(%d,%d), grid=(%d,%d)\n",
