@@ -9,6 +9,9 @@
     "clangd.arguments": [
         "--compile-commands-dir=${workspaceFolder}/build"
     ],
+    "files.exclude": {
+    "**/*.cu": true
+    },
     "files.associations": {
         "cmath": "cpp",
         "fstream": "cpp",
