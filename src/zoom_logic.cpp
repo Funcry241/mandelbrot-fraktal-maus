@@ -1,6 +1,6 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 117
-// 🧠 Maus-Kommentar: Kompakt & robust. Hotspot-Score bleibt gewichtete Mischung aus Entropie/Kontrast. Keine Funktionsverluste, aber klarer strukturiert und flott lesbar. Debug-Log für Score bleibt optional.
+// Zeilen: 120
+// 🧠 Maus-Kommentar: Strikt C++23, keine Signed/Unsigned-Warnings mehr, keine unused-Variablen. Debug-Messungen sauber #if-gekappt. Otter- und Schneefuchs-konform.
 #include "pch.hpp"
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -36,7 +36,9 @@ ZoomResult evaluateZoomTarget(
     float2 offset, float zoom, int width, int height, int tileSize,
     float2 currentOffset, int currentIndex, float currentEntropy, float currentContrast
 ) {
+#if ENABLE_ZOOM_LOGGING
     auto t0 = std::chrono::high_resolution_clock::now();
+#endif
 
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
@@ -48,14 +50,14 @@ ZoomResult evaluateZoomTarget(
     result.bestContrast = currentContrast;
     result.newOffset = currentOffset;
 
-    if (result.perTileContrast.capacity() < (size_t)tileCount)
+    if (result.perTileContrast.capacity() < static_cast<size_t>(tileCount))
         result.perTileContrast.reserve(tileCount);
     result.perTileContrast.assign(tileCount, 0.0f);
 
     float maxScore = -1.0f;
     for (int i = 0; i < tileCount; ++i) {
         float entropy = h_entropy[i];
-        float contrast = (h_contrast.size() > i) ? h_contrast[i] : 0.0f;
+        float contrast = (h_contrast.size() > static_cast<size_t>(i)) ? h_contrast[i] : 0.0f; // Fix: signed/unsigned
         int tx = i % tilesX, ty = i / tilesX;
         float2 cand = {
             offset.x + tileSize * (tx + 0.5f - tilesX / 2.0f) / zoom,
