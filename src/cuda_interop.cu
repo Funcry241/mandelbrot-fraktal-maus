@@ -72,6 +72,11 @@ void renderCudaFrame(
     size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
+    if (Settings::debugLogging) {
+        std::printf("[PTRS] devPtr=%p d_iter=%p d_ent=%p d_con=%p d_sup=%p\n",
+            (void*)devPtr, (void*)d_iterations, (void*)d_entropy, (void*)d_contrast, (void*)d_tileSupersampling);
+    }
+
     // --- DEBUG: Vorher Buffer auslesen
     if (Settings::debugLogging) {
         int dbg_before[3] = {-12345, -12345, -12345};
