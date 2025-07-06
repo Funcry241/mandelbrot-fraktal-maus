@@ -190,7 +190,7 @@ void launch_mandelbrotHybrid(
     float2 offset,
     int maxIterations,
     int tileSize,
-    const int* d_tileSupersampling,
+    int* d_tileSupersampling,
     int supersampling
 ) {
     dim3 block(16, 16);
