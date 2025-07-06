@@ -1,0 +1,37 @@
+# Datei: .clangd
+# Zeilen: 24
+# 🐭 Maus-Kommentar: Projektweite Clangd-Konfiguration. Nutzt compile_commands.json im Build-Ordner. Modernisiert Diagnostik, aktiviert Hintergrund-Index, erlaubt intelligente Auto-Vervollständigung. Maus & Schneefuchs validiert.
+
+CompileFlags:
+  # Setzt explizit den C++-Standard
+  Add: [-std=c++23]
+
+# Gibt an, wo die compile_commands.json liegt
+CompileDatabase:
+  Path: build
+
+Diagnostics:
+  UnusedIncludes: true        # Zeigt ungenutzte Includes an
+  ClangTidy:
+    Add:                      # Aktiviert gezielt nützliche Checks
+      - bugprone-*
+      - performance-*
+      - modernize-*
+      - readability-identifier-naming
+      - cppcoreguidelines-*
+
+Index:
+  Background: Build           # Hintergrundindex für große Projekte
+  StandardLibrary: Yes        # Erkennt Standardbibliothek korrekt
+
+Hover:
+  ShowAKA: true               # Zeigt "aka"-Typen (Typ-Aliase)
+
+Completion:
+  AllScopes: true             # Auch globale Symbole vorschlagen
+  FilterAndSort: true         # Intelligente Sortierung
+
+InlayHints:
+  Enabled: true               # Zeigt automatische Tipps im Code
+  ParameterNames: true
+  DeducedTypes: true

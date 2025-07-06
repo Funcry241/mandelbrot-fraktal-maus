@@ -95,5 +95,6 @@
       "xutility": "cpp"
     },
     "files.insertFinalNewline": true,
-    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json"
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "clangd.path": "C:/Tools/clangd-windows-20.1.0/clangd_20.1.0/bin/clangd.exe"
 }
