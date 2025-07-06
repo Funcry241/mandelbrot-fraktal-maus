@@ -44,6 +44,9 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * width + x;
 
+    if (x == 0 && y == 0) output[idx] = make_uchar4(255, 0, 0, 255); // Sollte oben links rot werden!
+
+
     // MausFix v3: Schreibe *immer* einen gültigen Wert (0) für OOB-Pixel, damit keine -1 entstehen!
     if (x >= width || y >= height) {
         if (idx < width * height && iterationsOut)
