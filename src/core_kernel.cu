@@ -33,14 +33,14 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fx, 
 __global__ void mandelbrotKernelAdaptive(uchar4* out, int* iterOut, int w, int h, float zoom, float2 offset, int maxIter, int tile, int* super) {
     int x = blockIdx.x * blockDim.x + threadIdx.x, y = blockIdx.y * blockDim.y + threadIdx.y, idx = y * w + x;
     if (x >= w || y >= h || idx < 0 || idx >= w * h) { if (iterOut && idx >= 0 && idx < w * h) iterOut[idx] = 0; if (out && idx >= 0 && idx < w * h) out[idx] = make_uchar4(0,0,0,255); return; }
+    // Testpixel (werden zusätzlich gesetzt, normales Bild bleibt für alle anderen!)
     if (x == 0 && y == 0) { iterOut[idx]=1234; out[idx]=make_uchar4(255,0,0,255);}
     if (x == 1 && y == 0) { iterOut[idx]=4321; out[idx]=make_uchar4(0,255,0,255);}
     if (x == 2 && y == 0) { iterOut[idx]=999;  out[idx]=make_uchar4(0,0,255,255);}
-
+    // Weiter für alle anderen Pixel wie gehabt:
     int tilesX = (w + tile - 1) / tile, tileIndex = (y / tile) * tilesX + (x / tile);
     int S = super ? super[tileIndex] : 1; float tSum=0.0f; int iSum=0;
     float aspect = float(w) / h, scale = 1.0f / zoom, spanX = 3.5f * scale, spanY = 2.0f * scale;
-
     for (int i = 0; i < S; ++i) for (int j = 0; j < S; ++j) {
         float dx = (i + 0.5f) / S, dy = (j + 0.5f) / S;
         float fx = ((x + dx) / w - 0.5f) * spanX * aspect + offset.x;
