@@ -68,9 +68,14 @@ void computeCudaFrame(FrameContext& ctx, RendererState& state) {
         ctx.newOffset.y = gpuNewOffset.y;
     }
 
+    // Host-Debug nach CUDA-Render
     if (Settings::debugLogging) {
         std::printf("[CUDA] Input: offset=(%.10f, %.10f) | zoom=%.2f\n",
             ctx.offset.x, ctx.offset.y, ctx.zoom);
+        if (!ctx.h_entropy.empty()) {
+            std::printf("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n",
+                ctx.h_entropy[0], ctx.h_contrast[0]);
+        }
     }    
 }
 
