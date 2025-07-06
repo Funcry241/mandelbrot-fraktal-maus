@@ -107,7 +107,8 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     iterationsOut[idx] = max(0, avgIter);
 }
 
-// ... (Rest wie gehabt, keine Änderungen nötig, keine Mapping-Bugs)
+// --- ENTROPY & CONTRAST-KERNELS ---
+
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
                               int width, int height, int tileSize,
                               int maxIter) {
@@ -179,6 +180,7 @@ __global__ void contrastKernel(const float* entropy, float* contrastOut,
     contrastOut[idx] = (count > 0) ? sumDiff / count : 0.0f;
 }
 
+// --- HOST-WRAPPER: Entropie und Kontrast berechnen ---
 void computeCudaEntropyContrast(
     const int* d_iterations,
     float* d_entropyOut,
@@ -201,6 +203,7 @@ void computeCudaEntropyContrast(
     cudaDeviceSynchronize();
 }
 
+// --- HOST-WRAPPER: Mandelbrot+Supersampling ---
 void launch_mandelbrotHybrid(
     uchar4* output,
     int* d_iterations,
