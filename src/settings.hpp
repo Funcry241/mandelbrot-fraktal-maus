@@ -39,7 +39,7 @@ inline constexpr int windowPosX = 100;   // Startposition links
 inline constexpr int windowPosY = 100;   // Startposition oben
 
 // 🔭 Initialer Fraktal-Ausschnitt (Zoomfaktor und Verschiebung)
-inline constexpr float initialZoom    = 300.0f;   // Start-Zoom: höherer Wert = näher dran – empfohlen: 100–1000
+inline constexpr float initialZoom    = 1.5f;   // Start-Zoom: höherer Wert = näher dran – empfohlen: 100–1000
 inline constexpr float initialOffsetX = -0.5f;    // Anfangsverschiebung auf der X-Achse
 inline constexpr float initialOffsetY =  0.0f;    // Anfangsverschiebung auf der Y-Achse
 
