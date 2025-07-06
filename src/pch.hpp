@@ -1,5 +1,5 @@
 // Datei: src/pch.hpp
-// Zeilen: 45
+// Zeilen: 46
 // 🐭 Maus-Kommentar: Precompiled Header – klar strukturiert: Windows-Header mit WIN32-Defines, dann OpenGL (GLEW+GLFW), dann CUDA-Runtime, dann STL. Achtung: windows.h nur mit NOMINMAX, GLEW nur vor GLFW. Schneefuchs bestand darauf, dass CUDA nur Runtime einbindet – nie cuda.h – sonst PCH-Krater.
 
 #pragma once
@@ -38,3 +38,5 @@
 #include "zoom_command.hpp"
 #include "frame_pipeline.hpp"
 #include "heatmap_overlay.hpp"
+
+// Leerzeile am Ende zum sauberen Abschluss
