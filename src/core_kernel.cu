@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 378
-// 🐭 Maus-Kommentar: Capybara+Kiwi+MausZoom – Grid/Block-Logging, OOB-Guard, Iter-Check. Alle Parameter explizit, Block/Grid sichtbar im Log, Debuglogging kontrolliert alles!
+// Zeilen: 386
+// 🐭 Maus-Kommentar: Capybara+Kiwi+MausZoom – Grid/Block-Logging, OOB-Guard, Iter-Check. Debug-Injection für Output-Check, explizites Fraktal- und Pointer-Debugging, Otter-approved.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -39,11 +39,20 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
                                          float zoom, float2 offset,
                                          int maxIterations,
                                          int tileSize,
-                                         const int* tileSupersampling) {
+                                         int* tileSupersampling) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * width + x;
-    
+
+    // Debug-Injection: Schreibe testweise festen Wert ins erste Pixel (links oben)
+#if 1
+    if (x == 0 && y == 0) {
+        iterationsOut[idx] = 1234; // Testwert, sollte in [KERNEL] Iterations First10: auftauchen!
+        output[idx] = make_uchar4(255, 0, 0, 255); // Knallrot für Pixel 0,0 wenn korrekt.
+        // KEIN return; // Lass weiterlaufen für regulären Mandelbrot-Test unten!
+    }
+#endif
+
     // MausFix v3: Schreibe *immer* einen gültigen Wert (0) für OOB-Pixel, damit keine -1 entstehen!
     if (x >= width || y >= height) {
         if (idx < width * height && iterationsOut)
@@ -87,7 +96,6 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     iterationsOut[idx] = max(0, avgIter);
 }
 
-// Fix: Setze Entropie für *jede* Kachel, auch wenn Thread 0 keine Pixel verarbeitet (Kiwi)
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
                               int width, int height, int tileSize,
                               int maxIter) {
