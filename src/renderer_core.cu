@@ -21,11 +21,17 @@
 Renderer::Renderer(int width, int height)
 : state(width, height), glInitialized(false) {}
 
+// Datei: src/renderer_core.cpp
+// Zeilen: [nur Abschnitt]
+// 🐭 Maus-Kommentar: Cleanup jetzt nur bei gültigem OpenGL-Kontext (Otter/Schneefuchs-Review Alpha 43)
+
 Renderer::~Renderer() {
-if (Settings::debugLogging && !glInitialized) {
-std::puts("[DEBUG] cleanup() wird trotz fehlender OpenGL-Initialisierung aufgerufen");
-}
-cleanup();
+    if (Settings::debugLogging && !glInitialized) {
+        std::puts("[DEBUG] cleanup() skipped – OpenGL was never initialized");
+    }
+    if (glInitialized) {
+        cleanup();
+    }
 }
 
 bool Renderer::initGL() {
