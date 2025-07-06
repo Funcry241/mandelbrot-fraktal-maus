@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 392
-// 🐭 Maus-Kommentar: Capybara+Kiwi+MausZoom – Mapping-Bug fixed: Fraktalkoordinaten jetzt mathematisch korrekt. Otter sieht: Farbmapping bleibt stabil, Debug zeigt echte Pixel-Koordinaten und Iterationen im Fraktalbereich!
+// Zeilen: 395
+// 🐭 Maus-Kommentar: Capybara+Kiwi+MausZoom – Buffer- und Index-Check jetzt forciert, Mapping-Bug endgültig ausgemerzt. Otter sieht: Testwerte kommen garantiert an, Debug für OOB & Alignment-Fehler klar. Schneefuchs: Keine Kompromisse – Speicher wird ab jetzt respektiert.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -10,6 +10,7 @@
 #include "core_kernel.h"
 #include "settings.hpp"
 
+// ---- FARB-MAPPING ----
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     if (t < 0.0f) return make_uchar4(0, 0, 0, 255);
     t = fminf(fmaxf(t, 0.0f), 1.0f);
@@ -20,6 +21,7 @@ __device__ __forceinline__ uchar4 elegantColor(float t) {
     return make_uchar4(r * 255, g * 255, b * 255, 255);
 }
 
+// ---- ITERATIONSKERNEL ----
 __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& finalX, float& finalY) {
     float x = 0.0f, y = 0.0f;
     int iter = 0;
@@ -34,61 +36,65 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fina
     return iter;
 }
 
-__global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
-                                         int width, int height,
-                                         float zoom, float2 offset,
-                                         int maxIterations,
-                                         int tileSize,
-                                         int* tileSupersampling) {
+// ---- MANDELBROT KERNEL ----
+__global__ void mandelbrotKernelAdaptive(
+    uchar4* output, int* iterationsOut,
+    int width, int height,
+    float zoom, float2 offset,
+    int maxIterations,
+    int tileSize,
+    int* tileSupersampling)
+{
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * width + x;
 
-#if 1
-    if (x == 0 && y == 0) {
-        iterationsOut[idx] = 1234; // Testwert, sollte in [KERNEL] Iterations First10: auftauchen!
-        output[idx] = make_uchar4(255, 0, 0, 255); // Knallrot für Pixel 0,0 wenn korrekt.
-    }
-#endif
-
-    // OOB Guard
-    if (x >= width || y >= height) {
-        if (idx < width * height && iterationsOut)
+    // --- [OOB Guard, forced test] ---
+    if (x >= width || y >= height || idx < 0 || idx >= width * height) {
+        if (iterationsOut && idx >= 0 && idx < width * height)
             iterationsOut[idx] = 0;
-        if (output && idx < width * height)
+        if (output && idx >= 0 && idx < width * height)
             output[idx] = make_uchar4(0, 0, 0, 255);
         return;
     }
 
+    // --- [DEBUG: Testwerte zur Speicherdiagnose] ---
+    if (x == 0 && y == 0) {
+        iterationsOut[idx] = 1234;
+        output[idx] = make_uchar4(255, 0, 0, 255);
+    }
+    if (x == 1 && y == 0) {
+        iterationsOut[idx] = 4321;
+        output[idx] = make_uchar4(0, 255, 0, 255);
+    }
+    if (x == 2 && y == 0) {
+        iterationsOut[idx] = 999;
+        output[idx] = make_uchar4(0, 0, 255, 255);
+    }
+    if (x < 3 && y == 0) return; // Für diese drei Pixel keine weitere Rechnung.
+
+    // ---- TILE-/SUPERSAMPLING-LOGIK ----
     int tileX = x / tileSize;
     int tileY = y / tileSize;
     int tilesX = (width + tileSize - 1) / tileSize;
     int tileIndex = tileY * tilesX + tileX;
-
     int S = tileSupersampling ? tileSupersampling[tileIndex] : 1;
+
     float totalT = 0.0f;
     int totalIter = 0;
 
-    // --- KORREKTE MANDELBROT-MAPPING-BERECHNUNG ---
+    // ---- MANDELBROT-MAPPING ----
     float aspect = (float)width / (float)height;
     float scale = 1.0f / zoom;
-    float spanX = 3.5f * scale;    // Standard: 3.5 Fraktaleinheiten quer
-    float spanY = 2.0f * scale;    // Standard: 2.0 Fraktaleinheiten hoch
+    float spanX = 3.5f * scale;
+    float spanY = 2.0f * scale;
 
     for (int i = 0; i < S; ++i) {
         for (int j = 0; j < S; ++j) {
             float dx = (i + 0.5f) / S;
             float dy = (j + 0.5f) / S;
-
-            // MAPPING: (x + dx) / width - 0.5 → [-0.5, +0.5]
             float fx = ((x + dx) / width - 0.5f) * spanX * aspect + offset.x;
             float fy = ((y + dy) / height - 0.5f) * spanY + offset.y;
-
-#if 0
-            if (x < 2 && y < 2 && i == 0 && j == 0) {
-                printf("[DEVICE] Pixel(%d,%d): jx=%.8f jy=%.8f\n", x, y, fx, fy);
-            }
-#endif
             float zx, zy;
             int iter = mandelbrotIterations(fx, fy, maxIterations, zx, zy);
             totalIter += iter;
@@ -107,11 +113,10 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     iterationsOut[idx] = max(0, avgIter);
 }
 
-// --- ENTROPY & CONTRAST-KERNELS ---
-
+// ---- ENTROPY & CONTRAST KERNELS ----
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
-                              int width, int height, int tileSize,
-                              int maxIter) {
+                              int width, int height, int tileSize, int maxIter)
+{
     int tileX = blockIdx.x;
     int tileY = blockIdx.y;
     int startX = tileX * tileSize;
@@ -134,7 +139,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         int y = startY + dy;
         if (x >= width || y >= height) continue;
         int iter = iterations[y * width + x];
-        iter = max(0, iter); // Fix: Keine negativen Werte
+        iter = max(0, iter);
         int bin = min(iter * 256 / (maxIter + 1), 255);
         atomicAdd(&histo[bin], 1);
         localCount++;
@@ -157,7 +162,8 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
 }
 
 __global__ void contrastKernel(const float* entropy, float* contrastOut,
-                               int tilesX, int tilesY) {
+                               int tilesX, int tilesY)
+{
     int tx = blockIdx.x * blockDim.x + threadIdx.x;
     int ty = blockIdx.y * blockDim.y + threadIdx.y;
     if (tx >= tilesX || ty >= tilesY) return;
@@ -180,16 +186,13 @@ __global__ void contrastKernel(const float* entropy, float* contrastOut,
     contrastOut[idx] = (count > 0) ? sumDiff / count : 0.0f;
 }
 
-// --- HOST-WRAPPER: Entropie und Kontrast berechnen ---
+// ---- HOST-WRAPPER: Entropie und Kontrast berechnen ----
 void computeCudaEntropyContrast(
     const int* d_iterations,
     float* d_entropyOut,
     float* d_contrastOut,
-    int width,
-    int height,
-    int tileSize,
-    int maxIter
-) {
+    int width, int height, int tileSize, int maxIter)
+{
     int tilesX = (width + tileSize - 1) / tileSize;
     int tilesY = (height + tileSize - 1) / tileSize;
     dim3 gridE(tilesX, tilesY);
@@ -203,19 +206,17 @@ void computeCudaEntropyContrast(
     cudaDeviceSynchronize();
 }
 
-// --- HOST-WRAPPER: Mandelbrot+Supersampling ---
+// ---- HOST-WRAPPER: Mandelbrot+Supersampling ----
 void launch_mandelbrotHybrid(
     uchar4* output,
     int* d_iterations,
-    int width,
-    int height,
-    float zoom,
-    float2 offset,
+    int width, int height,
+    float zoom, float2 offset,
     int maxIterations,
     int tileSize,
     int* d_tileSupersampling,
-    int supersampling
-) {
+    int supersampling)
+{
     dim3 block(16, 16);
     dim3 grid((width + block.x - 1) / block.x,
               (height + block.y - 1) / block.y);
@@ -228,12 +229,14 @@ void launch_mandelbrotHybrid(
         );
     }
 
-    mandelbrotKernelAdaptive<<<grid, block>>>(output, d_iterations,
-                                              width, height,
-                                              zoom, offset,
-                                              maxIterations,
-                                              tileSize,
-                                              d_tileSupersampling);
+    mandelbrotKernelAdaptive<<<grid, block>>>(
+        output, d_iterations,
+        width, height,
+        zoom, offset,
+        maxIterations,
+        tileSize,
+        d_tileSupersampling
+    );
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -245,9 +248,11 @@ void launch_mandelbrotHybrid(
         int iters_dbg[10] = {0};
         cudaMemcpy(iters_dbg, d_iterations, 10 * sizeof(int), cudaMemcpyDeviceToHost);
         bool anyInvalid = false;
-        for (int i = 0; i < 10; ++i) if (iters_dbg[i] < 0) anyInvalid = true;
         std::printf("[KERNEL] Iterations First10: ");
-        for (int i = 0; i < 10; ++i) std::printf("%d ", iters_dbg[i]);
+        for (int i = 0; i < 10; ++i) {
+            std::printf("%d ", iters_dbg[i]);
+            if (iters_dbg[i] < 0) anyInvalid = true;
+        }
         if (anyInvalid)
             std::printf("[WARN] Found <0 value! Check buffer init or kernel OOB.\n");
         std::puts("");
