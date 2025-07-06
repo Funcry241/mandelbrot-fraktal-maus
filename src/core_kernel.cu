@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 386
-// 🐭 Maus-Kommentar: Capybara+Kiwi+MausZoom – Grid/Block-Logging, OOB-Guard, Iter-Check. Debug-Injection für Output-Check, explizites Fraktal- und Pointer-Debugging, Otter-approved.
+// Zeilen: 394
+// 🐭 Maus-Kommentar: Capybara+Kiwi+MausZoom – Device-Debug für Fraktal-Koord, robust gegen OOB, Kernels immer CUDA-Error-checked. Otter liebt ASCII-Logs und float-Klarheit!
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -44,21 +44,28 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * width + x;
 
-    // Debug-Injection: Schreibe testweise festen Wert ins erste Pixel (links oben)
+    // Debug-Injection: Schreibe Testwert und Device-Debug für Pixel 0,0 & 1,0/0,1/1,1
 #if 1
-    if (x == 0 && y == 0) {
-        iterationsOut[idx] = 1234; // Testwert, sollte in [KERNEL] Iterations First10: auftauchen!
-        output[idx] = make_uchar4(255, 0, 0, 255); // Knallrot für Pixel 0,0 wenn korrekt.
-        // KEIN return; // Lass weiterlaufen für regulären Mandelbrot-Test unten!
+    if (x < 2 && y < 2) {
+        float dx = 0.5f, dy = 0.5f;
+        float jx = (x + dx - width * 0.5f) / zoom + offset.x;
+        float jy = (y + dy - height * 0.5f) / zoom + offset.y;
+        float zx, zy;
+        int iter = mandelbrotIterations(jx, jy, maxIterations, zx, zy);
+        printf("[DEVICE] Pixel(%d,%d): jx=%.8f jy=%.8f iter=%d\n", x, y, jx, jy, iter);
+
+        if (x == 0 && y == 0) {
+            iterationsOut[idx] = 1234; // Testwert, sollte im [KERNEL] Iterations First10: sichtbar sein!
+            output[idx] = make_uchar4(255, 0, 0, 255); // Rot für links oben
+            // Kein return, restlicher Mandelbrot-Code läuft normal weiter
+        }
     }
 #endif
 
-    // MausFix v3: Schreibe *immer* einen gültigen Wert (0) für OOB-Pixel, damit keine -1 entstehen!
+    // OOB-Guard: Immer gültigen Wert schreiben
     if (x >= width || y >= height) {
-        if (idx < width * height && iterationsOut)
-            iterationsOut[idx] = 0;
-        if (output && idx < width * height)
-            output[idx] = make_uchar4(0, 0, 0, 255);
+        if (idx < width * height && iterationsOut) iterationsOut[idx] = 0;
+        if (output && idx < width * height) output[idx] = make_uchar4(0, 0, 0, 255);
         return;
     }
 
@@ -66,22 +73,19 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
     int tileY = y / tileSize;
     int tilesX = (width + tileSize - 1) / tileSize;
     int tileIndex = tileY * tilesX + tileX;
-
-    int S = tileSupersampling ? tileSupersampling[tileIndex] : 1;
+    int S = (tileSupersampling ? tileSupersampling[tileIndex] : 1);
     float totalT = 0.0f;
     int totalIter = 0;
 
     for (int i = 0; i < S; ++i) {
+        float dx = (i + 0.5f) / S;
         for (int j = 0; j < S; ++j) {
-            float dx = (i + 0.5f) / S;
             float dy = (j + 0.5f) / S;
             float jx = (x + dx - width * 0.5f) / zoom + offset.x;
             float jy = (y + dy - height * 0.5f) / zoom + offset.y;
-
             float zx, zy;
             int iter = mandelbrotIterations(jx, jy, maxIterations, zx, zy);
             totalIter += iter;
-
             float norm = zx * zx + zy * zy;
             float t = (iter + 1.0f - log2f(log2f(fmaxf(norm, 1e-8f)))) / maxIterations;
             t = fminf(fmaxf(t, 0.0f), 1.0f);
@@ -89,11 +93,9 @@ __global__ void mandelbrotKernelAdaptive(uchar4* output, int* iterationsOut,
         }
     }
 
-    float avgT = totalT / (S * S);
-    int avgIter = totalIter / (S * S);
-
-    output[idx] = elegantColor(avgT);
-    iterationsOut[idx] = max(0, avgIter);
+    float invS2 = 1.0f / (S * S);
+    output[idx] = elegantColor(totalT * invS2);
+    iterationsOut[idx] = max(0, (int)(totalIter * invS2));
 }
 
 __global__ void entropyKernel(const int* iterations, float* entropyOut,
@@ -121,7 +123,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         int y = startY + dy;
         if (x >= width || y >= height) continue;
         int iter = iterations[y * width + x];
-        iter = max(0, iter); // Fix: Keine negativen Werte
+        iter = max(0, iter);
         int bin = min(iter * 256 / (maxIter + 1), 255);
         atomicAdd(&histo[bin], 1);
         localCount++;
@@ -133,8 +135,7 @@ __global__ void entropyKernel(const int* iterations, float* entropyOut,
         int usedCount = 0;
         for (int i = 0; i < 256; ++i) {
             float p = (localCount > 0 ? histo[i] / (float)total : 0.0f);
-            if (p > 0.0f)
-                entropy -= p * log2f(p);
+            if (p > 0.0f) entropy -= p * log2f(p);
             usedCount += histo[i];
         }
         int tilesX = (width + tileSize - 1) / tileSize;
@@ -148,7 +149,6 @@ __global__ void contrastKernel(const float* entropy, float* contrastOut,
     int tx = blockIdx.x * blockDim.x + threadIdx.x;
     int ty = blockIdx.y * blockDim.y + threadIdx.y;
     if (tx >= tilesX || ty >= tilesY) return;
-
     int idx = ty * tilesX + tx;
     float center = entropy[idx];
     float sumDiff = 0.0f;
@@ -181,11 +181,19 @@ void computeCudaEntropyContrast(
     dim3 gridE(tilesX, tilesY);
     dim3 blockE(128);
     entropyKernel<<<gridE, blockE>>>(d_iterations, d_entropyOut, width, height, tileSize, maxIter);
+    cudaError_t errE = cudaGetLastError();
+    if (errE != cudaSuccess) {
+        printf("[CUDA ERROR] entropyKernel: %s\n", cudaGetErrorString(errE));
+    }
     cudaDeviceSynchronize();
 
     dim3 gridC((tilesX + 15) / 16, (tilesY + 15) / 16);
     dim3 blockC(16, 16);
     contrastKernel<<<gridC, blockC>>>(d_entropyOut, d_contrastOut, tilesX, tilesY);
+    cudaError_t errC = cudaGetLastError();
+    if (errC != cudaSuccess) {
+        printf("[CUDA ERROR] contrastKernel: %s\n", cudaGetErrorString(errC));
+    }
     cudaDeviceSynchronize();
 }
 
@@ -205,11 +213,10 @@ void launch_mandelbrotHybrid(
     dim3 grid((width + block.x - 1) / block.x,
               (height + block.y - 1) / block.y);
 
-    // --- DEBUG: Log Kernel-Parameter (nur wenn debugLogging aktiv)
     if (Settings::debugLogging) {
         std::printf("[DEBUG] Mandelbrot-Kernel Call: width=%d, height=%d, maxIter=%d, zoom=%.2f, offset=(%.10f, %.10f), tileSize=%d, supersampling=%d, block=(%d,%d), grid=(%d,%d)\n",
             width, height, maxIterations, zoom, offset.x, offset.y, tileSize,
-            (d_tileSupersampling ? -42 : 1), // Falls du S sichtbar loggen willst, sonst entfernen
+            (d_tileSupersampling ? -42 : 1),
             block.x, block.y, grid.x, grid.y
         );
     }
@@ -220,14 +227,12 @@ void launch_mandelbrotHybrid(
                                               maxIterations,
                                               tileSize,
                                               d_tileSupersampling);
-
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
     }
     cudaDeviceSynchronize();
 
-    // --- DEBUG: Iterations-Buffer nach Kernel prüfen (Settings::debugLogging)
     if (Settings::debugLogging) {
         int iters_dbg[10] = {0};
         cudaMemcpy(iters_dbg, d_iterations, 10 * sizeof(int), cudaMemcpyDeviceToHost);
