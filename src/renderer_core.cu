@@ -1,6 +1,7 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 129
-// 🐭 Maus-Kommentar: Flugente aktiviert! float2 statt double2 für volle FPS. Statistik-Fix: lastEntropy/lastContrast werden immer gesetzt, unabhängig vom Debug-Flag. Final synchron zur Header-Signatur. Kein überflüssiger Parameter mehr. Fehlerbehandlung und Ressourcen-Management nach Otter/Schneefuchs. Keine Leaks, kein Müll, kein Zufall.
+// Zeilen: 131
+// 🐭 Maus-Kommentar: Flugente + Statistikfix: lastEntropy nur bei echtem Zielwechsel. Damit stimmt dE/dC im Log wieder. Schneefuchs: „Veränderung muss verdient sein.“ Kein Müll, kein Leak, kein Zufall.
+
 #include "pch.hpp"
 
 #include "renderer_core.hpp"
@@ -42,8 +43,7 @@ bool Renderer::initGL() {
         std::puts("[ERROR] glewInit() fehlgeschlagen");
         RendererWindow::destroyWindow(state.window);
         state.window = nullptr;
-        // --- Otter/Schneefuchs: Jetzt auch global GLFW terminieren! ---
-        glfwTerminate();
+        glfwTerminate(); // Otter/Schneefuchs: Fenster weg → GLFW auch!
         return false;
     }
 
@@ -61,9 +61,11 @@ bool Renderer::shouldClose() const {
 void Renderer::renderFrame_impl() {
     RendererLoop::renderFrame_impl(state);
 
-    // --- Statistik jetzt immer aktuell, unabhängig vom Logging! ---
-    state.lastEntropy  = state.zoomResult.bestEntropy;
-    state.lastContrast = state.zoomResult.bestContrast;
+    // 🛠️ Fix: Statistik nur bei neuem Ziel aktualisieren
+    if (state.zoomResult.isNewTarget) {
+        state.lastEntropy  = state.zoomResult.bestEntropy;
+        state.lastContrast = state.zoomResult.bestContrast;
+    }
 
 #if ENABLE_ZOOM_LOGGING
     float ox = state.offset.x;
@@ -95,10 +97,11 @@ void Renderer::renderFrame_impl() {
 }
 
 void Renderer::freeDeviceBuffers() {
-    if (state.d_iterations) { CUDA_CHECK(cudaFree(state.d_iterations)); state.d_iterations = nullptr; }
-    if (state.d_entropy) { CUDA_CHECK(cudaFree(state.d_entropy)); state.d_entropy = nullptr; }
-    if (state.d_contrast) { CUDA_CHECK(cudaFree(state.d_contrast)); state.d_contrast = nullptr; }
-    if (state.d_tileSupersampling){ CUDA_CHECK(cudaFree(state.d_tileSupersampling)); state.d_tileSupersampling = nullptr; }
+    if (state.d_iterations)         { CUDA_CHECK(cudaFree(state.d_iterations));         state.d_iterations = nullptr; }
+    if (state.d_entropy)            { CUDA_CHECK(cudaFree(state.d_entropy));            state.d_entropy = nullptr; }
+    if (state.d_contrast)           { CUDA_CHECK(cudaFree(state.d_contrast));           state.d_contrast = nullptr; }
+    if (state.d_tileSupersampling)  { CUDA_CHECK(cudaFree(state.d_tileSupersampling));  state.d_tileSupersampling = nullptr; }
+
     state.h_entropy.clear();
     state.h_contrast.clear();
     state.h_tileSupersampling.clear();
@@ -124,6 +127,5 @@ void Renderer::cleanup() {
     HeatmapOverlay::cleanup();
     glfwTerminate();
 
-    // --- Otter/Schneefuchs: Jetzt ist alles wirklich „geputzt“! ---
     glInitialized = false;
 }
