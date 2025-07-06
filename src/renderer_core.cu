@@ -1,7 +1,6 @@
 // Datei: src/renderer_core.cu
 // Zeilen: 129
-// 🐭 Maus-Kommentar: Flugente aktiviert! float2 statt double2 zur Wiederherstellung der FPS. Statistik-Fix: lastEntropy/lastContrast werden jetzt *immer* gesetzt, unabhängig vom Debug-Flag. Schneefuchs: „Jetzt liefern auch Release-Builds saubere Metriken.“
-
+// 🐭 Maus-Kommentar: Flugente aktiviert! float2 statt double2 für volle FPS. Statistik-Fix: lastEntropy/lastContrast werden immer gesetzt, unabhängig vom Debug-Flag. Final synchron zur Header-Signatur. Kein überflüssiger Parameter mehr. Fehlerbehandlung und Ressourcen-Management nach Otter/Schneefuchs. Keine Leaks, kein Müll, kein Zufall.
 #include "pch.hpp"
 
 #include "renderer_core.hpp"
@@ -59,8 +58,8 @@ bool Renderer::shouldClose() const {
     return RendererWindow::shouldClose(state.window);
 }
 
-void Renderer::renderFrame_impl(bool autoZoomEnabled) {
-    RendererLoop::renderFrame_impl(state, autoZoomEnabled);
+void Renderer::renderFrame_impl() {
+    RendererLoop::renderFrame_impl(state);
 
     // --- Statistik jetzt immer aktuell, unabhängig vom Logging! ---
     state.lastEntropy  = state.zoomResult.bestEntropy;
@@ -92,11 +91,6 @@ void Renderer::renderFrame_impl(bool autoZoomEnabled) {
         zr.distance, zr.minDistance, zr.relEntropyGain, zr.relContrastGain,
         zr.isNewTarget ? 1 : 0, stayCounter
     );
-
-    if (state.justZoomed) {
-        CudaInterop::logZoomEvaluation(state.d_iterations, state.width, state.height, state.maxIterations, state.zoom);
-        state.justZoomed = false;
-    }
 #endif
 }
 

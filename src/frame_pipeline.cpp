@@ -1,7 +1,6 @@
 // Datei: src/frame_pipeline.cpp
 // Zeilen: 110
-// 🐭 Maus-Kommentar: Kiwi – Kein Shadowing mehr, alle globalen Variablen klar: g_ctx, g_zoomBus. Kompakt & warnungsfrei. Otter und Schneefuchs lächeln. Reihenfolge-Bug bei ZoomCommand-Füllung jetzt behoben (Otter-Review).
-
+// 🐭 Maus-Kommentar: Kiwi – Kein Shadowing mehr, alle globalen Variablen klar: g_ctx, g_zoomBus. Kompakt & warnungsfrei. Otter und Schneefuchs lächeln. Kein toter Code, kein ungenutzter Dead-End-Entry mehr.
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
@@ -70,7 +69,7 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
     if (Settings::debugLogging)
         std::printf("[Logic] Step len=%.4e | Zoom += %.5f\n", std::sqrt(step.x*step.x+step.y*step.y), Settings::AUTOZOOM_SPEED);
 
-    // --- Fix: Reihenfolge jetzt korrekt (Otter/Schneefuchs-Hinweis) ---
+    // --- Reihenfolge korrekt (Otter/Schneefuchs-Hinweis) ---
     ZoomCommand cmd;
     cmd.frameIndex = globalFrameCounter;
     cmd.oldOffset  = make_float2((float)frameCtx.offset.x, (float)frameCtx.offset.y); // ALT vor Update
@@ -93,12 +92,4 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     if (frameCtx.overlayActive)
         HeatmapOverlay::drawOverlay(frameCtx.h_entropy, frameCtx.h_contrast, frameCtx.width, frameCtx.height, frameCtx.tileSize, tex, state);
     RendererPipeline::drawFullscreenQuad(tex);
-}
-
-// ---- Zentrale Frame-Pipeline ----
-void framePipeline(RendererState& state) {
-    beginFrame(g_ctx);
-    computeCudaFrame(g_ctx, state);
-    applyZoomLogic(g_ctx, g_zoomBus);
-    drawFrame(g_ctx, state.tex, state);
 }

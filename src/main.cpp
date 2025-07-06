@@ -1,7 +1,6 @@
-// Zeilen: 32
 // Datei: src/main.cpp
+// Zeilen: 32
 // 🐭 Maus-Kommentar: Overlay wird direkt über RendererState initialisiert. Heatmap-Status aus Settings. Kompakt, klar, kein Overhead. Schneefuchs nickt.
-
 #include "pch.hpp"
 #include "renderer_core.hpp"
 #include "settings.hpp"
@@ -10,25 +9,24 @@
 #include "cuda_interop.hpp"
 
 int main() {
-if (Settings::debugLogging)
-std::puts("[DEBUG] Mandelbrot-Otterdream gestartet");
+    if (Settings::debugLogging)
+        std::puts("[DEBUG] Mandelbrot-Otterdream gestartet");
 
-Renderer renderer(Settings::width, Settings::height);
-if (!renderer.initGL()) {
-    std::puts("[FATAL] OpenGL-Initialisierung fehlgeschlagen – Programm wird beendet");
-    return EXIT_FAILURE;
-}
+    Renderer renderer(Settings::width, Settings::height);
+    if (!renderer.initGL()) {
+        std::puts("[FATAL] OpenGL-Initialisierung fehlgeschlagen – Programm wird beendet");
+        return EXIT_FAILURE;
+    }
 
-RendererLoop::initResources(renderer.getState());
-renderer.getState().overlayEnabled = Settings::heatmapOverlayEnabled;
-CudaInterop::setPauseZoom(false);
+    RendererLoop::initResources(renderer.getState());
+    renderer.getState().overlayEnabled = Settings::heatmapOverlayEnabled;
+    CudaInterop::setPauseZoom(false);
 
-while (!renderer.shouldClose()) {
-    renderer.renderFrame_impl(true);
-    glfwPollEvents();
-    glfwSwapBuffers(renderer.getState().window);
-}
+    while (!renderer.shouldClose()) {
+        renderer.renderFrame_impl(); // Kein Parameter mehr (autoZoomEnabled entfernt)
+        glfwPollEvents();
+        glfwSwapBuffers(renderer.getState().window);
+    }
 
-return 0;
-
+    return 0;
 }

@@ -1,7 +1,6 @@
 // Datei: src/common.hpp
 // Zeilen: 60
-// 🐭 Maus-Kommentar: Zentraler Header mit weicher Tile-Größenfunktion, CUDA-Fehlermakro und Standard-Includes. Schneefuchs empfiehlt: kein doppeltes `<cmath>`, `computeTileSizeFromZoom` immer aus genau dieser Quelle verwenden!
-
+// 🐭 Maus-Kommentar: Zentraler Header mit weicher Tile-Größenfunktion, CUDA-Fehlermakro und Standard-Includes. Schneefuchs empfiehlt: kein doppeltes <cmath>, computeTileSizeFromZoom immer aus genau dieser Quelle verwenden! Alles warnfrei, keine Doppel-Defines, keine Header-Schatten.
 #pragma once
 
 // 🔧 Windows-spezifische Makros und Header
@@ -34,7 +33,7 @@
 #include <stdexcept>
 #include <vector>
 #include <string>
-#include <cmath> 
+#include <cmath>
 #include <algorithm>
 #include <cstdint>
 
@@ -44,7 +43,7 @@
         cudaError_t err = (call);                                              \
         if (err != cudaSuccess) {                                              \
             fprintf(stderr, "[CUDA ERROR] %s:%d: %s\n",                        \
-                    __FILE__, __LINE__, cudaGetErrorString(err));             \
+                    __FILE__, __LINE__, cudaGetErrorString(err));              \
             std::exit(EXIT_FAILURE);                                           \
         }                                                                      \
     } while (0)

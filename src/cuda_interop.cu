@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
 // Zeilen: 208
-// 🐭 Maus-Kommentar: Kolibri+Kiwi+Otter – Buffer-Nullung, Host/Device-Sync und Logging maximal kompakt, robust und ASCII-clean. Keine OOBs, kein Shadowing, 100% deterministisch. Schneefuchs approved.
+// 🐭 Maus-Kommentar: Kolibri+Kiwi+Otter – Buffer-Nullung, Host/Device-Sync und Logging maximal kompakt, robust und ASCII-clean. Keine OOBs, kein Shadowing, 100% deterministisch. Schneefuchs approved. Keine toten Funktionen, alles klar zu Ende geführt.
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "core_kernel.h"
