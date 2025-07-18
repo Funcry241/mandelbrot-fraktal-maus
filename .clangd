@@ -1,14 +1,26 @@
 # Datei: .clangd
-# Zeilen: 28
-# 🐭 Maus-Kommentar: Sicheres Clangd-Setup für VSCode mit CUDA – `.cu`-Dateien werden vom Index ausgeschlossen, damit der Server stabil läuft. Alle C++-Features bleiben aktiv. Schneefuchs gab grünes Licht nach EPIPE.
+# Zeilen: 40
+# 🐭 Maus-Kommentar: Waschbär-Kur für Clangd: .cu-Dateien nicht analysieren, CUDA-Toolchain explizit setzen, libdevice und includes per Hand nachreichen. Fix gegen sm_52/libdevice-Fehler. Schneefuchs empfiehlt: keine Magie – exakte Pfade.
 
 If:
   PathMatch: .*\.cu
   CompileFlags:
-    Remove: [*]  # Verhindert, dass Clangd .cu-Dateien überhaupt analysiert
+    Remove: [*]  # .cu-Dateien nicht analysieren, um Clangd-Stabilität zu wahren
 
 CompileFlags:
-  Add: [-std=c++23]  # C++23 explizit setzen
+  Add: 
+    - -std=c++23
+    - -xc++
+    - -fsyntax-only
+    - "--cuda-path=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9"
+    - -nocudainc
+    - -I"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9/include"
+    - -I"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9/include/crt"
+    - -I"${workspaceFolder}/src"
+    - -I"${workspaceFolder}/include"
+    - -I"${workspaceFolder}/external"
+    - -I"${workspaceFolder}/build"
+    - --cuda-gpu-arch=sm_89
 
 Diagnostics:
   UnusedIncludes: true
