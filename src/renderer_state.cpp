@@ -1,6 +1,7 @@
 // Datei: src/renderer_state.cpp
 // Zeilen: 98
 // 🐭 Maus-Kommentar: Kolibri integriert! Buffer-Init jetzt immer robust. Keine Schattenwerte, keine toten Felder (lastIndex entfernt). Schneefuchs: „Kein Schattenwert bleibt im System.“ Otter validiert für Capybara v2.
+
 #include "pch.hpp"
 #include "renderer_state.hpp"
 #include "settings.hpp"
