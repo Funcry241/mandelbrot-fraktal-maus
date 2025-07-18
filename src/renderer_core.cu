@@ -1,6 +1,6 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 131
-// 🐭 Maus-Kommentar: Flugente + Statistikfix: lastEntropy nur bei echtem Zielwechsel. Damit stimmt dE/dC im Log wieder. Schneefuchs: „Veränderung muss verdient sein.“ Kein Müll, kein Leak, kein Zufall.
+// Zeilen: 139
+// 🐭 Maus-Kommentar: Alpha 45c – Otter-Fix vollständig. Jetzt wird `shouldZoom` auch tatsächlich umgesetzt. Bewegung, Fortschritt, Würde. Schneefuchs: „Kein Ziel ist auch ein Ziel, aber halt ein langweiliges.“
 
 #include "pch.hpp"
 
@@ -65,6 +65,12 @@ void Renderer::renderFrame_impl() {
     if (state.zoomResult.isNewTarget) {
         state.lastEntropy  = state.zoomResult.bestEntropy;
         state.lastContrast = state.zoomResult.bestContrast;
+    }
+
+    // 🔍 Anwenden des Zooms, wenn sinnvoll
+    if (state.zoomResult.shouldZoom) {
+        state.zoom *= Settings::zoomFactor;
+        state.offset = state.zoomResult.newOffset;
     }
 
 #if ENABLE_ZOOM_LOGGING

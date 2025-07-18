@@ -10,6 +10,11 @@
 
 namespace Settings {
 
+// Zoom-Faktor bei jedem Auto-Zoom-Schritt.
+// Empfohlen: 1.05 (langsam), 1.1 (moderat), 1.2+ (aggressiv).
+// Höhere Werte vergrößern den Bildausschnitt schneller, aber riskieren visuelle Artefakte.
+inline constexpr float zoomFactor = 1.07f;
+
 // Empfohlene Werte: 1 (aus), 2, 3 oder 4
 // 1 = Kein Supersampling, schnellste Darstellung
 // 2+ = Mehrere Subpixel pro Pixel (2×2, 3×3, etc.)
