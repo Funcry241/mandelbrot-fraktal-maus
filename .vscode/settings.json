@@ -3,14 +3,14 @@
     "cmake.configureOnOpen": true,
     "cmake.preferredGenerators": ["Ninja"],
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-    "C_Cpp.intelliSenseEngine": "Disabled",
+    "C_Cpp.intelliSenseEngine": "disabled",
     "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
     "clangd.path": "C:/Tools/clangd-windows-20.1.0/clangd_20.1.0/bin/clangd.exe",
     "clangd.arguments": [
         "--compile-commands-dir=${workspaceFolder}/build"
     ],
     "files.exclude": {
-    "**/*.cu": true
+        "**/*.cu": false
     },
     "files.associations": {
         "cmath": "cpp",

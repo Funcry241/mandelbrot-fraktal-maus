@@ -1,15 +1,19 @@
 # Datei: .clangd
-# Zeilen: 22
-# 🐭 Maus-Kommentar: Projektweite Clangd-Konfiguration. Nutzt compile_commands.json im Build-Ordner. Modernisiert Diagnostik, aktiviert Hintergrund-Index, erlaubt intelligente Auto-Vervollständigung. Maus & Schneefuchs validiert.
+# Zeilen: 28
+# 🐭 Maus-Kommentar: Sicheres Clangd-Setup für VSCode mit CUDA – `.cu`-Dateien werden vom Index ausgeschlossen, damit der Server stabil läuft. Alle C++-Features bleiben aktiv. Schneefuchs gab grünes Licht nach EPIPE.
+
+If:
+  PathMatch: .*\.cu
+  CompileFlags:
+    Remove: [*]  # Verhindert, dass Clangd .cu-Dateien überhaupt analysiert
 
 CompileFlags:
-  # Setzt explizit den C++-Standard
-  Add: [-std=c++23]
+  Add: [-std=c++23]  # C++23 explizit setzen
 
 Diagnostics:
-  UnusedIncludes: true        # Zeigt ungenutzte Includes an
+  UnusedIncludes: true
   ClangTidy:
-    Add:                      # Aktiviert gezielt nützliche Checks
+    Add:
       - bugprone-*
       - performance-*
       - modernize-*
@@ -17,16 +21,16 @@ Diagnostics:
       - cppcoreguidelines-*
 
 Index:
-  Background: Build           # Hintergrundindex für große Projekte
-  StandardLibrary: Yes        # Erkennt Standardbibliothek korrekt
+  Background: Build
+  StandardLibrary: Yes
 
 Hover:
-  ShowAKA: true               # Zeigt "aka"-Typen (Typ-Aliase)
+  ShowAKA: true
 
 Completion:
-  AllScopes: true             # Auch globale Symbole vorschlagen
+  AllScopes: true
 
 InlayHints:
-  Enabled: true               # Zeigt automatische Tipps im Code
+  Enabled: true
   ParameterNames: true
   DeducedTypes: true

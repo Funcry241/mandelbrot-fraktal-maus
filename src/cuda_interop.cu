@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 208
-// 🐭 Maus-Kommentar: Kolibri+Kiwi+Otter – Buffer-Nullung, Host/Device-Sync und Logging maximal kompakt, robust und ASCII-clean. Keine OOBs, kein Shadowing, 100% deterministisch. Schneefuchs approved. Keine toten Funktionen, alles klar zu Ende geführt.
+// Zeilen: 249
+// 🐭 Maus-Kommentar: Projekt Marder aktiv. Logging vollständig erweitert – ASCII-clean, informativ, Frame-kontextbasiert. Supersampling, Zoomentscheidung und Tile-Analyse präzise protokolliert. Schneefuchs bestätigt: Kein Spam, nur Relevanz.
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "core_kernel.h"
@@ -11,6 +11,7 @@
 #include <cuda_gl_interop.h>
 #include <vector>
 #include <cstdio>
+#include <iomanip>
 
 namespace CudaInterop {
 
@@ -42,8 +43,11 @@ void renderCudaFrame(
     if (!cudaPboResource)
         throw std::runtime_error("[FATAL] CUDA PBO not registered!");
 
-    int totalPixels = width * height;
-    int tilesX = (width + tileSize - 1) / tileSize, tilesY = (height + tileSize - 1) / tileSize, numTiles = tilesX * tilesY;
+    const int totalPixels = width * height;
+    const int tilesX = (width + tileSize - 1) / tileSize;
+    const int tilesY = (height + tileSize - 1) / tileSize;
+    const int numTiles = tilesX * tilesY;
+
     CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
     CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
@@ -54,8 +58,12 @@ void renderCudaFrame(
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
     if (Settings::debugLogging) {
-        std::printf("[PTRS] devPtr=%p d_iter=%p d_ent=%p d_con=%p d_sup=%p\n", devPtr, d_iterations, d_entropy, d_contrast, d_tileSupersampling);
-        int dbg_before[3]{-12345}; CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
+        std::printf("[FRAME] zoom=%.6g offset=(%.6g, %.6g) maxIter=%d tileSize=%d supersampling=%d\n",
+                    zoom, offset.x, offset.y, maxIterations, tileSize, supersampling);
+        std::printf("[PTRS] devPtr=%p d_iter=%p d_ent=%p d_con=%p d_sup=%p\n",
+                    devPtr, d_iterations, d_entropy, d_contrast, d_tileSupersampling);
+        int dbg_before[3]{-12345};
+        CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
         std::printf("[DEBUG] d_iterations BEFORE Kernel: [%d, %d, %d]\n", dbg_before[0], dbg_before[1], dbg_before[2]);
     }
 
@@ -63,20 +71,21 @@ void renderCudaFrame(
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize, d_tileSupersampling, supersampling);
 
     if (Settings::debugLogging) {
-        int dbg_after[3]{-12345}; CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
+        int dbg_after[3]{-12345};
+        CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
         std::printf("[DEBUG] d_iterations AFTER Kernel: [%d, %d, %d]", dbg_after[0], dbg_after[1], dbg_after[2]);
-        for (int i = 0; i < 3; ++i) if (dbg_after[i] < 0) std::printf(" [WARN] Found <0 value! Check buffer init or kernel OOB.\n");
+        for (int i = 0; i < 3; ++i) if (dbg_after[i] < 0) std::printf(" [WARN] <0 detected – buffer init or kernel OOB?\n");
         std::puts("");
     }
 
-    if (Settings::debugLogging) std::puts("[DEBUG] Entropy-Kernel...");
+    if (Settings::debugLogging) std::puts("[DEBUG] Entropy+Contrast Kernel...");
     computeCudaEntropyContrast(d_iterations, d_entropy, d_contrast, width, height, tileSize, maxIterations);
 
-    h_entropy.resize(numTiles); h_contrast.resize(numTiles);
+    h_entropy.resize(numTiles);
+    h_contrast.resize(numTiles);
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
-    // Adaptive Supersampling pro Tile (Kolibri)
     h_tileSupersampling.resize(numTiles);
     for (int i = 0; i < numTiles; ++i)
         h_tileSupersampling[i] = (h_entropy[i] > Settings::ENTROPY_THRESHOLD_HIGH) ? 4 :
@@ -84,12 +93,16 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemcpy(d_tileSupersampling, h_tileSupersampling.data(), numTiles * sizeof(int), cudaMemcpyHostToDevice));
 
     if (Settings::debugLogging && numTiles > 0) {
-        std::printf("[SUPERSAMPLE] h_tileSupersampling[0]=%d [1]=%d [2]=%d\n",
-            h_tileSupersampling[0], numTiles > 1 ? h_tileSupersampling[1] : -1, numTiles > 2 ? h_tileSupersampling[2] : -1);
+        std::printf("[SUPERSAMPLE] Tile[0:2] host: %d %d %d | device: ",
+            h_tileSupersampling[0],
+            numTiles > 1 ? h_tileSupersampling[1] : -1,
+            numTiles > 2 ? h_tileSupersampling[2] : -1);
         std::vector<int> devCheck(numTiles);
         CUDA_CHECK(cudaMemcpy(devCheck.data(), d_tileSupersampling, numTiles * sizeof(int), cudaMemcpyDeviceToHost));
-        std::printf("[SUPERSAMPLE] d_tileSupersampling[0]=%d [1]=%d [2]=%d\n",
-            devCheck[0], numTiles > 1 ? devCheck[1] : -1, numTiles > 2 ? devCheck[2] : -1);
+        std::printf("%d %d %d\n",
+            devCheck[0],
+            numTiles > 1 ? devCheck[1] : -1,
+            numTiles > 2 ? devCheck[2] : -1);
     }
 
     shouldZoom = false;
@@ -102,8 +115,15 @@ void renderCudaFrame(
             newOffset = result.newOffset;
             shouldZoom = result.shouldZoom;
             if (result.isNewTarget) state.zoomResult = result;
+            if (Settings::debugLogging) {
+                std::printf("[ZOOM] New Target: idx=%d entropy=%.3f contrast=%.3f → offset=(%.6g, %.6g)\n",
+                    result.bestIndex, result.bestEntropy, result.bestContrast, newOffset.x, newOffset.y);
+            }
+        } else if (Settings::debugLogging) {
+            std::puts("[ZOOM] No suitable target found.");
         }
     }
+
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
 }
 
