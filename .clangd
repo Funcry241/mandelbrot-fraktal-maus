@@ -1,26 +1,21 @@
 # Datei: .clangd
-# Zeilen: 40
-# 🐭 Maus-Kommentar: Waschbär-Kur für Clangd: .cu-Dateien nicht analysieren, CUDA-Toolchain explizit setzen, libdevice und includes per Hand nachreichen. Fix gegen sm_52/libdevice-Fehler. Schneefuchs empfiehlt: keine Magie – exakte Pfade.
-
-If:
-  PathMatch: .*\.cu
-  CompileFlags:
-    Remove: [*]  # .cu-Dateien nicht analysieren, um Clangd-Stabilität zu wahren
+# Zeilen: 37
+# 🐭 Maus-Kommentar: Waschbär-Kernversion: Clangd akzeptiert CUDA-Quelltexte ohne libdevice. Kein "If", keine Aliase. Nur direkte CompileFlags. Ziel: LSP-Stabilität für .cu und .cpp gleichermaßen.
 
 CompileFlags:
   Add: 
     - -std=c++23
-    - -xc++
-    - -fsyntax-only
-    - "--cuda-path=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9"
-    - -nocudainc
+    - -xc++                      # Quelltext als C++ behandeln
+    - -fsyntax-only             # Nur Analyse, keine Kompilierung
+    - --cuda-path="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9"
+    - -nocudainc                # Header selbst angeben
+    - -nocudalib                # libdevice-Fehler verhindern
+    - --cuda-gpu-arch=sm_89     # Dummy-Architektur für LSP
     - -I"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9/include"
     - -I"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9/include/crt"
+    - -I"${workspaceFolder}/vcpkg_installed/x64-windows/include"
     - -I"${workspaceFolder}/src"
     - -I"${workspaceFolder}/include"
-    - -I"${workspaceFolder}/external"
-    - -I"${workspaceFolder}/build"
-    - --cuda-gpu-arch=sm_89
 
 Diagnostics:
   UnusedIncludes: true
