@@ -1,6 +1,7 @@
 // Datei: src/zoom_logic.hpp
-// Zeilen: 39
-// 🐭 Maus-Kommentar: Kompakt, rein deklarativ. Nur das Interface für Hotspot-Auswertung und Scoring. Flugente/Capybara-ready, Header bleibt minimal – Schneefuchs-Nivea
+// Zeilen: 41
+// 🐭 Maus-Kommentar: Kompakt, nun korrekt sortiert. ZoomResult zuerst, dann Signaturen. Kein forward-declare nötig. Clang/CUDA-safe.
+
 #pragma once
 #include "common.hpp"
 #include <vector>
@@ -25,10 +26,10 @@ float computeEntropyContrast(const std::vector<float>& entropy, int width, int h
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,
     const std::vector<float>& contrast,
-    float2 offset, float zoom,
+    float2 currentOffset, float zoom,
     int width, int height, int tileSize,
-    float2 currentOffset, int currentIndex,
-    float currentEntropy, float currentContrast
+    float2 previousOffset, int previousIndex,
+    float previousEntropy, float previousContrast
 );
 
 } // namespace ZoomLogic
