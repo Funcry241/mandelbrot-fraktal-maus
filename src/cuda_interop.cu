@@ -1,6 +1,7 @@
 // Datei: src/cuda_interop.cu
 // Zeilen: 249
-// 🐭 Maus-Kommentar: Projekt Marder aktiv. Logging vollständig erweitert – ASCII-clean, informativ, Frame-kontextbasiert. Supersampling, Zoomentscheidung und Tile-Analyse präzise protokolliert. Schneefuchs bestätigt: Kein Spam, nur Relevanz.
+// 🐭 Maus-Kommentar: Alpha 45 – Projekt Marder II. `zoomResult` wird nun immer gesetzt, nicht nur bei Zielwechsel. Damit stimmen Entropie, Kontrast und Logik in allen Modulen überein. Schneefuchs: „Kontext ist alles.“
+
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "core_kernel.h"
@@ -114,10 +115,12 @@ void renderCudaFrame(
         if (result.bestIndex >= 0) {
             newOffset = result.newOffset;
             shouldZoom = result.shouldZoom;
-            if (result.isNewTarget) state.zoomResult = result;
+            state.zoomResult = result;
+
             if (Settings::debugLogging) {
-                std::printf("[ZOOM] New Target: idx=%d entropy=%.3f contrast=%.3f → offset=(%.6g, %.6g)\n",
-                    result.bestIndex, result.bestEntropy, result.bestContrast, newOffset.x, newOffset.y);
+                std::printf("[ZOOM] Target: idx=%d entropy=%.3f contrast=%.3f → offset=(%.6g, %.6g) new=%d zoom=%d\n",
+                    result.bestIndex, result.bestEntropy, result.bestContrast,
+                    newOffset.x, newOffset.y, result.isNewTarget ? 1 : 0, result.shouldZoom ? 1 : 0);
             }
         } else if (Settings::debugLogging) {
             std::puts("[ZOOM] No suitable target found.");
