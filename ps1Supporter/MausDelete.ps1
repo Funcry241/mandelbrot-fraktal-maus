@@ -13,7 +13,7 @@ Write-Host "`n--- MausDelete gestartet ---`n"
 # 🎯 Zieldefinition: temporäre Dateierweiterungen, Dateinamenmuster, Build-Ordner
 $fileExtensions   = @('.obj', '.o', '.ilk', '.pdb', '.log', '.tmp', '.tlog')
 $filenamePatterns = @('CMakeCache.txt', 'CMakeGenerate.stamp', '*.VC.db', '*~')
-$folderNames      = @('CMakeFiles', 'build', 'Debug', 'Release', 'x64', '.vs', '.idea')
+$folderNames = @('CMakeFiles', 'Debug', 'Release', 'x64', '.vs', '.idea')  # build raus
 $excludedFolders  = @('dist')  # 🛡️ Diese Ordner werden NIE gelöscht (aber Inhalt ggf. gesondert behandelt)
 
 # 🔍 Rekursiver Suchlauf ab Projektwurzel
