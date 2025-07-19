@@ -3,6 +3,7 @@
 # 🐭 Maus-Kommentar: Waschbär-Kernversion: Clangd akzeptiert CUDA-Quelltexte ohne libdevice. Kein "If", keine Aliase. Nur direkte CompileFlags. Ziel: LSP-Stabilität für .cu und .cpp gleichermaßen.
 
 CompileFlags:
+  CompilationDatabase: None
   Add: 
     - -std=c++23
     - -xc++                      # Quelltext als C++ behandeln
@@ -18,7 +19,7 @@ CompileFlags:
     - -I"${workspaceFolder}/include"
 
 Diagnostics:
-  UnusedIncludes: true
+  UnusedIncludes: Strict
   ClangTidy:
     Add:
       - bugprone-*
@@ -26,6 +27,8 @@ Diagnostics:
       - modernize-*
       - readability-identifier-naming
       - cppcoreguidelines-*
+    Remove:
+      - modernize-use-std-print
 
 Index:
   Background: Build
