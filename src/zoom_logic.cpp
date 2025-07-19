@@ -1,10 +1,8 @@
-// Datei: src/zoom_logic.cpp
-// Zeilen: 112
-// 🐅 Maus-Kommentar: Alpha 46c – Logging-Otter: Detailliertes Log zu Entropie, Kontrast, Offset-Distanz und Zoomschwelle. Diagnose bei Blockade. Schneefuchs: „Wer nicht zoom
+// 🐅 Maus-Kommentar: Alpha 47a – Rückbau zu Variante A. Kein `lastOffset`-Hack mehr nötig: `ctx.offset` wird nun korrekt gesetzt. `shouldZoom` entscheidet nur auf Basis von Zielwechsel oder signifikanter Bewegung. Schneefuchs: „Wenn der Ort sich ändert, bewegt sich alles.“
+
 #include "zoom_logic.hpp"
 #include "settings.hpp"
 #include <cmath>
-#include <cfloat>
 #include <iostream>
 
 namespace ZoomLogic {
@@ -36,6 +34,7 @@ ZoomResult evaluateZoomTarget(
 
     float bestScore = -1.0f;
 
+    // 🔍 Suche nach dem besten Tile anhand von Entropie und Kontrast
     for (int i = 0; i < totalTiles; ++i) {
         float e = entropy[i];
         float c = contrast[i];
@@ -50,9 +49,11 @@ ZoomResult evaluateZoomTarget(
         }
     }
 
+    // ❌ Kein geeignetes Ziel gefunden
     if (result.bestIndex < 0)
-        return result; // No target found
+        return result;
 
+    // 📍 Zielkoordinaten im Bild berechnen
     int bx = result.bestIndex % tilesX;
     int by = result.bestIndex / tilesX;
 
@@ -61,45 +62,31 @@ ZoomResult evaluateZoomTarget(
     tileCenter.y = (by + 0.5f) * tileSize;
     tileCenter.x = (tileCenter.x / width - 0.5f) * 2.0f;
     tileCenter.y = (tileCenter.y / height - 0.5f) * 2.0f;
-    result.newOffset = make_float2(currentOffset.x + tileCenter.x / zoom,
-                                   currentOffset.y + tileCenter.y / zoom);
 
+    result.newOffset = make_float2(
+        currentOffset.x + tileCenter.x / zoom,
+        currentOffset.y + tileCenter.y / zoom
+    );
+
+    // 📏 Bewegung berechnen
     float dx = result.newOffset.x - previousOffset.x;
     float dy = result.newOffset.y - previousOffset.y;
     float dist = std::sqrt(dx * dx + dy * dy);
 
     result.isNewTarget = (result.bestIndex != previousIndex);
 
+    // 🧭 Zoom nur bei neuem Ziel oder spürbarer Bewegung
     const float minMove = Settings::MIN_JUMP_DISTANCE / zoom;
-    bool offsetMoved = (dist > minMove);
+    result.shouldZoom = result.isNewTarget || (dist > minMove);
 
-    // 🔁 Immer weiter zoomen, solange das Ziel attraktiv bleibt – auch wenn Index gleich
-    static float2 lastOffset = make_float2(FLT_MAX, FLT_MAX);
-    static float lastZoom = -1.0f;
-
-    constexpr float OFFSET_EPSILON = 1e-5f;
-    constexpr float ZOOM_EPSILON   = 1e-4f;
-
-    bool repeatedTarget = (std::abs(result.newOffset.x - lastOffset.x) < OFFSET_EPSILON) &&
-                          (std::abs(result.newOffset.y - lastOffset.y) < OFFSET_EPSILON) &&
-                          (std::abs(zoom - lastZoom) < ZOOM_EPSILON);
-
-    if (!repeatedTarget || offsetMoved) {
-        result.shouldZoom = true;
-        lastOffset = result.newOffset;
-        lastZoom = zoom;
-    } else {
-        result.shouldZoom = false;
-    }
-
-    // ASCII-only Log-Ausgabe zur Diagnose
+    // 🪵 ASCII-kompatibles Debug-Log
     if (Settings::debugLogging) {
         std::cout << "[ZoomEval] idx=" << result.bestIndex
                   << " E=" << result.bestEntropy
                   << " C=" << result.bestContrast
                   << " dist=" << dist
                   << " jumpLimit=" << minMove
-                  << " repeated=" << (repeatedTarget ? "1" : "0")
+                  << " new=" << (result.isNewTarget ? "1" : "0")
                   << " → zoom=" << (result.shouldZoom ? "1" : "0")
                   << "\n";
     }

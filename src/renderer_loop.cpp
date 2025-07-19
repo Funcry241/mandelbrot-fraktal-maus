@@ -1,6 +1,7 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 333
-// 🐭 Maus-Kommentar: Komplett gefixt – keine ungenutzten Parameter mehr, alle Casts explizit. Signatur jetzt synchron mit renderer_core. Clean/Build erzeugt keine toten Warnungen. Otter: "Alles sauber, nichts dem Zufall!"
+// Zeilen: 336
+// 🐭 Maus-Kommentar: Alpha 47a – Kritischer Otter-Bug behoben: `ctx.offset` wurde nie aktualisiert nach Frame 1. Jetzt wird der Offset bei jedem Frame neu gesetzt. Endlich bewegt sich das Bild. Schneefuchs: „Wer stehen bleibt, zoomt nicht.“
+
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
@@ -54,14 +55,16 @@ void beginFrame(RendererState& state) {
 }
 
 void renderFrame_impl(RendererState& state) {
+    // 🎯 Kritischer Bugfix: Offset und Zoom werden nun bei jedem Frame aktualisiert – nicht nur einmal!
+    ctx.zoom = static_cast<float>(state.zoom);
+    ctx.offset.x = static_cast<float>(state.offset.x);
+    ctx.offset.y = static_cast<float>(state.offset.y);
+
     if (isFirstFrame) {
-        ctx.zoom = static_cast<float>(state.zoom);
-        ctx.offset.x = static_cast<float>(state.offset.x);
-        ctx.offset.y = static_cast<float>(state.offset.y);
         isFirstFrame = false;
     }
 
-    // Context-Update, alle Casts explizit
+    // Kontext-Aktualisierung, explizite Casts
     ctx.width = state.width;
     ctx.height = state.height;
     ctx.maxIterations = state.maxIterations;
@@ -79,7 +82,7 @@ void renderFrame_impl(RendererState& state) {
 
     beginFrame(state);
 
-    // Maus: Vor jedem CUDA-Frame alle Buffer nullen!
+    // 🧹 Vor jedem CUDA-Frame alle relevanten Buffer nullen
     size_t totalPixels = static_cast<size_t>(ctx.width) * ctx.height;
     size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
     size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
@@ -88,14 +91,14 @@ void renderFrame_impl(RendererState& state) {
     CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
     CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
 
-    // 1. CUDA Fraktalberechnung
+    // 1. CUDA-Fraktalberechnung
     computeCudaFrame(ctx, state);
 
-    // 2. Bilddaten übertragen
+    // 2. OpenGL-Textur aktualisieren
     RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
     drawFrame(ctx, state.tex, state);
 
-    // 3. Heatmap/Overlay-Analyse
+    // 3. Heatmap-Analyse
     CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
     CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
     CudaInterop::computeCudaEntropyContrast(
@@ -116,15 +119,14 @@ void renderFrame_impl(RendererState& state) {
         std::printf("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n", e0, c0);
     }
 
-    // 4. Overlay/HUD zeichnen (synchron zum CUDA-Frame)
+    // 4. Overlay/HUD zeichnen
     HeatmapOverlay::drawOverlay(
         ctx.h_entropy, ctx.h_contrast,
         ctx.width, ctx.height, ctx.tileSize, 0, state
     );
-
     Hud::draw(state);
 
-    // State zurückschreiben
+    // 📝 Kontext zurückschreiben → Zoomlogik und CUDA-Ergebnisse werden synchronisiert
     state.zoom = static_cast<double>(ctx.zoom);
     state.offset.x = static_cast<float>(ctx.offset.x);
     state.offset.y = static_cast<float>(ctx.offset.y);
