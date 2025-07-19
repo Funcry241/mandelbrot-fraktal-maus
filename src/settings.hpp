@@ -98,12 +98,12 @@ inline constexpr int MAX_TILE_SIZE = 64; // Obergrenze – größere Werte = wen
 // SCORE_DIFF = Wie verschieden zwei Ziele sein müssen, damit ein Wechsel erwogen wird
 // SCORE_GAIN = Wie viel besser ein neues Ziel im Vergleich zum alten sein muss
 inline constexpr int TENTATIVE_FRAMES_REQUIRED = 2;       // Otter
-inline constexpr float MIN_SCORE_DIFF_RATIO = 0.05f;      // Schneefuchs
+inline constexpr float MIN_SCORE_DIFF_RATIO = 0.08f;      // Schneefuchs
 inline constexpr float MIN_SCORE_GAIN_RATIO = 0.05f;      // Schneefuchs
 
 // 🐘 Geduldsparameter für Zoom-Auslösung – abhängig vom Zoomlevel (logarithmisch)
 // MIN: nie weniger als X Frames warten, MAX: maximaler Geduldswert
-inline constexpr int MIN_STABLE_FRAMES = 3;               // Elefant
+inline constexpr int MIN_STABLE_FRAMES = 2;               // Elefant
 inline constexpr int MAX_STABLE_FRAMES = 12;              // Elefant
 
 // 🕊️ Adaptive LERP-Geschwindigkeit zwischen Kamera-Offset und Ziel
