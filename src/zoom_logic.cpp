@@ -1,11 +1,11 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 96
-// 🐅 Maus-Kommentar: Alpha 46b – Variante Otter: Immer weiter zoomen, solange das Ziel attraktiv bleibt. `shouldZoom` wird nun auch gesetzt, wenn Index gleich, aber Zoom-Fortschritt notwendig ist. Schneefuchs: „Zoom ist eine Haltung."
-
+// Zeilen: 112
+// 🐅 Maus-Kommentar: Alpha 46c – Logging-Otter: Detailliertes Log zu Entropie, Kontrast, Offset-Distanz und Zoomschwelle. Diagnose bei Blockade. Schneefuchs: „Wer nicht zoom
 #include "zoom_logic.hpp"
 #include "settings.hpp"
 #include <cmath>
 #include <cfloat>
+#include <iostream>
 
 namespace ZoomLogic {
 
@@ -70,8 +70,6 @@ ZoomResult evaluateZoomTarget(
 
     result.isNewTarget = (result.bestIndex != previousIndex);
 
-    // 🧲 Otter: Immer zoomen, wenn Ziel interessant und nicht exakt gleich
-    // Schneefuchs: „Zoom ist eine Haltung."
     const float minMove = Settings::MIN_JUMP_DISTANCE / zoom;
     bool offsetMoved = (dist > minMove);
 
@@ -83,8 +81,8 @@ ZoomResult evaluateZoomTarget(
     constexpr float ZOOM_EPSILON   = 1e-4f;
 
     bool repeatedTarget = (std::abs(result.newOffset.x - lastOffset.x) < OFFSET_EPSILON) &&
-                        (std::abs(result.newOffset.y - lastOffset.y) < OFFSET_EPSILON) &&
-                        (std::abs(zoom - lastZoom) < ZOOM_EPSILON);
+                          (std::abs(result.newOffset.y - lastOffset.y) < OFFSET_EPSILON) &&
+                          (std::abs(zoom - lastZoom) < ZOOM_EPSILON);
 
     if (!repeatedTarget || offsetMoved) {
         result.shouldZoom = true;
@@ -92,6 +90,18 @@ ZoomResult evaluateZoomTarget(
         lastZoom = zoom;
     } else {
         result.shouldZoom = false;
+    }
+
+    // ASCII-only Log-Ausgabe zur Diagnose
+    if (Settings::debugLogging) {
+        std::cout << "[ZoomEval] idx=" << result.bestIndex
+                  << " E=" << result.bestEntropy
+                  << " C=" << result.bestContrast
+                  << " dist=" << dist
+                  << " jumpLimit=" << minMove
+                  << " repeated=" << (repeatedTarget ? "1" : "0")
+                  << " → zoom=" << (result.shouldZoom ? "1" : "0")
+                  << "\n";
     }
 
     return result;
