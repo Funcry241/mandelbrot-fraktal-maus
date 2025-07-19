@@ -79,9 +79,12 @@ ZoomResult evaluateZoomTarget(
     static float2 lastOffset = make_float2(FLT_MAX, FLT_MAX);
     static float lastZoom = -1.0f;
 
-    bool repeatedTarget = (std::abs(result.newOffset.x - lastOffset.x) < 1e-10f) &&
-                          (std::abs(result.newOffset.y - lastOffset.y) < 1e-10f) &&
-                          (std::abs(zoom - lastZoom) < 1e-5f);
+    constexpr float OFFSET_EPSILON = 1e-5f;
+    constexpr float ZOOM_EPSILON   = 1e-4f;
+
+    bool repeatedTarget = (std::abs(result.newOffset.x - lastOffset.x) < OFFSET_EPSILON) &&
+                        (std::abs(result.newOffset.y - lastOffset.y) < OFFSET_EPSILON) &&
+                        (std::abs(zoom - lastZoom) < ZOOM_EPSILON);
 
     if (!repeatedTarget || offsetMoved) {
         result.shouldZoom = true;
