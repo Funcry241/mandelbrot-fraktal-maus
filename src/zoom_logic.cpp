@@ -1,10 +1,11 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 81
-// 🐅 Maus-Kommentar: Alpha 45b – Otterwunsch umgesetzt: Sobald ein Ziel mit ausreichend Entropie/Kontrast existiert, wird gezoomt, auch wenn der Index gleich bleibt. Kein Blockieren mehr durch isNewTarget. Schneefuchs: „Zoom ist eine Haltung."
+// Zeilen: 96
+// 🐅 Maus-Kommentar: Alpha 46b – Variante Otter: Immer weiter zoomen, solange das Ziel attraktiv bleibt. `shouldZoom` wird nun auch gesetzt, wenn Index gleich, aber Zoom-Fortschritt notwendig ist. Schneefuchs: „Zoom ist eine Haltung."
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
 #include <cmath>
+#include <cfloat>
 
 namespace ZoomLogic {
 
@@ -70,8 +71,25 @@ ZoomResult evaluateZoomTarget(
     result.isNewTarget = (result.bestIndex != previousIndex);
 
     // 🧲 Otter: Immer zoomen, wenn Ziel interessant und nicht exakt gleich
+    // Schneefuchs: „Zoom ist eine Haltung."
     const float minMove = Settings::MIN_JUMP_DISTANCE / zoom;
-    result.shouldZoom = (dist > minMove);
+    bool offsetMoved = (dist > minMove);
+
+    // 🔁 Immer weiter zoomen, solange das Ziel attraktiv bleibt – auch wenn Index gleich
+    static float2 lastOffset = make_float2(FLT_MAX, FLT_MAX);
+    static float lastZoom = -1.0f;
+
+    bool repeatedTarget = (std::abs(result.newOffset.x - lastOffset.x) < 1e-10f) &&
+                          (std::abs(result.newOffset.y - lastOffset.y) < 1e-10f) &&
+                          (std::abs(zoom - lastZoom) < 1e-5f);
+
+    if (!repeatedTarget || offsetMoved) {
+        result.shouldZoom = true;
+        lastOffset = result.newOffset;
+        lastZoom = zoom;
+    } else {
+        result.shouldZoom = false;
+    }
 
     return result;
 }
