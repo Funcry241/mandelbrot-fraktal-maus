@@ -22,7 +22,6 @@ template<typename T> inline T my_clamp(T val, T lo, T hi) {
 static int stableFrames = 0;
 static int tentativeFrames = 0;
 static int previousAcceptedIndex = -1;
-static constexpr int REQUIRED_TENTATIVE_FRAMES = 2;
 
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,
@@ -92,9 +91,9 @@ ZoomResult evaluateZoomTarget(
     float scoreGain = (prevScore > 0.0f) ? ((bestScore - prevScore) / prevScore) : 1.0f;
     float scoreDiff = (prevScore > 0.0f) ? std::abs(bestScore - prevScore) / prevScore : 1.0f;
 
-    bool isTentativeNewTarget = (result.bestIndex != previousAcceptedIndex && scoreDiff > 0.05f);
+    bool isTentativeNewTarget = (result.bestIndex != previousAcceptedIndex && scoreDiff > Settings::MIN_SCORE_DIFF_RATIO);
     bool significantMove = (dist > minMove);
-    bool significantGain = (scoreGain > 0.05f);
+    bool significantGain = (scoreGain > Settings::MIN_SCORE_GAIN_RATIO);
 
     // 🐘 Memory-Zielsystem mit Beständigkeit
     if (isTentativeNewTarget) {
@@ -103,7 +102,7 @@ ZoomResult evaluateZoomTarget(
         tentativeFrames = my_clamp(tentativeFrames + 1, 0, 1000);
     }
 
-    bool isStableTarget = (tentativeFrames >= REQUIRED_TENTATIVE_FRAMES);
+    bool isStableTarget = (tentativeFrames >= Settings::TENTATIVE_FRAMES_REQUIRED);
     result.isNewTarget = isStableTarget && isTentativeNewTarget;
 
     if (isStableTarget) {
@@ -111,7 +110,7 @@ ZoomResult evaluateZoomTarget(
     }
 
     // 🐑 Ziel muss verweilen, bevor Zoom erlaubt wird
-    int requiredStableFrames = my_clamp(static_cast<int>(3 + std::log2(zoom)), 3, 12);
+    int requiredStableFrames = my_clamp(static_cast<int>(Settings::MIN_STABLE_FRAMES + std::log2(zoom)), Settings::MIN_STABLE_FRAMES, Settings::MAX_STABLE_FRAMES);
     if (result.isNewTarget) {
         stableFrames = 0;
     } else {
@@ -122,7 +121,7 @@ ZoomResult evaluateZoomTarget(
 
     // 🕊️ Alpha-Glättung wächst mit Vertrauen (Frames)
     float progress = my_clamp(static_cast<float>(stableFrames) / requiredStableFrames, 0.0f, 1.0f);
-    float alpha = 0.01f + 0.09f * progress;
+    float alpha = Settings::ALPHA_LERP_MIN + (Settings::ALPHA_LERP_MAX - Settings::ALPHA_LERP_MIN) * progress;
 
     result.newOffset = result.shouldZoom
         ? proposedOffset

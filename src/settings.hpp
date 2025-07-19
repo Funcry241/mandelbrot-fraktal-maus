@@ -19,7 +19,7 @@ inline constexpr float zoomFactor = 1.07f;
 // 1 = Kein Supersampling, schnellste Darstellung
 // 2+ = Mehrere Subpixel pro Pixel (2×2, 3×3, etc.)
 // Erhöhung verbessert Bildqualität (Antialiasing), erhöht aber auch die Renderzeit quadratisch.
-// Bei 4 z. B. → 16-facher Aufwand!
+// Bei 4 z.​​z. B. → 16-facher Aufwand!
 // Hinweis: Wird bei Start in RendererState::reset() gesetzt und bis zum CUDA-Kernel durchgereicht.
 inline constexpr int defaultSupersampling = 1;
 
@@ -93,6 +93,24 @@ inline constexpr int BASE_TILE_SIZE = 24; // Empfohlen: 16–32 – idealer Komp
 inline constexpr int MIN_TILE_SIZE = 8; // Untergrenze – kleinere Werte = feinere Analyse, aber höhere Last
 inline constexpr int MAX_TILE_SIZE = 64; // Obergrenze – größere Werte = weniger Rechenlast, aber ungenauer
 
+// 🧠 Zielstabilitäts- und Zielauswahlparameter (Auto-Zoom Evaluation)
+// TENTATIVE = Wie viele Frames ein Ziel dominant sein muss, um als stabil zu gelten
+// SCORE_DIFF = Wie verschieden zwei Ziele sein müssen, damit ein Wechsel erwogen wird
+// SCORE_GAIN = Wie viel besser ein neues Ziel im Vergleich zum alten sein muss
+inline constexpr int TENTATIVE_FRAMES_REQUIRED = 2;       // Otter
+inline constexpr float MIN_SCORE_DIFF_RATIO = 0.05f;      // Schneefuchs
+inline constexpr float MIN_SCORE_GAIN_RATIO = 0.05f;      // Schneefuchs
+
+// 🐘 Geduldsparameter für Zoom-Auslösung – abhängig vom Zoomlevel (logarithmisch)
+// MIN: nie weniger als X Frames warten, MAX: maximaler Geduldswert
+inline constexpr int MIN_STABLE_FRAMES = 3;               // Elefant
+inline constexpr int MAX_STABLE_FRAMES = 12;              // Elefant
+
+// 🕊️ Adaptive LERP-Geschwindigkeit zwischen Kamera-Offset und Ziel
+// Bei wenigen stabilen Frames → langsam, bei vielen → schnell
+inline constexpr float ALPHA_LERP_MIN = 0.01f;            // Kolibri
+inline constexpr float ALPHA_LERP_MAX = 0.10f;            // Kolibri
+
 // 🐅 Maus-Kommentar: Eigene clamp-Funktion, um <algorithm> Konflikte mit std::clamp zu umgehen.
 // Eingesetzt zur Begrenzung dynamischer Parameter – robust auch ohne STL.
 inline float my_clamp(float val, float minVal, float maxVal) {
@@ -100,5 +118,3 @@ return (val < minVal) ? minVal : (val > maxVal) ? maxVal : val;
 }
 
 } // namespace Settings
-
-
