@@ -1,4 +1,10 @@
-// 🐅 Maus-Kommentar: Alpha 47a – Rückbau zu Variante A. Kein `lastOffset`-Hack mehr nötig: `ctx.offset` wird nun korrekt gesetzt. `shouldZoom` entscheidet nur auf Basis von Zielwechsel oder signifikanter Bewegung. Schneefuchs: „Wenn der Ort sich ändert, bewegt sich alles.“
+// 🐅 Maus-Kommentar: Alpha 48 – Panda Final. Harmonisierte Zoom-Logik mit Ziel-Memory, adaptiver Bewegung, Score-Hysterese und zoologischer Balance. Jeder Zoom ist verdient. Jeder Frame ein Gedanke.
+// 🐼 Panda: Bewertet Zielkacheln über Entropie × (1 + Kontrast) – klar, elegant, ästhetisch.
+// 🦦 Otter: Skalierte Distanzprüfung – abhängig vom Zoomlevel, fließend statt starr.
+// 🐘 Elefant: Zielstabilität durch Score-Gedächtnis – bleibt bei einem guten Ort.
+// 🕊️ Kolibri: Alpha-Lerp der Bewegung – steigt sanft, passt sich an.
+// 🐍 Flugente: float2 statt double2 – Performance mit Gefühl.
+// 🐑 Schneefuchs: Verweildauerbedingte Zielannahme – springt nicht sofort auf alles Neue.
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -6,6 +12,17 @@
 #include <iostream>
 
 namespace ZoomLogic {
+
+// 🧩 my_clamp – interne Utility-Funktion ohne <algorithm>
+template<typename T> inline T my_clamp(T val, T lo, T hi) {
+    return val < lo ? lo : (val > hi ? hi : val);
+}
+
+// 🔄 Persistenter Zustand: Stabilitäts- und Memory-Zähler
+static int stableFrames = 0;
+static int tentativeFrames = 0;
+static int previousAcceptedIndex = -1;
+static constexpr int REQUIRED_TENTATIVE_FRAMES = 2;
 
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,
@@ -16,9 +33,9 @@ ZoomResult evaluateZoomTarget(
     int height,
     int tileSize,
     float2 previousOffset,
-    int previousIndex,
-    float previousEntropy [[maybe_unused]],
-    float previousContrast [[maybe_unused]]
+    [[maybe_unused]] int previousIndex,
+    float previousEntropy,
+    float previousContrast
 ) {
     ZoomResult result;
     result.bestIndex = -1;
@@ -34,7 +51,7 @@ ZoomResult evaluateZoomTarget(
 
     float bestScore = -1.0f;
 
-    // 🔍 Suche nach dem besten Tile anhand von Entropie und Kontrast
+    // 🐼 Zielkachel mit höchstem Bewertungswert finden
     for (int i = 0; i < totalTiles; ++i) {
         float e = entropy[i];
         float c = contrast[i];
@@ -49,11 +66,9 @@ ZoomResult evaluateZoomTarget(
         }
     }
 
-    // ❌ Kein geeignetes Ziel gefunden
     if (result.bestIndex < 0)
         return result;
 
-    // 📍 Zielkoordinaten im Bild berechnen
     int bx = result.bestIndex % tilesX;
     int by = result.bestIndex / tilesX;
 
@@ -63,29 +78,70 @@ ZoomResult evaluateZoomTarget(
     tileCenter.x = (tileCenter.x / width - 0.5f) * 2.0f;
     tileCenter.y = (tileCenter.y / height - 0.5f) * 2.0f;
 
-    result.newOffset = make_float2(
+    float2 proposedOffset = make_float2(
         currentOffset.x + tileCenter.x / zoom,
         currentOffset.y + tileCenter.y / zoom
     );
 
-    // 📏 Bewegung berechnen
-    float dx = result.newOffset.x - previousOffset.x;
-    float dy = result.newOffset.y - previousOffset.y;
+    float dx = proposedOffset.x - previousOffset.x;
+    float dy = proposedOffset.y - previousOffset.y;
     float dist = std::sqrt(dx * dx + dy * dy);
+    float minMove = Settings::MIN_JUMP_DISTANCE / zoom;
 
-    result.isNewTarget = (result.bestIndex != previousIndex);
+    float prevScore = previousEntropy * (1.0f + previousContrast);
+    float scoreGain = (prevScore > 0.0f) ? ((bestScore - prevScore) / prevScore) : 1.0f;
+    float scoreDiff = (prevScore > 0.0f) ? std::abs(bestScore - prevScore) / prevScore : 1.0f;
 
-    // 🧭 Zoom nur bei neuem Ziel oder spürbarer Bewegung
-    const float minMove = Settings::MIN_JUMP_DISTANCE / zoom;
-    result.shouldZoom = result.isNewTarget || (dist > minMove);
+    bool isTentativeNewTarget = (result.bestIndex != previousAcceptedIndex && scoreDiff > 0.05f);
+    bool significantMove = (dist > minMove);
+    bool significantGain = (scoreGain > 0.05f);
 
-    // 🪵 ASCII-kompatibles Debug-Log
+    // 🐘 Memory-Zielsystem mit Beständigkeit
+    if (isTentativeNewTarget) {
+        tentativeFrames = 1;
+    } else {
+        tentativeFrames = my_clamp(tentativeFrames + 1, 0, 1000);
+    }
+
+    bool isStableTarget = (tentativeFrames >= REQUIRED_TENTATIVE_FRAMES);
+    result.isNewTarget = isStableTarget && isTentativeNewTarget;
+
+    if (isStableTarget) {
+        previousAcceptedIndex = result.bestIndex;
+    }
+
+    // 🐑 Ziel muss verweilen, bevor Zoom erlaubt wird
+    int requiredStableFrames = my_clamp(static_cast<int>(3 + std::log2(zoom)), 3, 12);
+    if (result.isNewTarget) {
+        stableFrames = 0;
+    } else {
+        stableFrames = my_clamp(stableFrames + 1, 0, 1000);
+    }
+
+    result.shouldZoom = stableFrames >= requiredStableFrames && (significantMove || significantGain);
+
+    // 🕊️ Alpha-Glättung wächst mit Vertrauen (Frames)
+    float progress = my_clamp(static_cast<float>(stableFrames) / requiredStableFrames, 0.0f, 1.0f);
+    float alpha = 0.01f + 0.09f * progress;
+
+    result.newOffset = result.shouldZoom
+        ? proposedOffset
+        : make_float2(
+            previousOffset.x * (1.0f - alpha) + proposedOffset.x * alpha,
+            previousOffset.y * (1.0f - alpha) + proposedOffset.y * alpha);
+
     if (Settings::debugLogging) {
         std::cout << "[ZoomEval] idx=" << result.bestIndex
                   << " E=" << result.bestEntropy
                   << " C=" << result.bestContrast
                   << " dist=" << dist
                   << " jumpLimit=" << minMove
+                  << " gain=" << scoreGain
+                  << " scoreDiff=" << scoreDiff
+                  << " tentative=" << tentativeFrames
+                  << " stable=" << stableFrames
+                  << " required=" << requiredStableFrames
+                  << " alpha=" << alpha
                   << " new=" << (result.isNewTarget ? "1" : "0")
                   << " → zoom=" << (result.shouldZoom ? "1" : "0")
                   << "\n";
