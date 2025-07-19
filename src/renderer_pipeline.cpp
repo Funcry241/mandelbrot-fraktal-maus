@@ -1,6 +1,7 @@
 // Datei: src/renderer_pipeline.cpp
-// Zeilen: 70
+// Zeilen: 69
 // 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean – HUD/Heatmap bleiben garantiert sichtbar. Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines.
+
 #include "pch.hpp"
 #include "renderer_pipeline.hpp"
 #include "opengl_utils.hpp"
@@ -52,7 +53,7 @@ void drawFullscreenQuad(GLuint tex) {
     glUseProgram(program);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
-    glDisable(GL_BLEND);
+    // Kein Blend-Disable – HUD benötigt Alpha-Blending!
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindVertexArray(VAO);
