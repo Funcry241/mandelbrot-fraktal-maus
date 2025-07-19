@@ -1,8 +1,9 @@
 // Datei: src/zoom_command.hpp
-// Zeilen: 65
+// Zeilen: 67
 // 🐭 Maus-Kommentar: Struktur für jede Auto-Zoom-Entscheidung – deterministisch, replayfähig, testbar.
 // 🦦 Otter: Reproduzierbares Verhalten durch CommandBus, jeder Frame dokumentiert.
 // 🐅 Maus: Kompakt, ohne math_utils, nur float2 aus <vector_types.h>.
+// 🐼 Panda: Jeder ZoomCommand ist ein protokollierter Denkprozess – Grundlage für Analyse, Replay und Heatmap.
 // Ziel: vollständige Nachvollziehbarkeit aller Zoom-Aktionen, ideal für Analyse und Debug.
 
 #pragma once
