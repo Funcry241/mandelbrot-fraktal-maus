@@ -8,69 +8,67 @@
 $ErrorActionPreference = 'Stop'
 $dryRun = $false  # 🐭 Debug-Modus: true = zeigt nur an, löscht aber nicht
 
-Write-Host "`n--- MausDelete gestartet ---`n"
+Write-Host "`n[MausDelete] Starting cleanup..."
 
-# 🎯 Zieldefinition: temporäre Dateierweiterungen, Dateinamenmuster, Build-Ordner
 $fileExtensions   = @('.obj', '.o', '.ilk', '.pdb', '.log', '.tmp', '.tlog')
 $filenamePatterns = @('CMakeCache.txt', 'CMakeGenerate.stamp', '*.VC.db', '*~')
-$folderNames = @('CMakeFiles', 'Debug', 'Release', 'x64', '.vs', '.idea')  # build raus
-$excludedFolders  = @('dist')  # 🛡️ Diese Ordner werden NIE gelöscht (aber Inhalt ggf. gesondert behandelt)
+$folderNames      = @('CMakeFiles', 'Debug', 'Release', 'x64', '.vs', '.idea')
+$excludedFolders  = @('dist')
 
-# 🔍 Rekursiver Suchlauf ab Projektwurzel
 $allItems = Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue
+
+[int]$countFiles = 0
+[int]$countDirs  = 0
+[int]$countDist  = 0
 
 foreach ($item in $allItems) {
     try {
         if ($item.PSIsContainer -and ($excludedFolders -contains $item.Name)) {
-            continue  # dist/ etc. werden hier grundsätzlich übersprungen
+            continue
         }
 
-        $isTrash = $false
-
+        $trash = $false
         if (-not $item.PSIsContainer) {
             $ext = $item.Extension.ToLowerInvariant()
-            if ($fileExtensions -contains $ext) {
-                $isTrash = $true
-            }
-            elseif ($filenamePatterns | Where-Object { $item.Name -like $_ }) {
-                $isTrash = $true
+            if ($fileExtensions -contains $ext -or ($filenamePatterns | Where-Object { $item.Name -like $_ })) {
+                $trash = $true
+                $countFiles++
             }
         }
         elseif ($folderNames -contains $item.Name) {
-            $isTrash = $true
+            $trash = $true
+            $countDirs++
         }
 
-        if ($isTrash) {
+        if ($trash) {
             if ($dryRun) {
-                Write-Host "  (DRY RUN) Würde löschen: $($item.FullName)"
+                Write-Host "  [DryRun] $($item.FullName)"
             } else {
                 Remove-Item $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Host "  Entfernt: $($item.FullName)"
             }
         }
+
     } catch {
-        Write-Warning "  Fehler beim Löschen: $($item.FullName)"
+        Write-Warning "[MausDelete] Error deleting: $($item.FullName)"
     }
 }
 
-# 🔧 Spezialfall: dist/-Inhalt leeren, aber Ordner behalten
+# 🔧 dist/-Ordner-Inhalte
 $distPath = Join-Path -Path $PSScriptRoot -ChildPath "dist"
 if (Test-Path $distPath) {
-    Get-ChildItem -Path $distPath -Force | Where-Object {
-        $_.Name
-    } | ForEach-Object {
+    Get-ChildItem -Path $distPath -Force | ForEach-Object {
         try {
             if ($dryRun) {
-                Write-Host "  (DRY RUN) Würde in dist/ löschen: $($_.FullName)"
+                Write-Host "  [DryRun:dist] $($_.FullName)"
             } else {
                 Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Host "  Entfernt aus dist/: $($_.FullName)"
+                $countDist++
             }
         } catch {
-            Write-Warning "  Fehler beim Löschen in dist/: $($_.FullName)"
+            Write-Warning "[MausDelete] Error in dist/: $($_.FullName)"
         }
     }
 }
 
-Write-Host "`n--- MausDelete abgeschlossen ---"
+Write-Host "[MausDelete] Done. Files: $countFiles  Dirs: $countDirs  dist/: $countDist"
 exit 0

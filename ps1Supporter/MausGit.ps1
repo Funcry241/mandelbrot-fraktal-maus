@@ -83,7 +83,6 @@ Makefile
 Write-Host "[GIT] Füge Dateien hinzu..."
 git add . | Out-Null
 
-$headExists = git rev-parse --verify HEAD 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[GIT] Erstelle Initial-Commit..."
     git commit -m "Initial import: OtterDream Mandelbrot Fraktal-Projekt" | Out-Null
