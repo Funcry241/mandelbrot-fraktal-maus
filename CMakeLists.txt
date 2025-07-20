@@ -1,6 +1,3 @@
-# Datei: CMakeLists.txt
-# Zeilen: 159
-# 🐭 Maus-Kommentar: Alpha 49 – CUDA-FLAGS optimiert: --fmad=true, --use_fast_math, --prec-div=true. Damit maximale Floating-Point-Performance bei stabiler numerischer Genauigkeit. Keine Kompromisse bei Buildqualität.
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -80,13 +77,15 @@ add_executable(mandelbrot_otterdream
 # 🐭 HUD-Font automatisch ins Zielverzeichnis kopieren
 # Schneefuchs: Klarheit, Otter: Komfort
 # ------------------------------------------------------------
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${PROJECT_NAME}>/fonts
+add_custom_target(copy_fonts ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/dist/fonts
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_SOURCE_DIR}/fonts/Roboto-Regular.ttf
-            $<TARGET_FILE_DIR:${PROJECT_NAME}>/fonts/Roboto-Regular.ttf
-    COMMENT "📦 Kopiere HUD-Font nach build-Ausgabeordner"
+            ${CMAKE_CURRENT_BINARY_DIR}/dist/fonts/Roboto-Regular.ttf
+    COMMENT "📦 Kopiere HUD-Font nach dist/fonts"
 )
+
+add_dependencies(mandelbrot_otterdream copy_fonts)
 
 if (MSVC)
   target_precompile_headers(mandelbrot_otterdream PRIVATE src/pch.hpp)
