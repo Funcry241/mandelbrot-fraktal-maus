@@ -9,7 +9,7 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 86 CACHE STRING "Default architecture if none provided")
 endif()
 
-project(OtterDreamMandelbrot LANGUAGES CXX CUDA)
+project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
 # ---------------------------------------------------------
 # 🔧 Vcpkg Integration
@@ -74,6 +74,18 @@ add_executable(mandelbrot_otterdream
     src/zoom_logic.cpp
     src/zoom_command.cpp
     src/frame_pipeline.cpp
+)
+
+# ------------------------------------------------------------
+# 🐭 HUD-Font automatisch ins Zielverzeichnis kopieren
+# Schneefuchs: Klarheit, Otter: Komfort
+# ------------------------------------------------------------
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${PROJECT_NAME}>/fonts
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/fonts/Roboto-Regular.ttf
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/fonts/Roboto-Regular.ttf
+    COMMENT "📦 Kopiere HUD-Font nach build-Ausgabeordner"
 )
 
 if (MSVC)

@@ -1,11 +1,12 @@
 param(
-    [string]$Configuration = "RelWithDebInfo"
+    [string]$Configuration = "RelWithDebInfo",
+    [switch]$Clean
 )
 
 $ErrorActionPreference = 'Stop'
 Write-Host "`n=== Build started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===`n"
 
-# SSH agent setup
+# SSH-Agent
 if ((Get-Service ssh-agent -ErrorAction SilentlyContinue).Status -ne 'Running') {
     Start-Service ssh-agent
     Write-Host "[SSH] ssh-agent started."
@@ -23,22 +24,24 @@ if (-not (ssh-add -l 2>&1) -match "SHA256") {
     Write-Host "[SSH] Key already active."
 }
 
-# Cleanup old artifacts
-foreach ($p in "build", "dist", "mandelbrot_otterdream_log.txt") {
-    if (Test-Path $p) {
-        Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "[CLEAN] Removed: $p"
+# Cleanup falls explizit angefordert
+if ($Clean) {
+    foreach ($p in "build", "dist", "mandelbrot_otterdream_log.txt") {
+        if (Test-Path $p) {
+            Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "[CLEAN] Removed: $p"
+        }
     }
 }
 
-# Supporter script check
+# Supporter
 $supporterDir = "ps1Supporter"
 if (-not (Test-Path $supporterDir)) {
     Write-Error "[SUPPORT] Missing folder: $supporterDir"
     exit 1
 }
 
-# CUDA setup
+# CUDA
 try {
     $nvcc = (Get-Command nvcc.exe -ErrorAction Stop).Source
     $cudaBin = Split-Path $nvcc -Parent
@@ -48,7 +51,7 @@ try {
     exit 1
 }
 
-# MSVC setup
+# MSVC
 $vswhere = "${Env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vsInstall = & "$vswhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vsInstall) {
@@ -62,7 +65,7 @@ cmd /c "`"$vcvars`" && set" | ForEach-Object {
     }
 }
 
-# Load .env
+# .env
 if (Test-Path .env) {
     Write-Host "[ENV] Loading .env..."
     Get-Content .env | ForEach-Object {
@@ -73,7 +76,7 @@ if (Test-Path .env) {
     }
 }
 
-# vcpkg setup
+# vcpkg
 try {
     $vcpkg = (Get-Command vcpkg.exe -ErrorAction Stop).Source
     $vcpkgRoot = Split-Path $vcpkg -Parent
@@ -84,10 +87,10 @@ try {
     exit 1
 }
 
-# Create directories
+# Verzeichnisse
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
-# CMake configure (clean call)
+# CMake-Konfiguration
 Write-Host "[INFO] CMake version: $(cmake --version | Select-String -Pattern 'cmake version')"
 Write-Host "[BUILD] Configuring project..."
 $cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=80;86;89;90"
@@ -103,23 +106,35 @@ $cmakeArgs = @(
     $cudaArch
 )
 cmake @cmakeArgs
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "[CMAKE] Configuration failed. Check CMakeLists.txt."
+    exit 1
+}
 
-# CMake build
+# Build
 Write-Host "[BUILD] Starting build..."
 cmake --build build --config $Configuration --parallel
+if ($LASTEXITCODE -ne 0) {
+    if (-not (Test-Path "build/build.ninja")) {
+        Write-Error "[NINJA] build.ninja missing. CMake-Konfiguration war fehlerhaft."
+    } else {
+        Write-Error "[BUILD] Ninja reported build failure."
+    }
+    exit 1
+}
 
-# Copy executable
+# Executable kopieren
 $exe = "build\$Configuration\mandelbrot_otterdream.exe"
 if (-not (Test-Path $exe)) { $exe = "build\mandelbrot_otterdream.exe" }
 if (Test-Path $exe) {
     Copy-Item $exe -Destination dist -Force
     Write-Host "[COPY] Executable to dist"
 } else {
-    Write-Error "[BUILD] Build probably failed. Check output above!"
+    Write-Error "[BUILD] Executable not found."
     exit 1
 }
 
-# Copy GLEW/GLFW DLLs
+# DLLs: GLFW / GLEW
 $dllSearchRoots = Get-ChildItem "$PSScriptRoot\vcpkg_installed" -Recurse -Directory | Where-Object { $_.Name -eq "bin" }
 foreach ($dll in 'glfw3.dll','glew32.dll') {
     $src = $dllSearchRoots | ForEach-Object {
@@ -134,7 +149,7 @@ foreach ($dll in 'glfw3.dll','glew32.dll') {
     }
 }
 
-# Copy CUDA runtime DLLs
+# CUDA-DLLs
 $cudaDlls = Get-ChildItem $cudaBin -Filter 'cudart64_*.dll'
 if ($cudaDlls) {
     foreach ($dll in $cudaDlls) {
@@ -146,7 +161,7 @@ if ($cudaDlls) {
     exit 1
 }
 
-# Run supporter scripts
+# Supporter-Skripte
 foreach ($script in 'run_build_inner.ps1','MausDelete.ps1','MausGitAutoCommit.ps1') {
     $path = Join-Path $supporterDir $script
     if (Test-Path $path) {
@@ -158,5 +173,5 @@ foreach ($script in 'run_build_inner.ps1','MausDelete.ps1','MausGitAutoCommit.ps
     }
 }
 
-Write-Host "`nBuild completed successfully."
+Write-Host "`n✅ Build completed successfully."
 exit 0

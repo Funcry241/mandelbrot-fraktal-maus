@@ -1,5 +1,6 @@
 // Datei: src/hud_freetype.cpp
-// 🐭 Maus-Kommentar: FreeType-HUD mit Klartextdarstellung in jeder Zoomstufe. Scharf wie ein Skalpell, stabil wie ein Otter. Shader-basiert, Unicode-tauglich, zoomfest. Kein ASCII-Geraffel mehr.
+// Zeilen: 164
+// 🐭 Maus-Kommentar: FreeType-HUD mit Klartextdarstellung in jeder Zoomstufe. Scharf wie ein Skalpell, stabil wie ein Otter. Shader-basiert, Unicode-tauglich, zoomfest. Kein ASCII-Geraffel mehr. Fehler geprüft. Crashschutz dank Otter.
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -46,6 +47,14 @@ static GLuint compile(GLenum type, const char* src) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
     glCompileShader(s);
+    GLint success = 0;
+    glGetShaderiv(s, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetShaderInfoLog(s, 512, nullptr, log);
+        std::fprintf(stderr, "[HUD] Shader compile error: %s\n", log);
+        std::exit(EXIT_FAILURE);
+    }
     return s;
 }
 
@@ -75,8 +84,16 @@ static void buildAtlas() {
 }
 
 void init() {
-    FT_Init_FreeType(&ft);
-    FT_New_Face(ft, "fonts/Roboto-Regular.ttf", 0, &face);
+    if (FT_Init_FreeType(&ft)) {
+        std::fprintf(stderr, "[HUD] Could not init FreeType library\n");
+        std::exit(EXIT_FAILURE);
+    }
+
+    if (FT_New_Face(ft, "fonts/Roboto-Regular.ttf", 0, &face)) {
+        std::fprintf(stderr, "[HUD] Failed to load font 'fonts/Roboto-Regular.ttf'\n");
+        std::exit(EXIT_FAILURE);
+    }
+
     FT_Set_Pixel_Sizes(face, 0, 32);
     buildAtlas();
 
