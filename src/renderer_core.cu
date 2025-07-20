@@ -23,7 +23,7 @@ Renderer::Renderer(int width, int height)
 
 Renderer::~Renderer() {
     if (Settings::debugLogging && !glInitialized) {
-        std::puts("[DEBUG] cleanup() skipped – OpenGL was never initialized");
+        std::puts("[DEBUG] cleanup() skipped - OpenGL was never initialized");
     }
     if (glInitialized) {
         cleanup();
@@ -67,11 +67,13 @@ void Renderer::renderFrame_impl() {
         state.lastContrast = state.zoomResult.bestContrast;
     }
 
-    // 🔍 Anwenden des Zooms, wenn sinnvoll
+    // 🐧 Immer sanfte Bewegung – unabhängig von Zoom-Auslösung
+    state.offset = state.zoomResult.newOffset;
+
     if (state.zoomResult.shouldZoom) {
         state.zoom *= Settings::zoomFactor;
-        state.offset = state.zoomResult.newOffset;
     }
+
 
 #if ENABLE_ZOOM_LOGGING
     float ox = state.offset.x;

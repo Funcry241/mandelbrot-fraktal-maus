@@ -1,5 +1,5 @@
 // Datei: src/zoom_command.hpp
-// Zeilen: 67
+// Zeilen: 63
 // 🐭 Maus-Kommentar: Struktur für jede Auto-Zoom-Entscheidung – deterministisch, replayfähig, testbar.
 // 🦦 Otter: Reproduzierbares Verhalten durch CommandBus, jeder Frame dokumentiert.
 // 🐅 Maus: Kompakt, ohne math_utils, nur float2 aus <vector_types.h>.
@@ -20,19 +20,18 @@ struct ZoomCommand {
     float zoomAfter = 1.0f;
     float entropy = 0.0f;
     float contrast = 0.0f;
-    int tileIndex = -1;
 
     std::string toCSV() const {
         char buf[128];
         snprintf(buf, sizeof(buf),
-                 "%d,%.5f,%.5f,%.1e,%.1e,%.4f,%.4f,%d",
+                 "%d,%.5f,%.5f,%.1e,%.1e,%.4f,%.4f",
                  frameIndex, newOffset.x, newOffset.y,
-                 zoomBefore, zoomAfter, entropy, contrast, tileIndex);
+                 zoomBefore, zoomAfter, entropy, contrast);
         return std::string(buf);
     }
 
     static std::string csvHeader() {
-        return "Frame,X,Y,ZoomBefore,ZoomAfter,Entropy,Contrast,TileIndex";
+        return "Frame,X,Y,ZoomBefore,ZoomAfter,Entropy,Contrast";
     }
 };
 

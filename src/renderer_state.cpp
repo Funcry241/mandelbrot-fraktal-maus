@@ -1,6 +1,6 @@
 // Datei: src/renderer_state.cpp
-// Zeilen: 98
-// 🐭 Maus-Kommentar: Kolibri integriert! Buffer-Init jetzt immer robust. Keine Schattenwerte, keine toten Felder (lastIndex entfernt). Schneefuchs: „Kein Schattenwert bleibt im System.“ Otter validiert für Capybara v2.
+// Zeilen: 104
+// 🐭 Maus-Kommentar: Gepard jetzt voll integriert: `zoomResult` ersetzt veraltetes `lastTileIndex`, HUD-Status wird explizit synchronisiert. Keine Schattenwerte, kein „Vergessen“ – der State ist jetzt deterministisch. Otter nennt es „Zoomlogik in Reinform“.
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -33,7 +33,14 @@ void RendererState::reset() {
 
     supersampling  = Settings::defaultSupersampling;
     overlayEnabled = false;
-    lastTileIndex  = -1;
+
+    // 🔄 Gepard: Reset ZoomResult
+    zoomResult.bestIndex     = -1;
+    zoomResult.bestEntropy   = 0.0f;
+    zoomResult.bestContrast  = 0.0f;
+    zoomResult.newOffset     = offset;
+    zoomResult.shouldZoom    = false;
+    zoomResult.isNewTarget   = false;
 }
 
 void RendererState::setupCudaBuffers() {
@@ -51,14 +58,14 @@ void RendererState::setupCudaBuffers() {
     CUDA_CHECK(cudaMalloc(&d_tileSupersampling, numTiles * sizeof(int))); // Kolibri
 
     h_entropy.resize(numTiles);
-    h_contrast.resize(numTiles);          // Panda
+    h_contrast.resize(numTiles);           // Panda
     h_tileSupersampling.resize(numTiles);  // Kolibri
 }
 
 void RendererState::resize(int newWidth, int newHeight) {
     if (d_iterations) { CUDA_CHECK(cudaFree(d_iterations)); d_iterations = nullptr; }
-    if (d_entropy) { CUDA_CHECK(cudaFree(d_entropy)); d_entropy = nullptr; }
-    if (d_contrast) { CUDA_CHECK(cudaFree(d_contrast)); d_contrast = nullptr; }
+    if (d_entropy)    { CUDA_CHECK(cudaFree(d_entropy));    d_entropy = nullptr; }
+    if (d_contrast)   { CUDA_CHECK(cudaFree(d_contrast));   d_contrast = nullptr; }
     if (d_tileSupersampling) { CUDA_CHECK(cudaFree(d_tileSupersampling)); d_tileSupersampling = nullptr; }
 
     CudaInterop::unregisterPBO();

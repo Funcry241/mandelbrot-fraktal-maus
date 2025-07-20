@@ -82,8 +82,7 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
     cmd.newOffset  = make_float2((float)frameCtx.newOffset.x, (float)frameCtx.newOffset.y);
     cmd.zoomAfter  = (float)frameCtx.zoom;
     cmd.entropy    = frameCtx.lastEntropy;
-    cmd.contrast   = frameCtx.lastContrast;
-    cmd.tileIndex  = frameCtx.lastTileIndex;
+    cmd.contrast   = frameCtx.lastContrast;    
     bus.push(cmd);
     frameCtx.timeSinceLastZoom = 0.0f;
 }

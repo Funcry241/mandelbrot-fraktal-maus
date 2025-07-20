@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 293
-// 🐭 Maus-Kommentar: Capybara+Kiwi+MausZoom – Mapping jetzt 100% aspect-korrekt: spanY=spanX*h/w. Keine Verzerrung mehr, Mandelbrot mittig. Otter-Check: Testpixel und Supersampling weiterhin geschützt.
+// Zeilen: 309
+// 👝 Maus-Kommentar: Alpha 50 – Verbesserte Robustheit & Eleganz. Neue `pixelToComplex`-Funktion für Klarheit, stabilisierte Farbnormalisierung gegen Artefakte, absichernder Kernel-Start & Entropie-Divisionsschutz. Otter: „Schönheit durch Genauigkeit.“
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -17,6 +17,12 @@ __device__ __forceinline__ uchar4 elegantColor(float t) {
     float g = 0.5f + 0.5f * __sinf(6.2831f * (t + 0.33f));
     float b = 0.5f + 0.5f * __sinf(6.2831f * (t + 0.66f));
     return make_uchar4(r * 255, g * 255, b * 255, 255);
+}
+
+// ---- KOORDINATEN-MAPPING ----
+__device__ __forceinline__ float2 pixelToComplex(float px, float py, int w, int h, float spanX, float spanY, float2 offset) {
+    return make_float2((px / w - 0.5f) * spanX + offset.x,
+                       (py / h - 0.5f) * spanY + offset.y);
 }
 
 // ---- MANDELBROT-ITERATION ----
@@ -53,16 +59,17 @@ __global__ void mandelbrotKernelAdaptive(
     float tSum = 0.0f; int iSum = 0;
     float scale = 1.0f / zoom;
     float spanX = 3.5f * scale;
-    float spanY = spanX * h / w; // <--- Das fixiert das Aspect Ratio!
+    float spanY = spanX * h / w;
     for (int i = 0; i < S; ++i)
         for (int j = 0; j < S; ++j) {
             float dx = (i + 0.5f) / S, dy = (j + 0.5f) / S;
-            float fx = ((x + dx) / w - 0.5f) * spanX + offset.x;
-            float fy = ((y + dy) / h - 0.5f) * spanY + offset.y;
-            float zx, zy; int it = mandelbrotIterations(fx, fy, maxIter, zx, zy); iSum += it;
+            float2 c = pixelToComplex(x + dx, y + dy, w, h, spanX, spanY, offset);
+            float zx, zy; int it = mandelbrotIterations(c.x, c.y, maxIter, zx, zy); iSum += it;
             float norm = zx * zx + zy * zy;
-            float tt = (it + 1.0f - log2f(log2f(fmaxf(norm, 1e-8f)))) / maxIter;
-            tSum += fminf(fmaxf(tt, 0.0f), 1.0f);
+            float tt = it - log2f(log2f(fmaxf(norm, 1.000001f)));
+            tt = tt / maxIter;
+            tt = fminf(fmaxf(tt, 0.0f), 1.0f);
+            tSum += tt;
         }
     out[idx] = elegantColor(tSum / (S * S));
     iterOut[idx] = max(0, iSum / (S * S));
@@ -81,7 +88,7 @@ __global__ void entropyKernel(const int* it, float* eOut, int w, int h, int tile
     if (threadIdx.x == 0) {
         float entropy = 0.0f; int used = 0;
         for (int i = 0; i < 256; ++i) {
-            float p = (local > 0 ? histo[i] / float(total) : 0.0f);
+            float p = (total > 0) ? (histo[i] / float(total)) : 0.0f;
             if (p > 0.0f) entropy -= p * log2f(p);
             used += histo[i];
         }
@@ -118,7 +125,8 @@ void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, f
                 w, h, maxIter, zoom, offset.x, offset.y, tile, supersampling, block.x, block.y, grid.x, grid.y);
         }
     }
-    mandelbrotKernelAdaptive<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter, tile, d_sup);
+    if (out && d_it)
+        mandelbrotKernelAdaptive<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter, tile, d_sup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess)
         std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));

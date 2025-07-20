@@ -91,15 +91,6 @@ constexpr int BASE_TILE_SIZE = 24; // Empfohlen: 16–32 – idealer Kompromiss 
 constexpr int MIN_TILE_SIZE  = 8;  // Untergrenze – kleinere Werte = feinere Analyse, aber höhere Last
 constexpr int MAX_TILE_SIZE  = 64; // Obergrenze – größere Werte = weniger Rechenlast, aber ungenauer
 
-// 🧠 Zielstabilitäts- und Zielauswahlparameter (Auto-Zoom Evaluation)
-constexpr int   TENTATIVE_FRAMES_REQUIRED = 2;     // Otter
-constexpr float MIN_SCORE_DIFF_RATIO      = 0.08f; // Schneefuchs
-constexpr float MIN_SCORE_GAIN_RATIO      = 0.05f; // Schneefuchs
-
-// 🐘 Geduldsparameter für Zoom-Auslösung – abhängig vom Zoomlevel (logarithmisch)
-constexpr int MIN_STABLE_FRAMES = 2;  // Elefant
-constexpr int MAX_STABLE_FRAMES = 12; // Elefant
-
 // 🕊️ Adaptive LERP-Geschwindigkeit zwischen Kamera-Offset und Ziel
 constexpr float ALPHA_LERP_MIN = 0.01f; // Kolibri
 constexpr float ALPHA_LERP_MAX = 0.10f; // Kolibri

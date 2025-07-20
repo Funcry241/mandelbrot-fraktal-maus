@@ -1,7 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 251
-// 🐭 Maus-Kommentar: Alpha 49 – [Perf] Log reduziert: Vorher/Nachher-Vergleiche der Iterationen nun in EINER ASCII-cleanen Zeile. Keine Sonderzeichen, kein Mehrzeilen-Spam. Warnungen entfallen, aber Log ist dafür kompakter. Schneefuchs: „Wer lesen kann, will nicht blättern.“
-
+// Zeilen: 258
+// 🐭 Maus-Kommentar: Alpha 49b – Logging-Reduktion nach „Gepard 2.0“: Debug-Ausgaben sind nun ASCII-clean, einzeilig, kompakt. Vorher/Nachher-Vergleiche der Iterationen, Supersampling-Check und Performance-Log in einer Zeile. Schneefuchs sagt: „Prägnanz ist Präzision.“
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "core_kernel.h"
@@ -13,7 +12,10 @@
 #include <vector>
 #include <cstdio>
 #include <iomanip>
-#include <chrono>
+
+#ifndef __CUDA_ARCH__
+  #include <chrono>
+#endif
 
 namespace CudaInterop {
 
@@ -45,7 +47,9 @@ void renderCudaFrame(
     if (!cudaPboResource)
         throw std::runtime_error("[FATAL] CUDA PBO not registered!");
 
+#ifndef __CUDA_ARCH__
     auto t0 = std::chrono::high_resolution_clock::now();
+#endif
 
     int totalPixels = width * height;
     int tilesX = (width + tileSize - 1) / tileSize;
@@ -77,12 +81,14 @@ void renderCudaFrame(
 
     if (Settings::debugLogging) {
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
-        std::printf("[DEBUG] Kernel iter: before={%d,%d,%d} after={%d,%d,%d}\n",
-            dbg_before[0], dbg_before[1], dbg_before[2],
-            dbg_after[0], dbg_after[1], dbg_after[2]);
+        std::printf("[DEBUG] Kernel iterations: %d→%d %d→%d %d→%d\n",
+            dbg_before[0], dbg_after[0],
+            dbg_before[1], dbg_after[1],
+            dbg_before[2], dbg_after[2]);
     }
 
-    if (Settings::debugLogging) std::puts("[DEBUG] Entropy+Contrast Kernel...");
+    if (Settings::debugLogging) std::puts("[DEBUG] Entropy+Contrast launched");
+
     computeCudaEntropyContrast(d_iterations, d_entropy, d_contrast, width, height, tileSize, maxIterations);
 
     h_entropy.resize(numTiles);
@@ -96,17 +102,21 @@ void renderCudaFrame(
                                  (h_entropy[i] > Settings::ENTROPY_THRESHOLD_LOW)  ? 2 : 1;
     CUDA_CHECK(cudaMemcpy(d_tileSupersampling, h_tileSupersampling.data(), numTiles * sizeof(int), cudaMemcpyHostToDevice));
 
-    if (Settings::debugLogging && numTiles > 0) {
-        std::printf("[SUPERSAMPLE] Tile[0:2] host: %d %d %d | device: ",
-            h_tileSupersampling[0],
-            numTiles > 1 ? h_tileSupersampling[1] : -1,
-            numTiles > 2 ? h_tileSupersampling[2] : -1);
+    if (Settings::debugLogging && numTiles > 2) {
         std::vector<int> devCheck(numTiles);
         CUDA_CHECK(cudaMemcpy(devCheck.data(), d_tileSupersampling, numTiles * sizeof(int), cudaMemcpyDeviceToHost));
-        std::printf("%d %d %d\n",
-            devCheck[0],
-            numTiles > 1 ? devCheck[1] : -1,
-            numTiles > 2 ? devCheck[2] : -1);
+        bool match = devCheck[0] == h_tileSupersampling[0] &&
+                     devCheck[1] == h_tileSupersampling[1] &&
+                     devCheck[2] == h_tileSupersampling[2];
+
+        if (match) {
+            std::printf("[DEBUG] Supersampling Tile[0-2]: %d %d %d\n",
+                h_tileSupersampling[0], h_tileSupersampling[1], h_tileSupersampling[2]);
+        } else {
+            std::printf("[DEBUG] Supersample mismatch – host: %d %d %d | device: %d %d %d\n",
+                h_tileSupersampling[0], h_tileSupersampling[1], h_tileSupersampling[2],
+                devCheck[0], devCheck[1], devCheck[2]);
+        }
     }
 
     shouldZoom = false;
@@ -132,11 +142,12 @@ void renderCudaFrame(
 
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
 
+#ifndef __CUDA_ARCH__
     auto t1 = std::chrono::high_resolution_clock::now();
-    if (Settings::debugLogging) {
-        float totalMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
+    float totalMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
+    if (Settings::debugLogging)
         std::printf("[Perf] cuda_interop total=%.2fms\n", totalMs);
-    }
+#endif
 }
 
 void setPauseZoom(bool pause) { pauseZoom = pause; }

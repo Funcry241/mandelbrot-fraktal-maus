@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 344
-// 🐭 Maus-Kommentar: Alpha 49 – Rückgabewert von `getPauseZoom()` wird nun explizit verarbeitet, um [[nodiscard]] zu erfüllen. Kein Logikverlust, keine Warnungen. Schneefuchs: "Wer ignoriert, verliert."
+// Zeilen: 166
+// 🐭 Maus-Kommentar: FrameContext-Pipeline jetzt Pinguin-kompatibel. Kein shouldZoom-Leak in RendererState. Alles, was ein Frame entscheidet, bleibt isoliert. ZoomLogik via ctx und CommandBus. Schneefuchs: sauber. Otter: schnell. Maus: zufrieden.
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -56,6 +56,10 @@ void beginFrame(RendererState& state) {
 void renderFrame_impl(RendererState& state) {
     auto frameStart = std::chrono::high_resolution_clock::now();
 
+    // 💡 HUD sichtbar machen: Frame-Buffer vorzeichnen
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
     ctx.zoom = static_cast<float>(state.zoom);
     ctx.offset.x = static_cast<float>(state.offset.x);
     ctx.offset.y = static_cast<float>(state.offset.y);
@@ -76,8 +80,7 @@ void renderFrame_impl(RendererState& state) {
     ctx.h_contrast = state.h_contrast;
     ctx.overlayActive = state.overlayEnabled;
     ctx.lastEntropy = state.lastEntropy;
-    ctx.lastContrast = state.lastContrast;
-    ctx.lastTileIndex = state.lastTileIndex;
+    ctx.lastContrast = state.lastContrast;    
 
     beginFrame(state);
 
@@ -88,7 +91,11 @@ void renderFrame_impl(RendererState& state) {
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    CUDA_CHECK(cudaMemset(ctx.d_iterations, 0, totalPixels * sizeof(int)));
+    // 🔄 Supersampling-Fix: Buffer leeren nur wenn gesetzt
+    if (ctx.d_iterations) {
+        CUDA_CHECK(cudaMemset(ctx.d_iterations, 0, totalPixels * sizeof(int)));
+    }
+
     computeCudaFrame(ctx, state);
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -98,8 +105,9 @@ void renderFrame_impl(RendererState& state) {
 
     auto t2 = std::chrono::high_resolution_clock::now();
 
-    CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
-    CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
+    if (ctx.d_entropy) CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
+    if (ctx.d_contrast) CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
+
     CudaInterop::computeCudaEntropyContrast(
         ctx.d_iterations,
         ctx.d_entropy,
@@ -140,10 +148,8 @@ void renderFrame_impl(RendererState& state) {
     state.offset.y = static_cast<float>(ctx.offset.y);
     state.h_entropy = ctx.h_entropy;
     state.h_contrast = ctx.h_contrast;
-    state.shouldZoom = ctx.shouldZoom;
     state.lastEntropy = ctx.lastEntropy;
-    state.lastContrast = ctx.lastContrast;
-    state.lastTileIndex = ctx.lastTileIndex;
+    state.lastContrast = ctx.lastContrast;    
 }
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -157,8 +163,7 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
         HeatmapOverlay::toggle(*state);
         break;
     case GLFW_KEY_P: {
-        // 🐭 Maus-Fix: Rückgabewert von [[nodiscard]]-Funktion nicht ignorieren!
-        bool paused = CudaInterop::getPauseZoom();
+        bool paused = CudaInterop::getPauseZoom(); // [[nodiscard]] wird beachtet
         CudaInterop::setPauseZoom(!paused);
         break;
     }

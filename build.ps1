@@ -1,7 +1,3 @@
-# ASCII-only build script for OtterDream Mandelbrot Project
-# Purpose: Clean build with vcpkg, CMake, Ninja, CUDA, MSVC
-# Note: No Emoji or Unicode, safe for PowerShell/Ninja parsing
-
 param(
     [string]$Configuration = "RelWithDebInfo"
 )

@@ -40,7 +40,6 @@ struct FrameContext {
     // Statuswerte zur Analyse / Logging
     float lastEntropy = 0.0f;
     float lastContrast = 0.0f;
-    int lastTileIndex = -1;
 
     // Heatmap Overlay
     bool overlayActive = false;
@@ -73,7 +72,6 @@ struct FrameContext {
         d_entropy = nullptr;
         d_contrast = nullptr;
         d_iterations = nullptr;
-        shouldZoom = false;
-        lastTileIndex = -1;
+        shouldZoom = false;        
     }
 };

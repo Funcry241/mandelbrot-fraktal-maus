@@ -1,6 +1,6 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 71
-// 🐭 Maus-Kommentar: State-of-the-Art für Renderer-Status. Alle Entropie-/Kontrast-/Zoomdaten persistent und schnell (float2 statt double2). Kein toter Code: lastIndex entfernt, Übersicht und Performance jetzt maximal klar. Schneefuchs: Übersicht, Otter: Performance.
+// Zeilen: 70
+// 🐭 Maus-Kommentar: State-of-the-Art für Renderer-Status. Alle Entropie-/Kontrast-/Zoomdaten persistent und schnell (float2 statt double2). Kein toter Code: lastTileIndex entfernt, Übersicht und Performance jetzt maximal klar. Schneefuchs: Übersicht, Otter: Performance.
 
 #pragma once
 
@@ -55,9 +55,6 @@ public:
     int frameCount = 0;
     double lastTime = 0.0;
 
-    // 🔁 Auto-Zoom-Aktivität
-    bool shouldZoom = false;
-
     // 🧠 Letztes Ergebnis der Zielanalyse (persistenter Zustand)
     ZoomLogic::ZoomResult zoomResult;
     float lastEntropy  = 0.0f;
@@ -69,7 +66,6 @@ public:
 
     // 🔥 Heatmap-Overlay-Zustand
     bool overlayEnabled = false;
-    int lastTileIndex   = -1;  // Zuletzt gewähltes Zieltile
 
     // 🧽 Setup & Verwaltung
     RendererState(int w, int h);

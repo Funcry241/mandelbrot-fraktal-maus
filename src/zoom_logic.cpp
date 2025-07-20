@@ -1,9 +1,8 @@
 // Datei: src/zoom_logic.cpp
 // Zeilen: 181
-// 🐭 Maus-Kommentar: Alpha 48.3 – Zoom-Zielauswahl wird nun mit präziser Laufzeitanalyse (ms) geloggt. Otter erkennt Bottlenecks, Schneefuchs reduziert Log-Ausgabe auf das Wesentliche.
+// 🐭 Maus-Kommentar: Alpha 49 "Pinguin" – sanftes, kontinuierliches Zoomen ohne Elefant! Ziel wird immer interpoliert verfolgt, Score fließt in Glättung ein. Kein Warten, kein Hüpfen. Schneefuchs genießt den Flug, Otter testet Stabilität.
 // 🐼 Panda: Bewertet Entropie × (1 + Kontrast) als Zielscore.
-// 🐘 Elefant: Stabilisiert Zielauswahl mit Gedächtnis (tentativeFrames, stableFrames).
-// 🕊️ Kolibri: Weiche Bewegung via LERP (Zoom ist Gleitflug).
+// 🐝 Kolibri: Weiche Bewegung via LERP (Zoom ist Gleitflug).
 // 🐍 Flugente: float2 bleibt für Performance aktiv.
 // 🔬 Blaupause: Laufzeitmessung mit std::chrono – erkennt Zoomlogik-Overhead.
 
@@ -18,10 +17,6 @@ namespace ZoomLogic {
 template<typename T> inline T my_clamp(T val, T lo, T hi) {
     return val < lo ? lo : (val > hi ? hi : val);
 }
-
-static int stableFrames = 0;
-static int tentativeFrames = 0;
-static int previousAcceptedIndex = -1;
 
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,
@@ -84,66 +79,30 @@ ZoomResult evaluateZoomTarget(
     float dx = proposedOffset.x - previousOffset.x;
     float dy = proposedOffset.y - previousOffset.y;
     float dist = std::sqrt(dx * dx + dy * dy);
-    float minMove = Settings::MIN_JUMP_DISTANCE / zoom;
 
     float prevScore = previousEntropy * (1.0f + previousContrast);
     float scoreGain = (prevScore > 0.0f) ? ((bestScore - prevScore) / prevScore) : 1.0f;
-    float scoreDiff = (prevScore > 0.0f) ? std::abs(bestScore - prevScore) / prevScore : 1.0f;
-    
-    result.isNewTarget = false;
 
-    // 🐘 Stabilisierung mit Ziel-Gedächtnis
-    if (result.bestIndex != previousAcceptedIndex) {
-        if (scoreDiff > Settings::MIN_SCORE_DIFF_RATIO) {
-            tentativeFrames = 1;
-        } else {
-            tentativeFrames = my_clamp(tentativeFrames + 1, 0, 1000);
-        }
-    } else {
-        tentativeFrames = my_clamp(tentativeFrames + 1, 0, 1000);
-    }
+    // Immer neuer Fokus (kein Stabilitäts-Check mehr)
+    result.isNewTarget = true;
+    result.shouldZoom = true;
 
-    bool isStableTarget = (tentativeFrames >= Settings::TENTATIVE_FRAMES_REQUIRED);
-    result.isNewTarget = isStableTarget && (result.bestIndex != previousAcceptedIndex);
-
-    if (isStableTarget) {
-        previousAcceptedIndex = result.bestIndex;
-    }
-
-    int requiredStableFrames = my_clamp(static_cast<int>(Settings::MIN_STABLE_FRAMES + std::log2(zoom)),
-                                        Settings::MIN_STABLE_FRAMES,
-                                        Settings::MAX_STABLE_FRAMES);
-
-    if (result.isNewTarget) {
-        stableFrames = 0;
-    } else {
-        stableFrames = my_clamp(stableFrames + 1, 0, 1000);
-    }
-
-    result.shouldZoom = stableFrames >= requiredStableFrames && (dist > minMove || scoreGain > Settings::MIN_SCORE_GAIN_RATIO);
-
-    float progress = my_clamp(static_cast<float>(stableFrames) / requiredStableFrames, 0.0f, 1.0f);
-    float alpha = Settings::ALPHA_LERP_MIN + (Settings::ALPHA_LERP_MAX - Settings::ALPHA_LERP_MIN) * progress;
-
-    result.newOffset = result.shouldZoom
-        ? proposedOffset
-        : make_float2(
-            previousOffset.x * (1.0f - alpha) + proposedOffset.x * alpha,
-            previousOffset.y * (1.0f - alpha) + proposedOffset.y * alpha);
+    float alpha = Settings::ALPHA_LERP_MAX;
+    result.newOffset = make_float2(
+        previousOffset.x * (1.0f - alpha) + proposedOffset.x * alpha,
+        previousOffset.y * (1.0f - alpha) + proposedOffset.y * alpha);
 
     auto t1 = std::chrono::high_resolution_clock::now(); // 🔬 Endzeit
     auto ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
     if (Settings::debugLogging) {
-        std::printf("[ZoomEval] i=%d E=%.2f C=%.2f d=%.4f g=%.2f a=%.2f %s%s | %.3fms\n",
+        std::printf("[ZoomEval] i=%d E=%.2f C=%.2f d=%.4f g=%.2f a=%.2f Z | %.3fms\n",
             result.bestIndex,
             result.bestEntropy,
             result.bestContrast,
             dist,
             scoreGain,
             alpha,
-            result.isNewTarget ? "N " : "",
-            result.shouldZoom ? "Z" : "-",
             ms
         );
     }
