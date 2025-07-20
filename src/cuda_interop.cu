@@ -81,7 +81,7 @@ void renderCudaFrame(
 
     if (Settings::debugLogging) {
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
-        std::printf("[DEBUG] Kernel iterations: %d→%d %d→%d %d→%d\n",
+        std::printf("[DEBUG] Kernel iterations: %d -> %d %d -> %d %d -> %d\n",
             dbg_before[0], dbg_after[0],
             dbg_before[1], dbg_after[1],
             dbg_before[2], dbg_after[2]);
