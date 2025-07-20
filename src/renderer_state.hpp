@@ -30,7 +30,7 @@ public:
     float  smoothedTargetScore  = -1.0f;            // Entropie-Score des Zieltiles (wird geglättet)
 
     // 📈 Anzeige-Feedback
-    float currentFPS = 0.0f;
+    float fps = 0.0f;
     float deltaTime  = 0.0f;
 
     // 🧩 Analysepuffer (Host)

@@ -42,7 +42,7 @@ void beginFrame(RendererState& state) {
     state.frameCount++;
 
     if (state.deltaTime > 0.0f)
-        state.currentFPS = 1.0f / state.deltaTime;
+        state.fps = 1.0f / state.deltaTime;
 }
 
 void renderFrame_impl(RendererState& state) {

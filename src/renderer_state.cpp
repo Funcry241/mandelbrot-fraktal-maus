@@ -23,7 +23,7 @@ void RendererState::reset() {
     targetOffset         = offset;  // 🦆 Flugente: float2 statt double2
     filteredTargetOffset = offset;
 
-    currentFPS   = 0.0f;
+    fps          = 0.0f;
     deltaTime    = 0.0f;
     frameCount   = 0;
     lastTime     = glfwGetTime();

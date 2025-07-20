@@ -126,8 +126,21 @@ void drawText(const std::string& text, float x, float y, float w, float h) {
 }
 
 void draw(RendererState& state) {
-    drawText("FPS: 42.0", 20.0f, 40.0f, float(state.width), float(state.height));
-    drawText("Zoom: 1e5", 20.0f, 80.0f, float(state.width), float(state.height));
+    char buf[128];
+
+    // FPS
+    std::snprintf(buf, sizeof(buf), "FPS: %.1f", state.fps);
+    drawText(buf, 20.0f, 40.0f, float(state.width), float(state.height));
+
+    // Zoom (als wissenschaftliche Notation)
+    double z = 1.0 / double(state.zoom);
+    int exponent = int(std::log10(z));
+    std::snprintf(buf, sizeof(buf), "Zoom: 1e%d", exponent);
+    drawText(buf, 20.0f, 80.0f, float(state.width), float(state.height));
+
+    // Offset
+    std::snprintf(buf, sizeof(buf), "Offset: %.6f, %.6f", state.offset.x, state.offset.y);
+    drawText(buf, 20.0f, 120.0f, float(state.width), float(state.height));
 }
 
 void cleanup() {
