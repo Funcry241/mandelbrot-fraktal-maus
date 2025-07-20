@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 238
-// 🐭 Maus-Kommentar: HUD sichtbar gemacht durch explizites Re-Binding von VAO, Shader und vollständige OpenGL-State-Absicherung nach drawFrame(). Schneefuchs: „Was gebunden ist, wird gesehen.“ Otter: Fixiert.
+// Zeilen: 269
+// 🐭 Maus-Kommentar: HUD-Fehleranalyse aktiviert. Font-Fallback durch Test-Rechteck. Debug-Ausgaben ASCII-only. Schneefuchs prüft Sichtbarkeit, Otter triggert Logik.
 
 #include "pch.hpp"
 
@@ -18,6 +18,7 @@
 #include "renderer_state.hpp"
 
 #include <cmath>
+#include <cstdio>
 
 namespace Hud {
 
@@ -85,10 +86,33 @@ void init() {
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable(GL_DEPTH_TEST); // HUD benötigt keinen Depth-Test
+    glDisable(GL_DEPTH_TEST);
 }
 
 void drawText(const std::string& text, float x, float y, float width, float height) {
+    if (text == "TEST_RECTANGLE") {
+        float w = 200.0f, h = 60.0f;
+        struct Vertex { float x, y; };
+        Vertex rect[6] = {
+            {10.0f, 10.0f}, {10.0f + w, 10.0f}, {10.0f + w, 10.0f + h},
+            {10.0f, 10.0f}, {10.0f + w, 10.0f + h}, {10.0f, 10.0f + h}
+        };
+
+        glUseProgram(hudProgram);
+        glBindVertexArray(hudVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(rect), rect, GL_DYNAMIC_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
+        glEnableVertexAttribArray(0);
+        glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glDisableVertexAttribArray(0);
+        glBindVertexArray(0);
+        glUseProgram(0);
+        std::puts("[HUD] Fallback rectangle drawn.");
+        return;
+    }
+
     if (text.empty()) return;
 
     char buffer[99999];
@@ -108,7 +132,9 @@ void drawText(const std::string& text, float x, float y, float width, float heig
         vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
     }
 
-    // 🔧 Explizites Re-Binding für Sichtbarkeit nach drawFrame()
+    std::printf("[HUD] Text=\"%s\" → Quads=%d → Vtx=%zu\n",
+        text.c_str(), num_quads, vertices.size());
+
     glUseProgram(hudProgram);
     glBindVertexArray(hudVAO);
     glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
@@ -116,21 +142,22 @@ void drawText(const std::string& text, float x, float y, float width, float heig
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
     glEnableVertexAttribArray(0);
     glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
-
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
-
     glDisableVertexAttribArray(0);
     glBindVertexArray(0);
     glUseProgram(0);
 
-    // 🔍 Fehlerausgabe zur Diagnose
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
-        fprintf(stderr, "[HUD] OpenGL Error: 0x%X\n", err);
+        std::printf("[HUD] GL Error after draw: 0x%X\n", err);
+    } else {
+        std::puts("[HUD] Draw call successful.");
     }
 }
 
 void draw(RendererState& state) {
+    drawText("TEST_RECTANGLE", 0, 0, static_cast<float>(state.width), static_cast<float>(state.height));
+
     char hudText1[256];
     char hudText2[256];
     char hudText3[64];
