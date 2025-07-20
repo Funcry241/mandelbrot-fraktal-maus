@@ -179,7 +179,7 @@ void draw(RendererState& state) {
 
     const float left = 10.0f;
     const float lineHeight = 28.0f;
-    const float baseY = static_cast<float>(Settings::height);
+    const float baseY = static_cast<float>(state.height);
 
     drawText(hudText1, left, baseY - 1.0f * lineHeight, static_cast<float>(state.width), static_cast<float>(state.height));
     drawText(hudText2, left, baseY - 2.0f * lineHeight, static_cast<float>(state.width), static_cast<float>(state.height));
