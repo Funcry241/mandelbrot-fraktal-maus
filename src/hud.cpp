@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 269
-// 🐭 Maus-Kommentar: HUD-Fehleranalyse aktiviert. Font-Fallback durch Test-Rechteck. Debug-Ausgaben ASCII-only. Schneefuchs prüft Sichtbarkeit, Otter triggert Logik.
+// Zeilen: 274
+// 🐭 Maus-Kommentar: HUD finalisiert. Logging präzise, Rechteck sichtbar, Ausrichtung dynamisch. Schneefuchs flüstert „klar wie der Himmel“. Otter klatscht.
 
 #include "pch.hpp"
 
@@ -16,6 +16,7 @@
 
 #include "hud.hpp"
 #include "renderer_state.hpp"
+#include "settings.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -28,15 +29,16 @@ layout(location = 0) in vec2 aPos;
 uniform vec2 uResolution;
 void main() {
     vec2 pos = aPos / uResolution * 2.0 - 1.0;
-    gl_Position = vec4(pos.x, -pos.y, 0.0, 1.0); // Flip Y for top-left origin
+    gl_Position = vec4(pos.x, -pos.y, 0.0, 1.0);
 }
 )GLSL";
 
 static const char* fragmentShaderSrc = R"GLSL(
 #version 430 core
 out vec4 FragColor;
+uniform vec4 uColor;
 void main() {
-    FragColor = vec4(1.0, 1.0, 1.0, 1.0); // Weißes HUD mit voller Deckkraft
+    FragColor = uColor;
 }
 )GLSL";
 
@@ -53,7 +55,7 @@ static GLuint compileShader(GLenum type, const char* src) {
     if (!success) {
         char infoLog[512];
         glGetShaderInfoLog(shader, 512, nullptr, infoLog);
-        fprintf(stderr, "[HUD SHADER ERROR]\n%s\n", infoLog);
+        std::fprintf(stderr, "[HUD SHADER ERROR] %s\n", infoLog);
     }
     return shader;
 }
@@ -71,7 +73,7 @@ static GLuint createHUDProgram() {
     if (!linkStatus) {
         char infoLog[512];
         glGetProgramInfoLog(program, 512, nullptr, infoLog);
-        fprintf(stderr, "[HUD LINK ERROR]\n%s\n", infoLog);
+        std::fprintf(stderr, "[HUD LINK ERROR] %s\n", infoLog);
     }
 
     glDeleteShader(vs);
@@ -104,12 +106,16 @@ void drawText(const std::string& text, float x, float y, float width, float heig
         glBufferData(GL_ARRAY_BUFFER, sizeof(rect), rect, GL_DYNAMIC_DRAW);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
         glEnableVertexAttribArray(0);
+
         glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
+        glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 0.4f, 0.6f, 1.0f, 1.0f); // hellblau
+
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glDisableVertexAttribArray(0);
         glBindVertexArray(0);
         glUseProgram(0);
-        std::puts("[HUD] Fallback rectangle drawn.");
+
+        if (Settings::debugLogging) std::puts("[HUD] Rect drawn");
         return;
     }
 
@@ -132,31 +138,28 @@ void drawText(const std::string& text, float x, float y, float width, float heig
         vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
     }
 
-    std::printf("[HUD] Text=\"%s\" → Quads=%d → Vtx=%zu\n",
-        text.c_str(), num_quads, vertices.size());
-
     glUseProgram(hudProgram);
     glBindVertexArray(hudVAO);
     glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
     glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
     glEnableVertexAttribArray(0);
+
     glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
+    glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 1.0f, 1.0f, 1.0f, 1.0f); // weiß
+
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
     glDisableVertexAttribArray(0);
     glBindVertexArray(0);
     glUseProgram(0);
 
-    GLenum err = glGetError();
-    if (err != GL_NO_ERROR) {
-        std::printf("[HUD] GL Error after draw: 0x%X\n", err);
-    } else {
-        std::puts("[HUD] Draw call successful.");
+    if (Settings::debugLogging && !text.empty()) {
+        std::printf("[HUD] \"%s\" Q=%d V=%zu\n", text.c_str(), num_quads, vertices.size());
     }
 }
 
 void draw(RendererState& state) {
-    drawText("TEST_RECTANGLE", 0, 0, static_cast<float>(state.width), static_cast<float>(state.height));
+    // drawText("TEST_RECTANGLE", 0, 0, static_cast<float>(state.width), static_cast<float>(state.height));
 
     char hudText1[256];
     char hudText2[256];
@@ -167,18 +170,20 @@ void draw(RendererState& state) {
     float frameTimeMs = static_cast<float>(state.deltaTime * 1000.0f);
 
     std::snprintf(hudText1, sizeof(hudText1),
-                  "FPS: %.1f | Zoom: 1e%.1f | Offset: (%.3f, %.3f)",
-                  fps, logZoom,
-                  static_cast<float>(state.offset.x),
-                  static_cast<float>(state.offset.y));
-    std::snprintf(hudText2, sizeof(hudText2),
-                  "Frame Time: %.2f ms", frameTimeMs);
-    std::snprintf(hudText3, sizeof(hudText3),
-                  "[H] Overlay: %s", state.overlayEnabled ? "ON" : "OFF");
+        "FPS: %.1f | Zoom: 1e%.1f | Offset: (%.3f, %.3f)",
+        fps, logZoom,
+        static_cast<float>(state.offset.x),
+        static_cast<float>(state.offset.y));
+    std::snprintf(hudText2, sizeof(hudText2), "Frame Time: %.2f ms", frameTimeMs);
+    std::snprintf(hudText3, sizeof(hudText3), "[H] Overlay: %s", state.overlayEnabled ? "ON" : "OFF");
 
-    drawText(hudText1, 10.0f, 20.0f, static_cast<float>(state.width), static_cast<float>(state.height));
-    drawText(hudText2, 10.0f, 50.0f, static_cast<float>(state.width), static_cast<float>(state.height));
-    drawText(hudText3, 10.0f, 80.0f, static_cast<float>(state.width), static_cast<float>(state.height));
+    const float left = 10.0f;
+    const float lineHeight = 28.0f;
+    const float baseY = static_cast<float>(Settings::height);
+
+    drawText(hudText1, left, baseY - 1.0f * lineHeight, static_cast<float>(state.width), static_cast<float>(state.height));
+    drawText(hudText2, left, baseY - 2.0f * lineHeight, static_cast<float>(state.width), static_cast<float>(state.height));
+    drawText(hudText3, left, baseY - 3.0f * lineHeight, static_cast<float>(state.width), static_cast<float>(state.height));
 }
 
 void cleanup() {
