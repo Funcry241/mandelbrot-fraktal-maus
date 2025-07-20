@@ -1,7 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 230
-// 🐭 Maus-Kommentar: HUD-Overlay mit Textanzeige via STB-Easy-Font und GLSL-Shadern. Zeigt FPS, Offset, Zoom-Faktor als wissenschaftliche Potenz sowie Overlay-Status. Schneefuchs: „Alles sichtbar, nichts verborgen.“
-// Otter-Fix: Shader-Linking wird nun geprüft. Float-Casts überall für MSVC /W4 /WX. Shader-Fehlerausgabe erweitert.
+// Zeilen: 238
+// 🐭 Maus-Kommentar: HUD sichtbar gemacht durch explizites Re-Binding von VAO, Shader und vollständige OpenGL-State-Absicherung nach drawFrame(). Schneefuchs: „Was gebunden ist, wird gesehen.“ Otter: Fixiert.
 
 #include "pch.hpp"
 
@@ -86,6 +85,7 @@ void init() {
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST); // HUD benötigt keinen Depth-Test
 }
 
 void drawText(const std::string& text, float x, float y, float width, float height) {
@@ -108,21 +108,26 @@ void drawText(const std::string& text, float x, float y, float width, float heig
         vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
     }
 
+    // 🔧 Explizites Re-Binding für Sichtbarkeit nach drawFrame()
+    glUseProgram(hudProgram);
     glBindVertexArray(hudVAO);
     glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
     glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
-
-    glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
-
-    glUseProgram(hudProgram);
+    glEnableVertexAttribArray(0);
     glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
 
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
 
-    glUseProgram(0);
     glDisableVertexAttribArray(0);
     glBindVertexArray(0);
+    glUseProgram(0);
+
+    // 🔍 Fehlerausgabe zur Diagnose
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        fprintf(stderr, "[HUD] OpenGL Error: 0x%X\n", err);
+    }
 }
 
 void draw(RendererState& state) {
@@ -132,7 +137,7 @@ void draw(RendererState& state) {
 
     float logZoom = -log10f(static_cast<float>(state.zoom));
     float fps = static_cast<float>(state.currentFPS);
-    float frameTimeMs = static_cast<float>(state.deltaTime * 1000.0);
+    float frameTimeMs = static_cast<float>(state.deltaTime * 1000.0f);
 
     std::snprintf(hudText1, sizeof(hudText1),
                   "FPS: %.1f | Zoom: 1e%.1f | Offset: (%.3f, %.3f)",
