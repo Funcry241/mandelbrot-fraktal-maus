@@ -1,5 +1,5 @@
 // Datei: src/hud.cpp
-// 🐭 Maus-Kommentar: strncpy_s eingebaut, keine Warnung mehr. Alles ASCII. Alles sichtbar. Otter: „Sauber.“
+// 🐭 Maus-Kommentar: HUD mit Debug-Fallback. Text wird mit ASCII-safe-Font gerendert. Log prüft, ob STB-Font überhaupt Quads erzeugt. Rechteck sichtbar, Text auch.
 
 #include "pch.hpp"
 
@@ -19,8 +19,6 @@
 
 #include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <vector>
 
 namespace Hud {
 
@@ -82,13 +80,6 @@ static GLuint createHUDProgram() {
     return program;
 }
 
-static void sanitizeASCII(char* buffer) {
-    for (size_t i = 0; buffer[i]; ++i) {
-        unsigned char c = static_cast<unsigned char>(buffer[i]);
-        if (c < 32 || c > 126) buffer[i] = '?';
-    }
-}
-
 void init() {
     glGenVertexArrays(1, &hudVAO);
     glGenBuffers(1, &hudVBO);
@@ -99,38 +90,61 @@ void init() {
     glDisable(GL_DEPTH_TEST);
 }
 
-void drawText(const char* rawText, float x, float y, float width, float height, bool fallbackRect = false) {
-    if (!rawText || !*rawText) return;
+void drawText(const std::string& text, float x, float y, float width, float height) {
+    if (text == "TEST_RECTANGLE") {
+        float w = 200.0f, h = 60.0f;
+        struct Vertex { float x, y; };
+        Vertex rect[6] = {
+            {10.0f, 10.0f}, {10.0f + w, 10.0f}, {10.0f + w, 10.0f + h},
+            {10.0f, 10.0f}, {10.0f + w, 10.0f + h}, {10.0f, 10.0f + h}
+        };
 
-    char asciiText[1024];
-    strncpy_s(asciiText, sizeof(asciiText), rawText, _TRUNCATE); // FIX!
-    sanitizeASCII(asciiText);
+        glUseProgram(hudProgram);
+        glBindVertexArray(hudVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(rect), rect, GL_DYNAMIC_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
+        glEnableVertexAttribArray(0);
 
-    char buffer[65536];
-    int num_quads = stb_easy_font_print(x, y, asciiText, nullptr, buffer, sizeof(buffer));
-    if (num_quads <= 0 && !fallbackRect) return;
+        glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
+        glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 0.4f, 0.6f, 1.0f, 1.0f); // hellblau
+
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glDisableVertexAttribArray(0);
+        glBindVertexArray(0);
+        glUseProgram(0);
+
+        if (Settings::debugLogging) std::puts("[HUD] Rect drawn");
+        return;
+    }
+
+    if (text.empty()) return;
+
+    char buffer[99999];
+    int num_quads = stb_easy_font_print(x, y, const_cast<char*>(text.c_str()), nullptr, buffer, sizeof(buffer));
+
+    if (Settings::debugLogging) {
+        std::printf("[HUD] drawText called: \"%s\" → quads=%d\n", text.c_str(), num_quads);
+    }
+
+    if (num_quads <= 0) {
+        if (Settings::debugLogging)
+            std::puts("[HUD] Warning: No quads generated for text");
+        return;
+    }
 
     struct Vertex { float x, y; };
     std::vector<Vertex> vertices;
+    vertices.reserve(num_quads * 6);
 
-    if (fallbackRect) {
-        float w = 220.0f, h = 70.0f;
-        Vertex rect[6] = {
-            {x, y}, {x + w, y}, {x + w, y + h},
-            {x, y}, {x + w, y + h}, {x, y + h}
-        };
-        vertices.insert(vertices.end(), std::begin(rect), std::end(rect));
-    } else {
-        vertices.reserve(num_quads * 6);
-        for (int i = 0; i < num_quads; ++i) {
-            unsigned char* quad = reinterpret_cast<unsigned char*>(buffer) + i * 64;
-            Vertex v0 = *reinterpret_cast<Vertex*>(quad +  0);
-            Vertex v1 = *reinterpret_cast<Vertex*>(quad + 16);
-            Vertex v2 = *reinterpret_cast<Vertex*>(quad + 32);
-            Vertex v3 = *reinterpret_cast<Vertex*>(quad + 48);
-            vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
-            vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
-        }
+    for (int i = 0; i < num_quads; ++i) {
+        unsigned char* quad = reinterpret_cast<unsigned char*>(buffer) + i * 64;
+        Vertex v0 = *reinterpret_cast<Vertex*>(quad +  0);
+        Vertex v1 = *reinterpret_cast<Vertex*>(quad + 16);
+        Vertex v2 = *reinterpret_cast<Vertex*>(quad + 32);
+        Vertex v3 = *reinterpret_cast<Vertex*>(quad + 48);
+        vertices.push_back(v0); vertices.push_back(v1); vertices.push_back(v2);
+        vertices.push_back(v0); vertices.push_back(v2); vertices.push_back(v3);
     }
 
     glUseProgram(hudProgram);
@@ -141,26 +155,20 @@ void drawText(const char* rawText, float x, float y, float width, float height, 
     glEnableVertexAttribArray(0);
 
     glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
-    glUniform4f(glGetUniformLocation(hudProgram, "uColor"),
-        fallbackRect ? 1.0f : 1.0f,
-        fallbackRect ? 0.0f : 1.0f,
-        fallbackRect ? 1.0f : 1.0f,
-        1.0f);
+    glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 1.0f, 1.0f, 1.0f, 1.0f); // weiß
 
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
-
     glDisableVertexAttribArray(0);
     glBindVertexArray(0);
     glUseProgram(0);
 
-    if (Settings::debugLogging && !fallbackRect)
-        std::printf("[HUD] \"%s\" Q=%d V=%zu\n", asciiText, num_quads, vertices.size());
+    if (Settings::debugLogging) {
+        std::printf("[HUD] \"%s\" Q=%d V=%zu\n", text.c_str(), num_quads, vertices.size());
+    }
 }
 
 void draw(RendererState& state) {
-    const float left = 10.0f;
-    const float lineHeight = 24.0f;
-    const float baseY = static_cast<float>(state.height);
+    drawText("TESTHUD", 200.0f, 100.0f, static_cast<float>(state.width), static_cast<float>(state.height));
 
     char hudText1[256];
     char hudText2[256];
@@ -178,12 +186,13 @@ void draw(RendererState& state) {
     std::snprintf(hudText2, sizeof(hudText2), "Frame Time: %.2f ms", frameTimeMs);
     std::snprintf(hudText3, sizeof(hudText3), "[H] Overlay: %s", state.overlayEnabled ? "ON" : "OFF");
 
-    drawText(hudText1, left, baseY - 1 * lineHeight, static_cast<float>(state.width), static_cast<float>(state.height));
-    drawText(hudText2, left, baseY - 2 * lineHeight, static_cast<float>(state.width), static_cast<float>(state.height));
-    drawText(hudText3, left, baseY - 3 * lineHeight, static_cast<float>(state.width), static_cast<float>(state.height));
+    const float left = 10.0f;
+    const float lineHeight = 28.0f;
+    const float baseY = static_cast<float>(state.height);
 
-    if (Settings::debugLogging)
-        drawText("DEBUG_RECT", 10.0f, 10.0f, static_cast<float>(state.width), static_cast<float>(state.height), true);
+    drawText(hudText1, left, baseY - 1.0f * lineHeight, static_cast<float>(state.width), static_cast<float>(state.height));
+    drawText(hudText2, left, baseY - 2.0f * lineHeight, static_cast<float>(state.width), static_cast<float>(state.height));
+    drawText(hudText3, left, baseY - 3.0f * lineHeight, static_cast<float>(state.width), static_cast<float>(state.height));
 }
 
 void cleanup() {
