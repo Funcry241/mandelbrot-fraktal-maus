@@ -22,7 +22,7 @@ static bool isFirstFrame = true;
 void initResources(RendererState& state) {
     if (state.pbo != 0 || state.tex != 0) {
         if (Settings::debugLogging)
-            std::puts("[DEBUG] initResources() skipped - resources already initialized");
+            std::puts("[DEBUG] initResources() skipped - reasources already initialized");
         return;
     }
     OpenGLUtils::setGLResourceContext("init");
