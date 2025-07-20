@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 249
-// 🐭 Maus-Kommentar: Alpha 45 – Projekt Marder II. `zoomResult` wird nun immer gesetzt, nicht nur bei Zielwechsel. Damit stimmen Entropie, Kontrast und Logik in allen Modulen überein. Schneefuchs: „Kontext ist alles.“
+// Zeilen: 251
+// 🐭 Maus-Kommentar: Alpha 49 – [Perf] Log reduziert: Vorher/Nachher-Vergleiche der Iterationen nun in EINER ASCII-cleanen Zeile. Keine Sonderzeichen, kein Mehrzeilen-Spam. Warnungen entfallen, aber Log ist dafür kompakter. Schneefuchs: „Wer lesen kann, will nicht blättern.“
 
 #include "pch.hpp"
 #include "cuda_interop.hpp"
@@ -66,20 +66,20 @@ void renderCudaFrame(
                     zoom, offset.x, offset.y, maxIterations, tileSize, supersampling);
         std::printf("[PTRS] devPtr=%p d_iter=%p d_ent=%p d_con=%p d_sup=%p\n",
                     devPtr, d_iterations, d_entropy, d_contrast, d_tileSupersampling);
-        int dbg_before[3]{-12345};
-        CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
-        std::printf("[DEBUG] d_iterations BEFORE Kernel: [%d, %d, %d]\n", dbg_before[0], dbg_before[1], dbg_before[2]);
     }
 
-    if (Settings::debugLogging) std::puts("[DEBUG] Mandelbrot-Kernel...");
+    int dbg_before[3]{-12345}, dbg_after[3]{-12345};
+    if (Settings::debugLogging) {
+        CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
+    }
+
     launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize, d_tileSupersampling, supersampling);
 
     if (Settings::debugLogging) {
-        int dbg_after[3]{-12345};
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
-        std::printf("[DEBUG] d_iterations AFTER Kernel: [%d, %d, %d]", dbg_after[0], dbg_after[1], dbg_after[2]);
-        for (int i = 0; i < 3; ++i) if (dbg_after[i] < 0) std::printf(" [WARN] <0 detected – buffer init or kernel OOB?\n");
-        std::puts("");
+        std::printf("[DEBUG] Kernel iter: before={%d,%d,%d} after={%d,%d,%d}\n",
+            dbg_before[0], dbg_before[1], dbg_before[2],
+            dbg_after[0], dbg_after[1], dbg_after[2]);
     }
 
     if (Settings::debugLogging) std::puts("[DEBUG] Entropy+Contrast Kernel...");
@@ -121,7 +121,7 @@ void renderCudaFrame(
             state.zoomResult = result;
 
             if (Settings::debugLogging) {
-                std::printf("[ZOOM] Target: idx=%d entropy=%.3f contrast=%.3f → offset=(%.6g, %.6g) new=%d zoom=%d\n",
+                std::printf("[ZOOM] Target: idx=%d entropy=%.3f contrast=%.3f -> offset=(%.6g, %.6g) new=%d zoom=%d\n",
                     result.bestIndex, result.bestEntropy, result.bestContrast,
                     newOffset.x, newOffset.y, result.isNewTarget ? 1 : 0, result.shouldZoom ? 1 : 0);
             }

@@ -135,7 +135,7 @@ ZoomResult evaluateZoomTarget(
     auto ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
     if (Settings::debugLogging) {
-        std::printf("[ZoomEval] i=%d E=%.2f C=%.2f d=%.4f g=%.2f α=%.2f %s%s | %.3fms\n",
+        std::printf("[ZoomEval] i=%d E=%.2f C=%.2f d=%.4f g=%.2f a=%.2f %s%s | %.3fms\n",
             result.bestIndex,
             result.bestEntropy,
             result.bestContrast,

@@ -23,8 +23,6 @@ static bool isFirstFrame = true;
 // 🔧 Initialisiert PBO, Texture, Cuda-Interop und HUD
 void initResources(RendererState& state) {
     if (state.pbo != 0 || state.tex != 0) {
-        if (Settings::debugLogging)
-            std::puts("[DEBUG] initResources() skipped - resources already initialized");
         return;
     }
     OpenGLUtils::setGLResourceContext("init");
@@ -36,9 +34,6 @@ void initResources(RendererState& state) {
 
     state.lastTileSize = computeTileSizeFromZoom(static_cast<float>(state.zoom));
     state.setupCudaBuffers();
-
-    if (Settings::debugLogging)
-        std::puts("[DEBUG] initResources() completed");
 }
 
 // ⏱️ Misst Delta-Time und FPS pro Frame
@@ -126,15 +121,12 @@ void renderFrame_impl(RendererState& state) {
         float drawMs = std::chrono::duration<float, std::milli>(t2 - t1).count();
         float analysisMs = std::chrono::duration<float, std::milli>(t3 - t2).count();
         float totalMs = std::chrono::duration<float, std::milli>(t3 - frameStart).count();
-        std::printf("[Perf] cuda=%.2fms draw=%.2fms analyze=%.2fms total=%.2fms\n", cudaMs, drawMs, analysisMs, totalMs);
-        std::printf("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n", e0, c0);
+        std::printf("[Perf] cuda=%.2fms draw=%.2fms analyze=%.2fms total=%.2fms | Entropy=%.4f Contrast=%.4f\n",
+            cudaMs, drawMs, analysisMs, totalMs, e0, c0);
     }
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    if (Settings::debugLogging)
-        std::puts("[HUD] glEnable(GL_BLEND) set");
 
     HeatmapOverlay::drawOverlay(
         ctx.h_entropy, ctx.h_contrast,
@@ -142,9 +134,6 @@ void renderFrame_impl(RendererState& state) {
     );
 
     Hud::draw(state);
-
-    if (Settings::debugLogging)
-        std::puts("[HUD] Hud::draw() called");
 
     state.zoom = static_cast<double>(ctx.zoom);
     state.offset.x = static_cast<float>(ctx.offset.x);
