@@ -102,6 +102,8 @@ $cmakeArgs = @(
     "-DCMAKE_CUDA_COMPILER=$nvcc",
     "-DCMAKE_CUDA_TOOLKIT_ROOT_DIR=$($cudaBin)\..",
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "-DCMAKE_CXX_STANDARD=23",
+    "-DCMAKE_CUDA_STANDARD=20",
     $cudaArch
 )
 cmake @cmakeArgs

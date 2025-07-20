@@ -1,79 +1,79 @@
 // Datei: src/renderer_state.hpp
 // Zeilen: 71
 // 🐭 Maus-Kommentar: State-of-the-Art für Renderer-Status. Alle Entropie-/Kontrast-/Zoomdaten persistent und schnell (float2 statt double2). Kein toter Code: lastIndex entfernt, Übersicht und Performance jetzt maximal klar. Schneefuchs: Übersicht, Otter: Performance.
+
 #pragma once
 
-#include "pch.hpp" // <cuda_runtime.h>, float2 etc.
-#include "zoom_logic.hpp" // ZoomResult für Auto-Zoom
+#include "pch.hpp"             // CUDA + float2/GLFW
+#include "zoom_logic.hpp"      // ZoomResult für Auto-Zoom
 #include <vector>
 
 class RendererState {
 public:
-// 🖼️ Fensterdimensionen
-int width;
-int height;
-GLFWwindow* window = nullptr;
+    // 🖼️ Fensterdimensionen (OpenGL-Viewport & Framebuffer-Größe)
+    int width;
+    int height;
+    GLFWwindow* window = nullptr;
 
-// 🔍 Zoom & Bildausschnitt
-double zoom = 1.0;
-float2 offset = { 0.0f, 0.0f };
+    // 🔍 Zoomfaktor & aktueller Fraktal-Ausschnitt (in Weltkoordinaten)
+    double zoom = 1.0;
+    float2 offset = { 0.0f, 0.0f };
 
-// 🧮 Iterationen
-int baseIterations = 100;
-int maxIterations = 1000;
+    // 🧮 Iterationsparameter
+    int baseIterations = 100;  // Ausgangswert
+    int maxIterations  = 1000; // aktuell verwendeter Maximalwert
 
-// 🎯 Zielkoordinaten
-double2 targetOffset = { 0.0, 0.0 };
-double2 filteredTargetOffset = { 0.0, 0.0 };
-float2 smoothedTargetOffset = { 0.0f, 0.0f };
-float smoothedTargetScore = -1.0f;
+    // 🎯 Auto-Zoom Zielkoordinaten
+    double2 targetOffset         = { 0.0, 0.0 };   // analysiertes Ziel
+    double2 filteredTargetOffset = { 0.0, 0.0 };   // geglättetes Ziel
+    float2 smoothedTargetOffset  = { 0.0f, 0.0f }; // LERP-Interpoliertes Ziel
+    float smoothedTargetScore    = -1.0f;          // Entropie-Score des Zieltiles (wird geglättet)
 
-// 📈 Anzeige
-float currentFPS = 0.0f;
-float deltaTime = 0.0f;
+    // 📈 Anzeige-Feedback
+    float currentFPS = 0.0f;
+    float deltaTime  = 0.0f;
 
-// 🧩 Entropie & Kontrast
-int lastTileSize = 0;
-std::vector<float> h_entropy;
-std::vector<float> h_contrast;
+    // 🧩 Analysepuffer (Host)
+    int lastTileSize = 0;
+    std::vector<float> h_entropy;
+    std::vector<float> h_contrast;
 
-// 🔗 CUDA-Puffer (Device)
-int* d_iterations = nullptr;
-float* d_entropy = nullptr;
-float* d_contrast = nullptr;
-int* d_tileSupersampling = nullptr;
+    // 🔗 Analysepuffer (Device)
+    int*   d_iterations        = nullptr;
+    float* d_entropy           = nullptr;
+    float* d_contrast          = nullptr;
+    int*   d_tileSupersampling = nullptr;
 
-// 🎛️ Supersampling-Puffer (Host)
-std::vector<int> h_tileSupersampling;
+    // 🎛️ Supersampling-Level pro Tile (Host)
+    std::vector<int> h_tileSupersampling;
 
-// 🎥 OpenGL-Puffer
-unsigned int pbo = 0;
-unsigned int tex = 0;
+    // 🎥 OpenGL-Zielpuffer (Interop via CUDA)
+    unsigned int pbo = 0;  // Pixel Buffer Object
+    unsigned int tex = 0;  // Texture (GL)
 
-// 🕒 Zeitsteuerung
-int frameCount = 0;
-double lastTime = 0.0;
+    // 🕒 Zeitsteuerung pro Frame
+    int frameCount = 0;
+    double lastTime = 0.0;
 
-// 🔁 Auto-Zoom
-bool shouldZoom = false;
+    // 🔁 Auto-Zoom-Aktivität
+    bool shouldZoom = false;
 
-// 🧠 Analyse & Ziel
-ZoomLogic::ZoomResult zoomResult;
-float lastEntropy = 0.0f;
-float lastContrast = 0.0f;
-bool justZoomed = false;
+    // 🧠 Letztes Ergebnis der Zielanalyse (persistenter Zustand)
+    ZoomLogic::ZoomResult zoomResult;
+    float lastEntropy  = 0.0f;
+    float lastContrast = 0.0f;
+    bool justZoomed    = false;
 
-// 📏 Globales Supersampling
-int supersampling = 1;
+    // 📏 Aktuelles globales Supersampling-Level
+    int supersampling = 1;
 
-// 🔥 Overlay
-bool overlayEnabled = false;
-int lastTileIndex = -1;
+    // 🔥 Heatmap-Overlay-Zustand
+    bool overlayEnabled = false;
+    int lastTileIndex   = -1;  // Zuletzt gewähltes Zieltile
 
-// 🧽 Verwaltung
-RendererState(int w, int h);
-void reset();
-void setupCudaBuffers();
-void resize(int newWidth, int newHeight);
-
+    // 🧽 Setup & Verwaltung
+    RendererState(int w, int h);
+    void reset();                      // stellt Initialzustand her
+    void setupCudaBuffers();          // allokiert Device-Buffer
+    void resize(int newWidth, int newHeight); // Fenstergröße ändern
 };

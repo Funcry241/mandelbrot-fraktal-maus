@@ -13,6 +13,7 @@
 #include <vector>
 #include <cstdio>
 #include <iomanip>
+#include <chrono>
 
 namespace CudaInterop {
 
@@ -44,10 +45,12 @@ void renderCudaFrame(
     if (!cudaPboResource)
         throw std::runtime_error("[FATAL] CUDA PBO not registered!");
 
-    const int totalPixels = width * height;
-    const int tilesX = (width + tileSize - 1) / tileSize;
-    const int tilesY = (height + tileSize - 1) / tileSize;
-    const int numTiles = tilesX * tilesY;
+    auto t0 = std::chrono::high_resolution_clock::now();
+
+    int totalPixels = width * height;
+    int tilesX = (width + tileSize - 1) / tileSize;
+    int tilesY = (height + tileSize - 1) / tileSize;
+    int numTiles = tilesX * tilesY;
 
     CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
@@ -128,9 +131,15 @@ void renderCudaFrame(
     }
 
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    if (Settings::debugLogging) {
+        float totalMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
+        std::printf("[Perf] cuda_interop total=%.2fms\n", totalMs);
+    }
 }
 
 void setPauseZoom(bool pause) { pauseZoom = pause; }
-bool getPauseZoom() { return pauseZoom; }
+[[nodiscard]] bool getPauseZoom() { return pauseZoom; }
 
 } // namespace CudaInterop

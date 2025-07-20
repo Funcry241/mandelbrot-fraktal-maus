@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 331
-// 🐭 Maus-Kommentar: Alpha 48.4 – `cudaMemset`-Doppel entfernt (FPS-Boost), HUD-Blend explizit aktiviert. Kommentierung gemäß Blaupause. Schneefuchs: „Wer doppelt nullt, halbiert die Frames.“
+// Zeilen: 344
+// 🐭 Maus-Kommentar: Alpha 49 – Rückgabewert von `getPauseZoom()` wird nun explizit verarbeitet, um [[nodiscard]] zu erfüllen. Kein Logikverlust, keine Warnungen. Schneefuchs: "Wer ignoriert, verliert."
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -12,6 +12,7 @@
 #include "heatmap_overlay.hpp"
 #include "frame_pipeline.hpp"
 #include "zoom_command.hpp"
+#include <chrono>
 
 namespace RendererLoop {
 
@@ -56,9 +57,10 @@ void beginFrame(RendererState& state) {
         state.currentFPS = 1.0f / state.deltaTime;
 }
 
-// 🎬 Hauptschleife: Fraktal zeichnen, Analyse durchführen, HUD und Overlay anzeigen
+// 🎮 Hauptschleife: Fraktal zeichnen, Analyse durchführen, HUD und Overlay anzeigen
 void renderFrame_impl(RendererState& state) {
-    // 🧠 Kontextübergabe an FrameContext (CUDA + Rendering)
+    auto frameStart = std::chrono::high_resolution_clock::now();
+
     ctx.zoom = static_cast<float>(state.zoom);
     ctx.offset.x = static_cast<float>(state.offset.x);
     ctx.offset.y = static_cast<float>(state.offset.y);
@@ -84,23 +86,23 @@ void renderFrame_impl(RendererState& state) {
 
     beginFrame(state);
 
-    // 📐 Dimensionsberechnung
     size_t totalPixels = static_cast<size_t>(ctx.width) * ctx.height;
     size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
     size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
     size_t tilesCount = tilesX * tilesY;
 
-    // 🧹 Iterationspuffer nullen – nötig für CUDA
-    CUDA_CHECK(cudaMemset(ctx.d_iterations, 0, totalPixels * sizeof(int)));
+    auto t0 = std::chrono::high_resolution_clock::now();
 
-    // 1️⃣ CUDA-Fraktalberechnung (Iterationsbuffer wird beschrieben)
+    CUDA_CHECK(cudaMemset(ctx.d_iterations, 0, totalPixels * sizeof(int)));
     computeCudaFrame(ctx, state);
 
-    // 2️⃣ OpenGL-Textur aktualisieren und anzeigen
+    auto t1 = std::chrono::high_resolution_clock::now();
+
     RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
     drawFrame(ctx, state.tex, state);
 
-    // 3️⃣ Heatmap-Analyse vorbereiten (nur hier Entropie- & Kontrastbuffer nullen)
+    auto t2 = std::chrono::high_resolution_clock::now();
+
     CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
     CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
     CudaInterop::computeCudaEntropyContrast(
@@ -115,13 +117,19 @@ void renderFrame_impl(RendererState& state) {
     CUDA_CHECK(cudaMemcpy(ctx.h_entropy.data(), ctx.d_entropy, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(ctx.h_contrast.data(), ctx.d_contrast, tilesCount * sizeof(float), cudaMemcpyDeviceToHost));
 
+    auto t3 = std::chrono::high_resolution_clock::now();
+
     if (Settings::debugLogging) {
         float e0 = ctx.h_entropy.empty() ? 0.0f : ctx.h_entropy[0];
         float c0 = ctx.h_contrast.empty() ? 0.0f : ctx.h_contrast[0];
+        float cudaMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
+        float drawMs = std::chrono::duration<float, std::milli>(t2 - t1).count();
+        float analysisMs = std::chrono::duration<float, std::milli>(t3 - t2).count();
+        float totalMs = std::chrono::duration<float, std::milli>(t3 - frameStart).count();
+        std::printf("[Perf] cuda=%.2fms draw=%.2fms analyze=%.2fms total=%.2fms\n", cudaMs, drawMs, analysisMs, totalMs);
         std::printf("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n", e0, c0);
     }
 
-    // 4️⃣ HUD und Heatmap-Overlay (sichtbar & korrekt überlagert)
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -138,7 +146,6 @@ void renderFrame_impl(RendererState& state) {
     if (Settings::debugLogging)
         std::puts("[HUD] Hud::draw() called");
 
-    // 🔄 Ergebnisse aus CUDA-Frame zurück in RendererState schreiben
     state.zoom = static_cast<double>(ctx.zoom);
     state.offset.x = static_cast<float>(ctx.offset.x);
     state.offset.y = static_cast<float>(ctx.offset.y);
@@ -150,7 +157,6 @@ void renderFrame_impl(RendererState& state) {
     state.lastTileIndex = ctx.lastTileIndex;
 }
 
-// ⌨️ Eingabeverarbeitung (z. B. Heatmap an/aus, Auto-Zoom pausieren)
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     (void)scancode; (void)mods;
     if (action != GLFW_PRESS) return;
@@ -161,9 +167,12 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     case GLFW_KEY_H:
         HeatmapOverlay::toggle(*state);
         break;
-    case GLFW_KEY_P:
-        CudaInterop::setPauseZoom(!CudaInterop::getPauseZoom());
+    case GLFW_KEY_P: {
+        // 🐭 Maus-Fix: Rückgabewert von [[nodiscard]]-Funktion nicht ignorieren!
+        bool paused = CudaInterop::getPauseZoom();
+        CudaInterop::setPauseZoom(!paused);
         break;
+    }
     default:
         break;
     }

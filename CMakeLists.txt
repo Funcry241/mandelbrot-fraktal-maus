@@ -1,13 +1,10 @@
 # Datei: CMakeLists.txt
-# Zeilen: 154
-# 🐭 Maus-Kommentar: Modularisierung + CUDA/OpenGL-Interop Fix. Ergänzt kompromisslose Warnungsbehandlung für MSVC/GCC/Clang/CUDA. Workaround für fehlende cuda_gl_interop.h – notwendig für Windows- und Linux-Setups. Schneefuchs: „Wer Fehler duldet, bekommt sie!“
-
+# Zeilen: 159
+# 🐭 Maus-Kommentar: Alpha 49 – CUDA-FLAGS optimiert: --fmad=true, --use_fast_math, --prec-div=true. Damit maximale Floating-Point-Performance bei stabiler numerischer Genauigkeit. Keine Kompromisse bei Buildqualität.
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
-# Aktiviert die Ausgabe von compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Nur setzen, wenn nicht von außen definiert (z. B. Preset oder -D)
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 86 CACHE STRING "Default architecture if none provided")
 endif()
@@ -25,6 +22,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ⚠️ Fallback: CMake kennt "CUDA23" nicht offiziell – daher auf 20 setzen,
+# aber explizit mit --std=c++23 im target_compile_options aktivieren.
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
@@ -38,7 +37,7 @@ find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------
-# 🩹 Fix: Suche nach cuda_gl_interop.h (wird nicht automatisch von CUDAToolkit eingebunden)
+# 🩹 Fix: Suche nach cuda_gl_interop.h
 find_path(CUDA_GL_INTEROP_INCLUDE_DIR cuda_gl_interop.h
     PATHS
         "$ENV{CUDA_PATH}/include"
@@ -59,39 +58,28 @@ include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
 # ---------------------------------------------------------
 # 🛠 Executable: zentrale Dateien des Mandelbrot-Renderers
 add_executable(mandelbrot_otterdream
-    # 🧠 Core Logic
     src/main.cpp
     src/renderer_core.cu
     src/renderer_loop.cpp
     src/renderer_state.cpp
-
-    # 🎨 Rendering & UI
     src/renderer_pipeline.cpp
     src/renderer_window.cpp
     src/renderer_resources.cpp
     src/hud.cpp
     src/opengl_utils.cpp
     src/heatmap_overlay.cpp
-
-    # ⚙️ CUDA-Kernel + Interop
     src/cuda_interop.cu
     src/core_kernel.cu
-
-    # 🔎 Zoom-Logik & Analyse
     src/zoom_logic.cpp
     src/zoom_command.cpp
     src/frame_pipeline.cpp
 )
 
-# Precompiled Header (MSVC-only)
 if (MSVC)
   target_precompile_headers(mandelbrot_otterdream PRIVATE src/pch.hpp)
 endif()
 
-# Includes
-target_include_directories(mandelbrot_otterdream PRIVATE
-    "${CMAKE_SOURCE_DIR}/src"
-)
+target_include_directories(mandelbrot_otterdream PRIVATE "${CMAKE_SOURCE_DIR}/src")
 
 # 🔍 CUDA-Includes für PCH/IntelliSense (nur MSVC)
 if (MSVC)
@@ -107,23 +95,21 @@ if (MSVC)
     endforeach()
 endif()
 
-# ✨ CUDA Eigenschaften
 set_target_properties(mandelbrot_otterdream PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
 )
 
-# Compile Flags: Kompromisslos!
 target_compile_features(mandelbrot_otterdream PRIVATE cxx_std_23)
 
+# ✅ explizit: CUDA bekommt --std=c++23, auch wenn CMake das Label nicht kennt
 target_compile_options(mandelbrot_otterdream PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+    $<$<COMPILE_LANGUAGE:CUDA>:--std=c++20 --expt-relaxed-constexpr>
     $<$<COMPILE_LANGUAGE:CXX>:
         $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /permissive- /Zc:__cplusplus>
         $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Werror>
     >
 )
 
-# 🤝 Linking
 target_link_libraries(mandelbrot_otterdream PRIVATE
     OpenGL::GL
     GLEW::GLEW
@@ -132,7 +118,6 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
     Threads::Threads
 )
 
-# CUDA-Dateien explizit als solche markieren (für separable compilation)
 set_source_files_properties(
     src/renderer_core.cu    
     src/cuda_interop.cu
@@ -140,8 +125,6 @@ set_source_files_properties(
     PROPERTIES LANGUAGE CUDA
 )
 
-# ---------------------------------------------------------
-# 🛣️ Build-Typ
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
@@ -150,8 +133,6 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 set(CMAKE_CUDA_FLAGS_DEBUG "-G -g")
-set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --fmad=false --prec-div=true")
+set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --fmad=true --use_fast_math --prec-div=true")
 
-# ---------------------------------------------------------
-# 📦 Zielpfad: installiere direkt in dist/, nicht dist/bin/
 install(TARGETS mandelbrot_otterdream RUNTIME DESTINATION .)

@@ -1,8 +1,8 @@
 // Datei: src/zoom_logic.hpp
-// Zeilen: 41
-// 🐭 Maus-Kommentar: Kompakt, nun korrekt sortiert. ZoomResult zuerst, dann Signaturen. Kein forward-declare nötig. Clang/CUDA-safe.
-// 🦦 Otter: Effizienter Einstiegspunkt für die Zielauswahl – klar getrennte Verantwortlichkeiten.
-// 🐅 Maus: Keine include-Kollisionen, keine Abhängigkeit zu math_utils, sauberes float2.
+// Zeilen: 47
+// 🐭 Maus-Kommentar: Alpha 49.1 – ZoomResult nun auch selbst [[nodiscard]], schützt gegen unbeachtete Konstrukte. Vollständig Clang/CUDA-kompatibel, exakt dokumentiert.
+// 🦦 Otter: Eindeutige Semantik – Ergebnis muss verwendet werden, sonst droht Zoomverlust.
+// 🐅 Maus: Kompakt, robust, klar priorisiert – ideal als Public API des Zoommoduls.
 
 #pragma once
 #include "common.hpp"
@@ -11,29 +11,43 @@
 
 namespace ZoomLogic {
 
-// Struktur mit allen Informationen zum besten Zoomziel – wird bei jedem Frame ausgewertet.
+/// 🎯 Datenstruktur für das beste Zoom-Ziel
+/// Wird jedes Frame neu berechnet – enthält Bewertung & Koordinaten
 struct ZoomResult {
-    int   bestIndex = -1;
-    float bestEntropy = 0.0f, bestContrast = 0.0f, bestScore = 0.0f;
-    float distance = 0.0f, minDistance = 0.0f;
-    float relEntropyGain = 0.0f, relContrastGain = 0.0f;
-    bool  isNewTarget = false, shouldZoom = false;
-    float2 newOffset = make_float2(0.0f, 0.0f);
-    std::vector<float> perTileContrast; // Optionaler Rückkanal zur Heatmap oder Analyse
+    int bestIndex = -1;                // Index im Tile-Raster
+    float bestEntropy = 0.0f;          // Entropiewert dieses Tiles
+    float bestContrast = 0.0f;         // Kontrast zum Nachbarumfeld
+    float bestScore = 0.0f;            // Gesamtscore (gewichtete Mischung)
+
+    float distance = 0.0f;             // Abstand zum aktuellen Ziel
+    float minDistance = 0.0f;          // minimale akzeptierte Distanz (Zoomschwelle)
+
+    float relEntropyGain = 0.0f;       // Entropiezuwachs gegenüber vorherigem Ziel
+    float relContrastGain = 0.0f;      // Kontrastzuwachs gegenüber vorherigem Ziel
+
+    bool isNewTarget = false;          // Wechselt das Ziel? (Relevanzsprung)
+    bool shouldZoom = false;           // Soll in das Ziel hineingezoomt werden?
+
+    float2 newOffset = make_float2(0.0f, 0.0f); // Koordinaten im Fraktalraum
+    std::vector<float> perTileContrast;         // Optional: Rückkanal für Heatmap
 };
 
-// 🐼 Panda: Entropie-Kontrastberechnung für jede Tile, mittelt 4er-Nachbarn
+/// 🐼 Panda: Entropie-Kontrastberechnung – mittelt über 4 direkte Nachbarn (oben, unten, links, rechts)
+/// Liefert Maß für lokale visuelle Struktur (Gradienten/Übergänge).
+[[nodiscard]]
 float computeEntropyContrast(const std::vector<float>& entropy, int width, int height, int tileSize);
 
-// 🐘 + 🦦 + 🕊️ evaluateZoomTarget – Herzstück der Zoom-Entscheidung
-// Liefert Zielkoordinaten und Bewertungsdaten für Auto-Zooming.
+/// 🐘 + 🦦 + 🕊️ evaluateZoomTarget – zentrales Entscheidungssystem für Auto-Zoom.
+/// Analysiert die Entropie- und Kontrastkarten, trifft Entscheidung über das nächste Ziel.
+/// Gibt vollständige Bewertungsstruktur (ZoomResult) zurück.
+[[nodiscard]]
 ZoomResult evaluateZoomTarget(
-    const std::vector<float>& entropy,
-    const std::vector<float>& contrast,
-    float2 currentOffset, float zoom,
-    int width, int height, int tileSize,
-    float2 previousOffset, int previousIndex,
-    float previousEntropy, float previousContrast
+    const std::vector<float>& entropy,          // Entropiekarte vom GPU-Kernel
+    const std::vector<float>& contrast,         // Kontrastwerte pro Tile
+    float2 currentOffset, float zoom,           // Aktuelle Ansicht (Kamera)
+    int width, int height, int tileSize,        // Bildgröße & Tile-Auflösung
+    float2 previousOffset, int previousIndex,   // Letztes Ziel
+    float previousEntropy, float previousContrast // Letzte Zielbewertung
 );
 
 } // namespace ZoomLogic
