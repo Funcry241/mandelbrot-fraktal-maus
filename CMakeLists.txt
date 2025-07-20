@@ -35,6 +35,7 @@ find_package(glew CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
+find_package(Freetype REQUIRED)
 
 # ---------------------------------------------------------
 # 🩹 Fix: Suche nach cuda_gl_interop.h
@@ -116,6 +117,7 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
     glfw
     CUDA::cudart
     Threads::Threads
+    Freetype::Freetype
 )
 
 set_source_files_properties(

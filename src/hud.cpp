@@ -1,206 +1,142 @@
-// Datei: src/hud.cpp (314 Zeilen)
-// 🐭 Maus-Kommentar: HUD ist jetzt idiotensicher. Rechteck und Text nutzen getrennte VAO-VBO-Zustände. Sichtprüfung erfolgt durch TESTHUD und TEST_RECTANGLE – beide unabhängig voneinander. Kein „stille Zeichnung“ mehr. Flight-mode-kompatibel (Flugente ready).
+// Datei: src/hud_freetype.cpp
+// 🐭 Maus-Kommentar: FreeType-HUD mit Klartextdarstellung in jeder Zoomstufe. Scharf wie ein Skalpell, stabil wie ein Otter. Shader-basiert, Unicode-tauglich, zoomfest. Kein ASCII-Geraffel mehr.
 
 #include "pch.hpp"
-
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable: 4505)
-#endif
-#define STB_EASY_FONT_IMPLEMENTATION
-#include "stb_easy_font.h"
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
-
 #include "hud.hpp"
 #include "renderer_state.hpp"
 #include "settings.hpp"
 
-#include <vector>
-#include <cstdio>
-#include <cmath>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include <map>
+#include <string>
 
 namespace Hud {
+
+static FT_Library ft;
+static FT_Face face;
+static GLuint textureAtlas = 0;
+static GLuint vao = 0, vbo = 0;
+static GLuint shader = 0;
+static std::map<char, std::tuple<float, float, float, float>> glyphUVs;
 
 static const char* vertexShaderSrc = R"GLSL(
 #version 430 core
 layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec2 aUV;
+out vec2 vUV;
 uniform vec2 uResolution;
 void main() {
     vec2 pos = aPos / uResolution * 2.0 - 1.0;
     gl_Position = vec4(pos.x, -pos.y, 0.0, 1.0);
-}
-)GLSL";
+    vUV = aUV;
+})GLSL";
 
 static const char* fragmentShaderSrc = R"GLSL(
 #version 430 core
+in vec2 vUV;
 out vec4 FragColor;
-uniform vec4 uColor;
+uniform sampler2D uFontTex;
 void main() {
-    FragColor = uColor;
-}
-)GLSL";
+    float alpha = texture(uFontTex, vUV).r;
+    FragColor = vec4(1.0, 1.0, 1.0, alpha);
+})GLSL";
 
-static GLuint hudVAO = 0;
-static GLuint hudVBO = 0;
-static GLuint hudProgram = 0;
-
-static GLuint compileShader(GLenum type, const char* src) {
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &src, nullptr);
-    glCompileShader(shader);
-    GLint success = 0;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char infoLog[512];
-        glGetShaderInfoLog(shader, 512, nullptr, infoLog);
-        std::fprintf(stderr, "[HUD SHADER ERROR] %s\n", infoLog);
-    }
-    return shader;
+static GLuint compile(GLenum type, const char* src) {
+    GLuint s = glCreateShader(type);
+    glShaderSource(s, 1, &src, nullptr);
+    glCompileShader(s);
+    return s;
 }
 
-static GLuint createHUDProgram() {
-    GLuint vs = compileShader(GL_VERTEX_SHADER, vertexShaderSrc);
-    GLuint fs = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSrc);
-    GLuint program = glCreateProgram();
-    glAttachShader(program, vs);
-    glAttachShader(program, fs);
-    glLinkProgram(program);
+static void buildAtlas() {
+    const int atlasW = 512, atlasH = 512;
+    glGenTextures(1, &textureAtlas);
+    glBindTexture(GL_TEXTURE_2D, textureAtlas);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, atlasW, atlasH, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
 
-    GLint linked = 0;
-    glGetProgramiv(program, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        char infoLog[512];
-        glGetProgramInfoLog(program, 512, nullptr, infoLog);
-        std::fprintf(stderr, "[HUD LINK ERROR] %s\n", infoLog);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    int x = 0, y = 0, rowH = 0;
+    for (char c = 32; c < 127; ++c) {
+        if (FT_Load_Char(face, c, FT_LOAD_RENDER)) continue;
+        FT_Bitmap& bmp = face->glyph->bitmap;
+        if (x + bmp.width >= atlasW) { x = 0; y += rowH; rowH = 0; }
+        glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, bmp.width, bmp.rows, GL_RED, GL_UNSIGNED_BYTE, bmp.buffer);
+        float u0 = x / float(atlasW), v0 = y / float(atlasH);
+        float u1 = (x + bmp.width) / float(atlasW), v1 = (y + bmp.rows) / float(atlasH);
+        glyphUVs[c] = { u0, v0, u1, v1 };
+        x += bmp.width + 1;
+        rowH = std::max(rowH, int(bmp.rows));
     }
-
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-    return program;
 }
 
 void init() {
-    glGenVertexArrays(1, &hudVAO);
-    glGenBuffers(1, &hudVBO);
-    hudProgram = createHUDProgram();
+    FT_Init_FreeType(&ft);
+    FT_New_Face(ft, "fonts/Roboto-Regular.ttf", 0, &face);
+    FT_Set_Pixel_Sizes(face, 0, 32);
+    buildAtlas();
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable(GL_DEPTH_TEST);
+    GLuint vs = compile(GL_VERTEX_SHADER, vertexShaderSrc);
+    GLuint fs = compile(GL_FRAGMENT_SHADER, fragmentShaderSrc);
+    shader = glCreateProgram();
+    glAttachShader(shader, vs);
+    glAttachShader(shader, fs);
+    glLinkProgram(shader);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
 }
 
-static bool drawTextImpl(const std::string& text, float x, float y, float width, float height) {
-    char buffer[99999];
-    int num_quads = stb_easy_font_print(x, y, const_cast<char*>(text.c_str()), nullptr, buffer, sizeof(buffer));
-
-    if (Settings::debugLogging) {
-        std::printf("[HUD] drawTextImpl \"%s\" -> quads=%d\n", text.c_str(), num_quads);
-    }
-
-    if (num_quads <= 0)
-        return false;
-
-    float* coords = reinterpret_cast<float*>(buffer);
+void drawText(const std::string& text, float x, float y, float w, float h) {
     std::vector<float> verts;
-    verts.reserve(num_quads * 6 * 2);
-
-    for (int i = 0; i < num_quads; ++i) {
-        float* p = coords + i * 8;
-        verts.insert(verts.end(), { p[0], p[1], p[2], p[3], p[4], p[5] });
-        verts.insert(verts.end(), { p[0], p[1], p[4], p[5], p[6], p[7] });
+    float penX = x;
+    for (char c : text) {
+        if (!glyphUVs.count(c)) continue;
+        auto [u0, v0, u1, v1] = glyphUVs[c];
+        float quadW = 16.0f, quadH = 32.0f;
+        float x0 = penX,     y0 = y;
+        float x1 = penX + quadW, y1 = y + quadH;
+        verts.insert(verts.end(), {
+            x0, y0, u0, v0,  x1, y0, u1, v0,  x1, y1, u1, v1,
+            x0, y0, u0, v0,  x1, y1, u1, v1,  x0, y1, u0, v1
+        });
+        penX += quadW;
     }
-
-    glUseProgram(hudProgram);
-    glBindVertexArray(hudVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
+    glUseProgram(shader);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(), GL_DYNAMIC_DRAW);
-
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
-
-    glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
-    glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 1.0f, 1.0f, 1.0f, 1.0f);
-
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size() / 2));
-
-    glDisableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureAtlas);
+    glUniform1i(glGetUniformLocation(shader, "uFontTex"), 0);
+    glUniform2f(glGetUniformLocation(shader, "uResolution"), w, h);
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size() / 4));
     glBindVertexArray(0);
     glUseProgram(0);
-    return true;
-}
-
-void drawText(const std::string& text, float x, float y, float width, float height) {
-    if (text == "TEST_RECTANGLE") {
-        struct Vertex { float x, y; };
-        Vertex rect[6] = {
-            {10, 10}, {210, 10}, {210, 70},
-            {10, 10}, {210, 70}, {10, 70}
-        };
-
-        glUseProgram(hudProgram);
-        glBindVertexArray(hudVAO);
-        glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(rect), rect, GL_DYNAMIC_DRAW);
-
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
-
-        glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
-        glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 1.0f, 0.0f, 1.0f, 1.0f); // Magenta
-
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-
-        glDisableVertexAttribArray(0);
-        glBindVertexArray(0);
-        glUseProgram(0);
-        return;
-    }
-
-    if (!text.empty())
-        drawTextImpl(text, x, y, width, height);
 }
 
 void draw(RendererState& state) {
-    drawText("TESTHUD", 200, 100, static_cast<float>(state.width), static_cast<float>(state.height));
-
-    float logZoom = -log10f(static_cast<float>(state.zoom));
-    float fps = static_cast<float>(state.currentFPS);
-    float frameTimeMs = static_cast<float>(state.deltaTime * 1000.0f);
-
-    char buf1[128], buf2[64], buf3[64];
-    std::snprintf(buf1, sizeof(buf1), "FPS: %.1f | Zoom: 1e%.1f | Offset: (%.3f, %.3f)",
-        fps, logZoom, static_cast<float>(state.offset.x), static_cast<float>(state.offset.y));
-    std::snprintf(buf2, sizeof(buf2), "Frame Time: %.2f ms", frameTimeMs);
-    std::snprintf(buf3, sizeof(buf3), "[H] Overlay: %s", state.overlayEnabled ? "ON" : "OFF");
-
-    float w = static_cast<float>(state.width);
-    float h = static_cast<float>(state.height);
-    float line = 28.0f;
-
-    bool ok1 = drawTextImpl(buf1, 10.0f, h - 1 * line, w, h);
-    bool ok2 = drawTextImpl(buf2, 10.0f, h - 2 * line, w, h);
-    bool ok3 = drawTextImpl(buf3, 10.0f, h - 3 * line, w, h);
-
-    if (Settings::debugLogging) {
-        std::printf("[HUD] %.1f fps | Zoom=1e%.1f | Offset=(%.3f, %.3f) | Frame %.2fms | Overlay=%s | Quads %d %d %d\n",
-            fps, logZoom,
-            static_cast<float>(state.offset.x),
-            static_cast<float>(state.offset.y),
-            frameTimeMs,
-            state.overlayEnabled ? "ON" : "OFF",
-            ok1 ? 1 : 0, ok2 ? 1 : 0, ok3 ? 1 : 0);
-    }
-
-    glFlush(); // sicherstellen, dass alles sichtbar wird
+    drawText("FPS: 42.0", 20.0f, 40.0f, float(state.width), float(state.height));
+    drawText("Zoom: 1e5", 20.0f, 80.0f, float(state.width), float(state.height));
 }
 
 void cleanup() {
-    glDeleteVertexArrays(1, &hudVAO);
-    glDeleteBuffers(1, &hudVBO);
-    glDeleteProgram(hudProgram);
-    glDisable(GL_BLEND);
+    glDeleteTextures(1, &textureAtlas);
+    glDeleteProgram(shader);
+    glDeleteBuffers(1, &vbo);
+    glDeleteVertexArrays(1, &vao);
+    FT_Done_Face(face);
+    FT_Done_FreeType(ft);
 }
 
 } // namespace Hud

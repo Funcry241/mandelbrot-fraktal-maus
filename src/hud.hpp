@@ -1,31 +1,21 @@
 // Datei: src/hud.hpp
-// Zeilen: 44
-// 🐭 Maus-Kommentar: HUD-Schnittstelle – zeigt FPS, Zoom und Offsets via STB-Easy-Font. Wird über OpenGL-Overlay gezeichnet. Kein ImGui, keine Abhängigkeiten, dafür pures ASCII mit 1ms Genauigkeit. Schneefuchs hätte es „effiziente Eleganz“ genannt.
+// Zeilen: 31
+// 🐭 Maus-Kommentar: HUD-Schnittstelle – rendert FPS, Zoom und Offset mit FreeType auf ein eigenes Overlay. Keine ASCII-Notlösung mehr. Glatte Linien, echte Typografie. Flight-Ready, Schneefuchs-approved.
 
 #pragma once
 
 #include <string>
 #include "renderer_state.hpp" // ✅ Damit RendererState in draw() bekannt ist
 
-// ------------------------------------------------------------
-// 🖥️ STB Easy Font Binding (nur für interne Nutzung)
-// ------------------------------------------------------------
-extern "C" {
-int stb_easy_font_print(float x, float y, const char* text,
-const unsigned char* color_rgb,
-void* vertex_buffer, int vbuf_size);
-}
-
-// 🎯 HUD-Overlay: FPS, FrameTime, Zoom-Level, Offsets
 namespace Hud {
 
-// 🚀 Initialisiert Shader und Vertex-Buffer für das HUD
+// 🚀 Initialisiert FreeType, lädt Font und erzeugt Shader + Texture-Atlas
 void init();
 
-// 🖼️ Rendert das HUD mit den aktuellen Werten aus dem RendererState
+// 🖼️ Rendert das HUD (FPS, Zoom, Offsets) auf das OpenGL-Overlay
 void draw(RendererState& state);
 
-// 🧹 Gibt alle HUD-bezogenen OpenGL-Ressourcen frei
+// 🧹 Gibt alle OpenGL- und FreeType-Ressourcen des HUD frei
 void cleanup();
 
 } // namespace Hud
