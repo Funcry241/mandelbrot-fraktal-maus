@@ -1,5 +1,5 @@
-// Datei: src/hud.cpp (312 Zeilen)
-// 🐭 Maus-Kommentar: HUD loggt nun kompakt ASCII-only – mit robuster Prüfung, ob `stb_easy_font` tatsächlich Text erzeugt. Kein Schweigen mehr bei `quads=0`. Otter nennt es: „Sichtprüfung durch Sichtbarkeit“.
+// Datei: src/hud.cpp (314 Zeilen)
+// 🐭 Maus-Kommentar: HUD ist jetzt idiotensicher. Rechteck und Text nutzen getrennte VAO-VBO-Zustände. Sichtprüfung erfolgt durch TESTHUD und TEST_RECTANGLE – beide unabhängig voneinander. Kein „stille Zeichnung“ mehr. Flight-mode-kompatibel (Flugente ready).
 
 #include "pch.hpp"
 
@@ -92,48 +92,39 @@ void init() {
 }
 
 static bool drawTextImpl(const std::string& text, float x, float y, float width, float height) {
-    char buffer[99999]; // STB-EasyFont verlangt char-buffer
+    char buffer[99999];
     int num_quads = stb_easy_font_print(x, y, const_cast<char*>(text.c_str()), nullptr, buffer, sizeof(buffer));
 
     if (Settings::debugLogging) {
-        std::printf("[HUD] drawTextImpl called: \"%s\" -> quads=%d (bufSize=%zu)\n", text.c_str(), num_quads, sizeof(buffer));
+        std::printf("[HUD] drawTextImpl \"%s\" -> quads=%d\n", text.c_str(), num_quads);
     }
 
-    if (num_quads <= 0) {
-        if (Settings::debugLogging) {
-            std::printf("[HUD] Warning: No quads generated for \"%s\"\n", text.c_str());
-        }
+    if (num_quads <= 0)
         return false;
-    }
 
     float* coords = reinterpret_cast<float*>(buffer);
-    [[maybe_unused]] const int numVertices = num_quads * 4;
-
     std::vector<float> verts;
-    verts.reserve(num_quads * 6 * 2); // 6 vertices * 2 floats
+    verts.reserve(num_quads * 6 * 2);
 
     for (int i = 0; i < num_quads; ++i) {
         float* p = coords + i * 8;
-        float x0 = p[0], y0 = p[1];
-        float x1 = p[2], y1 = p[3];
-        float x2 = p[4], y2 = p[5];
-        float x3 = p[6], y3 = p[7];
-
-        verts.insert(verts.end(), { x0, y0, x1, y1, x2, y2 });
-        verts.insert(verts.end(), { x0, y0, x2, y2, x3, y3 });
+        verts.insert(verts.end(), { p[0], p[1], p[2], p[3], p[4], p[5] });
+        verts.insert(verts.end(), { p[0], p[1], p[4], p[5], p[6], p[7] });
     }
 
     glUseProgram(hudProgram);
     glBindVertexArray(hudVAO);
     glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
     glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(), GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+
     glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
 
     glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
-    glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 1.0f, 1.0f, 1.0f, 1.0f); // weiß
+    glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 1.0f, 1.0f, 1.0f, 1.0f);
 
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size() / 2));
+
     glDisableVertexAttribArray(0);
     glBindVertexArray(0);
     glUseProgram(0);
@@ -152,13 +143,15 @@ void drawText(const std::string& text, float x, float y, float width, float heig
         glBindVertexArray(hudVAO);
         glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
         glBufferData(GL_ARRAY_BUFFER, sizeof(rect), rect, GL_DYNAMIC_DRAW);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
+
         glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
 
         glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
         glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 1.0f, 0.0f, 1.0f, 1.0f); // Magenta
 
         glDrawArrays(GL_TRIANGLES, 0, 6);
+
         glDisableVertexAttribArray(0);
         glBindVertexArray(0);
         glUseProgram(0);
@@ -178,9 +171,7 @@ void draw(RendererState& state) {
 
     char buf1[128], buf2[64], buf3[64];
     std::snprintf(buf1, sizeof(buf1), "FPS: %.1f | Zoom: 1e%.1f | Offset: (%.3f, %.3f)",
-        fps, logZoom,
-        static_cast<float>(state.offset.x),
-        static_cast<float>(state.offset.y));
+        fps, logZoom, static_cast<float>(state.offset.x), static_cast<float>(state.offset.y));
     std::snprintf(buf2, sizeof(buf2), "Frame Time: %.2f ms", frameTimeMs);
     std::snprintf(buf3, sizeof(buf3), "[H] Overlay: %s", state.overlayEnabled ? "ON" : "OFF");
 
@@ -193,7 +184,7 @@ void draw(RendererState& state) {
     bool ok3 = drawTextImpl(buf3, 10.0f, h - 3 * line, w, h);
 
     if (Settings::debugLogging) {
-        std::printf("[HUD] FPS=%.1f Zoom=1e%.1f Offset=(%.3f, %.3f) Frame=%.2fms Overlay=%s Quads=[%d %d %d]\n",
+        std::printf("[HUD] %.1f fps | Zoom=1e%.1f | Offset=(%.3f, %.3f) | Frame %.2fms | Overlay=%s | Quads %d %d %d\n",
             fps, logZoom,
             static_cast<float>(state.offset.x),
             static_cast<float>(state.offset.y),
@@ -201,6 +192,8 @@ void draw(RendererState& state) {
             state.overlayEnabled ? "ON" : "OFF",
             ok1 ? 1 : 0, ok2 ? 1 : 0, ok3 ? 1 : 0);
     }
+
+    glFlush(); // sicherstellen, dass alles sichtbar wird
 }
 
 void cleanup() {
