@@ -1,6 +1,5 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 139
-// 🐭 Maus-Kommentar: Alpha 45c – Otter-Fix vollständig. Jetzt wird `shouldZoom` auch tatsächlich umgesetzt. Bewegung, Fortschritt, Würde. Schneefuchs: „Kein Ziel ist auch ein Ziel, aber halt ein langweiliges.“
+// 🐭 Maus-Kommentar: Alpha 49c – Logging-Vereinheitlichung „Gepard 2.0“. Zoom-Ziel-Log ist optional aktivierbar. Alle Ausgaben sind ASCII-clean, einzeilig, kompakt. Fallback- und Fensterwarnungen klar getrennt. Schneefuchs: „Nur was präzise loggt, bleibt präzise.“
 
 #include "pch.hpp"
 
@@ -22,25 +21,25 @@ Renderer::Renderer(int width, int height)
 : state(width, height), glInitialized(false) {}
 
 Renderer::~Renderer() {
-    if (Settings::debugLogging && !glInitialized) {
-        std::puts("[DEBUG] cleanup() skipped - OpenGL was never initialized");
-    }
-    if (glInitialized) {
+    if (Settings::debugLogging && !glInitialized)
+        std::puts("[DEBUG] Cleanup skipped – OpenGL not initialized");
+
+    if (glInitialized)
         cleanup();
-    }
 }
 
 bool Renderer::initGL() {
-    if (Settings::debugLogging) std::puts("[DEBUG] initGL aufgerufen");
+    if (Settings::debugLogging)
+        std::puts("[DEBUG] initGL() called");
 
     state.window = RendererWindow::createWindow(state.width, state.height, this);
     if (!state.window) {
-        std::puts("[ERROR] Fenstererstellung fehlgeschlagen (GLFW)");
+        std::puts("[ERROR] Failed to create GLFW window");
         return false;
     }
 
     if (glewInit() != GLEW_OK) {
-        std::puts("[ERROR] glewInit() fehlgeschlagen");
+        std::puts("[ERROR] glewInit() failed");
         RendererWindow::destroyWindow(state.window);
         state.window = nullptr;
         glfwTerminate(); // Otter/Schneefuchs: Fenster weg → GLFW auch!
@@ -49,7 +48,9 @@ bool Renderer::initGL() {
 
     RendererPipeline::init();
 
-    if (Settings::debugLogging) std::puts("[DEBUG] OpenGL-Initialisierung abgeschlossen");
+    if (Settings::debugLogging)
+        std::puts("[DEBUG] OpenGL init complete");
+
     glInitialized = true;
     return true;
 }
@@ -61,44 +62,44 @@ bool Renderer::shouldClose() const {
 void Renderer::renderFrame_impl() {
     RendererLoop::renderFrame_impl(state);
 
-    // 🛠️ Fix: Statistik nur bei neuem Ziel aktualisieren
+    // Zoom-Ziel aktualisieren (wenn neu)
     if (state.zoomResult.isNewTarget) {
         state.lastEntropy  = state.zoomResult.bestEntropy;
         state.lastContrast = state.zoomResult.bestContrast;
     }
 
-    // 🐧 Immer sanfte Bewegung – unabhängig von Zoom-Auslösung
+    // Sanfte Bewegung immer (auch bei Pause)
     state.offset = state.zoomResult.newOffset;
 
     if (state.zoomResult.shouldZoom) {
         state.zoom *= Settings::zoomFactor;
     }
 
-
 #if ENABLE_ZOOM_LOGGING
-    float ox = state.offset.x;
-    float oy = state.offset.y;
-    float tx = state.smoothedTargetOffset.x;
-    float ty = state.smoothedTargetOffset.y;
-    float dx = tx - ox, dy = ty - oy;
+    const auto& zr = state.zoomResult;
+    const float2& off = state.offset;
+    const float2& tgt = zr.newOffset;
+    float dx = tgt.x - off.x;
+    float dy = tgt.y - off.y;
     float dist = std::sqrt(dx * dx + dy * dy);
 
     static float2 lastTarget = { 0.0f, 0.0f };
     static int stayCounter = 0;
-    bool jumped = (tx != lastTarget.x || ty != lastTarget.y);
+    bool jumped = (tgt.x != lastTarget.x || tgt.y != lastTarget.y);
     if (jumped) {
         stayCounter = 0;
-        lastTarget = { tx, ty };
+        lastTarget = tgt;
     } else {
         stayCounter++;
     }
 
-    const auto& zr = state.zoomResult;
     std::printf(
-        "ZoomLog Z %.5e Idx %3d Ent %.5f Ctr %.5f dE %.5f dC %.5f Dist %.6f Thresh %.6f RelE %.3f RelC %.3f New %d Stayed %d\n",
-        state.zoom, zr.bestIndex, zr.bestEntropy, zr.bestContrast,
+        "[ZoomLog] Z=%.5e Idx=%3d E=%.4f C=%.4f dE=%.4f dC=%.4f Dist=%.6f Thresh=%.6f RelE=%.3f RelC=%.3f New=%d Stay=%d\n",
+        state.zoom, zr.bestIndex,
+        zr.bestEntropy, zr.bestContrast,
         zr.bestEntropy - state.lastEntropy, zr.bestContrast - state.lastContrast,
-        zr.distance, zr.minDistance, zr.relEntropyGain, zr.relContrastGain,
+        zr.distance, zr.minDistance,
+        zr.relEntropyGain, zr.relContrastGain,
         zr.isNewTarget ? 1 : 0, stayCounter
     );
 #endif
@@ -116,7 +117,7 @@ void Renderer::freeDeviceBuffers() {
 }
 
 void Renderer::resize(int newW, int newH) {
-    std::printf("[INFO] Resized to %d x %d\n", newW, newH);
+    std::printf("[INFO] Resize: %d x %d\n", newW, newH);
     state.resize(newW, newH);
     glViewport(0, 0, newW, newH);
 }

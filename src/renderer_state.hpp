@@ -24,10 +24,10 @@ public:
     int maxIterations  = 1000; // aktuell verwendeter Maximalwert
 
     // 🎯 Auto-Zoom Zielkoordinaten
-    double2 targetOffset         = { 0.0, 0.0 };   // analysiertes Ziel
-    double2 filteredTargetOffset = { 0.0, 0.0 };   // geglättetes Ziel
-    float2 smoothedTargetOffset  = { 0.0f, 0.0f }; // LERP-Interpoliertes Ziel
-    float smoothedTargetScore    = -1.0f;          // Entropie-Score des Zieltiles (wird geglättet)
+    float2 targetOffset         = { 0.0f, 0.0f };   // analysiertes Ziel
+    float2 filteredTargetOffset = { 0.0f, 0.0f };   // geglättetes Ziel
+    float2 smoothedTargetOffset = { 0.0f, 0.0f };   // LERP-Interpoliertes Ziel
+    float  smoothedTargetScore  = -1.0f;            // Entropie-Score des Zieltiles (wird geglättet)
 
     // 📈 Anzeige-Feedback
     float currentFPS = 0.0f;
@@ -69,7 +69,7 @@ public:
 
     // 🧽 Setup & Verwaltung
     RendererState(int w, int h);
-    void reset();                      // stellt Initialzustand her
-    void setupCudaBuffers();          // allokiert Device-Buffer
+    void reset();                            // stellt Initialzustand her
+    void setupCudaBuffers();                 // allokiert Device-Buffer
     void resize(int newWidth, int newHeight); // Fenstergröße ändern
 };

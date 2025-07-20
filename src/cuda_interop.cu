@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
-// Zeilen: 258
 // 🐭 Maus-Kommentar: Alpha 49b – Logging-Reduktion nach „Gepard 2.0“: Debug-Ausgaben sind nun ASCII-clean, einzeilig, kompakt. Vorher/Nachher-Vergleiche der Iterationen, Supersampling-Check und Performance-Log in einer Zeile. Schneefuchs sagt: „Prägnanz ist Präzision.“
+
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "core_kernel.h"
@@ -66,10 +66,8 @@ void renderCudaFrame(
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
     if (Settings::debugLogging) {
-        std::printf("[FRAME] zoom=%.6g offset=(%.6g, %.6g) maxIter=%d tileSize=%d supersampling=%d\n",
+        std::printf("[CU-FRAME] zoom=%.5g offset=(%.5g %.5g) iter=%d tile=%d ss=%d\n",
                     zoom, offset.x, offset.y, maxIterations, tileSize, supersampling);
-        std::printf("[PTRS] devPtr=%p d_iter=%p d_ent=%p d_con=%p d_sup=%p\n",
-                    devPtr, d_iterations, d_entropy, d_contrast, d_tileSupersampling);
     }
 
     int dbg_before[3]{-12345}, dbg_after[3]{-12345};
@@ -81,13 +79,9 @@ void renderCudaFrame(
 
     if (Settings::debugLogging) {
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
-        std::printf("[DEBUG] Kernel iterations: %d -> %d %d -> %d %d -> %d\n",
-            dbg_before[0], dbg_after[0],
-            dbg_before[1], dbg_after[1],
-            dbg_before[2], dbg_after[2]);
+        std::printf("[CU-KERNEL] iters: %d->%d | %d->%d | %d->%d\n",
+            dbg_before[0], dbg_after[0], dbg_before[1], dbg_after[1], dbg_before[2], dbg_after[2]);
     }
-
-    if (Settings::debugLogging) std::puts("[DEBUG] Entropy+Contrast launched");
 
     computeCudaEntropyContrast(d_iterations, d_entropy, d_contrast, width, height, tileSize, maxIterations);
 
@@ -103,20 +97,11 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemcpy(d_tileSupersampling, h_tileSupersampling.data(), numTiles * sizeof(int), cudaMemcpyHostToDevice));
 
     if (Settings::debugLogging && numTiles > 2) {
-        std::vector<int> devCheck(numTiles);
-        CUDA_CHECK(cudaMemcpy(devCheck.data(), d_tileSupersampling, numTiles * sizeof(int), cudaMemcpyDeviceToHost));
-        bool match = devCheck[0] == h_tileSupersampling[0] &&
-                     devCheck[1] == h_tileSupersampling[1] &&
-                     devCheck[2] == h_tileSupersampling[2];
-
-        if (match) {
-            std::printf("[DEBUG] Supersampling Tile[0-2]: %d %d %d\n",
-                h_tileSupersampling[0], h_tileSupersampling[1], h_tileSupersampling[2]);
-        } else {
-            std::printf("[DEBUG] Supersample mismatch – host: %d %d %d | device: %d %d %d\n",
-                h_tileSupersampling[0], h_tileSupersampling[1], h_tileSupersampling[2],
-                devCheck[0], devCheck[1], devCheck[2]);
-        }
+        std::vector<int> devCheck(3);
+        CUDA_CHECK(cudaMemcpy(devCheck.data(), d_tileSupersampling, 3 * sizeof(int), cudaMemcpyDeviceToHost));
+        std::printf("[CU-SS] tiles[0-2] = host: %d %d %d | dev: %d %d %d\n",
+            h_tileSupersampling[0], h_tileSupersampling[1], h_tileSupersampling[2],
+            devCheck[0], devCheck[1], devCheck[2]);
     }
 
     shouldZoom = false;
@@ -131,12 +116,12 @@ void renderCudaFrame(
             state.zoomResult = result;
 
             if (Settings::debugLogging) {
-                std::printf("[ZOOM] Target: idx=%d entropy=%.3f contrast=%.3f -> offset=(%.6g, %.6g) new=%d zoom=%d\n",
+                std::printf("[CU-ZOOM] idx=%d entropy=%.3f contrast=%.3f -> (%.5g %.5g) new=%d zoom=%d\n",
                     result.bestIndex, result.bestEntropy, result.bestContrast,
                     newOffset.x, newOffset.y, result.isNewTarget ? 1 : 0, result.shouldZoom ? 1 : 0);
             }
         } else if (Settings::debugLogging) {
-            std::puts("[ZOOM] No suitable target found.");
+            std::puts("[CU-ZOOM] No suitable target");
         }
     }
 
@@ -146,7 +131,7 @@ void renderCudaFrame(
     auto t1 = std::chrono::high_resolution_clock::now();
     float totalMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
     if (Settings::debugLogging)
-        std::printf("[Perf] cuda_interop total=%.2fms\n", totalMs);
+        std::printf("[CU-PERF] total=%.2f ms\n", totalMs);
 #endif
 }
 
