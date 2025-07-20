@@ -1,17 +1,17 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 162
-// 🐅 Maus-Kommentar: Alpha 48.2 – `isTentativeNewTarget` nun aktiv genutzt für klare Debug-Markierung von Zielwechseln.
-// 🐼 Panda: Bewertet Zielkacheln über Entropie × (1 + Kontrast).
-// 🦦 Otter: Zoomdistanz abhängig vom Zoomlevel – weich geregelt.
-// 🐘 Elefant: Ziel bleibt bestehen, wenn fast gleich gut – kein hektisches Springen.
-// 🕊️ Kolibri: LERP gleicht sanft an – Zoom ist Bewegung, kein Ruck.
-// 🐍 Flugente: float2 für Performance beibehalten.
-// 🐑 Schneefuchs: TentativeFrames werden nur bei echten Zielwechseln zurückgesetzt.
+// Zeilen: 181
+// 🐭 Maus-Kommentar: Alpha 48.3 – Zoom-Zielauswahl wird nun mit präziser Laufzeitanalyse (ms) geloggt. Otter erkennt Bottlenecks, Schneefuchs reduziert Log-Ausgabe auf das Wesentliche.
+// 🐼 Panda: Bewertet Entropie × (1 + Kontrast) als Zielscore.
+// 🐘 Elefant: Stabilisiert Zielauswahl mit Gedächtnis (tentativeFrames, stableFrames).
+// 🕊️ Kolibri: Weiche Bewegung via LERP (Zoom ist Gleitflug).
+// 🐍 Flugente: float2 bleibt für Performance aktiv.
+// 🔬 Blaupause: Laufzeitmessung mit std::chrono – erkennt Zoomlogik-Overhead.
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
 #include <cmath>
 #include <iostream>
+#include <chrono>
 
 namespace ZoomLogic {
 
@@ -36,6 +36,8 @@ ZoomResult evaluateZoomTarget(
     float previousEntropy,
     float previousContrast
 ) {
+    auto t0 = std::chrono::high_resolution_clock::now(); // 🔬 Startzeit
+
     ZoomResult result;
     result.bestIndex = -1;
     result.shouldZoom = false;
@@ -87,8 +89,7 @@ ZoomResult evaluateZoomTarget(
     float prevScore = previousEntropy * (1.0f + previousContrast);
     float scoreGain = (prevScore > 0.0f) ? ((bestScore - prevScore) / prevScore) : 1.0f;
     float scoreDiff = (prevScore > 0.0f) ? std::abs(bestScore - prevScore) / prevScore : 1.0f;
-
-    bool isTentativeNewTarget = (result.bestIndex != previousAcceptedIndex && scoreDiff > Settings::MIN_SCORE_DIFF_RATIO);
+    
     result.isNewTarget = false;
 
     // 🐘 Stabilisierung mit Ziel-Gedächtnis
@@ -130,22 +131,21 @@ ZoomResult evaluateZoomTarget(
             previousOffset.x * (1.0f - alpha) + proposedOffset.x * alpha,
             previousOffset.y * (1.0f - alpha) + proposedOffset.y * alpha);
 
+    auto t1 = std::chrono::high_resolution_clock::now(); // 🔬 Endzeit
+    auto ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
+
     if (Settings::debugLogging) {
-        std::cout << "[ZoomEval] idx=" << result.bestIndex
-                  << " E=" << result.bestEntropy
-                  << " C=" << result.bestContrast
-                  << " dist=" << dist
-                  << " jumpLimit=" << minMove
-                  << " gain=" << scoreGain
-                  << " scoreDiff=" << scoreDiff
-                  << " tentative=" << tentativeFrames
-                  << " stable=" << stableFrames
-                  << " required=" << requiredStableFrames
-                  << " alpha=" << alpha
-                  << " isTentative=" << (isTentativeNewTarget ? "1" : "0")
-                  << " new=" << (result.isNewTarget ? "1" : "0")
-                  << " → zoom=" << (result.shouldZoom ? "1" : "0")
-                  << "\n";
+        std::printf("[ZoomEval] i=%d E=%.2f C=%.2f d=%.4f g=%.2f α=%.2f %s%s | %.3fms\n",
+            result.bestIndex,
+            result.bestEntropy,
+            result.bestContrast,
+            dist,
+            scoreGain,
+            alpha,
+            result.isNewTarget ? "N " : "",
+            result.shouldZoom ? "Z" : "-",
+            ms
+        );
     }
 
     return result;

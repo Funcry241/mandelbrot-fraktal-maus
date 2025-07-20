@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// Zeilen: 336
-// 🐭 Maus-Kommentar: Alpha 47a – Kritischer Otter-Bug behoben: `ctx.offset` wurde nie aktualisiert nach Frame 1. Jetzt wird der Offset bei jedem Frame neu gesetzt. Endlich bewegt sich das Bild. Schneefuchs: „Wer stehen bleibt, zoomt nicht.“
+// Zeilen: 331
+// 🐭 Maus-Kommentar: Alpha 48.4 – `cudaMemset`-Doppel entfernt (FPS-Boost), HUD-Blend explizit aktiviert. Kommentierung gemäß Blaupause. Schneefuchs: „Wer doppelt nullt, halbiert die Frames.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -19,10 +19,11 @@ static FrameContext ctx;
 static CommandBus zoomBus;
 static bool isFirstFrame = true;
 
+// 🔧 Initialisiert PBO, Texture, Cuda-Interop und HUD
 void initResources(RendererState& state) {
     if (state.pbo != 0 || state.tex != 0) {
         if (Settings::debugLogging)
-            std::puts("[DEBUG] initResources() skipped - reasources already initialized");
+            std::puts("[DEBUG] initResources() skipped - resources already initialized");
         return;
     }
     OpenGLUtils::setGLResourceContext("init");
@@ -39,6 +40,7 @@ void initResources(RendererState& state) {
         std::puts("[DEBUG] initResources() completed");
 }
 
+// ⏱️ Misst Delta-Time und FPS pro Frame
 void beginFrame(RendererState& state) {
     float currentTime = static_cast<float>(glfwGetTime());
     float lastTimeFloat = static_cast<float>(state.lastTime);
@@ -54,8 +56,9 @@ void beginFrame(RendererState& state) {
         state.currentFPS = 1.0f / state.deltaTime;
 }
 
+// 🎬 Hauptschleife: Fraktal zeichnen, Analyse durchführen, HUD und Overlay anzeigen
 void renderFrame_impl(RendererState& state) {
-    // 🎯 Kritischer Bugfix: Offset und Zoom werden nun bei jedem Frame aktualisiert – nicht nur einmal!
+    // 🧠 Kontextübergabe an FrameContext (CUDA + Rendering)
     ctx.zoom = static_cast<float>(state.zoom);
     ctx.offset.x = static_cast<float>(state.offset.x);
     ctx.offset.y = static_cast<float>(state.offset.y);
@@ -64,7 +67,6 @@ void renderFrame_impl(RendererState& state) {
         isFirstFrame = false;
     }
 
-    // Kontext-Aktualisierung, explizite Casts
     ctx.width = state.width;
     ctx.height = state.height;
     ctx.maxIterations = state.maxIterations;
@@ -82,23 +84,23 @@ void renderFrame_impl(RendererState& state) {
 
     beginFrame(state);
 
-    // 🧹 Vor jedem CUDA-Frame alle relevanten Buffer nullen
+    // 📐 Dimensionsberechnung
     size_t totalPixels = static_cast<size_t>(ctx.width) * ctx.height;
     size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
     size_t tilesY = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
     size_t tilesCount = tilesX * tilesY;
-    CUDA_CHECK(cudaMemset(ctx.d_iterations, 0, totalPixels * sizeof(int)));
-    CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
-    CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
 
-    // 1. CUDA-Fraktalberechnung
+    // 🧹 Iterationspuffer nullen – nötig für CUDA
+    CUDA_CHECK(cudaMemset(ctx.d_iterations, 0, totalPixels * sizeof(int)));
+
+    // 1️⃣ CUDA-Fraktalberechnung (Iterationsbuffer wird beschrieben)
     computeCudaFrame(ctx, state);
 
-    // 2. OpenGL-Textur aktualisieren
+    // 2️⃣ OpenGL-Textur aktualisieren und anzeigen
     RendererPipeline::updateTexture(state.pbo, state.tex, ctx.width, ctx.height);
     drawFrame(ctx, state.tex, state);
 
-    // 3. Heatmap-Analyse
+    // 3️⃣ Heatmap-Analyse vorbereiten (nur hier Entropie- & Kontrastbuffer nullen)
     CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
     CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
     CudaInterop::computeCudaEntropyContrast(
@@ -119,14 +121,24 @@ void renderFrame_impl(RendererState& state) {
         std::printf("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n", e0, c0);
     }
 
-    // 4. Overlay/HUD zeichnen
+    // 4️⃣ HUD und Heatmap-Overlay (sichtbar & korrekt überlagert)
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    if (Settings::debugLogging)
+        std::puts("[HUD] glEnable(GL_BLEND) set");
+
     HeatmapOverlay::drawOverlay(
         ctx.h_entropy, ctx.h_contrast,
         ctx.width, ctx.height, ctx.tileSize, 0, state
     );
+
     Hud::draw(state);
 
-    // 📝 Kontext zurückschreiben → Zoomlogik und CUDA-Ergebnisse werden synchronisiert
+    if (Settings::debugLogging)
+        std::puts("[HUD] Hud::draw() called");
+
+    // 🔄 Ergebnisse aus CUDA-Frame zurück in RendererState schreiben
     state.zoom = static_cast<double>(ctx.zoom);
     state.offset.x = static_cast<float>(ctx.offset.x);
     state.offset.y = static_cast<float>(ctx.offset.y);
@@ -138,6 +150,7 @@ void renderFrame_impl(RendererState& state) {
     state.lastTileIndex = ctx.lastTileIndex;
 }
 
+// ⌨️ Eingabeverarbeitung (z. B. Heatmap an/aus, Auto-Zoom pausieren)
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     (void)scancode; (void)mods;
     if (action != GLFW_PRESS) return;
