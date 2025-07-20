@@ -1,6 +1,5 @@
 // Datei: src/hud.cpp
-// Zeilen: 274
-// 🐭 Maus-Kommentar: HUD finalisiert. Logging präzise, Rechteck sichtbar, Ausrichtung dynamisch. Schneefuchs flüstert „klar wie der Himmel“. Otter klatscht.
+// 🐭 Maus-Kommentar: HUD absichern. Wenn STB keine Vertices liefert, wird Magenta-Rechteck als Notanker gemalt. Otter nennt es „Auge behalten“.
 
 #include "pch.hpp"
 
@@ -91,38 +90,41 @@ void init() {
     glDisable(GL_DEPTH_TEST);
 }
 
+static void drawFallbackRect(float width, float height) {
+    struct Vertex { float x, y; };
+    Vertex rect[6] = {
+        {10.0f, 10.0f}, {210.0f, 10.0f}, {210.0f, 70.0f},
+        {10.0f, 10.0f}, {210.0f, 70.0f}, {10.0f, 70.0f}
+    };
+
+    glUseProgram(hudProgram);
+    glBindVertexArray(hudVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(rect), rect, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
+    glEnableVertexAttribArray(0);
+
+    glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
+    glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 1.0f, 0.0f, 1.0f, 1.0f); // Magenta
+
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glDisableVertexAttribArray(0);
+    glBindVertexArray(0);
+    glUseProgram(0);
+
+    std::puts("[WARN] HUD fallback rectangle drawn (Q == 0)");
+}
+
 void drawText(const std::string& text, float x, float y, float width, float height) {
-    if (text == "TEST_RECTANGLE") {
-        float w = 200.0f, h = 60.0f;
-        struct Vertex { float x, y; };
-        Vertex rect[6] = {
-            {10.0f, 10.0f}, {10.0f + w, 10.0f}, {10.0f + w, 10.0f + h},
-            {10.0f, 10.0f}, {10.0f + w, 10.0f + h}, {10.0f, 10.0f + h}
-        };
-
-        glUseProgram(hudProgram);
-        glBindVertexArray(hudVAO);
-        glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(rect), rect, GL_DYNAMIC_DRAW);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
-        glEnableVertexAttribArray(0);
-
-        glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
-        glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 0.4f, 0.6f, 1.0f, 1.0f); // hellblau
-
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-        glDisableVertexAttribArray(0);
-        glBindVertexArray(0);
-        glUseProgram(0);
-
-        if (Settings::debugLogging) std::puts("[HUD] Rect drawn");
-        return;
-    }
-
     if (text.empty()) return;
 
     char buffer[99999];
     int num_quads = stb_easy_font_print(x, y, const_cast<char*>(text.c_str()), nullptr, buffer, sizeof(buffer));
+
+    if (num_quads == 0) {
+        drawFallbackRect(width, height);
+        return;
+    }
 
     struct Vertex { float x, y; };
     std::vector<Vertex> vertices;
@@ -146,21 +148,19 @@ void drawText(const std::string& text, float x, float y, float width, float heig
     glEnableVertexAttribArray(0);
 
     glUniform2f(glGetUniformLocation(hudProgram, "uResolution"), width, height);
-    glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 1.0f, 1.0f, 1.0f, 1.0f); // weiß
+    glUniform4f(glGetUniformLocation(hudProgram, "uColor"), 1.0f, 1.0f, 1.0f, 1.0f); // Weiß
 
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
     glDisableVertexAttribArray(0);
     glBindVertexArray(0);
     glUseProgram(0);
 
-    if (Settings::debugLogging && !text.empty()) {
+    if (Settings::debugLogging) {
         std::printf("[HUD] \"%s\" Q=%d V=%zu\n", text.c_str(), num_quads, vertices.size());
     }
 }
 
 void draw(RendererState& state) {
-    // drawText("TEST_RECTANGLE", 0, 0, static_cast<float>(state.width), static_cast<float>(state.height));
-
     char hudText1[256];
     char hudText2[256];
     char hudText3[64];
