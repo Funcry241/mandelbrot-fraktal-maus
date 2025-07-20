@@ -149,3 +149,5 @@ set(CMAKE_CUDA_FLAGS_DEBUG "-G -g")
 set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --fmad=true --use_fast_math --prec-div=true")
 
 install(TARGETS mandelbrot_otterdream RUNTIME DESTINATION .)
+
+install(FILES ${CMAKE_SOURCE_DIR}/fonts/Roboto-Regular.ttf DESTINATION fonts)
