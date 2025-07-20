@@ -111,6 +111,7 @@ void renderFrame_impl(RendererState& state) {
         float c0 = ctx.h_contrast.empty() ? 0.0f : ctx.h_contrast[0];
         std::printf("[Perf] cuda=%.2fms draw=%.2fms analyze=%.2fms total=%.2fms | E=%.4f C=%.4f\n",
             cudaMs, drawMs, analyzeMs, totalMs, e0, c0);
+        std::printf("[DEBUG] HUD draw call (state.overlayEnabled=%d)\n", static_cast<int>(state.overlayEnabled));
     }
 
     glEnable(GL_BLEND);
