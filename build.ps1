@@ -105,20 +105,36 @@ if (Test-Path $cacheFile) {
 
 # 🐭 glewPatch.fix=1 → glew32d.lib wird entfernt und Build-Ordner gelöscht, wenn nötig
 $glewTargets = "build/vcpkg_installed/x64-windows/share/glew/glew-targets.cmake"
+$glewBadRef = "glew32d.lib"
+$patched = $false
+
 if (Test-Path $glewTargets) {
     $content = Get-Content $glewTargets -Raw
-    if ($content -match "glew32d\.lib") {
-        Write-Host "[PATCH] Removed invalid reference to glew32d.lib"
-        $patched = $content -replace "glew32d\.lib", "glew32.lib"
-        Set-Content $glewTargets $patched -Force
-
-        if (Test-Path "build") {
-            Remove-Item -Recurse -Force build
-            Write-Host "[PATCH] Removed build/ due to GLEW fix"
-        }
-
-        New-Item -ItemType Directory -Force -Path build | Out-Null
+    if ($content -match $glewBadRef) {
+        Write-Host "[PATCH] Removing invalid GLEW reference: $glewBadRef"
+        $patched = $true
+        $patchedText = $content -replace $glewBadRef, "glew32.lib"
+        Set-Content $glewTargets $patchedText -Force
     }
+}
+
+# Zusätzlich: Cache prüfen
+$cacheFile = "build/CMakeCache.txt"
+if (Test-Path $cacheFile) {
+    $lines = Get-Content $cacheFile
+    $filtered = $lines | Where-Object { $_ -notmatch $glewBadRef }
+    if ($lines.Count -ne $filtered.Count) {
+        Write-Host "[PATCH] Removing $glewBadRef from CMakeCache.txt"
+        $patched = $true
+        Set-Content $cacheFile $filtered
+    }
+}
+
+# Wenn gepatcht → vollständiges Cleanup für cleanen Rebuild
+if ($patched -and (Test-Path "build")) {
+    Remove-Item -Recurse -Force build
+    Write-Host "[PATCH] Removed build/ due to GLEW fix"
+    New-Item -ItemType Directory -Force -Path build | Out-Null
 }
 
 # Verzeichnisse
