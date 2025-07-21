@@ -103,6 +103,16 @@ if (Test-Path $cacheFile) {
     }
 }
 
+# Workaround: Entferne ungültigen glew32d.lib-Pfad aus Cache
+$badLib = "build/vcpkg_installed/x64-windows/debug/lib/glew32d.lib"
+if (-not (Test-Path $badLib)) {
+    $glewTargets = "build/vcpkg_installed/x64-windows/share/glew/glew-targets.cmake"
+    if (Test-Path $glewTargets) {
+        (Get-Content $glewTargets) | Where-Object { $_ -notmatch "glew32d\.lib" } | Set-Content $glewTargets
+        Write-Host "[PATCH] Removed invalid reference to glew32d.lib"
+    }
+}
+
 # Verzeichnisse
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
