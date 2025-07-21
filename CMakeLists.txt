@@ -73,20 +73,6 @@ add_executable(mandelbrot_otterdream
     src/frame_pipeline.cpp
 )
 
-# ------------------------------------------------------------
-# 🐭 HUD-Font automatisch ins Zielverzeichnis kopieren
-# Schneefuchs: Klarheit, Otter: Komfort
-# ------------------------------------------------------------
-add_custom_target(copy_fonts ALL
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/dist/fonts
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_SOURCE_DIR}/fonts/Roboto-Regular.ttf
-            ${CMAKE_CURRENT_BINARY_DIR}/dist/fonts/Roboto-Regular.ttf
-    COMMENT "📦 Kopiere HUD-Font nach dist/fonts"
-)
-
-add_dependencies(mandelbrot_otterdream copy_fonts)
-
 if (MSVC)
   target_precompile_headers(mandelbrot_otterdream PRIVATE src/pch.hpp)
 endif()
@@ -141,13 +127,3 @@ set_source_files_properties(
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
-
-set(CMAKE_CXX_FLAGS_DEBUG "-g")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3")
-
-set(CMAKE_CUDA_FLAGS_DEBUG "-G -g")
-set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --fmad=true --use_fast_math --prec-div=true")
-
-install(TARGETS mandelbrot_otterdream RUNTIME DESTINATION .)
-
-install(FILES ${CMAKE_SOURCE_DIR}/fonts/Roboto-Regular.ttf DESTINATION fonts)

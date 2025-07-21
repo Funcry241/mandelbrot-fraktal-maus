@@ -1,6 +1,6 @@
-// Datei: src/hud_freetype.cpp
-// Zeilen: 164
-// 🐭 Maus-Kommentar: FreeType-HUD mit Klartextdarstellung in jeder Zoomstufe. Scharf wie ein Skalpell, stabil wie ein Otter. Shader-basiert, Unicode-tauglich, zoomfest. Kein ASCII-Geraffel mehr. Fehler geprüft. Crashschutz dank Otter.
+// Datei: src/hud.cpp
+// Zeilen: 170
+// 🐭 Maus-Kommentar: Jetzt mit präzisem Fehler-Log bei Fontproblemen – inkl. absolutem Pfad. Verhindert stummes Beenden, wenn Font fehlt. Debuggerfreundlich. Für Otter mit Adlerblick.
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -11,6 +11,7 @@
 #include FT_FREETYPE_H
 #include <map>
 #include <string>
+#include <filesystem>
 
 namespace Hud {
 
@@ -89,8 +90,14 @@ void init() {
         std::exit(EXIT_FAILURE);
     }
 
-    if (FT_New_Face(ft, "fonts/Roboto-Regular.ttf", 0, &face)) {
-        std::fprintf(stderr, "[HUD] Failed to load font 'fonts/Roboto-Regular.ttf'\n");
+    const std::string fontPath = "fonts/Roboto-Regular.ttf";
+    if (!std::filesystem::exists(fontPath)) {
+        std::fprintf(stderr, "[HUD] Font file missing: %s\n", std::filesystem::absolute(fontPath).string().c_str());
+        std::exit(EXIT_FAILURE);
+    }
+
+    if (FT_New_Face(ft, fontPath.c_str(), 0, &face)) {
+        std::fprintf(stderr, "[HUD] Failed to load font '%s'\n", std::filesystem::absolute(fontPath).string().c_str());
         std::exit(EXIT_FAILURE);
     }
 

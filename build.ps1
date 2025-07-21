@@ -87,6 +87,22 @@ try {
     exit 1
 }
 
+# Build-Verzeichnis validieren
+$cacheFile = "build/CMakeCache.txt"
+$expectedSource = (Resolve-Path ".\CMakeLists.txt").Path
+
+if (Test-Path $cacheFile) {
+    $actualSourceLine = Get-Content $cacheFile | Where-Object { $_ -match '^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$' }
+    if ($actualSourceLine -match '^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$') {
+        $actualSource = $matches[1]
+        if ($actualSource -ne $expectedSource) {
+            Write-Warning "[CACHE] Source mismatch detected. Removing stale build/..."
+            Remove-Item -Recurse -Force build
+            New-Item -ItemType Directory -Force -Path build | Out-Null
+        }
+    }
+}
+
 # Verzeichnisse
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
@@ -173,5 +189,19 @@ foreach ($script in 'run_build_inner.ps1','MausDelete.ps1','MausGitAutoCommit.ps
     }
 }
 
-Write-Host "`n✅ Build completed successfully."
+Write-Host "[INSTALL] Installing to ./dist"
+cmake --install build --prefix dist
+
+# HUD-Font kopieren (Roboto)
+$srcFont = "fonts\Roboto-Regular.ttf"
+$dstFont = "dist\fonts\Roboto-Regular.ttf"
+if (Test-Path $srcFont) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $dstFont) | Out-Null
+    Copy-Item $srcFont -Destination $dstFont -Force
+    Write-Host "[FONT] Copied HUD font to dist/fonts"
+} else {
+    Write-Warning "[FONT] Roboto font missing in /fonts"
+}
+
+Write-Host "`n=== Build completed successfully. ===`n"
 exit 0
