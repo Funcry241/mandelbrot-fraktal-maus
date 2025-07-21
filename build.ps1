@@ -87,23 +87,10 @@ try {
     exit 1
 }
 
-# Build-Verzeichnis validieren
-$cacheFile = "build/CMakeCache.txt"
-$expectedSource = (Resolve-Path ".\CMakeLists.txt").Path
+# Build-Verzeichnisse
+New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
-if (Test-Path $cacheFile) {
-    $actualSourceLine = Get-Content $cacheFile | Where-Object { $_ -match '^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$' }
-    if ($actualSourceLine -match '^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$') {
-        $actualSource = $matches[1]
-        if ($actualSource -ne $expectedSource) {
-            Write-Warning "[CACHE] Source mismatch detected. Removing stale build/..."
-            Remove-Item -Recurse -Force build
-            New-Item -ItemType Directory -Force -Path build | Out-Null
-        }
-    }
-}
-
-# 🐭 glewPatch.fix=1 → glew32d.lib wird entfernt und Build-Ordner gelöscht, wenn nötig
+# Patch glew32d.lib => glew32.lib
 $glewTargets = "build/vcpkg_installed/x64-windows/share/glew/glew-targets.cmake"
 $glewBadRef = "glew32d.lib"
 $patched = $false
@@ -118,58 +105,39 @@ if (Test-Path $glewTargets) {
     }
 }
 
-# Zusätzlich: Cache prüfen
-$cacheFile = "build/CMakeCache.txt"
-if (Test-Path $cacheFile) {
-    $lines = Get-Content $cacheFile
-    $filtered = $lines | Where-Object { $_ -notmatch $glewBadRef }
-    if ($lines.Count -ne $filtered.Count) {
-        Write-Host "[PATCH] Removing $glewBadRef from CMakeCache.txt"
-        $patched = $true
-        Set-Content $cacheFile $filtered
-    }
-}
-
-# Wenn gepatcht → vollständiges Cleanup für cleanen Rebuild
-if ($patched -and (Test-Path "build")) {
-    Remove-Item -Recurse -Force build
-    Write-Host "[PATCH] Removed build/ due to GLEW fix"
-    New-Item -ItemType Directory -Force -Path build | Out-Null
-}
-
-# Verzeichnisse
-New-Item -ItemType Directory -Force -Path build, dist | Out-Null
-
-# CMake-Konfiguration
-Write-Host "[INFO] CMake version: $(cmake --version | Select-String -Pattern 'cmake version')"
-Write-Host "[BUILD] Configuring project..."
+# CMake-Argumente
 $cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=80;86;89;90"
 $cmakeArgs = @(
     "-S", ".", "-B", "build", "-G", "Ninja",
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
     "-DCMAKE_BUILD_TYPE=$Configuration",
-    "-DCMAKE_CUDA_COMPILER=$nvcc",
-    "-DCMAKE_CUDA_TOOLKIT_ROOT_DIR=$($cudaBin)\..",
+    "-DCMAKE_CUDA_COMPILER=`"$nvcc`"",
+    "-DCMAKE_CUDA_TOOLKIT_ROOT_DIR=`"$($cudaBin)\..`"",
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     "-DCMAKE_CXX_STANDARD=23",
     "-DCMAKE_CUDA_STANDARD=20",
     $cudaArch
 )
-cmake @cmakeArgs
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "[CMAKE] Configuration failed. Check CMakeLists.txt."
-    exit 1
+
+# Erster Versuch (erzeugt glew-targets.cmake)
+Write-Host "[BUILD] Probing initial CMake to trigger GLEW files..."
+Start-Process -FilePath cmake.exe -ArgumentList $cmakeArgs -Wait -NoNewWindow
+
+# Zweiter CMake-Aufruf, falls Patch angewendet wurde
+if ($patched) {
+    Write-Host "[BUILD] Re-running CMake after GLEW patch..."
+    Start-Process -FilePath cmake.exe -ArgumentList $cmakeArgs -Wait -NoNewWindow
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "[CMAKE] Configuration failed after patch."
+        exit 1
+    }
 }
 
 # Build
 Write-Host "[BUILD] Starting build..."
 cmake --build build --config $Configuration --parallel
 if ($LASTEXITCODE -ne 0) {
-    if (-not (Test-Path "build/build.ninja")) {
-        Write-Error "[NINJA] build.ninja missing. CMake-Konfiguration war fehlerhaft."
-    } else {
-        Write-Error "[BUILD] Ninja reported build failure."
-    }
+    Write-Error "[BUILD] Build failed."
     exit 1
 }
 
@@ -184,7 +152,7 @@ if (Test-Path $exe) {
     exit 1
 }
 
-# DLLs: GLFW / GLEW
+# DLLs kopieren
 $dllSearchRoots = Get-ChildItem "$PSScriptRoot\vcpkg_installed" -Recurse -Directory | Where-Object { $_.Name -eq "bin" }
 foreach ($dll in 'glfw3.dll','glew32.dll') {
     $src = $dllSearchRoots | ForEach-Object {
@@ -223,10 +191,11 @@ foreach ($script in 'run_build_inner.ps1','MausDelete.ps1','MausGitAutoCommit.ps
     }
 }
 
+# Installation
 Write-Host "[INSTALL] Installing to ./dist"
 cmake --install build --prefix dist
 
-# HUD-Font kopieren (Roboto)
+# HUD-Font kopieren
 $srcFont = "fonts\Roboto-Regular.ttf"
 $dstFont = "dist\fonts\Roboto-Regular.ttf"
 if (Test-Path $srcFont) {
