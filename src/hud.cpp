@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 187
-// 🐭 Maus-Kommentar: Gepard HUD 1.0 – schützt vor GL-Crashes, prüft Kontext, fontPath, Shader-Erfolg. Kein draw ohne init. Fallback-Logs, ASCII-clean. Schneefuchs prüft und nickt.
+// Zeilen: 199
+// 🐭 Maus-Kommentar: Gepard HUD 1.1 – robust gegen fehlende Fonts, leere Glyphs und Shaderfehler. draw() prüft Init. Kein Zugriff ohne Kontext. Schneefuchs: „Schutz zuerst.“ Otter: „Crashfrei fliegen.“
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -73,9 +73,12 @@ static void buildAtlas() {
 
     int x = 0, y = 0, rowH = 0;
     for (char c = 32; c < 127; ++c) {
-        if (FT_Load_Char(face, c, FT_LOAD_RENDER)) continue;
-        FT_Bitmap& bmp = face->glyph->bitmap;
+        if (FT_Load_Char(face, c, FT_LOAD_RENDER) != 0) {
+            std::printf("[HUD] Failed to load glyph: %c\n", c);
+            continue;
+        }
 
+        FT_Bitmap& bmp = face->glyph->bitmap;
         if (bmp.width == 0 || bmp.rows == 0 || !bmp.buffer) {
             std::printf("[HUD] Skipping glyph %c – empty bitmap\n", c);
             continue;
@@ -90,6 +93,9 @@ static void buildAtlas() {
         x += bmp.width + 1;
         rowH = std::max(rowH, int(bmp.rows));
     }
+
+    if (glyphUVs.empty())
+        std::puts("[HUD] WARNING: Glyph atlas is empty – no text will render");
 }
 
 void init() {
@@ -126,6 +132,11 @@ void init() {
         return;
     }
 
+    if (!face || !face->glyph) {
+        std::fprintf(stderr, "[HUD] Invalid font face or glyph\n");
+        return;
+    }
+
     FT_Set_Pixel_Sizes(face, 0, 32);
     buildAtlas();
 
@@ -151,7 +162,7 @@ void init() {
 }
 
 void drawText(const std::string& text, float x, float y, float w, float h) {
-    if (!initialized) return;
+    if (!initialized || glyphUVs.empty()) return;
 
     std::vector<float> verts;
     float penX = x;
