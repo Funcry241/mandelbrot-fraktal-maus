@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 79
-// 🐭 Maus-Kommentar: Projekt Phönix – FreeType abgestreift, EasyFont erhoben. Kein Shader, keine Init. Zeichnet direkt per CPU-gepuffertem ASCII. Schnell, robust, restartfrei. Otter: „HUD ist jetzt ein Lichtschalter.“
+// Zeilen: 81
+// 🐭 Maus-Kommentar: Logging nun bedingt über Settings::debugLogging. Ausgabe nur bei Bedarf. HUD ist sichtbar, aber diskret. Otter: „Worte nur, wenn gefragt.“
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -22,13 +22,19 @@ void draw(RendererState& state) {
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 16, (void*)0);
+
+    // ✅ Korrektur: Stride ist 8 Byte, da nur (x, y) als float
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
 
     auto drawText = [](const char* text, float x, float y) {
         char buffer[9999]; // Max 999 chars
         int quads = stb_easy_font_print(x, y, (char*)text, nullptr, buffer, sizeof(buffer));
-        printf("[HUD] Drawing \"%s\" → %d quads\n", text, quads);
-        glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 4, buffer, GL_DYNAMIC_DRAW);
+
+        if (Settings::debugLogging) {
+            printf("[HUD] Drawing \"%s\" → %d quads\n", text, quads);
+        }
+
+        glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);
         glDrawArrays(GL_QUADS, 0, quads * 4);
     };
 
@@ -39,7 +45,7 @@ void draw(RendererState& state) {
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     glDisable(GL_TEXTURE_2D);
-    glColor3f(1, 1, 1);
+    glColor3f(1, 1, 1); // Weiß
 
     char buf[128];
     std::snprintf(buf, sizeof(buf), "FPS: %.1f", state.fps);
