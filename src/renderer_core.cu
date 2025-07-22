@@ -1,5 +1,6 @@
 // Datei: src/renderer_core.cu
-// 🐭 Maus-Kommentar: Alpha 49c – Logging-Vereinheitlichung „Gepard 2.0“. Zoom-Ziel-Log ist optional aktivierbar. Alle Ausgaben sind ASCII-clean, einzeilig, kompakt. Fallback- und Fensterwarnungen klar getrennt. Schneefuchs: „Nur was präzise loggt, bleibt präzise.“
+// Zeilen: 166
+// 🐭 Maus-Kommentar: Alpha 49d – Debug-Pfade vollständig instrumentiert. Alle kritischen Punkte im Lifecycle geloggt. Keine stillen Abstürze mehr. Ideal für Tracebacks. Schneefuchs flüstert: „Sichtbarkeit ist die halbe Stabilität.“
 
 #include "pch.hpp"
 
@@ -18,14 +19,20 @@
 #define ENABLE_ZOOM_LOGGING 0
 
 Renderer::Renderer(int width, int height)
-: state(width, height), glInitialized(false) {}
+: state(width, height), glInitialized(false) {
+    if (Settings::debugLogging)
+        std::puts("[DEBUG] Renderer::Renderer() started");
+}
 
 Renderer::~Renderer() {
     if (Settings::debugLogging && !glInitialized)
-        std::puts("[DEBUG] Cleanup skipped – OpenGL not initialized");
+        std::puts("[DEBUG] Cleanup skipped - OpenGL not initialized");
 
-    if (glInitialized)
+    if (glInitialized) {
+        if (Settings::debugLogging)
+            std::puts("[DEBUG] Calling cleanup()");
         cleanup();
+    }
 }
 
 bool Renderer::initGL() {
@@ -38,20 +45,32 @@ bool Renderer::initGL() {
         return false;
     }
 
+    if (Settings::debugLogging)
+        std::puts("[DEBUG] GLFW window created successfully");
+
+    glfwMakeContextCurrent(state.window);
+    if (Settings::debugLogging)
+        std::puts("[DEBUG] OpenGL context made current");
+
     if (glewInit() != GLEW_OK) {
         std::puts("[ERROR] glewInit() failed");
         RendererWindow::destroyWindow(state.window);
         state.window = nullptr;
-        glfwTerminate(); // Otter/Schneefuchs: Fenster weg → GLFW auch!
+        glfwTerminate();
         return false;
     }
 
-    RendererPipeline::init();
+    if (Settings::debugLogging)
+        std::puts("[DEBUG] GLEW initialized successfully");
 
+    RendererPipeline::init();
+    if (Settings::debugLogging)
+        std::puts("[DEBUG] RendererPipeline initialized");
+
+    glInitialized = true;
     if (Settings::debugLogging)
         std::puts("[DEBUG] OpenGL init complete");
 
-    glInitialized = true;
     return true;
 }
 
@@ -62,18 +81,15 @@ bool Renderer::shouldClose() const {
 void Renderer::renderFrame_impl() {
     RendererLoop::renderFrame_impl(state);
 
-    // Zoom-Ziel aktualisieren (wenn neu)
     if (state.zoomResult.isNewTarget) {
         state.lastEntropy  = state.zoomResult.bestEntropy;
         state.lastContrast = state.zoomResult.bestContrast;
     }
 
-    // Sanfte Bewegung immer (auch bei Pause)
     state.offset = state.zoomResult.newOffset;
 
-    if (state.zoomResult.shouldZoom) {
+    if (state.zoomResult.shouldZoom)
         state.zoom *= Settings::zoomFactor;
-    }
 
 #if ENABLE_ZOOM_LOGGING
     const auto& zr = state.zoomResult;
