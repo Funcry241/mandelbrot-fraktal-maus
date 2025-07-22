@@ -1,12 +1,13 @@
 // Datei: src/hud.cpp
-// Zeilen: 81
-// 🐭 Maus-Kommentar: Logging nun bedingt über Settings::debugLogging. Ausgabe nur bei Bedarf. HUD ist sichtbar, aber diskret. Otter: „Worte nur, wenn gefragt.“
+// Zeilen: 86
+// 🐭 Maus-Kommentar: Sichtbarkeit getestet mit "HUD ACTIVE". Logging ASCII-safe. Keine locale-Fallen. Otter: „Jetzt seh ich was, und zwar genau das!“
 
 #include "pch.hpp"
 #include "hud.hpp"
 #include "settings.hpp"
 #pragma warning(disable: 4505) // unreferenzierte statische Funktionen
 #include "stb_easy_font.h"
+#include <locale.h>
 
 namespace Hud {
 
@@ -47,8 +48,14 @@ void draw(RendererState& state) {
     glDisable(GL_TEXTURE_2D);
     glColor3f(1, 1, 1); // Weiß
 
+    // ✅ Fester ASCII-Text zur Sichtbarkeitsprüfung
+    drawText("HUD ACTIVE", 20, 20);
+
+    // ⚠️ Zahlen ASCII-sicher machen (englische Dezimalpunkte)
+    setlocale(LC_NUMERIC, "C");
+
     char buf[128];
-    std::snprintf(buf, sizeof(buf), "FPS: %.1f", state.fps);
+    std::snprintf(buf, sizeof(buf), "FPS: %.0f", state.fps);
     drawText(buf, 20, 40);
 
     double z = 1.0 / double(state.zoom);
