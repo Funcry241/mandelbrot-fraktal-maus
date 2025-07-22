@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 91
-// 🐭 Maus-Kommentar: Sichtbarkeit getestet mit "HUD ACTIVE". Logging ASCII-safe. Shader-State wird nun zurückgesetzt. Otter: „HUD kommt klar, wenn keiner reinpfuscht.“
+// Zeilen: 93
+// 🐭 Maus-Kommentar: Sichtbarkeit getestet mit "HUD ACTIVE". Logging ASCII-safe. Viewport wird korrekt gesetzt. Otter: „So sieht man's wirklich!“
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -50,6 +50,10 @@ void draw(RendererState& state) {
     };
 
     glPushMatrix();
+
+    // 🖼 Viewport korrekt setzen
+    glViewport(0, 0, state.width, state.height);
+
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0, state.width, state.height, 0, -1, 1);
