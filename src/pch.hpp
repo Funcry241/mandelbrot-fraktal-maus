@@ -1,6 +1,6 @@
 // Datei: src/pch.hpp
-// Zeilen: 46
-// 🐭 Maus-Kommentar: Precompiled Header – klar strukturiert: Windows-Header mit WIN32-Defines, dann OpenGL (GLEW+GLFW), dann CUDA-Runtime, dann STL. Achtung: windows.h nur mit NOMINMAX, GLEW nur vor GLFW. Schneefuchs bestand darauf, dass CUDA nur Runtime einbindet – nie cuda.h – sonst PCH-Krater.
+// Zeilen: 45
+// 🐭 Maus-Kommentar: Precompiled Header – Projekt Phönix! FreeType raus, EasyFont rein. OpenGL bleibt dominant. CUDA-Interop bleibt minimalinvasiv. Schneefuchs sieht, Otter lacht.
 
 #pragma once
 

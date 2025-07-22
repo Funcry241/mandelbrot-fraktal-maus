@@ -188,16 +188,5 @@ foreach ($script in 'run_build_inner.ps1','MausDelete.ps1','MausGitAutoCommit.ps
 Write-Host "[INSTALL] Installing to ./dist"
 cmake --install build --prefix dist
 
-# HUD-Font kopieren (Roboto)
-$srcFont = "fonts\Roboto-Regular.ttf"
-$dstFont = "dist\fonts\Roboto-Regular.ttf"
-if (Test-Path $srcFont) {
-    New-Item -ItemType Directory -Force -Path (Split-Path $dstFont) | Out-Null
-    Copy-Item $srcFont -Destination $dstFont -Force
-    Write-Host "[FONT] Copied HUD font to dist/fonts"
-} else {
-    Write-Warning "[FONT] Roboto font missing in /fonts"
-}
-
 Write-Host "`n=== Build completed successfully. ===`n"
 exit 0

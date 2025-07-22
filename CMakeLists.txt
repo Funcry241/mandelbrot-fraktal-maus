@@ -32,7 +32,6 @@ find_package(glew CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
-find_package(Freetype REQUIRED)
 
 # ---------------------------------------------------------
 # 🩹 Fix: Suche nach cuda_gl_interop.h
@@ -108,13 +107,13 @@ target_compile_options(mandelbrot_otterdream PRIVATE
     >
 )
 
+# 🚀 Projekt Phönix: Keine Abhängigkeit mehr zu Freetype
 target_link_libraries(mandelbrot_otterdream PRIVATE
     OpenGL::GL
     GLEW::GLEW
     glfw
     CUDA::cudart
-    Threads::Threads
-    Freetype::Freetype
+    Threads::Threads    
 )
 
 set_source_files_properties(
