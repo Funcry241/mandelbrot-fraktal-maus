@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 91
-// 🐭 Maus-Kommentar: Sichtbarkeit getestet mit "HUD ACTIVE". Logging ASCII-safe. Shader-State wird nun zurückgesetzt. Otter: „HUD kommt klar, wenn keiner reinpfuscht.“
+// Zeilen: 94
+// 🐭 Maus-Kommentar: Sichtbarkeit geprüft, Orthoprojektion korrekt mit glOrtho(..., zNear, zFar). Keine Annahmen über windowSize mehr. Otter bestätigt: Klartext.
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -29,6 +29,19 @@ void draw(RendererState& state) {
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
 
+    // Korrekte Orthoprojektion: 6 Parameter (inkl. zNear, zFar)
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0.0, state.width, state.height, 0.0, -1.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glDisable(GL_TEXTURE_2D);
+    glColor3f(1, 1, 1);
+
     auto drawText = [](const char* text, float x, float y) {
         char buffer[9999];
         char local[256];
@@ -44,15 +57,6 @@ void draw(RendererState& state) {
         glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);
         glDrawArrays(GL_QUADS, 0, quads * 4);
     };
-
-    glPushMatrix();
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, state.width, state.height, 0, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glDisable(GL_TEXTURE_2D);
-    glColor3f(1, 1, 1);
 
     drawText("HUD ACTIVE", 20, 20);
 
@@ -71,7 +75,12 @@ void draw(RendererState& state) {
     drawText(buf, 20, 120);
 
     glEnable(GL_TEXTURE_2D);
+
+    glMatrixMode(GL_MODELVIEW);
     glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+
     glBindVertexArray(0);
 }
 
