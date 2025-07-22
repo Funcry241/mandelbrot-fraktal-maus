@@ -9,6 +9,7 @@
 #include "cuda_interop.hpp"
 
 int main() {
+    std::puts("[DEBUG] Mandelbrot-Otterdream gestartet");
     if (Settings::debugLogging)
         std::puts("[DEBUG] Mandelbrot-Otterdream gestartet");
 
