@@ -121,8 +121,9 @@ void init() {
     const std::string fontPath = "fonts/Roboto-Regular.ttf";
     const std::string absPath = std::filesystem::absolute(fontPath).string();
 
-    if (!std::filesystem::exists(fontPath)) {
-        std::fprintf(stderr, "[HUD] Font file missing: %s\n", absPath.c_str());
+    std::error_code ec;
+    if (!std::filesystem::exists(fontPath, ec)) {
+        std::fprintf(stderr, "[HUD] Font file missing: %s (ec=%d)\n", absPath.c_str(), ec.value());
         std::fprintf(stderr, "[HUD] HUD will be disabled.\n");
         return;
     }
