@@ -6,6 +6,18 @@ param(
 $ErrorActionPreference = 'Stop'
 Write-Host "`n=== Build started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===`n"
 
+$buildDir = "build"
+$distDir = "dist"
+
+if (Test-Path $buildDir) {
+    Write-Host "[CLEAN] Removing: $buildDir"
+    Remove-Item -Recurse -Force $buildDir
+}
+if (Test-Path $distDir) {
+    Write-Host "[CLEAN] Removing: $distDir"
+    Remove-Item -Recurse -Force $distDir
+}
+
 # SSH-Agent
 if ((Get-Service ssh-agent -ErrorAction SilentlyContinue).Status -ne 'Running') {
     Start-Service ssh-agent
@@ -22,16 +34,6 @@ if (-not (ssh-add -l 2>&1) -match "SHA256") {
     }
 } else {
     Write-Host "[SSH] Key already active."
-}
-
-# Cleanup falls explizit angefordert
-if ($Clean) {
-    foreach ($p in "build", "dist", "mandelbrot_otterdream_log.txt") {
-        if (Test-Path $p) {
-            Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "[CLEAN] Removed: $p"
-        }
-    }
 }
 
 # Supporter
@@ -85,22 +87,6 @@ try {
 } catch {
     Write-Error "[VCPKG] Not found."
     exit 1
-}
-
-# Build-Verzeichnis validieren
-$cacheFile = "build/CMakeCache.txt"
-$expectedSource = (Resolve-Path ".\CMakeLists.txt").Path
-
-if (Test-Path $cacheFile) {
-    $actualSourceLine = Get-Content $cacheFile | Where-Object { $_ -match '^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$' }
-    if ($actualSourceLine -match '^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$') {
-        $actualSource = $matches[1]
-        if ($actualSource -ne $expectedSource) {
-            Write-Warning "[CACHE] Source mismatch detected. Removing stale build/..."
-            Remove-Item -Recurse -Force build
-            New-Item -ItemType Directory -Force -Path build | Out-Null
-        }
-    }
 }
 
 # Workaround: Entferne ungültigen glew32d.lib-Pfad aus Cache
