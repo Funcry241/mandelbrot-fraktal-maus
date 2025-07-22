@@ -75,7 +75,14 @@ static void buildAtlas() {
     for (char c = 32; c < 127; ++c) {
         if (FT_Load_Char(face, c, FT_LOAD_RENDER)) continue;
         FT_Bitmap& bmp = face->glyph->bitmap;
+
+        if (bmp.width == 0 || bmp.rows == 0 || !bmp.buffer) {
+            std::printf("[HUD] Skipping glyph %c – empty bitmap\n", c);
+            continue;
+        }
+
         if (x + bmp.width >= atlasW) { x = 0; y += rowH; rowH = 0; }
+
         glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, bmp.width, bmp.rows, GL_RED, GL_UNSIGNED_BYTE, bmp.buffer);
         float u0 = x / float(atlasW), v0 = y / float(atlasH);
         float u1 = (x + bmp.width) / float(atlasW), v1 = (y + bmp.rows) / float(atlasH);
