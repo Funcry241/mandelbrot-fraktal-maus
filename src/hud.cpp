@@ -85,6 +85,7 @@ static void buildAtlas() {
 }
 
 void init() {
+    std::fprintf(stderr, "[HUD] Start.. \n");
     if (FT_Init_FreeType(&ft)) {
         std::fprintf(stderr, "[HUD] Could not init FreeType library\n");
         return;
