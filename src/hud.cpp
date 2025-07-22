@@ -85,9 +85,10 @@ static void buildAtlas() {
 }
 
 void init() {
-    std::fprintf(stderr, "[HUD] Start.. \n");
+    std::puts("[HUD] Hud::init() reached");
+
     if (FT_Init_FreeType(&ft)) {
-        std::fprintf(stderr, "[HUD] Could not init FreeType library\n");
+        std::puts("[HUD] ERROR: Could not init FreeType");
         return;
     }
 
@@ -96,17 +97,21 @@ void init() {
 
     if (!std::filesystem::exists(fontPath)) {
         std::fprintf(stderr, "[HUD] Font file missing: %s\n", absPath.c_str());
-        std::fprintf(stderr, "[HUD] HUD will be disabled (no text rendering)\n");
+        std::fprintf(stderr, "[HUD] HUD will be disabled.\n");
         return;
     }
 
     if (FT_New_Face(ft, fontPath.c_str(), 0, &face)) {
         std::fprintf(stderr, "[HUD] Failed to load font: %s\n", absPath.c_str());
-        std::fprintf(stderr, "[HUD] HUD will be disabled (no text rendering)\n");
+        std::fprintf(stderr, "[HUD] HUD will be disabled.\n");
         return;
     }
 
     FT_Set_Pixel_Sizes(face, 0, 32);
+
+    if (glGetError() != GL_NO_ERROR)
+        std::puts("[HUD] Warning: GL error before atlas build");
+
     buildAtlas();
 
     GLuint vs = compile(GL_VERTEX_SHADER, vertexShaderSrc);
@@ -121,7 +126,7 @@ void init() {
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
 
-    std::puts("[HUD] Font loaded and HUD initialized");
+    std::puts("[HUD] HUD initialized successfully.");
 }
 
 void drawText(const std::string& text, float x, float y, float w, float h) {
