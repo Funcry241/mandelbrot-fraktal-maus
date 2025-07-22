@@ -27,7 +27,7 @@ void draw(RendererState& state) {
     auto drawText = [](const char* text, float x, float y) {
         char buffer[9999]; // Max 999 chars
         int quads = stb_easy_font_print(x, y, (char*)text, nullptr, buffer, sizeof(buffer));
-
+        printf("[HUD] Drawing \"%s\" → %d quads\n", text, quads);
         glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 4, buffer, GL_DYNAMIC_DRAW);
         glDrawArrays(GL_QUADS, 0, quads * 4);
     };
