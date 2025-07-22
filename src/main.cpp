@@ -8,7 +8,8 @@
 #include "renderer_state.hpp"
 #include "cuda_interop.hpp"
 
-int main() {    
+int main() {   
+    std::puts(">>>>> MAIN ENTRY POINT REACHED <<<<<"); 
     if (Settings::debugLogging)
         std::puts("[DEBUG] Mandelbrot-Otterdream gestartet");
 
