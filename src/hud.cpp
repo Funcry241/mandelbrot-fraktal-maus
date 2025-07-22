@@ -1,17 +1,16 @@
 // Datei: src/hud.cpp
-// Zeilen: 93
-// 🐭 Maus-Kommentar: Sichtbarkeit getestet mit "HUD ACTIVE". Logging ASCII-safe. Viewport wird korrekt gesetzt. Otter: „So sieht man's wirklich!“
+// Zeilen: 91
+// 🐭 Maus-Kommentar: Sichtbarkeit getestet mit "HUD ACTIVE". Logging ASCII-safe. Shader-State wird nun zurückgesetzt. Otter: „HUD kommt klar, wenn keiner reinpfuscht.“
 
 #include "pch.hpp"
 #include "hud.hpp"
 #include "settings.hpp"
-#pragma warning(disable: 4505) // unreferenzierte statische Funktionen
+#pragma warning(disable: 4505)
 #include "stb_easy_font.h"
 #include <locale.h>
 
 namespace Hud {
 
-// 🧱 Einfacher Quad-Puffer
 static GLuint vao = 0, vbo = 0;
 
 void draw(RendererState& state) {
@@ -20,7 +19,6 @@ void draw(RendererState& state) {
         glGenBuffers(1, &vbo);
     }
 
-    // 🔒 Sicherstellen, dass kein aktiver Shader stört
     glUseProgram(0);
     glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
@@ -29,8 +27,6 @@ void draw(RendererState& state) {
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glEnableVertexAttribArray(0);
-
-    // ✅ Korrektur: Stride ist 8 Byte, da nur (x, y) als float
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
 
     auto drawText = [](const char* text, float x, float y) {
@@ -50,21 +46,16 @@ void draw(RendererState& state) {
     };
 
     glPushMatrix();
-
-    // 🖼 Viewport korrekt setzen
-    glViewport(0, 0, state.width, state.height);
-
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0, state.width, state.height, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     glDisable(GL_TEXTURE_2D);
-    glColor3f(1, 1, 1); // Weiß
+    glColor3f(1, 1, 1);
 
     drawText("HUD ACTIVE", 20, 20);
 
-    // ⚠️ Zahlen ASCII-sicher machen (englische Dezimalpunkte)
     setlocale(LC_NUMERIC, "C");
 
     char buf[128];
