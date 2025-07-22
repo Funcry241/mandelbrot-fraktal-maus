@@ -8,7 +8,6 @@
 namespace OpenGLUtils {
 
 // Hilfsfunktion: Shader kompilieren
-#ifndef CUDACC
 static GLuint compileShader(GLenum type, const char* src) {
 GLuint s = glCreateShader(type);
 glShaderSource(s, 1, &src, nullptr);
@@ -53,7 +52,6 @@ glDeleteShader(f);
 return prog;
 
 }
-#endif // CUDACC
 
 void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) {
 constexpr float quad[] = {
