@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 86
-// 🐭 Maus-Kommentar: Sichtbarkeit getestet mit "HUD ACTIVE". Logging ASCII-safe. Keine locale-Fallen. Otter: „Jetzt seh ich was, und zwar genau das!“
+// Zeilen: 91
+// 🐭 Maus-Kommentar: Sichtbarkeit getestet mit "HUD ACTIVE". Logging ASCII-safe. Shader-State wird nun zurückgesetzt. Otter: „HUD kommt klar, wenn keiner reinpfuscht.“
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -20,6 +20,12 @@ void draw(RendererState& state) {
         glGenBuffers(1, &vbo);
     }
 
+    // 🔒 Sicherstellen, dass kein aktiver Shader stört
+    glUseProgram(0);
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glEnableVertexAttribArray(0);
@@ -28,7 +34,7 @@ void draw(RendererState& state) {
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
 
     auto drawText = [](const char* text, float x, float y) {
-        char buffer[9999];        
+        char buffer[9999];
         char local[256];
         strcpy_s(local, sizeof(local), text);
 
@@ -52,7 +58,6 @@ void draw(RendererState& state) {
     glDisable(GL_TEXTURE_2D);
     glColor3f(1, 1, 1); // Weiß
 
-    // ✅ Fester ASCII-Text zur Sichtbarkeitsprüfung
     drawText("HUD ACTIVE", 20, 20);
 
     // ⚠️ Zahlen ASCII-sicher machen (englische Dezimalpunkte)
