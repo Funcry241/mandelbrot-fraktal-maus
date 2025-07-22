@@ -8,8 +8,7 @@
 #include "renderer_state.hpp"
 #include "cuda_interop.hpp"
 
-int main() {
-    std::puts("[DEBUG] Mandelbrot-Otterdream gestartet");
+int main() {    
     if (Settings::debugLogging)
         std::puts("[DEBUG] Mandelbrot-Otterdream gestartet");
 

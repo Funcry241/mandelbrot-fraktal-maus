@@ -87,18 +87,22 @@ static void buildAtlas() {
 void init() {
     if (FT_Init_FreeType(&ft)) {
         std::fprintf(stderr, "[HUD] Could not init FreeType library\n");
-        std::exit(EXIT_FAILURE);
+        return;
     }
 
     const std::string fontPath = "fonts/Roboto-Regular.ttf";
+    const std::string absPath = std::filesystem::absolute(fontPath).string();
+
     if (!std::filesystem::exists(fontPath)) {
-        std::fprintf(stderr, "[HUD] Font file missing: %s\n", std::filesystem::absolute(fontPath).string().c_str());
-        std::exit(EXIT_FAILURE);
+        std::fprintf(stderr, "[HUD] Font file missing: %s\n", absPath.c_str());
+        std::fprintf(stderr, "[HUD] HUD will be disabled (no text rendering)\n");
+        return;
     }
 
     if (FT_New_Face(ft, fontPath.c_str(), 0, &face)) {
-        std::fprintf(stderr, "[HUD] Failed to load font '%s'\n", std::filesystem::absolute(fontPath).string().c_str());
-        std::exit(EXIT_FAILURE);
+        std::fprintf(stderr, "[HUD] Failed to load font: %s\n", absPath.c_str());
+        std::fprintf(stderr, "[HUD] HUD will be disabled (no text rendering)\n");
+        return;
     }
 
     FT_Set_Pixel_Sizes(face, 0, 32);
@@ -115,6 +119,8 @@ void init() {
 
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
+
+    std::puts("[HUD] Font loaded and HUD initialized");
 }
 
 void drawText(const std::string& text, float x, float y, float w, float h) {
