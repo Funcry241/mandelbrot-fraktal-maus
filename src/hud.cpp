@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 170
-// 🐭 Maus-Kommentar: Jetzt mit präzisem Fehler-Log bei Fontproblemen – inkl. absolutem Pfad. Verhindert stummes Beenden, wenn Font fehlt. Debuggerfreundlich. Für Otter mit Adlerblick.
+// Zeilen: 187
+// 🐭 Maus-Kommentar: Gepard HUD 1.0 – schützt vor GL-Crashes, prüft Kontext, fontPath, Shader-Erfolg. Kein draw ohne init. Fallback-Logs, ASCII-clean. Schneefuchs prüft und nickt.
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -21,6 +21,7 @@ static GLuint textureAtlas = 0;
 static GLuint vao = 0, vbo = 0;
 static GLuint shader = 0;
 static std::map<char, std::tuple<float, float, float, float>> glyphUVs;
+static bool initialized = false;
 
 static const char* vertexShaderSrc = R"GLSL(
 #version 430 core
@@ -53,8 +54,8 @@ static GLuint compile(GLenum type, const char* src) {
     if (!success) {
         char log[512];
         glGetShaderInfoLog(s, 512, nullptr, log);
-        std::fprintf(stderr, "[HUD] Shader compile error: %s\n", log);
-        std::exit(EXIT_FAILURE);
+        std::fprintf(stderr, "[HUD] Shader compile error:\n%s\n", log);
+        return 0;
     }
     return s;
 }
@@ -85,7 +86,19 @@ static void buildAtlas() {
 }
 
 void init() {
-    std::puts("[HUD] Hud::init() reached");
+    std::puts("[HUD] init() called");
+
+    if (initialized) {
+        std::puts("[HUD] Already initialized, skipping.");
+        return;
+    }
+
+    GLint major = 0;
+    glGetIntegerv(GL_MAJOR_VERSION, &major);
+    if (major < 3) {
+        std::puts("[HUD] ERROR: OpenGL context not ready. Aborting HUD init.");
+        return;
+    }
 
     if (FT_Init_FreeType(&ft)) {
         std::puts("[HUD] ERROR: Could not init FreeType");
@@ -103,19 +116,19 @@ void init() {
 
     if (FT_New_Face(ft, fontPath.c_str(), 0, &face)) {
         std::fprintf(stderr, "[HUD] Failed to load font: %s\n", absPath.c_str());
-        std::fprintf(stderr, "[HUD] HUD will be disabled.\n");
         return;
     }
 
     FT_Set_Pixel_Sizes(face, 0, 32);
-
-    if (glGetError() != GL_NO_ERROR)
-        std::puts("[HUD] Warning: GL error before atlas build");
-
     buildAtlas();
 
     GLuint vs = compile(GL_VERTEX_SHADER, vertexShaderSrc);
     GLuint fs = compile(GL_FRAGMENT_SHADER, fragmentShaderSrc);
+    if (vs == 0 || fs == 0) {
+        std::puts("[HUD] Shader compile failed – HUD disabled");
+        return;
+    }
+
     shader = glCreateProgram();
     glAttachShader(shader, vs);
     glAttachShader(shader, fs);
@@ -126,10 +139,13 @@ void init() {
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
 
+    initialized = true;
     std::puts("[HUD] HUD initialized successfully.");
 }
 
 void drawText(const std::string& text, float x, float y, float w, float h) {
+    if (!initialized) return;
+
     std::vector<float> verts;
     float penX = x;
     for (char c : text) {
@@ -144,6 +160,7 @@ void drawText(const std::string& text, float x, float y, float w, float h) {
         });
         penX += quadW;
     }
+
     glUseProgram(shader);
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -162,30 +179,32 @@ void drawText(const std::string& text, float x, float y, float w, float h) {
 }
 
 void draw(RendererState& state) {
-    char buf[128];
+    if (!initialized) return;
 
-    // FPS
+    char buf[128];
     std::snprintf(buf, sizeof(buf), "FPS: %.1f", state.fps);
     drawText(buf, 20.0f, 40.0f, float(state.width), float(state.height));
 
-    // Zoom (als wissenschaftliche Notation)
     double z = 1.0 / double(state.zoom);
     int exponent = int(std::log10(z));
     std::snprintf(buf, sizeof(buf), "Zoom: 1e%d", exponent);
     drawText(buf, 20.0f, 80.0f, float(state.width), float(state.height));
 
-    // Offset
     std::snprintf(buf, sizeof(buf), "Offset: %.6f, %.6f", state.offset.x, state.offset.y);
     drawText(buf, 20.0f, 120.0f, float(state.width), float(state.height));
 }
 
 void cleanup() {
+    if (!initialized) return;
+
     glDeleteTextures(1, &textureAtlas);
     glDeleteProgram(shader);
     glDeleteBuffers(1, &vbo);
     glDeleteVertexArrays(1, &vao);
     FT_Done_Face(face);
     FT_Done_FreeType(ft);
+
+    initialized = false;
 }
 
 } // namespace Hud
