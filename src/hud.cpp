@@ -34,7 +34,8 @@ void draw(RendererState& state) {
         if (Settings::debugLogging) {
             printf("[HUD] Drawing \"%s\" -> %d quads\n", text, quads);
         }
-
+        
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);
         glDrawArrays(GL_QUADS, 0, quads * 4);
     };
