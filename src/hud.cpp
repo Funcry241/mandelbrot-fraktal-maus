@@ -28,13 +28,16 @@ void draw(RendererState& state) {
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
 
     auto drawText = [](const char* text, float x, float y) {
-        char buffer[9999]; // Max 999 chars
-        int quads = stb_easy_font_print(x, y, (char*)text, nullptr, buffer, sizeof(buffer));
+        char buffer[9999];        
+        char local[256];
+        strcpy_s(local, sizeof(local), text);
+
+        int quads = stb_easy_font_print(x, y, local, nullptr, buffer, sizeof(buffer));
 
         if (Settings::debugLogging) {
-            printf("[HUD] Drawing \"%s\" -> %d quads\n", text, quads);
+            printf("[HUD] Drawing \"%s\" -> %d quads\n", local, quads);
         }
-        
+
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);
         glDrawArrays(GL_QUADS, 0, quads * 4);
