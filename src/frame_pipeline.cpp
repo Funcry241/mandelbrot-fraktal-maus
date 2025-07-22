@@ -61,7 +61,7 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
     if (!frameCtx.shouldZoom) return;
     if (dist < Settings::DEADZONE) {
         if (Settings::debugLogging)
-            std::printf("[Logic] Offset in DEADZONE (%.4e) → no movement\n", dist);
+            std::printf("[Logic] Offset in DEADZONE (%.4e) -> no movement\n", dist);
         return;
     }
     double stepScale = std::tanh(Settings::OFFSET_TANH_SCALE * dist);

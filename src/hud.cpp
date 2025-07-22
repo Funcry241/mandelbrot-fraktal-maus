@@ -31,7 +31,7 @@ void draw(RendererState& state) {
         int quads = stb_easy_font_print(x, y, (char*)text, nullptr, buffer, sizeof(buffer));
 
         if (Settings::debugLogging) {
-            printf("[HUD] Drawing \"%s\" → %d quads\n", text, quads);
+            printf("[HUD] Drawing \"%s\" -> %d quads\n", text, quads);
         }
 
         glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);

@@ -11,7 +11,7 @@ Deklariert klar getrennte Schritte:
     ZoomLogik (mit CommandBus)
 
     Bildausgabe (Heatmap & Fraktal)
-    → Alles basiert auf FrameContext, keine globalen Zustände.
+    -> Alles basiert auf FrameContext, keine globalen Zustände.
     ❤️ FIX: computeCudaFrame explizit mit RendererState – Maus liebt Präzision, Schneefuchs liebt Klarheit.
     ❤️ FIX: drawFrame braucht jetzt RendererState für HeatmapOverlay (neuer Parameter).
     */
