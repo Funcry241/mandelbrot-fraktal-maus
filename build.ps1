@@ -53,7 +53,7 @@ try {
     exit 1
 }
 
-# MSVC
+# MSVC (ohne Zeilenlängenfehler)
 $vswhere = "${Env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vsInstall = & "$vswhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vsInstall) {
@@ -61,8 +61,7 @@ if (-not $vsInstall) {
     exit 1
 }
 $vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
-cmd /c "`"$vcvars`""
-
+& "$vcvars" > $null
 
 # .env
 if (Test-Path .env) {
