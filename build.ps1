@@ -128,7 +128,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # Build
 Write-Host "[BUILD] Starting build..."
-cmake --build build --config $Configuration --parallel
+cmake --build build --config $Configuration --parallel -- -v
 if ($LASTEXITCODE -ne 0) {
     if (-not (Test-Path "build/build.ninja")) {
         Write-Error "[NINJA] build.ninja missing. CMake-Konfiguration war fehlerhaft."
