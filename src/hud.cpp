@@ -75,8 +75,8 @@ void draw(RendererState& state) {
     // === Hintergrundbox ===
     float blockHeight = lineHeight * 4 + 2 * padding;
     float blockWidth = 400.0f;
-    float bx = startX - padding;
-    float by = startY - padding;
+    float bx = startX;
+    float by = startY;
 
     float bg[] = {
         bx,           by,
