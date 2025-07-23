@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 106
-// 🐭 Maus-Kommentar: Box-Abstand exakt an Heatmap angepasst (16 px), `padding` entfernt, HUD-Schrift explizit sichtbar gemacht via `glColor4f`. Kein Alpha-Ghosting, keine Pseudozentrierung. Otter-gemessen.
+// Zeilen: 108
+// 🐭 Maus-Kommentar: HUD-Textbox hat exakt dieselben Abstände wie Heatmap (oben/links = 16). Keine Koordinatenverwirrung mehr – alles Otter-symmetrisch!
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -9,6 +9,7 @@
 #include "stb_easy_font.h"
 #pragma warning(disable:4505) // nötig für stb_easy_font.h wegen ungenutzter interner Funktionen (Otter geprüft)
 #include <locale.h>
+#include <cstdio>
 
 namespace Hud {
 
@@ -42,10 +43,12 @@ void draw(RendererState& state) {
 
     glDisable(GL_TEXTURE_2D);
 
+    // === Layout-Konstanten ===
     constexpr float margin = 16.0f;
     const float startX = margin;
     const float startY = margin;
     const float lineHeight = 40.0f;
+    const float padding = 10.0f;
 
     const char* lines[] = {
         "HUD ACTIVE",
@@ -68,11 +71,11 @@ void draw(RendererState& state) {
     std::snprintf(buf, sizeof(buf), "Offset: %.6f, %.6f", state.offset.x, state.offset.y);
     lines[3] = _strdup(buf);
 
-    // === Hintergrundbox exakt wie Heatmap-Overlay ===
-    float blockHeight = lineHeight * 4;
+    // === Hintergrundbox für alle Zeilen ===
+    float blockHeight = lineHeight * 4 + 2 * padding;
     float blockWidth = 400.0f;
-    float bx = startX;
-    float by = startY;
+    float bx = startX - padding;
+    float by = startY - padding;
 
     float bg[] = {
         bx,           by,
@@ -90,15 +93,29 @@ void draw(RendererState& state) {
     glDrawArrays(GL_LINE_LOOP, 0, 4);
 
     // === Text zeichnen ===
-    glColor4f(1, 1, 1, 1); // explizit Alpha setzen
+    std::fprintf(stderr, "[HUD] Start drawing text...\n");
+    glColor3f(1, 1, 1);
+
     for (int i = 0; i < 4; ++i) {
-        if (!lines[i]) continue;
+        if (!lines[i]) {
+            std::fprintf(stderr, "[HUD] Line %d is null\n", i);
+            continue;
+        }
+
         char buffer[9999];
         unsigned char dummyColor[4] = { 255, 255, 255, 255 };
         int quads = stb_easy_font_print(startX, startY + i * lineHeight, (char*)lines[i], dummyColor, buffer, sizeof(buffer));
+        std::fprintf(stderr, "[HUD] Line %d: '%s' → %d quads\n", i, lines[i], quads);
+
         if (quads > 0) {
             glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);
             glDrawArrays(GL_QUADS, 0, quads * 4);
+
+            GLenum err = glGetError();
+            if (err != GL_NO_ERROR)
+                std::fprintf(stderr, "[HUD] OpenGL error after draw: 0x%x\n", err);
+        } else {
+            std::fprintf(stderr, "[HUD] No quads for line %d\n", i);
         }
     }
 
