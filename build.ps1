@@ -61,11 +61,8 @@ if (-not $vsInstall) {
     exit 1
 }
 $vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
-cmd /c "`"$vcvars`" && set" | ForEach-Object {
-    if ($_ -match '^([\w]+)=(.*)$') {
-        [Environment]::SetEnvironmentVariable($matches[1], $matches[2])
-    }
-}
+& "$vcvars" > $null
+
 
 # .env
 if (Test-Path .env) {
@@ -80,6 +77,7 @@ if (Test-Path .env) {
 
 # VCPKG leiser machen (nur essentielle Ausgaben)
 [Environment]::SetEnvironmentVariable("VCPKG_FEATURE_FLAGS", "quiet")
+[Environment]::SetEnvironmentVariable("VCPKG_KEEP_ENV_VARS", "VCPKG_FEATURE_FLAGS")
 
 # vcpkg
 try {
@@ -118,6 +116,7 @@ $cmakeArgs = @(
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     "-DCMAKE_CXX_STANDARD=23",
     "-DCMAKE_CUDA_STANDARD=20",
+    "-DCMAKE_MESSAGE_LOG_LEVEL=NOTICE",
     $cudaArch
 )
 cmake @cmakeArgs
@@ -175,6 +174,12 @@ if ($cudaDlls) {
     Write-Error "[CUDA] cudart64_*.dll missing!"
     exit 1
 }
+
+# Git-Ausgabe minimieren (Step 3)
+$env:GIT_TRACE = "0"
+$env:GIT_TRACE_PERFORMANCE = "0"
+$env:GIT_TRACE_SETUP = "0"
+$env:GIT_TERMINAL_PROMPT = "0"
 
 # Supporter-Skripte
 foreach ($script in 'run_build_inner.ps1','MausDelete.ps1','MausGitAutoCommit.ps1') {
