@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 106
-// 🐭 Maus-Kommentar: HUD-Text wird nun in einem einzigen transparenten Rechteck gruppiert dargestellt. Keine Einzel-Quads, sondern klare Blöcke – OtterStyle.
+// Zeilen: 109
+// 🐭 Maus-Kommentar: HUD-Overlay jetzt mit elegantem Alpha-Hintergrund, sauberer strdup-Logik und klarer Speicherfreigabe. glOrtho bleibt erhalten für volle Kompatibilität. Otter-approved.
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -46,12 +46,8 @@ void draw(RendererState& state) {
     const float lineHeight = 40.0f;
     const float padding = 10.0f;
 
-    const char* lines[] = {
-        "HUD ACTIVE",
-        nullptr,
-        nullptr,
-        nullptr
-    };
+    char* lines[4] = { nullptr };
+    lines[0] = _strdup("HUD ACTIVE");
 
     setlocale(LC_NUMERIC, "C");
     char buf[128];
@@ -94,15 +90,14 @@ void draw(RendererState& state) {
         if (!lines[i]) continue;
         char buffer[9999];
         unsigned char dummyColor[4] = { 255, 255, 255, 255 };
-        int quads = stb_easy_font_print(x, y0 + i * lineHeight, (char*)lines[i], dummyColor, buffer, sizeof(buffer));
+        int quads = stb_easy_font_print(x, y0 + i * lineHeight, lines[i], dummyColor, buffer, sizeof(buffer));
         if (quads > 0) {
             glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);
             glDrawArrays(GL_QUADS, 0, quads * 4);
         }
     }
 
-    // Cleanup temporär kopierte Strings
-    for (int i = 1; i < 4; ++i) free((void*)lines[i]);
+    for (int i = 0; i < 4; ++i) free((void*)lines[i]);
 
     glEnable(GL_TEXTURE_2D);
 
