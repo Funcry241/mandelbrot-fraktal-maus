@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 108
-// 🐭 Maus-Kommentar: `x` und `y0` wurden durch `startX` und `startY` ersetzt, um eine konsistente, lesbare Platzierung der HUD-Elemente zu gewährleisten. Kein `y0`-Wirrwarr mehr – klare Otterachse.
+// Zeilen: 106
+// 🐭 Maus-Kommentar: Box-Abstand exakt an Heatmap angepasst (16 px), `padding` entfernt, HUD-Schrift explizit sichtbar gemacht via `glColor4f`. Kein Alpha-Ghosting, keine Pseudozentrierung. Otter-gemessen.
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -46,7 +46,6 @@ void draw(RendererState& state) {
     const float startX = margin;
     const float startY = margin;
     const float lineHeight = 40.0f;
-    const float padding = 10.0f;
 
     const char* lines[] = {
         "HUD ACTIVE",
@@ -69,11 +68,11 @@ void draw(RendererState& state) {
     std::snprintf(buf, sizeof(buf), "Offset: %.6f, %.6f", state.offset.x, state.offset.y);
     lines[3] = _strdup(buf);
 
-    // === Hintergrundbox für alle Zeilen ===
-    float blockHeight = lineHeight * 4 + 2 * padding;
+    // === Hintergrundbox exakt wie Heatmap-Overlay ===
+    float blockHeight = lineHeight * 4;
     float blockWidth = 400.0f;
-    float bx = startX - padding;
-    float by = startY - padding;
+    float bx = startX;
+    float by = startY;
 
     float bg[] = {
         bx,           by,
@@ -91,7 +90,7 @@ void draw(RendererState& state) {
     glDrawArrays(GL_LINE_LOOP, 0, 4);
 
     // === Text zeichnen ===
-    glColor3f(1, 1, 1);
+    glColor4f(1, 1, 1, 1); // explizit Alpha setzen
     for (int i = 0; i < 4; ++i) {
         if (!lines[i]) continue;
         char buffer[9999];
