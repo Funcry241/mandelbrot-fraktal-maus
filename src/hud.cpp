@@ -105,7 +105,7 @@ void draw(RendererState& state) {
         char buffer[9999];
         unsigned char dummyColor[4] = { 255, 255, 255, 255 };
         int quads = stb_easy_font_print(startX, startY + i * lineHeight, (char*)lines[i], dummyColor, buffer, sizeof(buffer));
-        std::fprintf(stderr, "[HUD] Line %d: '%s' → %d quads\n", i, lines[i], quads);
+        std::fprintf(stderr, "[HUD] Line %d: '%s' -> %d quads\n", i, lines[i], quads);
 
         if (quads > 0) {
             glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);
