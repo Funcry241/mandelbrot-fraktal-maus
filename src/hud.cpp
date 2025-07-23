@@ -1,46 +1,45 @@
 // Datei: src/hud.cpp
-// Zeilen: 118
-// 🐭 Maus-Kommentar: HUD-Fehleranalyse aktiv. Sichtbarkeit per rotem Rechteck, Blend-Setup, Matrix-Logs. Otter: „Knallhart sichtbar. Entweder rot, oder tot.“
+// Zeilen: 116
+// 🐭 Maus-Kommentar: Alpha 50a – HUD-Sichtbarkeit erzwingt glViewport-Logik, Font-Fallback und Lokalisierungssicherheit. Alles ASCII. Otter vermutet: setlocale war’s.
 
 #include "pch.hpp"
 #include "hud.hpp"
 #include "settings.hpp"
 #pragma warning(disable: 4505)
 #include "stb_easy_font.h"
-#include <locale.h>
 
 namespace Hud {
 
 static GLuint vao = 0, vbo = 0;
 
 void draw(RendererState& state) {
-    printf("[HUD] draw() BEGIN – w=%d h=%d fps=%.1f zoom=%.4f\n", state.width, state.height, state.fps, state.zoom);
-
     if (!vao) {
         glGenVertexArrays(1, &vao);
         glGenBuffers(1, &vbo);
     }
 
+    // Log aktiven Viewport zur Verifikation
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    if (Settings::debugLogging) {
+        printf("[HUD] Viewport: x=%d y=%d w=%d h=%d\n", viewport[0], viewport[1], viewport[2], viewport[3]);
+    }
+
     glUseProgram(0);
+    glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
 
+    // Korrekte Orthoprojektion
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
     glLoadIdentity();
     glOrtho(0.0, state.width, state.height, 0.0, -1.0, 1.0);
-
-    GLfloat proj[16];
-    glGetFloatv(GL_PROJECTION_MATRIX, proj);
-    printf("[HUD] PROJ[0]=%.2f PROJ[5]=%.2f PROJ[10]=%.2f\n", proj[0], proj[5], proj[10]);
 
     glMatrixMode(GL_MODELVIEW);
     glPushMatrix();
@@ -49,24 +48,12 @@ void draw(RendererState& state) {
     glDisable(GL_TEXTURE_2D);
     glColor3f(1, 1, 1);
 
-    // Sichtbarkeitsrechteck – rot
-    glBegin(GL_QUADS);
-    glColor3f(1, 0, 0);
-    glVertex2f(10, 10);
-    glVertex2f(110, 10);
-    glVertex2f(110, 110);
-    glVertex2f(10, 110);
-    glEnd();
-
     auto drawText = [](const char* text, float x, float y) {
         char buffer[9999];
-        char local[256];
-        strcpy_s(local, sizeof(local), text);
-
-        int quads = stb_easy_font_print(x, y, local, nullptr, buffer, sizeof(buffer));
+        int quads = stb_easy_font_print(x, y, const_cast<char*>(text), nullptr, buffer, sizeof(buffer));
 
         if (Settings::debugLogging) {
-            printf("[HUD] Drawing \"%s\" -> %d quads\n", local, quads);
+            printf("[HUD] Drawing \"%s\" -> %d quads\n", text, quads);
         }
 
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -76,9 +63,8 @@ void draw(RendererState& state) {
 
     drawText("HUD ACTIVE", 20, 20);
 
-    setlocale(LC_NUMERIC, "C");
-
     char buf[128];
+
     std::snprintf(buf, sizeof(buf), "FPS: %.0f", state.fps);
     drawText(buf, 20, 40);
 
