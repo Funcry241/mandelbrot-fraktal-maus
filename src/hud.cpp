@@ -104,7 +104,7 @@ void draw(RendererState& state) {
         int quads = stb_easy_font_print(startX, startY + i * lineHeight, (char*)lines[i], color, buffer, sizeof(buffer));
 
         if (Settings::debugLogging)
-            std::fprintf(stderr, "[HUD] Line %d: '%s' -> %d quads\n", i, lines[i], quads);
+            std::printf("[HUD] Line %d: '%s' -> %d quads\n", i, lines[i], quads);
 
         if (quads > 0) {
             glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);
@@ -113,7 +113,7 @@ void draw(RendererState& state) {
             if (Settings::debugLogging) {
                 GLenum err = glGetError();
                 if (err != GL_NO_ERROR)
-                    std::fprintf(stderr, "[HUD] OpenGL error after draw: 0x%x\n", err);
+                    std::printf("[HUD] OpenGL error after draw: 0x%x\n", err);
             }
         }
     }
