@@ -1,6 +1,6 @@
 // Datei: src/hud.cpp
-// Zeilen: 94
-// 🐭 Maus-Kommentar: Sichtbarkeit geprüft, Orthoprojektion korrekt mit glOrtho(..., zNear, zFar). Keine Annahmen über windowSize mehr. Otter bestätigt: Klartext.
+// Zeilen: 118
+// 🐭 Maus-Kommentar: HUD-Fehleranalyse aktiv. Sichtbarkeit per rotem Rechteck, Blend-Setup, Matrix-Logs. Otter: „Knallhart sichtbar. Entweder rot, oder tot.“
 
 #include "pch.hpp"
 #include "hud.hpp"
@@ -14,26 +14,33 @@ namespace Hud {
 static GLuint vao = 0, vbo = 0;
 
 void draw(RendererState& state) {
+    printf("[HUD] draw() BEGIN – w=%d h=%d fps=%.1f zoom=%.4f\n", state.width, state.height, state.fps, state.zoom);
+
     if (!vao) {
         glGenVertexArrays(1, &vao);
         glGenBuffers(1, &vbo);
     }
 
     glUseProgram(0);
-    glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
 
-    // Korrekte Orthoprojektion: 6 Parameter (inkl. zNear, zFar)
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
     glLoadIdentity();
     glOrtho(0.0, state.width, state.height, 0.0, -1.0, 1.0);
+
+    GLfloat proj[16];
+    glGetFloatv(GL_PROJECTION_MATRIX, proj);
+    printf("[HUD] PROJ[0]=%.2f PROJ[5]=%.2f PROJ[10]=%.2f\n", proj[0], proj[5], proj[10]);
 
     glMatrixMode(GL_MODELVIEW);
     glPushMatrix();
@@ -41,6 +48,15 @@ void draw(RendererState& state) {
 
     glDisable(GL_TEXTURE_2D);
     glColor3f(1, 1, 1);
+
+    // Sichtbarkeitsrechteck – rot
+    glBegin(GL_QUADS);
+    glColor3f(1, 0, 0);
+    glVertex2f(10, 10);
+    glVertex2f(110, 10);
+    glVertex2f(110, 110);
+    glVertex2f(10, 110);
+    glEnd();
 
     auto drawText = [](const char* text, float x, float y) {
         char buffer[9999];
