@@ -53,7 +53,7 @@ try {
     exit 1
 }
 
-# MSVC (ohne Zeilenlängenfehler)
+# MSVC (korrekte Übernahme der Umgebungsvariablen)
 $vswhere = "${Env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vsInstall = & "$vswhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vsInstall) {
@@ -61,7 +61,11 @@ if (-not $vsInstall) {
     exit 1
 }
 $vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
-& "$vcvars" > $null
+& cmd /c "`"$vcvars`" && set" | ForEach-Object {
+    if ($_ -match '^([\w]+)=(.*)$') {
+        [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+    }
+}
 
 # .env
 if (Test-Path .env) {
@@ -74,7 +78,7 @@ if (Test-Path .env) {
     }
 }
 
-# VCPKG leiser machen (nur essentielle Ausgaben)
+# VCPKG leiser machen
 [Environment]::SetEnvironmentVariable("VCPKG_FEATURE_FLAGS", "quiet")
 [Environment]::SetEnvironmentVariable("VCPKG_KEEP_ENV_VARS", "VCPKG_FEATURE_FLAGS")
 
@@ -89,7 +93,7 @@ try {
     exit 1
 }
 
-# Workaround: Entferne ungültigen glew32d.lib-Pfad aus Cache
+# Patch: glew32d.lib entfernen
 $badLib = "build/vcpkg_installed/x64-windows/debug/lib/glew32d.lib"
 if (-not (Test-Path $badLib)) {
     $glewTargets = "build/vcpkg_installed/x64-windows/share/glew/glew-targets.cmake"
@@ -102,7 +106,7 @@ if (-not (Test-Path $badLib)) {
 # Verzeichnisse
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 
-# CMake-Konfiguration
+# CMake
 Write-Host "[INFO] CMake version: $(cmake --version | Select-String -Pattern 'cmake version')"
 Write-Host "[BUILD] Configuring project..."
 $cudaArch = "-DCMAKE_CUDA_ARCHITECTURES=80;86;89;90"
@@ -174,7 +178,7 @@ if ($cudaDlls) {
     exit 1
 }
 
-# Git-Ausgabe minimieren (Step 3)
+# Git-Ausgabe minimieren
 $env:GIT_TRACE = "0"
 $env:GIT_TRACE_PERFORMANCE = "0"
 $env:GIT_TRACE_SETUP = "0"
