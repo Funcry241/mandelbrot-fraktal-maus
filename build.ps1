@@ -61,7 +61,7 @@ if (-not $vsInstall) {
     exit 1
 }
 $vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
-& "$vcvars" > $null
+cmd /c "`"$vcvars`""
 
 
 # .env
