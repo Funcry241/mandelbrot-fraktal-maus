@@ -72,7 +72,7 @@ void draw(RendererState& state) {
     std::snprintf(buf, sizeof(buf), "Offset: %.6f, %.6f", state.offset.x, state.offset.y);
     lines[3] = _strdup(buf);
 
-    // === Hintergrundbox für alle Zeilen ===
+    // === Hintergrundbox ===
     float blockHeight = lineHeight * 4 + 2 * padding;
     float blockWidth = 400.0f;
     float bx = startX - padding;
@@ -93,12 +93,15 @@ void draw(RendererState& state) {
     glBufferData(GL_ARRAY_BUFFER, sizeof(bg), bg, GL_DYNAMIC_DRAW);
     glDrawArrays(GL_LINE_LOOP, 0, 4);
 
-        glColor3f(1, 1, 1);
+    // === Text zeichnen ===
+    glColor3f(1, 1, 1);
 
-    for (int i = 0; i < 4; ++i) {        
+    for (int i = 0; i < 4; ++i) {
+        if (!lines[i] || lines[i][0] == '\0') continue;
+
         char buffer[9999];
-        unsigned char dummyColor[4] = { 255, 255, 255, 255 };
-        int quads = stb_easy_font_print(startX, startY + i * lineHeight, (char*)lines[i], dummyColor, buffer, sizeof(buffer));
+        unsigned char color[4] = { 255, 255, 255, 255 };
+        int quads = stb_easy_font_print(startX, startY + i * lineHeight, (char*)lines[i], color, buffer, sizeof(buffer));
 
         if (Settings::debugLogging)
             std::fprintf(stderr, "[HUD] Line %d: '%s' -> %d quads\n", i, lines[i], quads);
@@ -107,12 +110,11 @@ void draw(RendererState& state) {
             glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);
             glDrawArrays(GL_QUADS, 0, quads * 4);
 
-            GLenum err = glGetError();
-            if (err != GL_NO_ERROR && Settings::debugLogging)
-                std::fprintf(stderr, "[HUD] OpenGL error after draw: 0x%x\n", err);
-        } else {
-            if (Settings::debugLogging)
-                std::fprintf(stderr, "[HUD] No quads for line %d\n", i);
+            if (Settings::debugLogging) {
+                GLenum err = glGetError();
+                if (err != GL_NO_ERROR)
+                    std::fprintf(stderr, "[HUD] OpenGL error after draw: 0x%x\n", err);
+            }
         }
     }
 
@@ -121,11 +123,8 @@ void draw(RendererState& state) {
     glDisableClientState(GL_VERTEX_ARRAY);
     glEnable(GL_TEXTURE_2D);
 
-    glMatrixMode(GL_MODELVIEW);
-    glPopMatrix();
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-
+    glMatrixMode(GL_MODELVIEW);   glPopMatrix();
+    glMatrixMode(GL_PROJECTION); glPopMatrix();
     glBindVertexArray(0);
 }
 
