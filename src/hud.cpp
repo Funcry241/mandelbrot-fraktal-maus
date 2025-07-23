@@ -5,6 +5,7 @@
 #include "pch.hpp"
 #include "hud.hpp"
 #include "settings.hpp"
+#define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
 #pragma warning(disable:4505) // nötig für stb_easy_font.h wegen ungenutzter interner Funktionen (Otter geprüft)
 #include <locale.h>
