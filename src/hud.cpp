@@ -99,7 +99,7 @@ void draw(RendererState& state) {
     for (int i = 0; i < 4; ++i) {
         if (!lines[i] || lines[i][0] == '\0') continue;
 
-        char buffer[9999];
+        float buffer[9999]; // 🐭 Fix: vorher char[] → nun float[] wegen stb_easy_font (Otter geprüft)
         unsigned char color[4] = { 255, 255, 255, 255 };
         int quads = stb_easy_font_print(startX, startY + i * lineHeight, (char*)lines[i], color, buffer, sizeof(buffer));
 
