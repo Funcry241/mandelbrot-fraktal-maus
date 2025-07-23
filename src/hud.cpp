@@ -1,5 +1,5 @@
 // Datei: src/hud.cpp
-// Zeilen: 108
+// Zeilen: 111
 // 🐭 Maus-Kommentar: HUD-Textbox hat exakt dieselben Abstände wie Heatmap (oben/links = 16). Keine Koordinatenverwirrung mehr – alles Otter-symmetrisch!
 
 #include "pch.hpp"
@@ -29,8 +29,9 @@ void draw(RendererState& state) {
 
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glVertexPointer(2, GL_FLOAT, 0, (void*)0);
 
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
@@ -93,34 +94,41 @@ void draw(RendererState& state) {
     glDrawArrays(GL_LINE_LOOP, 0, 4);
 
     // === Text zeichnen ===
-    std::fprintf(stderr, "[HUD] Start drawing text...\n");
+    if (Settings::debugLogging)
+        std::fprintf(stderr, "[HUD] Start drawing text...\n");
+
     glColor3f(1, 1, 1);
 
     for (int i = 0; i < 4; ++i) {
         if (!lines[i]) {
-            std::fprintf(stderr, "[HUD] Line %d is null\n", i);
+            if (Settings::debugLogging)
+                std::fprintf(stderr, "[HUD] Line %d is null\n", i);
             continue;
         }
 
         char buffer[9999];
         unsigned char dummyColor[4] = { 255, 255, 255, 255 };
         int quads = stb_easy_font_print(startX, startY + i * lineHeight, (char*)lines[i], dummyColor, buffer, sizeof(buffer));
-        std::fprintf(stderr, "[HUD] Line %d: '%s' -> %d quads\n", i, lines[i], quads);
+
+        if (Settings::debugLogging)
+            std::fprintf(stderr, "[HUD] Line %d: '%s' -> %d quads\n", i, lines[i], quads);
 
         if (quads > 0) {
             glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);
             glDrawArrays(GL_QUADS, 0, quads * 4);
 
             GLenum err = glGetError();
-            if (err != GL_NO_ERROR)
+            if (err != GL_NO_ERROR && Settings::debugLogging)
                 std::fprintf(stderr, "[HUD] OpenGL error after draw: 0x%x\n", err);
         } else {
-            std::fprintf(stderr, "[HUD] No quads for line %d\n", i);
+            if (Settings::debugLogging)
+                std::fprintf(stderr, "[HUD] No quads for line %d\n", i);
         }
     }
 
     for (int i = 1; i < 4; ++i) free((void*)lines[i]);
 
+    glDisableClientState(GL_VERTEX_ARRAY);
     glEnable(GL_TEXTURE_2D);
 
     glMatrixMode(GL_MODELVIEW);
