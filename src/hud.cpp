@@ -93,19 +93,9 @@ void draw(RendererState& state) {
     glBufferData(GL_ARRAY_BUFFER, sizeof(bg), bg, GL_DYNAMIC_DRAW);
     glDrawArrays(GL_LINE_LOOP, 0, 4);
 
-    // === Text zeichnen ===
-    if (Settings::debugLogging)
-        std::fprintf(stderr, "[HUD] Start drawing text...\n");
+        glColor3f(1, 1, 1);
 
-    glColor3f(1, 1, 1);
-
-    for (int i = 0; i < 4; ++i) {
-        if (!lines[i]) {
-            if (Settings::debugLogging)
-                std::fprintf(stderr, "[HUD] Line %d is null\n", i);
-            continue;
-        }
-
+    for (int i = 0; i < 4; ++i) {        
         char buffer[9999];
         unsigned char dummyColor[4] = { 255, 255, 255, 255 };
         int quads = stb_easy_font_print(startX, startY + i * lineHeight, (char*)lines[i], dummyColor, buffer, sizeof(buffer));
