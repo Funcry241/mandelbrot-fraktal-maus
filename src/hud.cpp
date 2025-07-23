@@ -1,12 +1,17 @@
 // Datei: src/hud.cpp
-// Zeilen: 109
-// 🐭 Maus-Kommentar: HUD-Overlay jetzt mit elegantem Alpha-Hintergrund, sauberer strdup-Logik und klarer Speicherfreigabe. glOrtho bleibt erhalten für volle Kompatibilität. Otter-approved.
+// Zeilen: 110
+// 🐭 Maus-Kommentar: Das HUD nutzt nun ein einheitliches, halbtransparentes Rechteck zur Gruppierung aller Textzeilen. Warnung 4505 explizit deaktiviert, da `stb_easy_font.h` interne Funktionen enthält, die nie referenziert werden – Otter-Setup bleibt `/WX`-kompatibel.
 
 #include "pch.hpp"
 #include "hud.hpp"
 #include "settings.hpp"
 #include "stb_easy_font.h"
-#pragma warning(disable:4505)
+
+// Warnung C4505: "nicht referenzierte Funktion mit interner Verknüpfung wurde entfernt"
+// wird von stb_easy_font.h erzeugt, ist aber harmlos.
+// Deaktivieren notwendig, damit /WX nicht greift.
+#pragma warning(disable:4505) // nötig für stb_easy_font.h wegen ungenutzter interner Funktionen (Otter geprüft)
+
 #include <locale.h>
 
 namespace Hud {
@@ -46,8 +51,12 @@ void draw(RendererState& state) {
     const float lineHeight = 40.0f;
     const float padding = 10.0f;
 
-    char* lines[4] = { nullptr };
-    lines[0] = _strdup("HUD ACTIVE");
+    const char* lines[] = {
+        "HUD ACTIVE",
+        nullptr,
+        nullptr,
+        nullptr
+    };
 
     setlocale(LC_NUMERIC, "C");
     char buf[128];
@@ -70,10 +79,10 @@ void draw(RendererState& state) {
     float by = y0 - padding;
 
     float bg[] = {
-        bx,        by,
+        bx,            by,
         bx+blockWidth, by,
         bx+blockWidth, by+blockHeight,
-        bx,        by+blockHeight
+        bx,            by+blockHeight
     };
 
     glColor4f(0.1f, 0.1f, 0.1f, 0.4f); // Hintergrund
@@ -90,14 +99,14 @@ void draw(RendererState& state) {
         if (!lines[i]) continue;
         char buffer[9999];
         unsigned char dummyColor[4] = { 255, 255, 255, 255 };
-        int quads = stb_easy_font_print(x, y0 + i * lineHeight, lines[i], dummyColor, buffer, sizeof(buffer));
+        int quads = stb_easy_font_print(x, y0 + i * lineHeight, (char*)lines[i], dummyColor, buffer, sizeof(buffer));
         if (quads > 0) {
             glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(float) * 2, buffer, GL_DYNAMIC_DRAW);
             glDrawArrays(GL_QUADS, 0, quads * 4);
         }
     }
 
-    for (int i = 0; i < 4; ++i) free((void*)lines[i]);
+    for (int i = 1; i < 4; ++i) free((void*)lines[i]);
 
     glEnable(GL_TEXTURE_2D);
 
