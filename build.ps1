@@ -78,6 +78,9 @@ if (Test-Path .env) {
     }
 }
 
+# VCPKG leiser machen (nur essentielle Ausgaben)
+[Environment]::SetEnvironmentVariable("VCPKG_FEATURE_FLAGS", "quiet")
+
 # vcpkg
 try {
     $vcpkg = (Get-Command vcpkg.exe -ErrorAction Stop).Source
