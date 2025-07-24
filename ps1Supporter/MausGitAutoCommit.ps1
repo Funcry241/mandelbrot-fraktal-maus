@@ -17,37 +17,32 @@ if (-not (Test-Path ".git")) {
     exit 1
 }
 
-# 2) Dateien zum Commit vormerken
-Write-Host "[GIT] Staging changes..."
-git add .
+# 2) Dateien zum Commit vormerken (kein Output)
+git add . >$null 2>&1
 
-# 3) Prüfe, ob es etwas zu committen gibt
+# 3) Prüfe auf Änderungen
 $status = git status --porcelain
 if (-not $status) {
     Write-Host "[GIT] No changes to commit."
     exit 0
 }
 
-# 4) Commit mit Zeitstempel erstellen
+# 4) Commit
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 $fullMessage = "$Message $timestamp"
-
-Write-Host "[GIT] Creating commit with message: $fullMessage"
-git commit -m "$fullMessage"
+git commit -m "$fullMessage" >$null 2>&1
+Write-Host "[GIT] Commit created: $fullMessage"
 
 # 5) Aktuellen Branch ermitteln
 $branch = git rev-parse --abbrev-ref HEAD
 
-# 6) Push auf Remote
-Write-Host "[GIT] Pushing to branch '$branch'..."
-git push origin $branch
+# 6) Push ohne Lärm
+git push origin $branch --quiet
+Write-Host "[GIT] Pushed to '$branch'."
 
-Write-Host "[GIT] Changes successfully pushed."
-
-# 7) Optionale Überraschung (1 von 20)
-$rareChance = Get-Random -Minimum 1 -Maximum 21
-if ($rareChance -eq 1) {
-    $otterArt = @(
+# 7) Seltenes Otter-Artwork
+if ((Get-Random -Minimum 1 -Maximum 21) -eq 1) {
+    @(
         "    .--.",
         "   /    \\",
         "  /_    _\\",
@@ -55,12 +50,9 @@ if ($rareChance -eq 1) {
         " |\\__/\\__|",
         " \\    /\\   /",
         "  '--'  '--'"
-    )
-    foreach ($line in $otterArt) {
-        Write-Host $line
-    }
+    ) | ForEach-Object { Write-Host $_ }
     Write-Host "Rare Otter Encounter!"
 }
 
-Write-Host "[GIT] AutoGit script completed."
+Write-Host "[GIT] AutoGit completed."
 exit 0
