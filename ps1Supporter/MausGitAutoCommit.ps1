@@ -36,8 +36,14 @@ Write-Host "[GIT] Commit created: $fullMessage"
 # 5) Aktuellen Branch ermitteln
 $branch = git rev-parse --abbrev-ref HEAD
 
-# 6) Push ohne Lärm
-git push origin $branch --quiet
+# 6) Push mit Fehlerprüfung
+Write-Host "[GIT] Pushing to '$branch'..."
+$pushOutput = git push origin $branch 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[GIT] Push failed:"
+    Write-Host $pushOutput
+    exit 1
+}
 Write-Host "[GIT] Pushed to '$branch'."
 
 # 7) Seltenes Otter-Artwork
