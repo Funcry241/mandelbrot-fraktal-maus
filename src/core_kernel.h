@@ -1,5 +1,4 @@
 // Datei: src/core_kernel.h
-// Zeilen: 29
 // 🐭 Maus-Kommentar: Funktionsprototypen für CUDA-Mandelbrot-Kernel (Kolibri-kompatibel mit Supersampling!)
 // Schneefuchs: "Header immer synchron zur Implementation!"
 

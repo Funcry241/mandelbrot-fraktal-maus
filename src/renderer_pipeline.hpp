@@ -1,5 +1,4 @@
 // Datei: src/renderer_pipeline.hpp
-// Zeilen: 22
 // 🐭 Maus-Kommentar: Die Altlast render() wurde entfernt. Nur noch drawFullscreenQuad(tex)! Schneefuchs: „Weniger ist mehr, wenn das Mehr nur Unsinn war.“
 
 #pragma once

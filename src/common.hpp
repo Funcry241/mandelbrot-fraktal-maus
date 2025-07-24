@@ -1,5 +1,4 @@
 // Datei: src/common.hpp
-// Zeilen: 60
 // 🐭 Maus-Kommentar: Zentraler Header mit weicher Tile-Größenfunktion, CUDA-Fehlermakro und Standard-Includes. Schneefuchs empfiehlt: kein doppeltes <cmath>, computeTileSizeFromZoom immer aus genau dieser Quelle verwenden! Alles warnfrei, keine Doppel-Defines, keine Header-Schatten.
 #pragma once
 

@@ -1,5 +1,4 @@
 // Datei: src/opengl_utils.cpp
-// Zeilen: 90
 // 🐭 Maus-Kommentar: Shaderfehler beenden das Programm nicht mehr, sondern geben 0 zurück und loggen klar. Schneefuchs: „Otter stirbt erst, wenn du willst.“
 
 #include "pch.hpp"

@@ -61,10 +61,10 @@ add_executable(mandelbrot_otterdream
     src/renderer_state.cpp
     src/renderer_pipeline.cpp
     src/renderer_window.cpp
-    src/renderer_resources.cpp
-    src/hud.cpp
+    src/renderer_resources.cpp    
     src/opengl_utils.cpp
     src/heatmap_overlay.cpp
+    src/warzenschwein_overlay.cpp
     src/cuda_interop.cu
     src/core_kernel.cu
     src/zoom_logic.cpp

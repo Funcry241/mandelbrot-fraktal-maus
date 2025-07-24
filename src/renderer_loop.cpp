@@ -4,11 +4,11 @@
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
-#include "hud.hpp"
 #include "settings.hpp"
 #include "renderer_pipeline.hpp"
 #include "renderer_resources.hpp"
 #include "heatmap_overlay.hpp"
+#include "warzenschwein_overlay.hpp"
 #include "frame_pipeline.hpp"
 #include "zoom_command.hpp"
 #include <chrono>
@@ -26,7 +26,6 @@ void initResources(RendererState& state) {
     state.pbo = OpenGLUtils::createPBO(state.width, state.height);
     state.tex = OpenGLUtils::createTexture(state.width, state.height);
     CudaInterop::registerPBO(state.pbo);
-    Hud::init();
 
     state.lastTileSize = computeTileSizeFromZoom(static_cast<float>(state.zoom));
     state.setupCudaBuffers();
@@ -122,7 +121,14 @@ void renderFrame_impl(RendererState& state) {
         ctx.width, ctx.height, ctx.tileSize, 0, state
     );
 
-    Hud::draw(state);
+    WarzenschweinOverlay::setText(
+        "OtterDream Mandelbrot\n"
+        "Zoom: " + std::to_string(state.zoom) + "\n"
+        "FPS: "  + std::to_string(state.fps),
+        0, 0
+    );
+    WarzenschweinOverlay::drawOverlay(state);
+
 
     state.zoom         = static_cast<double>(ctx.zoom);
     state.offset       = { ctx.offset.x, ctx.offset.y };

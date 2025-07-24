@@ -1,5 +1,4 @@
 // Datei: src/renderer_core.cu
-// Zeilen: 166
 // 🐭 Maus-Kommentar: Alpha 49d – Debug-Pfade vollständig instrumentiert. Alle kritischen Punkte im Lifecycle geloggt. Keine stillen Abstürze mehr. Ideal für Tracebacks. Schneefuchs flüstert: „Sichtbarkeit ist die halbe Stabilität.“
 
 #include "pch.hpp"
@@ -11,10 +10,10 @@
 #include "renderer_loop.hpp"
 #include "common.hpp"
 #include "settings.hpp"
-#include "hud.hpp"
 #include "cuda_interop.hpp"
 #include "zoom_logic.hpp"
 #include "heatmap_overlay.hpp"
+#include "warzenschwein_overlay.hpp"
 
 #define ENABLE_ZOOM_LOGGING 0
 
@@ -138,8 +137,7 @@ void Renderer::resize(int newW, int newH) {
     glViewport(0, 0, newW, newH);
 }
 
-void Renderer::cleanup() {
-    Hud::cleanup();
+void Renderer::cleanup() {    
     RendererPipeline::cleanup();
     CudaInterop::unregisterPBO();
 
@@ -147,9 +145,11 @@ void Renderer::cleanup() {
     glDeleteTextures(1, &state.tex);
 
     RendererWindow::destroyWindow(state.window);
-
+    WarzenschweinOverlay::cleanup();
+    
     freeDeviceBuffers();
     HeatmapOverlay::cleanup();
+
     glfwTerminate();
 
     glInitialized = false;

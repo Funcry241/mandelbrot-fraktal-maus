@@ -1,5 +1,4 @@
 // Datei: src/settings.hpp
-// Zeilen: 97
 // 🐅 Maus-Kommentar: Steuerungszentrale für Auto-Zoom, Fraktal-Feintuning, Entropieanalyse und CUDA-Tile-Verhalten.
 // Nur aktive, genutzte Konstanten bleiben erhalten – der Rest wurde entrümpelt. Die Schwester atmet auf.
 // Modernisiert mit robusten Kommentaren und eigenem clamp, [[nodiscard]] wurde an Variablen entfernt (nvcc inkompatibel).

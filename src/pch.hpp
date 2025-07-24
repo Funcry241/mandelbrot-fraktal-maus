@@ -1,5 +1,4 @@
 // Datei: src/pch.hpp
-// Zeilen: 45
 // 🐭 Maus-Kommentar: Precompiled Header – Projekt Phönix! FreeType raus, EasyFont rein. OpenGL bleibt dominant. CUDA-Interop bleibt minimalinvasiv. Schneefuchs sieht, Otter lacht.
 
 #pragma once

@@ -34,7 +34,7 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 - **📊 Heatmap-Overlay**  
   Entropie/Kontrast pro Tile sichtbar gemacht – Debug & Analyse
 
-- **🧰 HUD & ASCII-Debug (via stb_easy_font)**  
+- **🧰 HUD & ASCII-Debug**  
   FPS, Zoom, Offset, optional aktivierbar
 
 - **🦝 Build-Fallback-Logik (Waschbär)**  
@@ -59,7 +59,6 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 
 - [GLFW](https://www.glfw.org/) – Fenster- und Eingabe-Handling  
 - [GLEW](http://glew.sourceforge.net/) – OpenGL-Extension-Management  
-- [stb_easy_font](https://github.com/nothings/stb/blob/master/stb_easy_font.h) – Schriftanzeige im HUD *(optional)*
 
 ---
 

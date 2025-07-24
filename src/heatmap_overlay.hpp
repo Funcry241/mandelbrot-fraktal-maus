@@ -1,5 +1,4 @@
 // Datei: src/heatmap_overlay.hpp
-// Zeilen: 32
 /*
 Maus-Kommentar 🐭: Overlay ist jetzt vollständig zustandslos – kein interner bool mehr. Alle Kontrollfunktionen arbeiten direkt mit RendererState&. drawOverlay-API akzeptiert ctx. Schneefuchs: „Kein Schatten, nur Klarheit.“
 */

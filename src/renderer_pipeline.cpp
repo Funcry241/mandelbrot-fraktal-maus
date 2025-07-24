@@ -1,5 +1,4 @@
 // Datei: src/renderer_pipeline.cpp
-// Zeilen: 69
 // 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean – HUD/Heatmap bleiben garantiert sichtbar. Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines.
 
 #include "pch.hpp"

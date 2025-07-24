@@ -1,5 +1,4 @@
 // Datei: src/zoom_logic.hpp
-// Zeilen: 47
 // 🐭 Maus-Kommentar: Alpha 49.1 – ZoomResult nun auch selbst [[nodiscard]], schützt gegen unbeachtete Konstrukte. Vollständig Clang/CUDA-kompatibel, exakt dokumentiert.
 // 🦦 Otter: Eindeutige Semantik – Ergebnis muss verwendet werden, sonst droht Zoomverlust.
 // 🐅 Maus: Kompakt, robust, klar priorisiert – ideal als Public API des Zoommoduls.

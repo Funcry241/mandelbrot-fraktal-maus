@@ -1,31 +1,31 @@
 // Datei: src/renderer_window.cpp
-// Zeilen: 72
-// 🐭 Maus-Kommentar: Fixed-Function wieder aktiviert – Kompatibilitätsprofil gesetzt. HUD lebt! Keine Shader-Zwang für simple Text-Quads. Otter: „So wenig Code, so viel Wirkung.“
+// 🐭 Maus-Kommentar: Fixed-Function raus, moderner Kontext rein – für Warzenschwein wird OpenGL 4.3 erzwungen. Keine Kompromisse mehr, Otter-Style.
 
 #include "pch.hpp"
 #include "renderer_window.hpp"
 #include "renderer_core.hpp"
 #include "settings.hpp"
 #include "renderer_loop.hpp" // für RendererLoop::keyCallback
+#include <cstdio>
 
 namespace RendererInternals {
 
 // Erstellt GLFW-Fenster, setzt OpenGL-Kontext & VSync, Position aus Settings
 GLFWwindow* createGLFWWindow(int width, int height) {
     if (!glfwInit()) {
-        std::cerr << "[ERROR] GLFW init failed\n";
+        std::fprintf(stderr, "[ERROR] GLFW init failed\n");
         return nullptr;
     }
 
-    // OpenGL 3.3 Kompatibilitätsprofil für stb_easy_font
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    // OpenGL 4.3 Core – nötig für Shader-Text (Warzenschwein!)
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_FALSE);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
     GLFWwindow* window = glfwCreateWindow(width, height, "OtterDream Mandelbrot", nullptr, nullptr);
     if (!window) {
-        std::cerr << "[ERROR] Window creation failed\n";
+        std::fprintf(stderr, "[ERROR] Window creation failed\n");
         glfwTerminate();
         return nullptr;
     }

@@ -1,5 +1,4 @@
 // Datei: src/frame_pipeline.cpp
-// Zeilen: 110
 // 🐭 Maus-Kommentar: Kiwi – Kein Shadowing mehr, alle globalen Variablen klar: g_ctx, g_zoomBus. Kompakt & warnungsfrei. Otter und Schneefuchs lächeln. Kein toter Code, kein ungenutzter Dead-End-Entry mehr.
 #include "pch.hpp"
 #include "cuda_interop.hpp"

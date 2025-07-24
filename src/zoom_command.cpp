@@ -1,5 +1,4 @@
 // Datei: src/zoom_command.cpp
-// Zeilen: 50
 // 🐭 Maus-Kommentar: Implementiert CSV-Export und Zoom-Log für CommandBus – strukturiert, minimalistisch, replayfähig.
 // 🦦 Otter: Exportiert jeden ZoomCommand sauber ins CSV – für Rückverfolgung und Debug sichtbar.
 // 🐼 Panda: Jeder Frame ist ein Denkprozess – dieses Logging ist das Gedächtnis.

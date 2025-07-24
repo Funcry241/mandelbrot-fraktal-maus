@@ -1,5 +1,4 @@
 // Datei: src/frame_pipeline.hpp
-// Zeilen: 43
 /* 🐭 interner Maus-Kommentar:
 Schnittstelle für die modulare Frame-Pipeline.
 Deklariert klar getrennte Schritte:

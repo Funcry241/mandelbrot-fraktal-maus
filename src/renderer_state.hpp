@@ -1,5 +1,4 @@
 // Datei: src/renderer_state.hpp
-// Zeilen: 70
 // 🐭 Maus-Kommentar: State-of-the-Art für Renderer-Status. Alle Entropie-/Kontrast-/Zoomdaten persistent und schnell (float2 statt double2). Kein toter Code: lastTileIndex entfernt, Übersicht und Performance jetzt maximal klar. Schneefuchs: Übersicht, Otter: Performance.
 
 #pragma once

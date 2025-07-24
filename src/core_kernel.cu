@@ -1,5 +1,4 @@
 // Datei: src/core_kernel.cu
-// Zeilen: 309
 // 👝 Maus-Kommentar: Alpha 50 – Verbesserte Robustheit & Eleganz. Neue `pixelToComplex`-Funktion für Klarheit, stabilisierte Farbnormalisierung gegen Artefakte, absichernder Kernel-Start & Entropie-Divisionsschutz. Otter: „Schönheit durch Genauigkeit.“
 
 #include <cuda_runtime.h>

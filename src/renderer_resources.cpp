@@ -1,5 +1,4 @@
 // Datei: src/renderer_resources.cpp
-// Zeilen: 80
 // 🐭 Maus-Kommentar: Kontextsensitives Logging – Debug-Ausgabe nur noch bei aktiviertem Settings::debugLogging. Schneefuchs: „Finde den Ursprung, finde den Fehler.“ Keine Tippfehler mehr, keine Noise-Leaks.
 #include "pch.hpp"
 #include "renderer_resources.hpp"

@@ -1,5 +1,4 @@
 // Datei: src/renderer_resources.hpp
-// Zeilen: 28
 // ⏱️ Modular und mit Logging-Kontext – Ressourcenursprung immer nachvollziehbar.
 
 #pragma once

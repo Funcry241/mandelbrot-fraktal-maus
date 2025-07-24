@@ -1,5 +1,4 @@
 // Datei: src/renderer_loop.hpp
-// Zeilen: 23
 // 🐭 Maus-Kommentar: Render-Loop, FPS, HUD, Auto-Zoom und Eingaben jetzt sauber gekapselt. Kein autoZoomEnabled-Parameter mehr – Signatur jetzt final synchron mit renderer_core. drawOverlay ist lokal. Schneefuchs: „Der Taktgeber des Fraktal-Tanzes, mit Blick für Tasten.“
 #pragma once
 

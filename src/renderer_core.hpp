@@ -1,5 +1,4 @@
 // Datei: src/renderer_core.hpp
-// Zeilen: 43
 // 🐭 Maus-Kommentar: Header für das Rendering-Modul. Keine überflüssigen Parameter mehr – volle Synchronität zur Source. Funktioniert exakt mit der einparametrigen Loop-Signatur. Otter und Schneefuchs sind stolz.
 #pragma once
 

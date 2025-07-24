@@ -1,5 +1,4 @@
 // Datei: src/cuda_interop.hpp
-// Zeilen: 61
 // 🐭 Maus-Kommentar: Schnittstelle CUDA/OpenGL – Kolibri, Panda & Capybara 2 sauber integriert, float2-only.
 // Wrapper für Host/Device-Puffer, Heatmap & Auto-Zoom. Keine Redundanz – alles klar Otter!
 

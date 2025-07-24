@@ -1,5 +1,4 @@
 // Datei: src/frame_context.hpp
-// Zeilen: 82
 /* 🐭 interner Maus-Kommentar:
    FrameContext initialisiert ab sofort alle Kernwerte aus Settings.
    Keine Magic Numbers mehr! Flugente: immer synchron, immer robust.

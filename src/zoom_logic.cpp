@@ -1,5 +1,4 @@
 // Datei: src/zoom_logic.cpp
-// Zeilen: 181
 // 🐭 Maus-Kommentar: Alpha 49 "Pinguin" – sanftes, kontinuierliches Zoomen ohne Elefant! Ziel wird immer interpoliert verfolgt, Score fließt in Glättung ein. Kein Warten, kein Hüpfen. Schneefuchs genießt den Flug, Otter testet Stabilität.
 // 🐼 Panda: Bewertet Entropie × (1 + Kontrast) als Zielscore.
 // 🐝 Kolibri: Weiche Bewegung via LERP (Zoom ist Gleitflug).

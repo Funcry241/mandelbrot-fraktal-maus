@@ -1,5 +1,4 @@
 // Datei: src/renderer_window.hpp
-// Zeilen: 23
 // 🐭 Maus-Kommentar: GLFW-Fensterverwaltung als zentrale API – Callbacks nur noch über createWindow(). Keine Mehrdeutigkeit. Schneefuchs-konform.
 
 #pragma once

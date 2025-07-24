@@ -1,5 +1,4 @@
 // Datei: src/zoom_command.hpp
-// Zeilen: 63
 // 🐭 Maus-Kommentar: Struktur für jede Auto-Zoom-Entscheidung – deterministisch, replayfähig, testbar.
 // 🦦 Otter: Reproduzierbares Verhalten durch CommandBus, jeder Frame dokumentiert.
 // 🐅 Maus: Kompakt, ohne math_utils, nur float2 aus <vector_types.h>.

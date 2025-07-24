@@ -1,5 +1,4 @@
 // Datei: src/main.cpp
-// Zeilen: 32
 // 🐭 Maus-Kommentar: Overlay wird direkt über RendererState initialisiert. Heatmap-Status aus Settings. Kompakt, klar, kein Overhead. Schneefuchs nickt.
 #include "pch.hpp"
 #include "renderer_core.hpp"

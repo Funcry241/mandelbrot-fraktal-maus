@@ -1,5 +1,4 @@
 // Datei: src/heatmap_overlay.cpp
-// Zeilen: 162
 // 🐭 Maus-Kommentar: Overlay-Zustand wird nicht mehr intern gespeichert. drawOverlay(ctx) steht jetzt global bereit, prüft ctx.overlayActive und ruft intern HeatmapOverlay::drawOverlay(...) auf. Damit ist die Integration in renderer_loop.cpp direkt möglich. Schneefuchs: Sichtbarkeit mit System.
 
 #include "pch.hpp"
