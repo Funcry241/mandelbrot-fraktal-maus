@@ -1,13 +1,13 @@
 // Datei: src/hud.cpp
 // Zeilen: 111
-// 🐭 Maus-Kommentar: HUD-Textbox hat exakt dieselben Abstände wie Heatmap (oben/links = 16). Schriftdarstellung nutzt jetzt originalgetreues stb_easy_font-Setup (static Buffer, stride 16, kein VBO). Dieser Zustand ist Otter-sicher und darf nicht zurückgebaut werden!
+// 🐭 Maus-Kommentar: HUD-Textbox hat exakt dieselben Abstände wie Heatmap (oben/links = 16). Schriftdarstellung nutzt jetzt originalgetreues stb_easy_font-Setup (static Buffer, stride 16, kein VBO). Speicherfehler mit geteiltem Buffer behoben – alle Strings haben jetzt eigene Quelle (Otter-proof).
 
 #include "pch.hpp"
 #include "hud.hpp"
 #include "settings.hpp"
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
-#pragma warning(disable:4505) // nötig für stb_easy_font.h wegen ungenutzter interner Funktionen (Otter geprüft)
+#pragma warning(disable:4505)
 #include <locale.h>
 #include <cstdio>
 
@@ -57,18 +57,21 @@ void draw(RendererState& state) {
     };
 
     setlocale(LC_NUMERIC, "C");
-    char buf[128];
 
-    std::snprintf(buf, sizeof(buf), "FPS: %.0f", state.fps);
-    lines[1] = _strdup(buf);
+    // 🐭 vorher: ein Buffer überschrieben → Schrift unsichtbar
+    // jetzt: jeder Text hat eigene temporäre Quelle
+    char buf1[64], buf2[64], buf3[64];
+
+    std::snprintf(buf1, sizeof(buf1), "FPS: %.0f", state.fps);
+    lines[1] = _strdup(buf1);
 
     double z = 1.0 / double(state.zoom);
     int exponent = int(std::log10(z));
-    std::snprintf(buf, sizeof(buf), "Zoom: 1e%d", exponent);
-    lines[2] = _strdup(buf);
+    std::snprintf(buf2, sizeof(buf2), "Zoom: 1e%d", exponent);
+    lines[2] = _strdup(buf2);
 
-    std::snprintf(buf, sizeof(buf), "Offset: %.6f, %.6f", state.offset.x, state.offset.y);
-    lines[3] = _strdup(buf);
+    std::snprintf(buf3, sizeof(buf3), "Offset: %.6f, %.6f", state.offset.x, state.offset.y);
+    lines[3] = _strdup(buf3);
 
     // === Hintergrundbox ===
     float blockHeight = lineHeight * 4 + 2 * padding;
@@ -85,15 +88,14 @@ void draw(RendererState& state) {
 
     glColor4f(0.1f, 0.1f, 0.1f, 0.4f);
     glBufferData(GL_ARRAY_BUFFER, sizeof(bg), bg, GL_DYNAMIC_DRAW);
-    glVertexPointer(2, GL_FLOAT, 0, (void*)0); // 🟢 korrekt für VBO-Daten mit 2 floats
+    glVertexPointer(2, GL_FLOAT, 0, (void*)0);
     glDrawArrays(GL_QUADS, 0, 4);
 
     glColor4f(0.3f, 0.3f, 0.3f, 0.7f);
     glBufferData(GL_ARRAY_BUFFER, sizeof(bg), bg, GL_DYNAMIC_DRAW);
     glDrawArrays(GL_LINE_LOOP, 0, 4);
 
-    // === Text zeichnen (stb_easy_font - sicherer Stand) ===
-    // ⚠️ Keine VBO-Nutzung, keine BufferData. Stride MUSS 16 sein. FontBuffer ist static.
+    // === Text zeichnen ===
     static char fontBuffer[99999];
 
     for (int i = 0; i < 4; ++i) {
@@ -113,7 +115,7 @@ void draw(RendererState& state) {
 
         if (quads > 0) {
             glColor3f(1.0f, 1.0f, 1.0f);
-            glVertexPointer(2, GL_FLOAT, 16, fontBuffer); // 🟡 Pflicht: stride = 16!
+            glVertexPointer(2, GL_FLOAT, 16, fontBuffer);
             glDrawArrays(GL_QUADS, 0, quads * 4);
         }
     }
