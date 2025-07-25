@@ -105,7 +105,10 @@ void setText(const std::string& text, int /*x*/, int /*y*/) {
 
 void drawOverlay(RendererState& ctx) {
     if (!ctx.warzenschweinOverlayEnabled) return;
-    if (currentLines.empty()) return;
+    if (currentLines.empty()) {
+        std::printf("[Warzenschwein] No text lines to draw.\n");
+        return;
+    }
 
     const float pixelSize = 0.0025f / static_cast<float>(ctx.zoom); // dynamisch
 
@@ -146,6 +149,8 @@ void drawOverlay(RendererState& ctx) {
     for (auto& v : bg)
         vertices.insert(vertices.end(), v, v + 5);
 
+    size_t glyphCount = 0;
+
     for (size_t lineIdx = 0; lineIdx < currentLines.size(); ++lineIdx) {
         float yBase = startY - lineIdx * (glyphHeight + 2) * pixelSize;
         const std::string& line = currentLines[lineIdx];
@@ -154,6 +159,7 @@ void drawOverlay(RendererState& ctx) {
             const auto& bitmap = WarzenschweinFont::get(c);
             if (bitmap == WarzenschweinFont::Glyph{}) continue;
 
+            ++glyphCount;
             float xBase = startX + col * (glyphWidth + 1) * pixelSize;
             for (int row = 0; row < glyphHeight; ++row) {
                 uint8_t bits = bitmap[row];
@@ -177,6 +183,13 @@ void drawOverlay(RendererState& ctx) {
         }
     }
 
+    std::printf("[Warzenschwein] lines=%zu glyphs=%zu floats=%zu (tris=%zu)\n",
+        currentLines.size(), glyphCount, vertices.size(), vertices.size() / 15);
+
+    if (vertices.empty()) {
+        std::printf("[Warzenschwein] WARNING: vertex buffer is empty – nothing to draw.\n");
+    }
+
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
@@ -187,6 +200,11 @@ void drawOverlay(RendererState& ctx) {
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
 
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 5));
+
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::printf("[Warzenschwein] GL error after draw: 0x%04X\n", err);
+    }
 
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
