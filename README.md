@@ -40,6 +40,9 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 - **🦝 Build-Fallback-Logik (Waschbär)**  
   Automatische Bereinigung von vcpkg/glew-Bugs (z. B. `glew32d.lib`)
 
+- **🖋️ Eigenes Font-Overlay (Warzenschwein)**
+  HUD-Schrift ohne ImGui oder externe Fontlibs – direkt per OpenGL-Shader
+
 ---
 
 ## 🖥️ Systemvoraussetzungen

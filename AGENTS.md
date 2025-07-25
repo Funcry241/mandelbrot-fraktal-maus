@@ -50,6 +50,7 @@ Diese Tastenkürzel sind während der Laufzeit verfügbar:
 | `P`     | Auto-Zoom pausieren oder fortsetzen |
 | `Space` | Alternativ zu `P`                   |
 | `H`     | Heatmap-Overlay ein-/ausschalten    |
+| `T`     | HUD (WarzenschweinOverlay) toggeln     |
 
 ---
 
