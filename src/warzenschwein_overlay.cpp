@@ -1,5 +1,4 @@
-// Datei: src/warzenschwein_overlay.cpp
-// 🐭 Maus-Kommentar: Warzenschwein nutzt jetzt direkt die kompakte Font-Map aus `warzenschwein_font.hpp`. Kein eigener Glyph-Cache mehr, volle Wiederverwendbarkeit. Schneefuchs: „Ein Overlay, ein Font – Ende der Vervielfachung!“
+// 🐭 Maus-Kommentar: pixelSize jetzt dynamisch über ctx.zoom wie bei Heatmap. Einheitlich, stabil, keine Frustquelle mehr. Schneefuchs: „Zoom-Faktor muss rein.“
 
 #include "pch.hpp"
 #include "warzenschwein_overlay.hpp"
@@ -19,7 +18,6 @@ static std::vector<std::string> currentLines;
 
 constexpr int glyphWidth = 8;
 constexpr int glyphHeight = 12;
-constexpr float pixelSize = 0.0025f; // World-Space-Größe pro Pixel, wir machen es später ggf. dynamisch.
 
 static const char* vertexShaderSrc = R"GLSL(
 #version 430 core
@@ -107,21 +105,14 @@ void setText(const std::string& text, int /*x*/, int /*y*/) {
 
 void drawOverlay(RendererState& ctx) {
     if (!ctx.warzenschweinOverlayEnabled) return;
+    if (currentLines.empty()) return;
 
-    if (currentLines.empty()) {
-        if (Settings::debugLogging) {
-            printf("[Warzenschwein] No text set - skipping draw.\n");
-        }
-        return;
-    }
+    const float pixelSize = 0.0025f / static_cast<float>(ctx.zoom); // dynamisch
 
     if (vao == 0) {
         glGenVertexArrays(1, &vao);
         glGenBuffers(1, &vbo);
         shader = createShaderProgram();
-        if (Settings::debugLogging) {
-            printf("[Warzenschwein] Initialized shader and buffers.\n");
-        }
     }
 
     glUseProgram(shader);
@@ -131,7 +122,7 @@ void drawOverlay(RendererState& ctx) {
     float startY =  1.0f - 0.02f;
     float r = 1.0f, g = 0.8f, b = 0.3f;
 
-    // Hintergrund-Box vorbereiten (wie Heatmap)
+    // Hintergrundbox
     size_t maxWidth = 0;
     for (const auto& line : currentLines)
         if (line.length() > maxWidth) maxWidth = line.length();
@@ -184,10 +175,6 @@ void drawOverlay(RendererState& ctx) {
                 }
             }
         }
-    }
-
-    if (Settings::debugLogging) {
-        printf("[Warzenschwein] Drawing %zu lines (%zu vertices)\n", currentLines.size(), vertices.size() / 5);
     }
 
     glBindVertexArray(vao);

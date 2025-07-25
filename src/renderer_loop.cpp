@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// 🐭 Maus-Kommentar: Alpha 49e – Overlay-Spaltung abgeschlossen. WarzenschweinOverlay und HeatmapOverlay laufen getrennt, Logging ist ASCII-clean, Aufrufe sind konditional. Schneefuchs: keine Kollision mehr. Otter: endlich lesbar.
+// 🐭 Maus-Kommentar: Alpha 59a – WarzenschweinOverlay zeigt nun auch dynamisch Iterationen, TileSize, AutoZoom. Alles ASCII-sicher. Schneefuchs: „Live-Telemetrie. Endlich klar.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -124,12 +124,15 @@ void renderFrame_impl(RendererState& state) {
     }
 
     if (state.warzenschweinOverlayEnabled) {
-        WarzenschweinOverlay::setText(
+        std::string warzText =
             "OtterDream Mandelbrot\n"
             "Zoom: " + std::to_string(state.zoom) + "\n"
-            "FPS: "  + std::to_string(state.fps),
-            0, 0
-        );
+            "FPS:  " + std::to_string(state.fps) + "\n"
+            "Iter: " + std::to_string(state.maxIterations) + "\n"
+            "Tile: " + std::to_string(state.lastTileSize) + "\n"
+            "Auto: " + (CudaInterop::getPauseZoom() ? "Paused" : "Active");
+
+        WarzenschweinOverlay::setText(warzText, 0, 0);
         WarzenschweinOverlay::drawOverlay(state);
     }
 
