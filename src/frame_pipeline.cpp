@@ -6,6 +6,7 @@
 #include "frame_context.hpp"
 #include "zoom_command.hpp"
 #include "heatmap_overlay.hpp"
+#include "warzenschwein_overlay.hpp"
 #include "settings.hpp"
 #include <GLFW/glfw3.h>
 #include <cmath>
@@ -89,5 +90,8 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
 void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     if (frameCtx.overlayActive)
         HeatmapOverlay::drawOverlay(frameCtx.h_entropy, frameCtx.h_contrast, frameCtx.width, frameCtx.height, frameCtx.tileSize, tex, state);
+    if (Settings::warzenschweinOverlayEnabled) 
+        WarzenschweinOverlay::drawOverlay(state);    
+
     RendererPipeline::drawFullscreenQuad(tex);
 }
