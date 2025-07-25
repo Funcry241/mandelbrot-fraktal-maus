@@ -132,7 +132,7 @@ void renderFrame_impl(RendererState& state) {
             "Tile: " + std::to_string(state.lastTileSize) + "\n"
             "Auto: " + (CudaInterop::getPauseZoom() ? "Paused" : "Active");
 
-        WarzenschweinOverlay::setText(warzText, 0, 0);
+        WarzenschweinOverlay::setText(warzText);
         WarzenschweinOverlay::drawOverlay(state);
     }
 
