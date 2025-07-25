@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// 🐭 Maus-Kommentar: Alpha 49c – Logging nach „Gepard 2.0“. Alle Zeitmessungen in einer Zeile. Keine Redundanz, keine Doppler, keine Unicode-Zeichen. HUD-Aufruf explizit und sicher. Schneefuchs: blitzsauber. Otter: flüssig.
+// 🐭 Maus-Kommentar: Alpha 49e – Overlay-Spaltung abgeschlossen. WarzenschweinOverlay und HeatmapOverlay laufen getrennt, Logging ist ASCII-clean, Aufrufe sind konditional. Schneefuchs: keine Kollision mehr. Otter: endlich lesbar.
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -61,7 +61,7 @@ void renderFrame_impl(RendererState& state) {
     ctx.d_contrast   = state.d_contrast;
     ctx.h_entropy    = state.h_entropy;
     ctx.h_contrast   = state.h_contrast;
-    ctx.overlayActive= state.overlayEnabled;
+    ctx.overlayActive= state.heatmapOverlayEnabled; // nur Heatmap beeinflusst Entropielogik
     ctx.lastEntropy  = state.lastEntropy;
     ctx.lastContrast = state.lastContrast;
 
@@ -88,7 +88,7 @@ void renderFrame_impl(RendererState& state) {
 
     auto t2 = std::chrono::high_resolution_clock::now();
 
-    if (ctx.d_entropy)  CUDA_CHECK(cudaMemset(ctx.d_entropy,  0, tilesCount * sizeof(float)));
+    if (ctx.d_entropy)  CUDA_CHECK(cudaMemset(ctx.d_entropy, 0, tilesCount * sizeof(float)));
     if (ctx.d_contrast) CUDA_CHECK(cudaMemset(ctx.d_contrast, 0, tilesCount * sizeof(float)));
 
     CudaInterop::computeCudaEntropyContrast(
@@ -110,25 +110,28 @@ void renderFrame_impl(RendererState& state) {
         float c0 = ctx.h_contrast.empty() ? 0.0f : ctx.h_contrast[0];
         std::printf("[Perf] cuda=%.2fms draw=%.2fms analyze=%.2fms total=%.2fms | E=%.4f C=%.4f\n",
             cudaMs, drawMs, analyzeMs, totalMs, e0, c0);
-        std::printf("[DEBUG] HUD draw call (state.overlayEnabled=%d)\n", static_cast<int>(state.overlayEnabled));
+        std::printf("[DEBUG] WarzenschweinOverlay enabled = %d\n", static_cast<int>(state.warzenschweinOverlayEnabled));
     }
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    HeatmapOverlay::drawOverlay(
-        ctx.h_entropy, ctx.h_contrast,
-        ctx.width, ctx.height, ctx.tileSize, 0, state
-    );
+    if (state.heatmapOverlayEnabled) {
+        HeatmapOverlay::drawOverlay(
+            ctx.h_entropy, ctx.h_contrast,
+            ctx.width, ctx.height, ctx.tileSize, 0, state
+        );
+    }
 
-    WarzenschweinOverlay::setText(
-        "OtterDream Mandelbrot\n"
-        "Zoom: " + std::to_string(state.zoom) + "\n"
-        "FPS: "  + std::to_string(state.fps),
-        0, 0
-    );
-    WarzenschweinOverlay::drawOverlay(state);
-
+    if (state.warzenschweinOverlayEnabled) {
+        WarzenschweinOverlay::setText(
+            "OtterDream Mandelbrot\n"
+            "Zoom: " + std::to_string(state.zoom) + "\n"
+            "FPS: "  + std::to_string(state.fps),
+            0, 0
+        );
+        WarzenschweinOverlay::drawOverlay(state);
+    }
 
     state.zoom         = static_cast<double>(ctx.zoom);
     state.offset       = { ctx.offset.x, ctx.offset.y };

@@ -34,6 +34,11 @@ constexpr float ENTROPY_THRESHOLD_LOW  = 1.5f; // Empfehlung: 1.0 – 2.5
 // false = Muss per Taste H aktiviert werden
 constexpr bool heatmapOverlayEnabled = true; // Otter: standardmäßig an
 
+// 🐷 Sichtbarkeit des WarzenschweinOverlays (Text-HUD) beim Programmstart
+// true  = HUD mit FPS, Zoom etc. ist sofort sichtbar
+// false = Muss per Taste aktiviert oder im Code gesetzt werden
+constexpr bool warzenschweinOverlayEnabled = true; // Otter: HUD ab Start sichtbar
+
 // 💥 Fensterkonfiguration (Initialgröße und Position auf dem Bildschirm)
 constexpr int width       = 1024; // Breite des Fensters in Pixel – empfohlen: 800 bis 1600
 constexpr int height      = 768;  // Höhe des Fensters in Pixel – empfohlen: 600 bis 1200

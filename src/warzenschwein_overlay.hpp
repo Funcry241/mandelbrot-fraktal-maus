@@ -19,7 +19,7 @@ void cleanup();
 // Position ist oben links in Pixelkoordinaten
 void setText(const std::string& text, int x, int y);
 
-// Zeichnet den vorbereiteten Text (nur wenn `ctx.hudEnabled == true`)
+// Zeichnet den vorbereiteten Text (nur wenn `ctx.warzenschweinOverlayEnabled == true`)
 void drawOverlay(RendererState& ctx);
 
 } // namespace Warzenschwein

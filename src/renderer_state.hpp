@@ -64,7 +64,10 @@ public:
     int supersampling = 1;
 
     // 🔥 Heatmap-Overlay-Zustand
-    bool overlayEnabled = false;
+    bool heatmapOverlayEnabled = false;
+
+    // HUD-Overlay-Zustand
+    bool warzenschweinOverlayEnabled = false;
 
     // 🧽 Setup & Verwaltung
     RendererState(int w, int h);

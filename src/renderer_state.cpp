@@ -30,7 +30,8 @@ void RendererState::reset() {
     lastTileSize = Settings::BASE_TILE_SIZE;
 
     supersampling  = Settings::defaultSupersampling;
-    overlayEnabled = Settings::heatmapOverlayEnabled;
+    heatmapOverlayEnabled     = Settings::heatmapOverlayEnabled;
+    warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
 
     // 🔄 ZoomResult vollständig zurücksetzen (Gepard)
     zoomResult.bestIndex    = -1;

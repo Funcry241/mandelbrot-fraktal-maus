@@ -19,7 +19,7 @@ static std::vector<std::string> currentLines;
 
 constexpr int glyphWidth = 8;
 constexpr int glyphHeight = 12;
-constexpr float pixelSize = 0.005f; // World-Space-Größe pro Pixel
+constexpr float pixelSize = 0.0025f; // World-Space-Größe pro Pixel, wir machen es später ggf. dynamisch.
 
 static const char* vertexShaderSrc = R"GLSL(
 #version 430 core
@@ -78,7 +78,7 @@ static GLuint createShaderProgram() {
 }
 
 void toggle(RendererState& ctx) {
-    ctx.overlayEnabled = !ctx.overlayEnabled;
+    ctx.warzenschweinOverlayEnabled = !ctx.warzenschweinOverlayEnabled;
 }
 
 void cleanup() {
@@ -106,12 +106,22 @@ void setText(const std::string& text, int /*x*/, int /*y*/) {
 }
 
 void drawOverlay(RendererState& ctx) {
-    if (!ctx.overlayEnabled || currentLines.empty()) return;
+    if (!ctx.warzenschweinOverlayEnabled) return;
+
+    if (currentLines.empty()) {
+        if (Settings::debugLogging) {
+            printf("[Warzenschwein] No text set - skipping draw.\n");
+        }
+        return;
+    }
 
     if (vao == 0) {
         glGenVertexArrays(1, &vao);
         glGenBuffers(1, &vbo);
         shader = createShaderProgram();
+        if (Settings::debugLogging) {
+            printf("[Warzenschwein] Initialized shader and buffers.\n");
+        }
     }
 
     glUseProgram(shader);
@@ -120,6 +130,30 @@ void drawOverlay(RendererState& ctx) {
     float startX = -1.0f + 0.02f;
     float startY =  1.0f - 0.02f;
     float r = 1.0f, g = 0.8f, b = 0.3f;
+
+    // Hintergrund-Box vorbereiten (wie Heatmap)
+    size_t maxWidth = 0;
+    for (const auto& line : currentLines)
+        if (line.length() > maxWidth) maxWidth = line.length();
+
+    float boxW = (maxWidth * (glyphWidth + 1) + 2) * pixelSize;
+    float boxH = (currentLines.size() * (glyphHeight + 2) + 2) * pixelSize;
+
+    float x0 = startX - pixelSize;
+    float y0 = startY + pixelSize;
+    float x1 = startX + boxW;
+    float y1 = startY - boxH;
+
+    float bg[6][5] = {
+        {x0, y0, 0.2f, 0.2f, 0.2f},
+        {x1, y0, 0.2f, 0.2f, 0.2f},
+        {x1, y1, 0.2f, 0.2f, 0.2f},
+        {x0, y0, 0.2f, 0.2f, 0.2f},
+        {x1, y1, 0.2f, 0.2f, 0.2f},
+        {x0, y1, 0.2f, 0.2f, 0.2f},
+    };
+    for (auto& v : bg)
+        vertices.insert(vertices.end(), v, v + 5);
 
     for (size_t lineIdx = 0; lineIdx < currentLines.size(); ++lineIdx) {
         float yBase = startY - lineIdx * (glyphHeight + 2) * pixelSize;
@@ -150,6 +184,10 @@ void drawOverlay(RendererState& ctx) {
                 }
             }
         }
+    }
+
+    if (Settings::debugLogging) {
+        printf("[Warzenschwein] Drawing %zu lines (%zu vertices)\n", currentLines.size(), vertices.size() / 5);
     }
 
     glBindVertexArray(vao);

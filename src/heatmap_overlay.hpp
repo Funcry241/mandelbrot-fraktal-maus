@@ -10,7 +10,7 @@ struct RendererState;
 
 namespace HeatmapOverlay {
 
-// Overlay ein-/ausblenden via Tastendruck (setzt ctx.overlayEnabled um)
+// Overlay ein-/ausblenden via Tastendruck (setzt ctx.heatmapOverlayEnabled um)
 void toggle(RendererState& ctx);
 
 // Gibt GPU-Ressourcen (VAO, VBO, Shader) frei

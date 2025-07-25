@@ -13,12 +13,13 @@ int main() {
 
     Renderer renderer(Settings::width, Settings::height);
     if (!renderer.initGL()) {
-        std::puts("[FATAL] OpenGL-Initialisierung fehlgeschlagen – Programm wird beendet");
+        std::puts("[FATAL] OpenGL-Initialisierung fehlgeschlagen - Programm wird beendet");
         return EXIT_FAILURE;
     }
 
     RendererLoop::initResources(renderer.getState());
-    renderer.getState().overlayEnabled = Settings::heatmapOverlayEnabled;
+    renderer.getState().heatmapOverlayEnabled = Settings::heatmapOverlayEnabled;
+    renderer.getState().warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
     CudaInterop::setPauseZoom(false);
 
     while (!renderer.shouldClose()) {

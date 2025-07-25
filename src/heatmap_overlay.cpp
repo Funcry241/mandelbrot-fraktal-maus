@@ -75,7 +75,7 @@ return prog;
 }
 
 void toggle(RendererState& ctx) {
-ctx.overlayEnabled = !ctx.overlayEnabled;
+ctx.heatmapOverlayEnabled = !ctx.heatmapOverlayEnabled;
 }
 
 void cleanup() {
@@ -91,7 +91,7 @@ int width, int height,
 int tileSize,
 [[maybe_unused]] GLuint textureId,
 RendererState& ctx) {
-if (!ctx.overlayEnabled) return;
+if (!ctx.heatmapOverlayEnabled) return;
 
 static bool warned = false;
 if (entropy.empty() || contrast.empty()) {
