@@ -79,7 +79,6 @@ void renderFrame_impl(RendererState& state) {
     ctx.height       = state.height;
     ctx.maxIterations= state.maxIterations;
     ctx.tileSize     = state.lastTileSize;
-    ctx.supersampling= state.supersampling;
     ctx.d_iterations = state.d_iterations;
     ctx.d_entropy    = state.d_entropy;
     ctx.d_contrast   = state.d_contrast;

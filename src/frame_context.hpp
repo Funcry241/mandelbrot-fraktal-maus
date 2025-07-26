@@ -1,14 +1,9 @@
-// Datei: src/frame_context.hpp
-/* 🐭 interner Maus-Kommentar:
-   FrameContext initialisiert ab sofort alle Kernwerte aus Settings.
-   Keine Magic Numbers mehr! Flugente: immer synchron, immer robust.
-   Schneefuchs: „Wartbarkeit ist, wenn Settings überall gelten.“
-*/
+/* 🐭 Maus-Kommentar: Alpha 49f – Supersampling restlos entfernt. `supersampling` raus, Konstruktor synchron mit Settings. Alles glasklar, wartbar, schnell. Schneefuchs: entkernt. Otter: minimalistisch. */
 
 #pragma once
 #include <vector>
 #include <cuda_runtime.h>
-#include "settings.hpp"        // Settings::BASE_TILE_SIZE etc.
+#include "settings.hpp"  // Settings::BASE_TILE_SIZE etc.
 
 struct FrameContext {
     // Bilddimensionen
@@ -18,7 +13,6 @@ struct FrameContext {
     // CUDA-Parameter
     int maxIterations;
     int tileSize;
-    int supersampling;
 
     // Kamera / Fraktalkoordinaten
     float zoom;
@@ -33,7 +27,7 @@ struct FrameContext {
     std::vector<float> h_entropy;   // hostseitig – pro Tile
     std::vector<float> h_contrast;  // Kontrast pro Tile – für Heatmap
     float* d_entropy = nullptr;     // device-seitig
-    float* d_contrast = nullptr;    // ✅ NEU: Kontrastwerte auf GPU
+    float* d_contrast = nullptr;    // Kontrastwerte auf GPU
     int* d_iterations = nullptr;    // Iterationstiefe je Pixel
 
     // Statuswerte zur Analyse / Logging
@@ -48,11 +42,10 @@ struct FrameContext {
     double totalTime = 0.0;
     double timeSinceLastZoom = 0.0;
 
-    // Konstruktor initialisiert alles aus Settings
+    // Konstruktor initialisiert aus Settings
     FrameContext()
         : maxIterations(Settings::INITIAL_ITERATIONS),
           tileSize(Settings::BASE_TILE_SIZE),
-          supersampling(Settings::defaultSupersampling),
           zoom(Settings::initialZoom),
           offset{Settings::initialOffsetX, Settings::initialOffsetY}
     {}
@@ -71,6 +64,6 @@ struct FrameContext {
         d_entropy = nullptr;
         d_contrast = nullptr;
         d_iterations = nullptr;
-        shouldZoom = false;        
+        shouldZoom = false;
     }
 };

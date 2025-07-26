@@ -1,6 +1,4 @@
-// Datei: src/cuda_interop.hpp
-// 🐭 Maus-Kommentar: Schnittstelle CUDA/OpenGL – Kolibri, Panda & Capybara 2 sauber integriert, float2-only.
-// Wrapper für Host/Device-Puffer, Heatmap & Auto-Zoom. Keine Redundanz – alles klar Otter!
+// 🐭 Maus-Kommentar: Alpha 49f – Supersampling ausgebaut, Signatur verschlankt. Nur noch klare Parameter für CUDA-Interop. Otter: scharf. Schneefuchs: kein Ballast.
 
 #ifndef CUDA_INTEROP_HPP
 #define CUDA_INTEROP_HPP
@@ -32,10 +30,7 @@ void renderCudaFrame(
     float2& newOffset,
     bool& shouldZoom,
     int tileSize,
-    int supersampling,
-    RendererState& state,
-    int* d_tileSupersampling,
-    std::vector<int>& h_tileSupersampling
+    RendererState& state
 );
 
 void setPauseZoom(bool pause);

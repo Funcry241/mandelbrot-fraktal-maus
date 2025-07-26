@@ -1,5 +1,4 @@
-// Datei: src/renderer_state.cpp
-// 🐭 Maus-Kommentar: Alpha 49d – Flugente watschelt voran: `targetOffset` ist jetzt `float2`, alles konsistent zur GPU. Kein `double2` mehr, kein Konvertierungskrach. Resize-Log bleibt kompakt. Otter lacht.
+// 🐭 Maus-Kommentar: Alpha 49e – Supersampling entfernt. `setupCudaBuffers` allokiert nur noch Iterationen, Entropie, Kontrast. Kein `d_tileSupersampling`, kein `h_tileSupersampling`, kein globaler SS-Wert. Otter: klar und schnell. Schneefuchs: Kein Rauschen mehr.
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -20,7 +19,7 @@ void RendererState::reset() {
     baseIterations = Settings::INITIAL_ITERATIONS;
     maxIterations  = Settings::MAX_ITERATIONS_CAP;
 
-    targetOffset         = offset;  // 🦆 Flugente: float2 statt double2
+    targetOffset         = offset;
     filteredTargetOffset = offset;
 
     fps          = 0.0f;
@@ -29,11 +28,9 @@ void RendererState::reset() {
     lastTime     = glfwGetTime();
     lastTileSize = Settings::BASE_TILE_SIZE;
 
-    supersampling  = Settings::defaultSupersampling;
-    heatmapOverlayEnabled     = Settings::heatmapOverlayEnabled;
+    heatmapOverlayEnabled       = Settings::heatmapOverlayEnabled;
     warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
 
-    // 🔄 ZoomResult vollständig zurücksetzen (Gepard)
     zoomResult.bestIndex    = -1;
     zoomResult.bestEntropy  = 0.0f;
     zoomResult.bestContrast = 0.0f;
@@ -52,20 +49,17 @@ void RendererState::setupCudaBuffers() {
     CUDA_CHECK(cudaMalloc(&d_iterations, totalPixels * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
 
-    CUDA_CHECK(cudaMalloc(&d_entropy,             numTiles * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_contrast,            numTiles * sizeof(float)));       // Panda
-    CUDA_CHECK(cudaMalloc(&d_tileSupersampling,   numTiles * sizeof(int)));         // Kolibri
+    CUDA_CHECK(cudaMalloc(&d_entropy,  numTiles * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_contrast, numTiles * sizeof(float)));
 
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
-    h_tileSupersampling.resize(numTiles);
 }
 
 void RendererState::resize(int newWidth, int newHeight) {
-    if (d_iterations)        { CUDA_CHECK(cudaFree(d_iterations));        d_iterations = nullptr; }
-    if (d_entropy)           { CUDA_CHECK(cudaFree(d_entropy));           d_entropy = nullptr; }
-    if (d_contrast)          { CUDA_CHECK(cudaFree(d_contrast));          d_contrast = nullptr; }
-    if (d_tileSupersampling) { CUDA_CHECK(cudaFree(d_tileSupersampling)); d_tileSupersampling = nullptr; }
+    if (d_iterations) { CUDA_CHECK(cudaFree(d_iterations)); d_iterations = nullptr; }
+    if (d_entropy)    { CUDA_CHECK(cudaFree(d_entropy));    d_entropy = nullptr; }
+    if (d_contrast)   { CUDA_CHECK(cudaFree(d_contrast));   d_contrast = nullptr; }
 
     CudaInterop::unregisterPBO();
 

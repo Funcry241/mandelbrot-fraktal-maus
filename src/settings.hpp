@@ -14,20 +14,21 @@ namespace Settings {
 // Höhere Werte vergrößern den Bildausschnitt schneller, aber riskieren visuelle Artefakte.
 constexpr float zoomFactor = 1.07f;
 
-// Empfohlene Werte: 1 (aus), 2, 3 oder 4
-// 1 = Kein Supersampling, schnellste Darstellung
-// 2+ = Mehrere Subpixel pro Pixel (2×2, 3×3, etc.)
-// Erhöhung verbessert Bildqualität (Antialiasing), erhöht aber auch die Renderzeit quadratisch.
-constexpr int defaultSupersampling = 1;
+// Untere Entropie-Schwelle für Auto-Zoom-Zielauswahl.
+// Nur Tiles mit Entropie > ENTROPY_THRESHOLD_LOW werden als Kandidaten betrachtet.
+//
+// Wertempfehlung:
+//   - 0.0f: kein Filter (auch langweilige Bereiche werden berücksichtigt)
+//   - 2.0f–3.0f: realistische Schwelle für kontrastarme Tiles
+//   - 4.0f–5.0f: nur sehr strukturierte Bereiche
+//
+// Erhöhung → stärkerer Filter, langsameres Zoomen  
+// Reduktion → breitere Auswahl, aber potenziell uninteressanter Zoom
+inline constexpr float ENTROPY_THRESHOLD_LOW = 2.5f;
 
 // 🔍 Debug-Modi: visuelle Darstellung & Konsolen-Ausgabe aktivieren
 constexpr bool debugGradient = false; // Aktiviert reine Entropie-Ansicht (keine Farben) – nur zu Analysezwecken
 constexpr bool debugLogging  = true;  // Aktiviert Konsolenausgaben für Auto-Zoom, Tile-Entropie etc.
-
-// Legt fest, wie stark die Supersampling-Stufe bei hoher Entropie skaliert wird.
-// HIGH: ab diesem Wert 4x4 Supersampling, LOW: ab diesem Wert 2x2 Supersampling.
-constexpr float ENTROPY_THRESHOLD_HIGH = 2.5f; // Empfehlung: 2.5 – 4.0
-constexpr float ENTROPY_THRESHOLD_LOW  = 1.2f; // Empfehlung: 1.0 – 2.5
 
 // 🔥 Sichtbarkeit des Heatmap-Overlays beim Programmstart
 // true = Heatmap (Entropie-Kontrast) ist sofort sichtbar

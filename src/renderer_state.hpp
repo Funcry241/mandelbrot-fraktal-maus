@@ -1,5 +1,4 @@
-// Datei: src/renderer_state.hpp
-// 🐭 Maus-Kommentar: State-of-the-Art für Renderer-Status. Alle Entropie-/Kontrast-/Zoomdaten persistent und schnell (float2 statt double2). Kein toter Code: lastTileIndex entfernt, Übersicht und Performance jetzt maximal klar. Schneefuchs: Übersicht, Otter: Performance.
+// 🐭 Maus-Kommentar: Alpha 49e – Supersampling entfernt. Keine Leichen im Speicher: d_tileSupersampling, h_tileSupersampling, supersampling sind weg. Otter: Endlich ohne Ballast. Schneefuchs: Speicher klar.
 
 #pragma once
 
@@ -38,13 +37,9 @@ public:
     std::vector<float> h_contrast;
 
     // 🔗 Analysepuffer (Device)
-    int*   d_iterations        = nullptr;
-    float* d_entropy           = nullptr;
-    float* d_contrast          = nullptr;
-    int*   d_tileSupersampling = nullptr;
-
-    // 🎛️ Supersampling-Level pro Tile (Host)
-    std::vector<int> h_tileSupersampling;
+    int*   d_iterations = nullptr;
+    float* d_entropy    = nullptr;
+    float* d_contrast   = nullptr;
 
     // 🎥 OpenGL-Zielpuffer (Interop via CUDA)
     unsigned int pbo = 0;  // Pixel Buffer Object
@@ -59,9 +54,6 @@ public:
     float lastEntropy  = 0.0f;
     float lastContrast = 0.0f;
     bool justZoomed    = false;
-
-    // 📏 Aktuelles globales Supersampling-Level
-    int supersampling = 1;
 
     // 🔥 Heatmap-Overlay-Zustand
     bool heatmapOverlayEnabled = false;

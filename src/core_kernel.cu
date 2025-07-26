@@ -1,5 +1,4 @@
-// Datei: src/core_kernel.cu
-// 👝 Maus-Kommentar: Alpha 50 – Verbesserte Robustheit & Eleganz. Neue `pixelToComplex`-Funktion für Klarheit, stabilisierte Farbnormalisierung gegen Artefakte, absichernder Kernel-Start & Entropie-Divisionsschutz. Otter: „Schönheit durch Genauigkeit.“
+// 🐭 Maus-Kommentar: Supersampling entfernt – einfache Kernlogik bleibt erhalten. Fokus liegt wieder auf Basissampling. Otter: Robustheit. Schneefuchs: Klarheit.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -38,8 +37,8 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fx, 
 }
 
 // ---- MANDELBROT-KERNEL ----
-__global__ void mandelbrotKernelAdaptive(
-    uchar4* out, int* iterOut, int w, int h, float zoom, float2 offset, int maxIter, int tile, int* super)
+__global__ void mandelbrotKernel(
+    uchar4* out, int* iterOut, int w, int h, float zoom, float2 offset, int maxIter, int tile)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -51,34 +50,20 @@ __global__ void mandelbrotKernelAdaptive(
         return;
     }
 
-    // Debugpixel (Testanzeige)
-    if (x == 0 && y == 0) { iterOut[idx] = 1234; out[idx] = make_uchar4(255, 0, 0, 255); }
-    if (x == 1 && y == 0) { iterOut[idx] = 4321; out[idx] = make_uchar4(0, 255, 0, 255); }
-    if (x == 2 && y == 0) { iterOut[idx] = 999;  out[idx] = make_uchar4(0, 0, 255, 255); }
-
-    int tilesX = (w + tile - 1) / tile;
-    int tileIndex = (y / tile) * tilesX + (x / tile);
-    int S = super ? super[tileIndex] : 1;
-    if (S < 1 || S > 32) S = 1;
-
-    float tSum = 0.0f; int iSum = 0;
     float scale = 1.0f / zoom;
     float spanX = 3.5f * scale;
     float spanY = spanX * h / w;
 
-    for (int i = 0; i < S; ++i)
-        for (int j = 0; j < S; ++j) {
-            float dx = (i + 0.5f) / S, dy = (j + 0.5f) / S;
-            float2 c = pixelToComplex(x + dx, y + dy, w, h, spanX, spanY, offset);
-            float zx, zy; int it = mandelbrotIterations(c.x, c.y, maxIter, zx, zy); iSum += it;
-            float norm = zx * zx + zy * zy;
-            float tt = it - log2f(log2f(fmaxf(norm, 1.000001f)));
-            tt = fminf(fmaxf(tt / maxIter, 0.0f), 1.0f);
-            tSum += tt;
-        }
+    float2 c = pixelToComplex(x + 0.5f, y + 0.5f, w, h, spanX, spanY, offset);
+    float zx, zy;
+    int it = mandelbrotIterations(c.x, c.y, maxIter, zx, zy);
 
-    out[idx] = elegantColor(tSum / (S * S));
-    iterOut[idx] = max(0, iSum / (S * S));
+    float norm = zx * zx + zy * zy;
+    float t = it - log2f(log2f(fmaxf(norm, 1.000001f)));
+    t = fminf(fmaxf(t / maxIter, 0.0f), 1.0f);
+
+    out[idx] = elegantColor(t);
+    iterOut[idx] = it;
 }
 
 // ---- ENTROPY & CONTRAST ----
@@ -139,17 +124,16 @@ void computeCudaEntropyContrast(const int* d_it, float* d_e, float* d_c, int w, 
     cudaDeviceSynchronize();
 }
 
-// ---- HOST-WRAPPER: Mandelbrot-Hybrid ----
-void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, float2 offset, int maxIter, int tile, int* d_sup, int supersampling) {
+// ---- HOST-WRAPPER: Mandelbrot ----
+void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, float2 offset, int maxIter, int tile) {
     dim3 block(16, 16), grid((w + 15) / 16, (h + 15) / 16);
     if (Settings::debugLogging) {
-        std::printf("[Kernel] %dx%d | Zoom: %.3e | Offset: (%.5f, %.5f) | Iter: %d | Tile: %d | Supersampling: %s\n",
-            w, h, zoom, offset.x, offset.y, maxIter, tile,
-            d_sup ? "Buffer" : std::to_string(supersampling).c_str());
+        std::printf("[Kernel] %dx%d | Zoom: %.3e | Offset: (%.5f, %.5f) | Iter: %d | Tile: %d\n",
+            w, h, zoom, offset.x, offset.y, maxIter, tile);
     }
 
     if (out && d_it)
-        mandelbrotKernelAdaptive<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter, tile, d_sup);
+        mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter, tile);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess)

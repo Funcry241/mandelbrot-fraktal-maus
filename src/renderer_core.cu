@@ -1,5 +1,4 @@
-// Datei: src/renderer_core.cu
-// 🐭 Maus-Kommentar: Alpha 49d – Debug-Pfade vollständig instrumentiert. Alle kritischen Punkte im Lifecycle geloggt. Keine stillen Abstürze mehr. Ideal für Tracebacks. Schneefuchs flüstert: „Sichtbarkeit ist die halbe Stabilität.“
+// 🐭 Maus-Kommentar: Alpha 49e – Supersampling vollständig entfernt. Kein d_tileSupersampling, kein h_tileSupersampling, kein Overhead mehr. Otter: "Sauberer, schneller, schlanker." Schneefuchs zufrieden.
 
 #include "pch.hpp"
 
@@ -121,14 +120,12 @@ void Renderer::renderFrame_impl() {
 }
 
 void Renderer::freeDeviceBuffers() {
-    if (state.d_iterations)         { CUDA_CHECK(cudaFree(state.d_iterations));         state.d_iterations = nullptr; }
-    if (state.d_entropy)            { CUDA_CHECK(cudaFree(state.d_entropy));            state.d_entropy = nullptr; }
-    if (state.d_contrast)           { CUDA_CHECK(cudaFree(state.d_contrast));           state.d_contrast = nullptr; }
-    if (state.d_tileSupersampling)  { CUDA_CHECK(cudaFree(state.d_tileSupersampling));  state.d_tileSupersampling = nullptr; }
+    if (state.d_iterations) { CUDA_CHECK(cudaFree(state.d_iterations)); state.d_iterations = nullptr; }
+    if (state.d_entropy)    { CUDA_CHECK(cudaFree(state.d_entropy));    state.d_entropy = nullptr; }
+    if (state.d_contrast)   { CUDA_CHECK(cudaFree(state.d_contrast));   state.d_contrast = nullptr; }
 
     state.h_entropy.clear();
     state.h_contrast.clear();
-    state.h_tileSupersampling.clear();
 }
 
 void Renderer::resize(int newW, int newH) {
@@ -137,7 +134,7 @@ void Renderer::resize(int newW, int newH) {
     glViewport(0, 0, newW, newH);
 }
 
-void Renderer::cleanup() {    
+void Renderer::cleanup() {
     RendererPipeline::cleanup();
     CudaInterop::unregisterPBO();
 
@@ -146,11 +143,10 @@ void Renderer::cleanup() {
 
     RendererWindow::destroyWindow(state.window);
     WarzenschweinOverlay::cleanup();
-    
+
     freeDeviceBuffers();
     HeatmapOverlay::cleanup();
 
     glfwTerminate();
-
     glInitialized = false;
 }

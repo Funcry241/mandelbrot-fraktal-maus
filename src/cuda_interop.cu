@@ -1,5 +1,4 @@
-// Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: Alpha 49b – Logging-Reduktion nach „Gepard 2.0“: Debug-Ausgaben sind nun ASCII-clean, einzeilig, kompakt. Vorher/Nachher-Vergleiche der Iterationen, Supersampling-Check und Performance-Log in einer Zeile. Schneefuchs sagt: „Prägnanz ist Präzision.“
+// 🐭 Maus-Kommentar: Alpha 49g – Supersampling vollständig ausgebaut. Mandelbrot-Kernel erhält keine SS-Daten mehr, alle Speicher freigeräumt. Schneefuchs: Präzise. Otter: Sauber.
 
 #include "pch.hpp"
 #include "cuda_interop.hpp"
@@ -41,8 +40,8 @@ void renderCudaFrame(
     int* d_iterations, float* d_entropy, float* d_contrast,
     int width, int height, float zoom, float2 offset, int maxIterations,
     std::vector<float>& h_entropy, std::vector<float>& h_contrast,
-    float2& newOffset, bool& shouldZoom, int tileSize, int supersampling,
-    RendererState& state, int* d_tileSupersampling, std::vector<int>& h_tileSupersampling
+    float2& newOffset, bool& shouldZoom, int tileSize,
+    RendererState& state
 ) {
     if (!cudaPboResource)
         throw std::runtime_error("[FATAL] CUDA PBO not registered!");
@@ -59,15 +58,14 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
     CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
-    CUDA_CHECK(cudaMemset(d_tileSupersampling, 0, numTiles * sizeof(int)));
 
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
     uchar4* devPtr = nullptr; size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
     if (Settings::debugLogging) {
-        std::printf("[CU-FRAME] zoom=%.5g offset=(%.5g %.5g) iter=%d tile=%d ss=%d\n",
-                    zoom, offset.x, offset.y, maxIterations, tileSize, supersampling);
+        std::printf("[CU-FRAME] zoom=%.5g offset=(%.5g %.5g) iter=%d tile=%d\n",
+                    zoom, offset.x, offset.y, maxIterations, tileSize);
     }
 
     int dbg_before[3]{-12345}, dbg_after[3]{-12345};
@@ -75,7 +73,7 @@ void renderCudaFrame(
         CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
     }
 
-    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize, d_tileSupersampling, supersampling);
+    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
 
     if (Settings::debugLogging) {
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
@@ -89,20 +87,6 @@ void renderCudaFrame(
     h_contrast.resize(numTiles);
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
-
-    h_tileSupersampling.resize(numTiles);
-    for (int i = 0; i < numTiles; ++i)
-        h_tileSupersampling[i] = (h_entropy[i] > Settings::ENTROPY_THRESHOLD_HIGH) ? 4 :
-                                 (h_entropy[i] > Settings::ENTROPY_THRESHOLD_LOW)  ? 2 : 1;
-    CUDA_CHECK(cudaMemcpy(d_tileSupersampling, h_tileSupersampling.data(), numTiles * sizeof(int), cudaMemcpyHostToDevice));
-
-    if (Settings::debugLogging && numTiles > 2) {
-        std::vector<int> devCheck(3);
-        CUDA_CHECK(cudaMemcpy(devCheck.data(), d_tileSupersampling, 3 * sizeof(int), cudaMemcpyDeviceToHost));
-        std::printf("[CU-SS] tiles[0-2] = host: %d %d %d | dev: %d %d %d\n",
-            h_tileSupersampling[0], h_tileSupersampling[1], h_tileSupersampling[2],
-            devCheck[0], devCheck[1], devCheck[2]);
-    }
 
     shouldZoom = false;
     if (!pauseZoom) {
