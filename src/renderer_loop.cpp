@@ -124,9 +124,10 @@ void renderFrame_impl(RendererState& state) {
     }
 
     if (state.warzenschweinOverlayEnabled) {
+        int zoomExp = static_cast<int>(std::round(std::log10(1.0 / state.zoom)));
         std::string warzText =
             "OtterDream Mandelbrot\n"
-            "Zoom: " + std::to_string(state.zoom) + "\n"
+            "Zoom: 1e" + std::to_string(zoomExp) + "\n"
             "FPS:  " + std::to_string(state.fps) + "\n"
             "Iter: " + std::to_string(state.maxIterations) + "\n"
             "Tile: " + std::to_string(state.lastTileSize) + "\n"
