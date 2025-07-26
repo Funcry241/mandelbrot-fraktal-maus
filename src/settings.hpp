@@ -26,8 +26,8 @@ constexpr bool debugLogging  = true;  // Aktiviert Konsolenausgaben für Auto-Zo
 
 // Legt fest, wie stark die Supersampling-Stufe bei hoher Entropie skaliert wird.
 // HIGH: ab diesem Wert 4x4 Supersampling, LOW: ab diesem Wert 2x2 Supersampling.
-constexpr float ENTROPY_THRESHOLD_HIGH = 3.0f; // Empfehlung: 2.5 – 4.0
-constexpr float ENTROPY_THRESHOLD_LOW  = 1.5f; // Empfehlung: 1.0 – 2.5
+constexpr float ENTROPY_THRESHOLD_HIGH = 2.5f; // Empfehlung: 2.5 – 4.0
+constexpr float ENTROPY_THRESHOLD_LOW  = 1.2f; // Empfehlung: 1.0 – 2.5
 
 // 🔥 Sichtbarkeit des Heatmap-Overlays beim Programmstart
 // true = Heatmap (Entropie-Kontrast) ist sofort sichtbar

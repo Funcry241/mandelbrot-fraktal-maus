@@ -1,5 +1,5 @@
 // Datei: src/renderer_loop.cpp
-// 🐭 Maus-Kommentar: Alpha 59a – WarzenschweinOverlay zeigt nun auch dynamisch Iterationen, TileSize, AutoZoom. Alles ASCII-sicher. Schneefuchs: „Live-Telemetrie. Endlich klar.“
+// 🐭 Maus-Kommentar: Alpha 60b – Dynamische Tile-Größenanpassung bei Zoomänderung, sauber vor ctx-Befüllung. Schneefuchs: „Soft resize.“ Otter: „Konsistent, endlich.“
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -49,6 +49,19 @@ void renderFrame_impl(RendererState& state) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
+    beginFrame(state);
+
+    // 🐭 Maus: Dynamische Anpassung der Tile-Größe bei Zoomänderung – ersetzt statisches Verhalten. Otter sagt: „Endlich weich.“
+    {
+        int newTile = computeTileSizeFromZoom(static_cast<float>(state.zoom));
+        if (newTile != state.lastTileSize) {
+            if (Settings::debugLogging)
+                std::printf("[Tile] Updating tileSize: %d → %d (zoom = %.4e)\n",
+                    state.lastTileSize, newTile, state.zoom);
+            state.resize(state.width, state.height);
+        }
+    }
+
     ctx.zoom         = static_cast<float>(state.zoom);
     ctx.offset       = { static_cast<float>(state.offset.x), static_cast<float>(state.offset.y) };
     ctx.width        = state.width;
@@ -61,13 +74,11 @@ void renderFrame_impl(RendererState& state) {
     ctx.d_contrast   = state.d_contrast;
     ctx.h_entropy    = state.h_entropy;
     ctx.h_contrast   = state.h_contrast;
-    ctx.overlayActive= state.heatmapOverlayEnabled; // nur Heatmap beeinflusst Entropielogik
+    ctx.overlayActive= state.heatmapOverlayEnabled;
     ctx.lastEntropy  = state.lastEntropy;
     ctx.lastContrast = state.lastContrast;
 
     if (isFirstFrame) isFirstFrame = false;
-
-    beginFrame(state);
 
     size_t totalPixels = static_cast<size_t>(ctx.width) * ctx.height;
     size_t tilesX = (ctx.width + ctx.tileSize - 1) / ctx.tileSize;
