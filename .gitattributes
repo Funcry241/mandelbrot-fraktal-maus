@@ -1,11 +1,11 @@
-# 🧠 Maus-Kommentar: Einheitliche Line Endings, Syntax-Hervorhebung, saubere Diffs – für Mandelbrot-Otterdream
+# 🧠 Maus-Kommentar: Einheitliche Line Endings, Syntax-Hervorhebung, saubere Diffs - für Mandelbrot-Otterdream
 
 # --------------------------------------------------------
 # Standardtextdateien: automatisch LF
 * text=auto eol=lf
 
 # --------------------------------------------------------
-# Quellcode – explizit Unix-LF, unabhängig vom OS
+# Quellcode - explizit Unix-LF, unabhängig vom OS
 *.cpp     text eol=lf
 *.c       text eol=lf
 *.cu      text eol=lf
@@ -29,7 +29,7 @@ CMakeLists.txt text eol=lf
 *.txt     text eol=lf
 
 # --------------------------------------------------------
-# Binary files – nicht diffbar
+# Binary files - nicht diffbar
 *.exe     binary
 *.dll     binary
 *.lib     binary

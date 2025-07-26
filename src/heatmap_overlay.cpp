@@ -50,7 +50,7 @@ glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
 if (!success) {
 GLchar log[1024];
 glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
-std::fprintf(stderr, "[SHADER ERROR] Compilation failed: %s\n", log);
+LUCHS_LOG( "[SHADER ERROR] Compilation failed: %s\n", log);
 }
 return shader;
 }
@@ -67,7 +67,7 @@ glGetProgramiv(prog, GL_LINK_STATUS, &success);
 if (!success) {
 GLchar log[1024];
 glGetProgramInfoLog(prog, sizeof(log), nullptr, log);
-std::fprintf(stderr, "[SHADER ERROR] Linking failed: %s\n", log);
+LUCHS_LOG( "[SHADER ERROR] Linking failed: %s\n", log);
 }
 glDeleteShader(vs);
 glDeleteShader(fs);
@@ -96,7 +96,7 @@ if (!ctx.heatmapOverlayEnabled) return;
 static bool warned = false;
 if (entropy.empty() || contrast.empty()) {
     if (Settings::debugLogging && !warned) {
-        std::fprintf(stderr, "[DEBUG] HeatmapOverlay: entropy or contrast vector is empty.\n");
+        LUCHS_LOG( "[DEBUG] HeatmapOverlay: entropy or contrast vector is empty.\n");
         warned = true;
     }
     return;
@@ -163,7 +163,7 @@ glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(data.size() / 3));
 
 GLenum err = glGetError();
 if (Settings::debugLogging && err != GL_NO_ERROR) {
-    std::fprintf(stderr, "[DEBUG] HeatmapOverlay: OpenGL error 0x%x\n", err);
+    LUCHS_LOG( "[DEBUG] HeatmapOverlay: OpenGL error 0x%x\n", err);
 }
 
 glDisableVertexAttribArray(0);
@@ -175,4 +175,4 @@ glUseProgram(0);
 
 } // namespace HeatmapOverlay
 
-// 📣 Globale Funktion entfernt – benutze explizit HeatmapOverlay::drawOverlay im Render-Loop.
+// 📣 Globale Funktion entfernt - benutze explizit HeatmapOverlay::drawOverlay im Render-Loop.

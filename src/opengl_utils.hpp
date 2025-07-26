@@ -1,5 +1,5 @@
 // Datei: src/opengl_utils.hpp
-// 🐭 Maus-Kommentar: Robbe-Edition – keine Altlasten mehr. Moderne Shader-/Quad-Erzeugung, explizite VAO-Nutzung. GLEW/GLFW IMMER im PCH. Schneefuchs: „Header bleibt schlank, sonst beißt die Robbe!“
+// 🐭 Maus-Kommentar: Robbe-Edition - keine Altlasten mehr. Moderne Shader-/Quad-Erzeugung, explizite VAO-Nutzung. GLEW/GLFW IMMER im PCH. Schneefuchs: „Header bleibt schlank, sonst beißt die Robbe!“
 
 #pragma once
 #ifndef OPENGL_UTILS_HPP

@@ -1,5 +1,5 @@
 // Datei: src/warzenschwein_overlay.cpp
-// 🐭 Maus-Kommentar: Vollständig gekapselt wie HeatmapOverlay – Textzustand lokal. drawOverlay prüft `visible` und `currentText`, Shader/VAO/VBO intern verwaltet. Kein Zugriff auf ctx außer Zoom. Otter: saubere Trennung, Schneefuchs: klares Datenmodell.
+// 🐭 Maus-Kommentar: Vollständig gekapselt wie HeatmapOverlay - Textzustand lokal. drawOverlay prüft `visible` und `currentText`, Shader/VAO/VBO intern verwaltet. Kein Zugriff auf ctx außer Zoom. Otter: saubere Trennung, Schneefuchs: klares Datenmodell.
 
 #include "warzenschwein_overlay.hpp"
 #include "warzenschwein_fontdata.hpp"
@@ -51,7 +51,7 @@ static GLuint compile(GLenum type, const char* src) {
     if (!ok) {
         char buf[512];
         glGetShaderInfoLog(s, 512, nullptr, buf);
-        std::fprintf(stderr, "[ShaderError] %s: %s\n", (type == GL_VERTEX_SHADER ? "Vertex" : "Fragment"), buf);
+        LUCHS_LOG( "[ShaderError] %s: %s\n", (type == GL_VERTEX_SHADER ? "Vertex" : "Fragment"), buf);
     }
     return s;
 }
@@ -151,7 +151,7 @@ void generateOverlayQuads(
 
 void drawOverlay(RendererState& ctx) {
      if (Settings::debugLogging) {
-        printf("[WS-Precheck] visible=%d | empty=%d\n",
+        LUCHS_LOG("[WS-Precheck] visible=%d | empty=%d\n",
             static_cast<int>(visible),
             static_cast<int>(currentText.empty())
         );
@@ -164,7 +164,7 @@ void drawOverlay(RendererState& ctx) {
     generateOverlayQuads(currentText, vertices, background, ctx);
 
     if (Settings::debugLogging) {
-        printf("[WS-Overlay] Visible=%d | TextLen=%zu | Verts=%zu | BG=%zu | Zoom=%.3f\n",
+        LUCHS_LOG("[WS-Overlay] Visible=%d | TextLen=%zu | Verts=%zu | BG=%zu | Zoom=%.3f\n",
             visible,
             currentText.length(),
             vertices.size(),
@@ -193,7 +193,7 @@ void drawOverlay(RendererState& ctx) {
     if (Settings::debugLogging) {
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
-            printf("[WS-GL] glGetError = 0x%04X\n", err);
+            LUCHS_LOG("[WS-GL] glGetError = 0x%04X\n", err);
         }
     }
 }

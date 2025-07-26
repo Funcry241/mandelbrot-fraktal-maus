@@ -1,8 +1,8 @@
 // Datei: src/zoom_command.hpp
-// 🐭 Maus-Kommentar: Struktur für jede Auto-Zoom-Entscheidung – deterministisch, replayfähig, testbar.
+// 🐭 Maus-Kommentar: Struktur für jede Auto-Zoom-Entscheidung - deterministisch, replayfähig, testbar.
 // 🦦 Otter: Reproduzierbares Verhalten durch CommandBus, jeder Frame dokumentiert.
 // 🐅 Maus: Kompakt, ohne math_utils, nur float2 aus <vector_types.h>.
-// 🐼 Panda: Jeder ZoomCommand ist ein protokollierter Denkprozess – Grundlage für Analyse, Replay und Heatmap.
+// 🐼 Panda: Jeder ZoomCommand ist ein protokollierter Denkprozess - Grundlage für Analyse, Replay und Heatmap.
 // Ziel: vollständige Nachvollziehbarkeit aller Zoom-Aktionen, ideal für Analyse und Debug.
 
 #pragma once
@@ -22,7 +22,7 @@ struct ZoomCommand {
 
     std::string toCSV() const {
         char buf[128];
-        snprintf(buf, sizeof(buf),
+        LUCHS_LOG(buf, sizeof(buf),
                  "%d,%.5f,%.5f,%.1e,%.1e,%.4f,%.4f",
                  frameIndex, newOffset.x, newOffset.y,
                  zoomBefore, zoomAfter, entropy, contrast);

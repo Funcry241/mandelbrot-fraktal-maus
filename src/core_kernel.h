@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: Supersampling entfernt – launch_mandelbrotHybrid jetzt minimal und direkt. Otter: Klarer Fokus. Schneefuchs: Nur das, was gebraucht wird.
+// 🐭 Maus-Kommentar: Supersampling entfernt - launch_mandelbrotHybrid jetzt minimal und direkt. Otter: Klarer Fokus. Schneefuchs: Nur das, was gebraucht wird.
 
 #ifndef CORE_KERNEL_H
 #define CORE_KERNEL_H
@@ -25,7 +25,7 @@ void launch_mandelbrotHybrid(
     int tileSize
 );
 
-// Entropie- und Kontrastberechnung pro Tile – Panda & Capybara
+// Entropie- und Kontrastberechnung pro Tile - Panda & Capybara
 extern "C"
 void computeCudaEntropyContrast(
     const int* d_iterations,

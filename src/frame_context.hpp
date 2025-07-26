@@ -1,4 +1,4 @@
-/* 🐭 Maus-Kommentar: Alpha 49f – Supersampling restlos entfernt. `supersampling` raus, Konstruktor synchron mit Settings. Alles glasklar, wartbar, schnell. Schneefuchs: entkernt. Otter: minimalistisch. */
+/* 🐭 Maus-Kommentar: Alpha 49f - Supersampling restlos entfernt. `supersampling` raus, Konstruktor synchron mit Settings. Alles glasklar, wartbar, schnell. Schneefuchs: entkernt. Otter: minimalistisch. */
 
 #pragma once
 #include <vector>
@@ -24,8 +24,8 @@ struct FrameContext {
     float2 newOffset = {0.0f, 0.0f}; // neues Ziel (wenn shouldZoom = true)
 
     // Entropie-Daten
-    std::vector<float> h_entropy;   // hostseitig – pro Tile
-    std::vector<float> h_contrast;  // Kontrast pro Tile – für Heatmap
+    std::vector<float> h_entropy;   // hostseitig - pro Tile
+    std::vector<float> h_contrast;  // Kontrast pro Tile - für Heatmap
     float* d_entropy = nullptr;     // device-seitig
     float* d_contrast = nullptr;    // Kontrastwerte auf GPU
     int* d_iterations = nullptr;    // Iterationstiefe je Pixel
@@ -53,11 +53,11 @@ struct FrameContext {
     // Debug-Ausgaben
     void printDebug() const {
         if (!Settings::debugLogging) return;
-        printf("[Frame] w=%d h=%d zoom=%.1e offset=(%.5f, %.5f) tiles=%d\n",
+        LUCHS_LOG("[Frame] w=%d h=%d zoom=%.1e offset=(%.5f, %.5f) tiles=%d\n",
             width, height, zoom, offset.x, offset.y, tileSize);
     }
 
-    // Speicher zurücksetzen – z. B. bei Resize
+    // Speicher zurücksetzen - z. B. bei Resize
     void clear() {
         h_entropy.clear();
         h_contrast.clear();

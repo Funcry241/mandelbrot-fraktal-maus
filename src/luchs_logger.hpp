@@ -1,34 +1,36 @@
-// Datei: src/luchs_logger.hpp
-// 🐭 Maus-Kommentar: Einheitliches Logging für Host (C++) und Device (CUDA). Host-Ausgabe mit Zeitstempel, Device via Buffer. Otter: UniversalMakro. Schneefuchs: Compilezeit-Switch.
-
 #pragma once
-#ifndef LUCHS_LOGGER_HPP
-#define LUCHS_LOGGER_HPP
-
+#include <iostream>
 #include <cstdio>
+#include <cstdarg>
 
-namespace LuchsLogger {
+// Stream-basiertes Logging (LUCHS_LOG_STREAM << ...)
+struct LogStream {
+    template <typename T>
+    LogStream& operator<<(const T& value) {
+        std::cerr << value;
+        return *this;
+    }
 
-// Host-seitiges Logging mit Zeitstempel und Ursprungsort
-void logMessage(const char* file, int line, const char* msg);
+    // Für std::endl etc.
+    LogStream& operator<<(std::ostream& (*manip)(std::ostream&)) {
+        std::cerr << manip;
+        return *this;
+    }
+};
 
-// Optional: explizites Flush (falls gepuffert wird)
-void flushLogs();
+inline LogStream LUCHS_LOG_STREAM;
 
-// CUDA-seitiges Logging (deviceLog)
-#ifdef __CUDACC__
-__device__ void deviceLog(const char* file, int line, const char* msg);
-void resetDeviceLog();
-void flushDeviceLogToHost(cudaStream_t stream);
-#endif
+// printf-artiges Logging (LUCHS_LOG("x = %d\n", x))
+inline void LUCHS_LOG_PRINTF(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    std::vfprintf(stderr, fmt, args);
+    va_end(args);
+}
 
-} // namespace LuchsLogger
+// Makro-Magie: LUCHS_LOG(...) ruft LUCHS_LOG_PRINTF auf
+#define LUCHS_LOG(...) LUCHS_LOG_PRINTF(__VA_ARGS__)
 
-// 🔁 Gemeinsames Logging-Makro – entscheidet zur Compilezeit
-#ifdef __CUDACC__
-#define LUCHS_LOG(msg) ::LuchsLogger::deviceLog(__FILE__, __LINE__, msg)
-#else
-#define LUCHS_LOG(msg) ::LuchsLogger::logMessage(__FILE__, __LINE__, msg)
-#endif
-
-#endif // LUCHS_LOGGER_HPP
+// 🧪 Erweiterbar:
+// #define LUCHS_LOG_ERR(...)  LUCHS_LOG("[ERROR] " __VA_ARGS__)
+// #define LUCHS_LOG_DBG(...)  if (Settings::debugLogging) LUCHS_LOG("[DEBUG] " __VA_ARGS__)

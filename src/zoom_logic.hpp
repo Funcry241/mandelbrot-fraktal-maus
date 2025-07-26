@@ -1,7 +1,7 @@
 // Datei: src/zoom_logic.hpp
-// 🐭 Maus-Kommentar: Alpha 49.1 – ZoomResult nun auch selbst [[nodiscard]], schützt gegen unbeachtete Konstrukte. Vollständig Clang/CUDA-kompatibel, exakt dokumentiert.
-// 🦦 Otter: Eindeutige Semantik – Ergebnis muss verwendet werden, sonst droht Zoomverlust.
-// 🐅 Maus: Kompakt, robust, klar priorisiert – ideal als Public API des Zoommoduls.
+// 🐭 Maus-Kommentar: Alpha 49.1 - ZoomResult nun auch selbst [[nodiscard]], schützt gegen unbeachtete Konstrukte. Vollständig Clang/CUDA-kompatibel, exakt dokumentiert.
+// 🦦 Otter: Eindeutige Semantik - Ergebnis muss verwendet werden, sonst droht Zoomverlust.
+// 🐅 Maus: Kompakt, robust, klar priorisiert - ideal als Public API des Zoommoduls.
 
 #pragma once
 #include "common.hpp"
@@ -11,7 +11,7 @@
 namespace ZoomLogic {
 
 /// 🎯 Datenstruktur für das beste Zoom-Ziel
-/// Wird jedes Frame neu berechnet – enthält Bewertung & Koordinaten
+/// Wird jedes Frame neu berechnet - enthält Bewertung & Koordinaten
 struct ZoomResult {
     int bestIndex = -1;                // Index im Tile-Raster
     float bestEntropy = 0.0f;          // Entropiewert dieses Tiles
@@ -31,12 +31,12 @@ struct ZoomResult {
     std::vector<float> perTileContrast;         // Optional: Rückkanal für Heatmap
 };
 
-/// 🐼 Panda: Entropie-Kontrastberechnung – mittelt über 4 direkte Nachbarn (oben, unten, links, rechts)
+/// 🐼 Panda: Entropie-Kontrastberechnung - mittelt über 4 direkte Nachbarn (oben, unten, links, rechts)
 /// Liefert Maß für lokale visuelle Struktur (Gradienten/Übergänge).
 [[nodiscard]]
 float computeEntropyContrast(const std::vector<float>& entropy, int width, int height, int tileSize);
 
-/// 🐘 + 🦦 + 🕊️ evaluateZoomTarget – zentrales Entscheidungssystem für Auto-Zoom.
+/// 🐘 + 🦦 + 🕊️ evaluateZoomTarget - zentrales Entscheidungssystem für Auto-Zoom.
 /// Analysiert die Entropie- und Kontrastkarten, trifft Entscheidung über das nächste Ziel.
 /// Gibt vollständige Bewertungsstruktur (ZoomResult) zurück.
 [[nodiscard]]

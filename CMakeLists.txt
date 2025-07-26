@@ -19,7 +19,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# ⚠️ Fallback: CMake kennt "CUDA23" nicht offiziell – daher auf 20 setzen,
+# ⚠️ Fallback: CMake kennt "CUDA23" nicht offiziell - daher auf 20 setzen,
 # aber explizit mit --std=c++23 im target_compile_options aktivieren.
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
@@ -47,7 +47,7 @@ find_path(CUDA_GL_INTEROP_INCLUDE_DIR cuda_gl_interop.h
 )
 
 if(NOT CUDA_GL_INTEROP_INCLUDE_DIR)
-  message(FATAL_ERROR "cuda_gl_interop.h not found – CUDA-OpenGL Interop benötigt!")
+  message(FATAL_ERROR "cuda_gl_interop.h not found - CUDA-OpenGL Interop benötigt!")
 endif()
 
 include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
@@ -56,6 +56,8 @@ include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
 # 🛠 Executable: zentrale Dateien des Mandelbrot-Renderers
 add_executable(mandelbrot_otterdream
     src/main.cpp
+    src/luchs_device_buffer.cu
+    src/luchs_logger.cpp
     src/renderer_core.cu
     src/renderer_loop.cpp
     src/renderer_state.cpp
@@ -70,10 +72,7 @@ add_executable(mandelbrot_otterdream
     src/zoom_logic.cpp
     src/zoom_command.cpp
     src/frame_pipeline.cpp
-    src/luchs_logger.cpp
-    src/luchs_device_buffer.cu
-    src/luchs_upload.cpp
-    src/luchs_logstream.cpp
+    src/luchs_logger.cpp       
 )
 
 if (MSVC)
@@ -122,6 +121,7 @@ set_source_files_properties(
     src/renderer_core.cu    
     src/cuda_interop.cu
     src/core_kernel.cu
+    src/luchs_device_buffer.cu
     PROPERTIES LANGUAGE CUDA
 )
 

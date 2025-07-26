@@ -1,5 +1,5 @@
 // Datei: src/renderer_core.hpp
-// 🐭 Maus-Kommentar: Header für das Rendering-Modul. Keine überflüssigen Parameter mehr – volle Synchronität zur Source. Funktioniert exakt mit der einparametrigen Loop-Signatur. Otter und Schneefuchs sind stolz.
+// 🐭 Maus-Kommentar: Header für das Rendering-Modul. Keine überflüssigen Parameter mehr - volle Synchronität zur Source. Funktioniert exakt mit der einparametrigen Loop-Signatur. Otter und Schneefuchs sind stolz.
 #pragma once
 
 #include <GLFW/glfw3.h>

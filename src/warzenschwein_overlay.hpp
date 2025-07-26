@@ -1,5 +1,5 @@
 // Datei: src/warzenschwein_overlay.hpp
-// 🐭 Maus-Kommentar: Volle Kontrolle – Text wird extern via setText() gesetzt, Rest ist gekapselt. drawOverlay nutzt nur Zoom. Kein Zugriff auf internen RendererState nötig. Schneefuchs: Trennung, Otter: Lesbarkeit.
+// 🐭 Maus-Kommentar: Volle Kontrolle - Text wird extern via setText() gesetzt, Rest ist gekapselt. drawOverlay nutzt nur Zoom. Kein Zugriff auf internen RendererState nötig. Schneefuchs: Trennung, Otter: Lesbarkeit.
 
 #pragma once
 #include "renderer_state.hpp"

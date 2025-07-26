@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: Alpha 49h "Frosch" – Alle simplen Performance-Maßnahmen integriert: memset reduziert, unnötige Host-Kopien vermieden, const verwendet, lokale Reduktion. Kein SS-Handling mehr. Otter: Stabil. Schneefuchs: Elegant.
+// 🐭 Maus-Kommentar: Alpha 49h "Frosch" - Alle simplen Performance-Maßnahmen integriert: memset reduziert, unnötige Host-Kopien vermieden, const verwendet, lokale Reduktion. Kein SS-Handling mehr. Otter: Stabil. Schneefuchs: Elegant.
 
 #include "pch.hpp"
 #include "cuda_interop.hpp"
@@ -23,7 +23,7 @@ static bool pauseZoom = false;
 
 void registerPBO(unsigned int pbo) {
     if (cudaPboResource) {
-        std::fprintf(stderr, "[ERROR] registerPBO: already registered!\n");
+        LUCHS_LOG("[ERROR] registerPBO: already registered!\n");
         return;
     }
     CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard));
@@ -69,7 +69,7 @@ void renderCudaFrame(
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
     if (Settings::debugLogging) {
-        std::printf("[CU-FRAME] zoom=%.5g offset=(%.5g %.5g) iter=%d tile=%d\n",
+        LUCHS_LOG("[CU-FRAME] zoom=%.5g offset=(%.5g %.5g) iter=%d tile=%d\n",
                     zoom, offset.x, offset.y, maxIterations, tileSize);
     }
 
@@ -80,7 +80,7 @@ void renderCudaFrame(
         launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
         int dbg_after[3]{};
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, sizeof(dbg_after), cudaMemcpyDeviceToHost));
-        std::printf("[CU-KERNEL] iters: %d->%d | %d->%d | %d->%d\n",
+        LUCHS_LOG("[CU-KERNEL] iters: %d->%d | %d->%d | %d->%d\n",
             dbg_before[0], dbg_after[0], dbg_before[1], dbg_after[1], dbg_before[2], dbg_after[2]);
     } else {
         launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
@@ -107,12 +107,12 @@ void renderCudaFrame(
             state.zoomResult = result;
 
             if (Settings::debugLogging) {
-                std::printf("[CU-ZOOM] idx=%d entropy=%.3f contrast=%.3f -> (%.5g %.5g) new=%d zoom=%d\n",
+                LUCHS_LOG("[CU-ZOOM] idx=%d entropy=%.3f contrast=%.3f -> (%.5g %.5g) new=%d zoom=%d\n",
                     result.bestIndex, result.bestEntropy, result.bestContrast,
                     newOffset.x, newOffset.y, result.isNewTarget ? 1 : 0, result.shouldZoom ? 1 : 0);
             }
         } else if (Settings::debugLogging) {
-            std::puts("[CU-ZOOM] No suitable target");
+            LUCHS_LOG("[CU-ZOOM] No suitable target");
         }
     }
 
@@ -122,7 +122,7 @@ void renderCudaFrame(
     const auto t1 = std::chrono::high_resolution_clock::now();
     const float totalMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
     if (Settings::debugLogging)
-        std::printf("[CU-PERF] total=%.2f ms\n", totalMs);
+        LUCHS_LOG("[CU-PERF] total=%.2f ms\n", totalMs);
 #endif
 }
 

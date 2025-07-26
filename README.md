@@ -1,6 +1,6 @@
 <!-- Datei: README.md -->
 <!-- Zeilen: 159 -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 53.2 – Waschbär integriert, GLEW-Fallback entschärft, CI-ready, Patchsystem dokumentiert. Schneefuchs sagt: „Erst putzen, dann patchen.“ -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 53.2 - Waschbär integriert, GLEW-Fallback entschärft, CI-ready, Patchsystem dokumentiert. Schneefuchs sagt: „Erst putzen, dann patchen.“ -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
@@ -32,7 +32,7 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
   Anzeige über Fullscreen-Quad, keine Altlasten, direkte PBO-Verbindung via `cudaGraphicsGLRegisterBuffer`
 
 - **📊 Heatmap-Overlay**  
-  Entropie/Kontrast pro Tile sichtbar gemacht – Debug & Analyse
+  Entropie/Kontrast pro Tile sichtbar gemacht - Debug & Analyse
 
 - **🧰 HUD & ASCII-Debug**  
   FPS, Zoom, Offset, optional aktivierbar
@@ -41,7 +41,7 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
   Automatische Bereinigung von vcpkg/glew-Bugs (z. B. `glew32d.lib`)
 
 - **🖋️ Eigenes Font-Overlay (Warzenschwein)**
-  HUD-Schrift ohne ImGui oder externe Fontlibs – direkt per OpenGL-Shader
+  HUD-Schrift ohne ImGui oder externe Fontlibs - direkt per OpenGL-Shader
 
 ---
 
@@ -60,8 +60,8 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 
 ## 📦 Abhängigkeiten (via vcpkg)
 
-- [GLFW](https://www.glfw.org/) – Fenster- und Eingabe-Handling  
-- [GLEW](http://glew.sourceforge.net/) – OpenGL-Extension-Management  
+- [GLFW](https://www.glfw.org/) - Fenster- und Eingabe-Handling  
+- [GLEW](http://glew.sourceforge.net/) - OpenGL-Extension-Management  
 
 ---
 
@@ -92,7 +92,7 @@ cd ..
 > - inkonsistente CMake-Caches  
 > - fehlende CUDA-Pfade  
 >  
-> Kein zweiter Durchlauf nötig – dank 🐭-Patchlogik und 🦝 Waschbär-Watchdog.
+> Kein zweiter Durchlauf nötig - dank 🐭-Patchlogik und 🦝 Waschbär-Watchdog.
 
 ---
 
@@ -151,19 +151,19 @@ Find your GPU's capability [here](https://developer.nvidia.com/cuda-gpus).
 **Ab Alpha 53:**  
 Der Build prüft automatisch auf bekannte Toolchain-Fallen.  
 Wenn z. B. `glew32d.lib` referenziert wird, wird der Eintrag gelöscht,  
-der Cache invalidiert und der Build neu aufgesetzt – ganz ohne Nutzerinteraktion.
+der Cache invalidiert und der Build neu aufgesetzt - ganz ohne Nutzerinteraktion.
 
-> „Sieht unscheinbar aus, aber hat alles im Griff.“ – 🦝
+> „Sieht unscheinbar aus, aber hat alles im Griff.“ - 🦝
 
 ---
 
 ## 📄 Lizenz
 
-Dieses Projekt steht unter der MIT-Lizenz – siehe [LICENSE](LICENSE) für Details.
+Dieses Projekt steht unter der MIT-Lizenz - siehe [LICENSE](LICENSE) für Details.
 
 ---
 
-**OtterDream** – von der Raupe zum Fraktal-Schmetterling 🦋  
+**OtterDream** - von der Raupe zum Fraktal-Schmetterling 🦋  
 *Happy Zooming!*
 
 🐭 This project owes a mouse more than it admits.  

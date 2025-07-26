@@ -1,4 +1,4 @@
-# 🧠 build_env.ps1 – Initialisiert MSVC-Umgebung für CUDA + cl.exe (automatisch)
+# 🧠 build_env.ps1 - Initialisiert MSVC-Umgebung für CUDA + cl.exe (automatisch)
 
 # Ermittle Developer Command Prompt für VS 2022
 $vcvarsall = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"

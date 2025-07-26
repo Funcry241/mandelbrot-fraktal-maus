@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: Alpha 49e – Supersampling entfernt. Keine Leichen im Speicher: d_tileSupersampling, h_tileSupersampling, supersampling sind weg. Otter: Endlich ohne Ballast. Schneefuchs: Speicher klar.
+// 🐭 Maus-Kommentar: Alpha 49e - Supersampling entfernt. Keine Leichen im Speicher: d_tileSupersampling, h_tileSupersampling, supersampling sind weg. Otter: Endlich ohne Ballast. Schneefuchs: Speicher klar.
 
 #pragma once
 

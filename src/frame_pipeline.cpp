@@ -1,17 +1,19 @@
-// 🐭 Maus-Kommentar: Alpha 49f – Supersampling restlos entfernt. `computeCudaFrame()` ohne `supersampling`, `d_tileSupersampling` oder `h_tileSupersampling`. Alles stabil, nichts vergessen. Otter: deterministisch. Schneefuchs: präzise.
-
-#include "pch.hpp"
-#include "cuda_interop.hpp"
-#include "renderer_pipeline.hpp"
-#include "frame_context.hpp"
-#include "zoom_command.hpp"
-#include "heatmap_overlay.hpp"
-#include "warzenschwein_overlay.hpp"
-#include "settings.hpp"
 #include <GLFW/glfw3.h>
 #include <cmath>
 #include <vector>
 #include <vector_types.h>
+#include "pch.hpp"
+#include "cuda_interop.hpp"
+#include "renderer_pipeline.hpp"
+#include "frame_context.hpp"
+#include "renderer_state.hpp"
+#include "zoom_command.hpp"
+#include "heatmap_overlay.hpp"
+#include "warzenschwein_overlay.hpp"
+#include "settings.hpp"
+#include "luchs_logger.hpp"
+
+namespace FramePipeline {
 
 static FrameContext g_ctx;
 static CommandBus g_zoomBus;
@@ -32,7 +34,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     float2 gpuNewOffset  = gpuOffset;
 
     if (Settings::debugLogging) {
-        std::printf("[DEBUG] Mandelbrot-Kernel Call: width=%d, height=%d, maxIter=%d, zoom=%.2f, offset=(%.10f, %.10f), tileSize=%d\n",
+        LUCHS_LOG("[DEBUG] Mandelbrot-Kernel Call: width=%d, height=%d, maxIter=%d, zoom=%.2f, offset=(%.10f, %.10f), tileSize=%d\n",
             frameCtx.width, frameCtx.height, frameCtx.maxIterations, frameCtx.zoom,
             frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
     }
@@ -59,8 +61,8 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     }
 
     if (Settings::debugLogging && !frameCtx.h_entropy.empty()) {
-        std::printf("[CUDA] Input: offset=(%.10f, %.10f) | zoom=%.2f\n", frameCtx.offset.x, frameCtx.offset.y, frameCtx.zoom);
-        std::printf("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n", frameCtx.h_entropy[0], frameCtx.h_contrast[0]);
+        LUCHS_LOG("[CUDA] Input: offset=(%.10f, %.10f) | zoom=%.2f\n", frameCtx.offset.x, frameCtx.offset.y, frameCtx.zoom);
+        LUCHS_LOG("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n", frameCtx.h_entropy[0], frameCtx.h_contrast[0]);
     }
 }
 
@@ -72,11 +74,11 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
     double dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
 
     if (Settings::debugLogging)
-        std::printf("[Logic] Start | shouldZoom=%d | Zoom=%.2f | dO=%.4e\n", frameCtx.shouldZoom ? 1 : 0, frameCtx.zoom, dist);
+        LUCHS_LOG("[Logic] Start | shouldZoom=%d | Zoom=%.2f | dO=%.4e\n", frameCtx.shouldZoom ? 1 : 0, frameCtx.zoom, dist);
     if (!frameCtx.shouldZoom) return;
     if (dist < Settings::DEADZONE) {
         if (Settings::debugLogging)
-            std::printf("[Logic] Offset in DEADZONE (%.4e) -> no movement\n", dist);
+            LUCHS_LOG("[Logic] Offset in DEADZONE (%.4e) -> no movement\n", dist);
         return;
     }
 
@@ -87,7 +89,7 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
     };
 
     if (Settings::debugLogging)
-        std::printf("[Logic] Step len=%.4e | Zoom += %.5f\n", std::sqrt(step.x * step.x + step.y * step.y), Settings::AUTOZOOM_SPEED);
+        LUCHS_LOG("[Logic] Step len=%.4e | Zoom += %.5f\n", std::sqrt(step.x * step.x + step.y * step.y), Settings::AUTOZOOM_SPEED);
 
     ZoomCommand cmd;
     cmd.frameIndex = globalFrameCounter;
@@ -115,3 +117,12 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
 
     RendererPipeline::drawFullscreenQuad(tex);
 }
+
+void execute(RendererState& state) {
+    beginFrame(g_ctx);
+    computeCudaFrame(g_ctx, state);
+    applyZoomLogic(g_ctx, g_zoomBus);
+    drawFrame(g_ctx, state.tex, state);
+}
+
+} // namespace FramePipeline

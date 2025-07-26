@@ -1,5 +1,5 @@
 // Datei: src/renderer_window.cpp
-// 🐭 Maus-Kommentar: Fixed-Function raus, moderner Kontext rein – für Warzenschwein wird OpenGL 4.3 erzwungen. Keine Kompromisse mehr, Otter-Style.
+// 🐭 Maus-Kommentar: Fixed-Function raus, moderner Kontext rein - für Warzenschwein wird OpenGL 4.3 erzwungen. Keine Kompromisse mehr, Otter-Style.
 
 #include "pch.hpp"
 #include "renderer_window.hpp"
@@ -13,11 +13,11 @@ namespace RendererInternals {
 // Erstellt GLFW-Fenster, setzt OpenGL-Kontext & VSync, Position aus Settings
 GLFWwindow* createGLFWWindow(int width, int height) {
     if (!glfwInit()) {
-        std::fprintf(stderr, "[ERROR] GLFW init failed\n");
+        LUCHS_LOG( "[ERROR] GLFW init failed\n");
         return nullptr;
     }
 
-    // OpenGL 4.3 Core – nötig für Shader-Text (Warzenschwein!)
+    // OpenGL 4.3 Core - nötig für Shader-Text (Warzenschwein!)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -25,7 +25,7 @@ GLFWwindow* createGLFWWindow(int width, int height) {
 
     GLFWwindow* window = glfwCreateWindow(width, height, "OtterDream Mandelbrot", nullptr, nullptr);
     if (!window) {
-        std::fprintf(stderr, "[ERROR] Window creation failed\n");
+        LUCHS_LOG( "[ERROR] Window creation failed\n");
         glfwTerminate();
         return nullptr;
     }
@@ -36,7 +36,7 @@ GLFWwindow* createGLFWWindow(int width, int height) {
     return window;
 }
 
-// Registriert Callbacks (Größe, Taste) am Fenster – UserPointer ist Renderer*
+// Registriert Callbacks (Größe, Taste) am Fenster - UserPointer ist Renderer*
 void configureWindowCallbacks(GLFWwindow* window, void* userPointer) {
     glfwSetWindowUserPointer(window, userPointer);
 
@@ -46,7 +46,7 @@ void configureWindowCallbacks(GLFWwindow* window, void* userPointer) {
         }
     });
 
-    // KeyCallback aus RendererLoop – so hat man Zugriff auf RendererState
+    // KeyCallback aus RendererLoop - so hat man Zugriff auf RendererState
     glfwSetKeyCallback(window, RendererLoop::keyCallback);
 }
 

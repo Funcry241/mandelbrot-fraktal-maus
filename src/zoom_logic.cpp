@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: Alpha 49f – Projekt „Frosch“: Technisch saubere Zoomlogik. Effizient, klar, schnell. Kein doppeltes Rechnen, keine unnötigen Branches. Otter: Glasklar. Schneefuchs: Makellos.
+// 🐭 Maus-Kommentar: Alpha 49f - Projekt „Frosch“: Technisch saubere Zoomlogik. Effizient, klar, schnell. Kein doppeltes Rechnen, keine unnötigen Branches. Otter: Glasklar. Schneefuchs: Makellos.
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -94,7 +94,7 @@ ZoomResult evaluateZoomTarget(
     const float ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
     if (Settings::debugLogging) {
-        std::printf("[ZoomEval] i=%d E=%.2f C=%.2f d=%.4f g=%.2f a=%.2f Z | %.3fms\n",
+        LUCHS_LOG("[ZoomEval] i=%d E=%.2f C=%.2f d=%.4f g=%.2f a=%.2f Z | %.3fms\n",
             result.bestIndex,
             result.bestEntropy,
             result.bestContrast,

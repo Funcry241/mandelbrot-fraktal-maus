@@ -1,11 +1,11 @@
 // Datei: src/renderer_pipeline.cpp
-// 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean – HUD/Heatmap bleiben garantiert sichtbar. Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines.
+// 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean - HUD/Heatmap bleiben garantiert sichtbar. Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines.
 
 #include "pch.hpp"
 #include "renderer_pipeline.hpp"
 #include "opengl_utils.hpp"
 #include "common.hpp"
-#include <iostream>
+#include "luchs_logger.hpp"
 #include <cstdlib>
 
 namespace RendererPipeline {
@@ -31,12 +31,14 @@ void main() { FragColor = texture(uTex, vTex); }
 void init() {
     program = OpenGLUtils::createProgramFromSource(vShader, fShader);
     if (!program) {
-        std::cerr << "[FATAL] Shaderprogramm konnte nicht erstellt werden – OpenGL-Abbruch\n";
+        LUCHS_LOG("[FATAL] Shaderprogramm konnte nicht erstellt werden - OpenGL-Abbruch\n");
         std::exit(EXIT_FAILURE);
     }
+
     glUseProgram(program);
     glUniform1i(glGetUniformLocation(program, "uTex"), 0);
     glUseProgram(0);
+
     OpenGLUtils::createFullscreenQuad(&VAO, &VBO, &EBO);
 }
 
@@ -52,7 +54,7 @@ void drawFullscreenQuad(GLuint tex) {
     glUseProgram(program);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
-    // Kein Blend-Disable – HUD benötigt Alpha-Blending!
+    // Kein Blend-Disable - HUD benötigt Alpha-Blending!
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindVertexArray(VAO);

@@ -84,5 +84,5 @@ void RendererState::resize(int newWidth, int newHeight) {
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
 
     if (Settings::debugLogging)
-        std::printf("[Resize] %d x %d buffers reallocated\n", width, height);
+        LUCHS_LOG("[Resize] %d x %d buffers reallocated\n", width, height);
 }

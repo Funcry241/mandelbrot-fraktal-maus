@@ -1,5 +1,5 @@
 // Datei: src/warzenschwein_fontdata.hpp
-// 🐭 Maus-Kommentar: Maximale Kompression durch direkte Glyph-Zuordnung via Map. Kein `chars[]`, kein `reinterpret_cast`, keine Iteration. Schneefuchs: „Wenn du weißt, was du willst – nimm’s dir direkt!“
+// 🐭 Maus-Kommentar: Maximale Kompression durch direkte Glyph-Zuordnung via Map. Kein `chars[]`, kein `reinterpret_cast`, keine Iteration. Schneefuchs: „Wenn du weißt, was du willst - nimm’s dir direkt!“
 
 #pragma once
 #include <unordered_map>
@@ -89,7 +89,7 @@ inline std::string toHexString(const Glyph& g) {
     std::string out;
     char buf[5];
     for (auto b : g) {
-        std::snprintf(buf, sizeof(buf), "%02X ", b);
+        LUCHS_LOG(buf, sizeof(buf), "%02X ", b);
         out += buf;
     }
     return out;

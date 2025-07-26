@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: Alpha 49f – Supersampling ausgebaut, Signatur verschlankt. Nur noch klare Parameter für CUDA-Interop. Otter: scharf. Schneefuchs: kein Ballast.
+// 🐭 Maus-Kommentar: Alpha 49f - Supersampling ausgebaut, Signatur verschlankt. Nur noch klare Parameter für CUDA-Interop. Otter: scharf. Schneefuchs: kein Ballast.
 
 #ifndef CUDA_INTEROP_HPP
 #define CUDA_INTEROP_HPP

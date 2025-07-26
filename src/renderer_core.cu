@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: Alpha 49e – Supersampling vollständig entfernt. Kein d_tileSupersampling, kein h_tileSupersampling, kein Overhead mehr. Otter: "Sauberer, schneller, schlanker." Schneefuchs zufrieden.
+// 🐭 Maus-Kommentar: Alpha 49e - Supersampling vollständig entfernt. Kein d_tileSupersampling, kein h_tileSupersampling, kein Overhead mehr. Otter: "Sauberer, schneller, schlanker." Schneefuchs zufrieden.
 
 #include "pch.hpp"
 
@@ -19,39 +19,39 @@
 Renderer::Renderer(int width, int height)
 : state(width, height), glInitialized(false) {
     if (Settings::debugLogging)
-        std::puts("[DEBUG] Renderer::Renderer() started");
+        LUCHS_LOG("[DEBUG] Renderer::Renderer() started");
 }
 
 Renderer::~Renderer() {
     if (Settings::debugLogging && !glInitialized)
-        std::puts("[DEBUG] Cleanup skipped - OpenGL not initialized");
+        LUCHS_LOG("[DEBUG] Cleanup skipped - OpenGL not initialized");
 
     if (glInitialized) {
         if (Settings::debugLogging)
-            std::puts("[DEBUG] Calling cleanup()");
+            LUCHS_LOG("[DEBUG] Calling cleanup()");
         cleanup();
     }
 }
 
 bool Renderer::initGL() {
     if (Settings::debugLogging)
-        std::puts("[DEBUG] initGL() called");
+        LUCHS_LOG("[DEBUG] initGL() called");
 
     state.window = RendererWindow::createWindow(state.width, state.height, this);
     if (!state.window) {
-        std::puts("[ERROR] Failed to create GLFW window");
+        LUCHS_LOG("[ERROR] Failed to create GLFW window");
         return false;
     }
 
     if (Settings::debugLogging)
-        std::puts("[DEBUG] GLFW window created successfully");
+        LUCHS_LOG("[DEBUG] GLFW window created successfully");
 
     glfwMakeContextCurrent(state.window);
     if (Settings::debugLogging)
-        std::puts("[DEBUG] OpenGL context made current");
+        LUCHS_LOG("[DEBUG] OpenGL context made current");
 
     if (glewInit() != GLEW_OK) {
-        std::puts("[ERROR] glewInit() failed");
+        LUCHS_LOG("[ERROR] glewInit() failed");
         RendererWindow::destroyWindow(state.window);
         state.window = nullptr;
         glfwTerminate();
@@ -59,15 +59,15 @@ bool Renderer::initGL() {
     }
 
     if (Settings::debugLogging)
-        std::puts("[DEBUG] GLEW initialized successfully");
+        LUCHS_LOG("[DEBUG] GLEW initialized successfully");
 
     RendererPipeline::init();
     if (Settings::debugLogging)
-        std::puts("[DEBUG] RendererPipeline initialized");
+        LUCHS_LOG("[DEBUG] RendererPipeline initialized");
 
     glInitialized = true;
     if (Settings::debugLogging)
-        std::puts("[DEBUG] OpenGL init complete");
+        LUCHS_LOG("[DEBUG] OpenGL init complete");
 
     return true;
 }
@@ -107,7 +107,7 @@ void Renderer::renderFrame_impl() {
         stayCounter++;
     }
 
-    std::printf(
+    LUCHS_LOG(
         "[ZoomLog] Z=%.5e Idx=%3d E=%.4f C=%.4f dE=%.4f dC=%.4f Dist=%.6f Thresh=%.6f RelE=%.3f RelC=%.3f New=%d Stay=%d\n",
         state.zoom, zr.bestIndex,
         zr.bestEntropy, zr.bestContrast,
@@ -129,7 +129,7 @@ void Renderer::freeDeviceBuffers() {
 }
 
 void Renderer::resize(int newW, int newH) {
-    std::printf("[INFO] Resize: %d x %d\n", newW, newH);
+    LUCHS_LOG("[INFO] Resize: %d x %d\n", newW, newH);
     state.resize(newW, newH);
     glViewport(0, 0, newW, newH);
 }

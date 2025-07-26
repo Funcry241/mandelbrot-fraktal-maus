@@ -1,10 +1,6 @@
-// Datei: src/zoom_command.cpp
-// 🐭 Maus-Kommentar: Implementiert CSV-Export und Zoom-Log für CommandBus – strukturiert, minimalistisch, replayfähig.
-// 🦦 Otter: Exportiert jeden ZoomCommand sauber ins CSV – für Rückverfolgung und Debug sichtbar.
-// 🐼 Panda: Jeder Frame ist ein Denkprozess – dieses Logging ist das Gedächtnis.
-// 🐑 Schneefuchs: Klarer Header, immer ASCII-clean – auch für PowerShell-Logs geeignet.
-
+#include "zoom_logic.hpp"
 #include "zoom_command.hpp"
+#include "luchs_logger.hpp"
 #include <fstream>
 #include <iostream>
 #include <algorithm>
@@ -12,15 +8,16 @@
 void exportCommandsToCSV(const CommandBus& bus, const std::string& filename) {
     std::ofstream out(filename);
     if (!out) {
-        std::cerr << "[ZoomExport] Failed to open file: " << filename << "\n";
+        LUCHS_LOG("[ZoomExport] Failed to open file: %s\n", filename.c_str());
         return;
     }
+
     out << ZoomCommand::csvHeader() << "\n";
     for (const auto& cmd : bus.getHistory())
         out << cmd.toCSV() << "\n";
 
-    std::cout << "[ZoomExport] Exported " << bus.getHistory().size()
-              << " commands to '" << filename << "'\n";
+    LUCHS_LOG("[ZoomExport] Exported %zu commands to '%s'\n",
+              bus.getHistory().size(), filename.c_str());
 }
 
 void printZoomHistory(const CommandBus& bus, int maxLines) {
@@ -28,10 +25,9 @@ void printZoomHistory(const CommandBus& bus, int maxLines) {
     int total = static_cast<int>(hist.size());
     int begin = std::max(0, total - (maxLines > 0 ? maxLines : 10));
 
-    std::cout << "[ZoomLog] Showing last " << (total - begin)
-              << " of " << total << " commands:\n"
-              << ZoomCommand::csvHeader() << "\n";
+    LUCHS_LOG("[ZoomLog] Showing last %d of %d commands:\n", total - begin, total);
+    LUCHS_LOG("%s\n", ZoomCommand::csvHeader().c_str());
 
     for (int i = begin; i < total; ++i)
-        std::cout << hist[i].toCSV() << "\n";
+        LUCHS_LOG("%s\n", hist[i].toCSV().c_str());
 }

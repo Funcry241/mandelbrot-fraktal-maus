@@ -1,9 +1,10 @@
-// 🐭 Maus-Kommentar: Supersampling entfernt – einfache Kernlogik bleibt erhalten. Fokus liegt wieder auf Basissampling. Otter: Robustheit. Schneefuchs: Klarheit.
+// 🐭 Maus-Kommentar: Supersampling entfernt - einfache Kernlogik bleibt erhalten. Fokus liegt wieder auf Basissampling. Otter: Robustheit. Schneefuchs: Klarheit.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
 #include <cmath>
+#include "luchs_logger.hpp"
 #include "common.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
@@ -128,7 +129,7 @@ void computeCudaEntropyContrast(const int* d_it, float* d_e, float* d_c, int w, 
 void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, float2 offset, int maxIter, int tile) {
     dim3 block(16, 16), grid((w + 15) / 16, (h + 15) / 16);
     if (Settings::debugLogging) {
-        std::printf("[Kernel] %dx%d | Zoom: %.3e | Offset: (%.5f, %.5f) | Iter: %d | Tile: %d\n",
+        LUCHS_LOG("[Kernel] %dx%d | Zoom: %.3e | Offset: (%.5f, %.5f) | Iter: %d | Tile: %d\n",
             w, h, zoom, offset.x, offset.y, maxIter, tile);
     }
 
@@ -137,14 +138,14 @@ void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, f
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess)
-        std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
+        LUCHS_LOG( "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
     cudaDeviceSynchronize();
 
     if (Settings::debugLogging) {
         int it[10] = { 0 };
         cudaMemcpy(it, d_it, sizeof(it), cudaMemcpyDeviceToHost);
-        std::printf("[Iter] First10: ");
-        for (int i = 0; i < 10; ++i) std::printf("%d ", it[i]);
-        std::puts("");
+        LUCHS_LOG("[Iter] First10: ");
+        for (int i = 0; i < 10; ++i) LUCHS_LOG("%d ", it[i]);
+        LUCHS_LOG("");
     }
 }

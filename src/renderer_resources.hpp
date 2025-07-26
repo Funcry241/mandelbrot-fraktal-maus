@@ -1,5 +1,5 @@
 // Datei: src/renderer_resources.hpp
-// ⏱️ Modular und mit Logging-Kontext – Ressourcenursprung immer nachvollziehbar.
+// ⏱️ Modular und mit Logging-Kontext - Ressourcenursprung immer nachvollziehbar.
 
 #pragma once
 #ifndef RENDERER_RESOURCES_HPP
