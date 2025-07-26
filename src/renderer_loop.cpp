@@ -1,3 +1,4 @@
+// Datei: src/renderer_loop.cpp
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
@@ -37,9 +38,6 @@ void beginFrame(RendererState& state) {
     state.deltaTime = delta;
     state.lastTime = static_cast<double>(currentTime);
     state.frameCount++;
-
-    if (state.deltaTime > 0.0f)
-        state.fps = 1.0f / state.deltaTime;
 }
 
 void renderFrame_impl(RendererState& state) {
@@ -49,7 +47,6 @@ void renderFrame_impl(RendererState& state) {
 
     beginFrame(state);
 
-    // 🐭 Maus: Iterationen an Zoom-Level anpassen – √Zoom-Skalierung
     {
         const double scale = std::sqrt(state.zoom);
         const int scaledIters = static_cast<int>(5000.0 * scale);
@@ -61,7 +58,6 @@ void renderFrame_impl(RendererState& state) {
         }
     }
 
-    // 🐭 Maus: Dynamische Anpassung der Tile-Größe bei Zoomänderung – ersetzt statisches Verhalten.
     {
         int newTile = computeTileSizeFromZoom(static_cast<float>(state.zoom));
         if (newTile != state.lastTileSize) {
@@ -149,7 +145,7 @@ void renderFrame_impl(RendererState& state) {
         std::string warzText =
             "OtterDream Mandelbrot\n"
             "Zoom: 1e" + std::to_string(zoomExp) + "\n"
-            "FPS:  " + std::to_string(state.fps) + "\n"
+            "FPS:  " + std::to_string(static_cast<int>(state.fps)) + "\n"
             "Iter: " + std::to_string(state.maxIterations) + "\n"
             "Tile: " + std::to_string(state.lastTileSize) + "\n"
             "Auto: " + (CudaInterop::getPauseZoom() ? "Paused" : "Active");
@@ -157,6 +153,12 @@ void renderFrame_impl(RendererState& state) {
         WarzenschweinOverlay::setText(warzText);
         WarzenschweinOverlay::drawOverlay(state);
     }
+
+    // 🐭 Maus: FPS hier korrekt setzen – inklusive vollständiger Framezeit
+    auto frameEnd = std::chrono::high_resolution_clock::now();
+    float totalMs = std::chrono::duration<float, std::milli>(frameEnd - frameStart).count();
+    if (totalMs > 0.0f)
+        state.fps = 1000.0f / totalMs;
 
     state.zoom         = static_cast<double>(ctx.zoom);
     state.offset       = { ctx.offset.x, ctx.offset.y };
