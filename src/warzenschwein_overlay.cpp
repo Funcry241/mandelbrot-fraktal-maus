@@ -153,6 +153,16 @@ void drawOverlay(RendererState& ctx) {
     initGL();
     generateOverlayQuads(currentText, vertices, background, (float)ctx.zoom);
 
+    if (Settings::debugLogging) {
+        printf("[WS-Overlay] Visible=%d | TextLen=%zu | Verts=%zu | BG=%zu | Zoom=%.3f\n",
+            visible,
+            currentText.length(),
+            vertices.size(),
+            background.size(),
+            ctx.zoom
+        );
+    }
+
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -169,6 +179,13 @@ void drawOverlay(RendererState& ctx) {
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
     glUseProgram(0);
+
+    if (Settings::debugLogging) {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            printf("[WS-GL] glGetError = 0x%04X\n", err);
+        }
+    }
 }
 
 void toggle(RendererState&) {
