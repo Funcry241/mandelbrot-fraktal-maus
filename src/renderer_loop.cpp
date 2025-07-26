@@ -58,6 +58,7 @@ void renderFrame_impl(RendererState& state) {
             if (Settings::debugLogging)
                 std::printf("[Tile] Updating tileSize: %d → %d (zoom = %.4e)\n",
                     state.lastTileSize, newTile, state.zoom);
+            state.lastTileSize = newTile; // <– entscheidend!
             state.resize(state.width, state.height);
         }
     }
