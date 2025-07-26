@@ -147,6 +147,13 @@ void generateOverlayQuads(
 }
 
 void drawOverlay(RendererState& ctx) {
+     if (Settings::debugLogging) {
+        printf("[WS-Precheck] visible=%d | empty=%d\n",
+            static_cast<int>(visible),
+            static_cast<int>(currentText.empty())
+        );
+    }
+
     if (!Settings::warzenschweinOverlayEnabled) return;
     if (!visible || currentText.empty()) return;
 
