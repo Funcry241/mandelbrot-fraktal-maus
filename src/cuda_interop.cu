@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: Alpha 49g – Supersampling vollständig ausgebaut. Mandelbrot-Kernel erhält keine SS-Daten mehr, alle Speicher freigeräumt. Schneefuchs: Präzise. Otter: Sauber.
+// 🐭 Maus-Kommentar: Alpha 49h "Frosch" – Alle simplen Performance-Maßnahmen integriert: memset reduziert, unnötige Host-Kopien vermieden, const verwendet, lokale Reduktion. Kein SS-Handling mehr. Otter: Stabil. Schneefuchs: Elegant.
 
 #include "pch.hpp"
 #include "cuda_interop.hpp"
@@ -47,20 +47,25 @@ void renderCudaFrame(
         throw std::runtime_error("[FATAL] CUDA PBO not registered!");
 
 #ifndef __CUDA_ARCH__
-    auto t0 = std::chrono::high_resolution_clock::now();
+    const auto t0 = std::chrono::high_resolution_clock::now();
 #endif
 
-    int totalPixels = width * height;
-    int tilesX = (width + tileSize - 1) / tileSize;
-    int tilesY = (height + tileSize - 1) / tileSize;
-    int numTiles = tilesX * tilesY;
+    const int totalPixels = width * height;
+    const int tilesX = (width + tileSize - 1) / tileSize;
+    const int tilesY = (height + tileSize - 1) / tileSize;
+    const int numTiles = tilesX * tilesY;
 
-    CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
-    CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
-    CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
+    // Otter: Nur bei aktivem Debugging setzen wir Speicher explizit auf 0
+    if (Settings::debugLogging) {
+        CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
+        CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
+        CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
+    }
 
+    // ---- PBO Mapping ----
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
-    uchar4* devPtr = nullptr; size_t size = 0;
+    uchar4* devPtr = nullptr;
+    size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
     if (Settings::debugLogging) {
@@ -68,19 +73,20 @@ void renderCudaFrame(
                     zoom, offset.x, offset.y, maxIterations, tileSize);
     }
 
-    int dbg_before[3]{-12345}, dbg_after[3]{-12345};
+    // ---- Mandelbrot Render ----
     if (Settings::debugLogging) {
-        CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
-    }
-
-    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
-
-    if (Settings::debugLogging) {
-        CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, 3 * sizeof(int), cudaMemcpyDeviceToHost));
+        int dbg_before[3]{};
+        CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, sizeof(dbg_before), cudaMemcpyDeviceToHost));
+        launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
+        int dbg_after[3]{};
+        CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, sizeof(dbg_after), cudaMemcpyDeviceToHost));
         std::printf("[CU-KERNEL] iters: %d->%d | %d->%d | %d->%d\n",
             dbg_before[0], dbg_after[0], dbg_before[1], dbg_after[1], dbg_before[2], dbg_after[2]);
+    } else {
+        launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
     }
 
+    // ---- Analyse Entropie & Kontrast ----
     computeCudaEntropyContrast(d_iterations, d_entropy, d_contrast, width, height, tileSize, maxIterations);
 
     h_entropy.resize(numTiles);
@@ -88,9 +94,10 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
+    // ---- Zoomlogik ----
     shouldZoom = false;
     if (!pauseZoom) {
-        auto result = ZoomLogic::evaluateZoomTarget(
+        const auto result = ZoomLogic::evaluateZoomTarget(
             h_entropy, h_contrast, offset, zoom, width, height, tileSize,
             state.offset, state.zoomResult.bestIndex, state.zoomResult.bestEntropy, state.zoomResult.bestContrast
         );
@@ -112,8 +119,8 @@ void renderCudaFrame(
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
 
 #ifndef __CUDA_ARCH__
-    auto t1 = std::chrono::high_resolution_clock::now();
-    float totalMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
+    const auto t1 = std::chrono::high_resolution_clock::now();
+    const float totalMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
     if (Settings::debugLogging)
         std::printf("[CU-PERF] total=%.2f ms\n", totalMs);
 #endif

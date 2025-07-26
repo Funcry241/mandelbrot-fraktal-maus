@@ -44,9 +44,9 @@ __global__ void mandelbrotKernel(
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * w + x;
 
-    if (x >= w || y >= h || idx < 0 || idx >= w * h) {
-        if (iterOut && idx >= 0 && idx < w * h) iterOut[idx] = 0;
-        if (out && idx >= 0 && idx < w * h) out[idx] = make_uchar4(0, 0, 0, 255);
+    if (x >= w || y >= h || idx >= w * h) {
+        if (iterOut && idx < w * h) iterOut[idx] = 0;
+        if (out && idx < w * h) out[idx] = make_uchar4(0, 0, 0, 255);
         return;
     }
 

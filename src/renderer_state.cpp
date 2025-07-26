@@ -1,5 +1,3 @@
-// 🐭 Maus-Kommentar: Alpha 49e – Supersampling entfernt. `setupCudaBuffers` allokiert nur noch Iterationen, Entropie, Kontrast. Kein `d_tileSupersampling`, kein `h_tileSupersampling`, kein globaler SS-Wert. Otter: klar und schnell. Schneefuchs: Kein Rauschen mehr.
-
 #include "pch.hpp"
 #include "renderer_state.hpp"
 #include "settings.hpp"
@@ -22,21 +20,29 @@ void RendererState::reset() {
     targetOffset         = offset;
     filteredTargetOffset = offset;
 
-    fps          = 0.0f;
-    deltaTime    = 0.0f;
-    frameCount   = 0;
-    lastTime     = glfwGetTime();
+    fps        = 0.0f;
+    deltaTime  = 0.0f;
+    frameCount = 0;
+    lastTime   = glfwGetTime();
+
     lastTileSize = Settings::BASE_TILE_SIZE;
 
     heatmapOverlayEnabled       = Settings::heatmapOverlayEnabled;
     warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
 
-    zoomResult.bestIndex    = -1;
-    zoomResult.bestEntropy  = 0.0f;
-    zoomResult.bestContrast = 0.0f;
-    zoomResult.newOffset    = offset;
-    zoomResult.shouldZoom   = false;
-    zoomResult.isNewTarget  = false;
+    // 🐭 Maus: Initialisierung exakt in Struct-Reihenfolge gemäß zoom_logic.hpp
+    zoomResult.bestIndex       = -1;
+    zoomResult.bestEntropy     = 0.0f;
+    zoomResult.bestContrast    = 0.0f;
+    zoomResult.bestScore       = 0.0f;
+    zoomResult.distance        = 0.0f;
+    zoomResult.minDistance     = 0.0f;
+    zoomResult.relEntropyGain  = 0.0f;
+    zoomResult.relContrastGain = 0.0f;
+    zoomResult.isNewTarget     = false;
+    zoomResult.shouldZoom      = false;
+    zoomResult.newOffset       = offset;
+    zoomResult.perTileContrast.clear();
 }
 
 void RendererState::setupCudaBuffers() {
@@ -58,13 +64,13 @@ void RendererState::setupCudaBuffers() {
 
 void RendererState::resize(int newWidth, int newHeight) {
     if (d_iterations) { CUDA_CHECK(cudaFree(d_iterations)); d_iterations = nullptr; }
-    if (d_entropy)    { CUDA_CHECK(cudaFree(d_entropy));    d_entropy = nullptr; }
-    if (d_contrast)   { CUDA_CHECK(cudaFree(d_contrast));   d_contrast = nullptr; }
+    if (d_entropy)    { CUDA_CHECK(cudaFree(d_entropy));    d_entropy    = nullptr; }
+    if (d_contrast)   { CUDA_CHECK(cudaFree(d_contrast));   d_contrast   = nullptr; }
 
     CudaInterop::unregisterPBO();
 
-    if (pbo != 0) { glDeleteBuffers(1, &pbo); pbo = 0; }
-    if (tex != 0) { glDeleteTextures(1, &tex); tex = 0; }
+    if (pbo) { glDeleteBuffers(1, &pbo); pbo = 0; }
+    if (tex) { glDeleteTextures(1, &tex); tex = 0; }
 
     width  = newWidth;
     height = newHeight;
@@ -74,9 +80,6 @@ void RendererState::resize(int newWidth, int newHeight) {
 
     CudaInterop::registerPBO(pbo);
     setupCudaBuffers();
-
-    if (d_iterations)
-        CUDA_CHECK(cudaMemset(d_iterations, 0, width * height * sizeof(int)));
 
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
 

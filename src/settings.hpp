@@ -94,7 +94,6 @@ constexpr float OFFSET_TANH_SCALE = 5.0f;
 // ♻️ Iterationssteuerung – beeinflusst Detailtiefe bei starkem Zoom
 constexpr int INITIAL_ITERATIONS = 100;    // Basiswert – empfohlen: 50 bis 200
 constexpr int MAX_ITERATIONS_CAP = 50000;  // Hardlimit – je höher, desto langsamer, aber detaillierter
-constexpr int ITERATION_STEP     = 5;      // Anstieg pro Zoomlevel – empfohlen: 1 bis 10
 
 // 💚 CUDA Tile-Größen (neu quantisiert!)
 constexpr int BASE_TILE_SIZE = 24; // Empfohlen: 16–32 – idealer Kompromiss aus Qualität & Performance
@@ -104,11 +103,5 @@ constexpr int MAX_TILE_SIZE  = 64; // Obergrenze – größere Werte = weniger R
 // 🕊️ Adaptive LERP-Geschwindigkeit zwischen Kamera-Offset und Ziel
 constexpr float ALPHA_LERP_MIN = 0.01f; // Kolibri
 constexpr float ALPHA_LERP_MAX = 0.10f; // Kolibri
-
-// 🐅 Maus-Kommentar: Eigene clamp-Funktion, um <algorithm> Konflikte mit std::clamp zu umgehen.
-// Eingesetzt zur Begrenzung dynamischer Parameter – robust auch ohne STL.
-inline float my_clamp(float val, float minVal, float maxVal) {
-    return (val < minVal) ? minVal : (val > maxVal) ? maxVal : val;
-}
 
 } // namespace Settings
