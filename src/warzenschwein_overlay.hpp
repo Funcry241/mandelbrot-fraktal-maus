@@ -15,8 +15,7 @@ void setText(const std::string& text);
 void generateOverlayQuads(
     const std::string& text,
     std::vector<float>& vertexOut,
-    std::vector<float>& backgroundOut,
-    float zoom
+    std::vector<float>& backgroundOut
 );
 
 // 🖼️ Zeichnet das Overlay (Text + Rechteck)

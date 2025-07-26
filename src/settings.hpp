@@ -39,6 +39,11 @@ constexpr bool heatmapOverlayEnabled = true; // Otter: standardmäßig an
 // false = Muss per Taste aktiviert oder im Code gesetzt werden
 constexpr bool warzenschweinOverlayEnabled = true; // Otter: HUD ab Start sichtbar
 
+// HUD-Textgröße (in NDC-Einheiten pro Pixelquadrat)
+// Empfohlen: 0.0015 (klein), 0.0025 (normal), 0.004 (groß)
+// Wirkt sich auf WarzenschweinOverlay aus
+inline constexpr float hudPixelSize = 0.0025f;
+
 // 💥 Fensterkonfiguration (Initialgröße und Position auf dem Bildschirm)
 constexpr int width       = 1024; // Breite des Fensters in Pixel – empfohlen: 800 bis 1600
 constexpr int height      = 768;  // Höhe des Fensters in Pixel – empfohlen: 600 bis 1200

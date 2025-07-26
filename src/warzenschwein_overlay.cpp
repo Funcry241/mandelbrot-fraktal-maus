@@ -94,12 +94,11 @@ static void buildBackground(float x0, float y0, float x1, float y1) {
 void generateOverlayQuads(
     const std::string& text,
     std::vector<float>& vertexOut,
-    std::vector<float>& backgroundOut,
-    float zoom
+    std::vector<float>& backgroundOut
 ) {
     vertexOut.clear();
     backgroundOut.clear();
-    const float px = 0.0025f / zoom;
+    const float px = Settings::hudPixelSize;
     const float x0 = -1.0f + 0.02f, y0 = 1.0f - 0.02f;
 
     std::vector<std::string> lines;
@@ -158,7 +157,7 @@ void drawOverlay(RendererState& ctx) {
     if (!visible || currentText.empty()) return;
 
     initGL();
-    generateOverlayQuads(currentText, vertices, background, (float)ctx.zoom);
+    generateOverlayQuads(currentText, vertices, background);
 
     if (Settings::debugLogging) {
         printf("[WS-Overlay] Visible=%d | TextLen=%zu | Verts=%zu | BG=%zu | Zoom=%.3f\n",
