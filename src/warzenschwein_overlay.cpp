@@ -20,7 +20,7 @@ static GLuint shader = 0;
 static std::vector<float> vertices;
 static std::vector<float> background;
 static std::string currentText;
-static bool visible = false;
+static bool visible = true;
 
 static const char* vsSrc = R"GLSL(
 #version 430 core
