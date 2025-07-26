@@ -1,8 +1,8 @@
-// Datei: src/luchs_buffer.hpp
+// Datei: src/luchs_device_buffer.hpp
 
 #pragma once
-#ifndef LUCHS_BUFFER_HPP
-#define LUCHS_BUFFER_HPP
+#ifndef LUCHS_DEVICE_BUFFER_HPP
+#define LUCHS_DEVICE_BUFFER_HPP
 
 #include <cuda_runtime.h>
 
@@ -36,4 +36,4 @@ void flushLogToConsole();
 #define LUCHS_DEVICE_LOG(msg) ((void)0)
 #endif
 
-#endif // LUCHS_BUFFER_HPP
+#endif // LUCHS_DEVICE_BUFFER_HPP

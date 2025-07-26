@@ -1,26 +1,28 @@
-#include "luchs_buffer.hpp"
+// Datei: src/luchs_device_logger.cu
+// 🐭 Maus-Kommentar: Diese Datei ist das CUDA-Gegenstück zu LuchsLogger – deviceLog() schreibt in gemeinsamen Buffer. Otter: klare Trennung von Upload- und Device-Logik. Schneefuchs: saubere Ownership-Übergabe.
+
 #include "luchs_logger.hpp"
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 
-namespace Luchs {
+namespace LuchsLogger {
 
-// Logbuffer im globalen Device-Speicher
+// 🔧 Globaler Log-Puffer im Device-Speicher
 __device__ char d_logBuffer[LOG_BUFFER_SIZE];
 __device__ int d_logOffset = 0;
 
-// Hostseitige Kopie
-char h_logBuffer[LOG_BUFFER_SIZE] = {0};
+// 📥 Host-seitiger Empfangs-Puffer
+static char h_logBuffer[LOG_BUFFER_SIZE] = {0};
 
+// 🔹 CUDA-Logschreibfunktion (von Device aus aufrufbar)
 __device__ void deviceLog(const char* file, int line, const char* msg) {
-    int idx = atomicAdd(&d_logOffset, 0); // Vorab prüfen: genug Platz?
+    int idx = atomicAdd(&d_logOffset, 0); // Vorab prüfen
     if (idx >= LOG_BUFFER_SIZE - 128) return;
 
-    // Format: "<file>:<line> | <msg>\n"
     int len = 0;
 
-    // Schlichtes Formatieren, kein sprintf im Device-Code
+    // 🔠 Datei + Zeile formatieren
     for (int i = 0; file[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
         d_logBuffer[idx + len++] = file[i];
 
@@ -49,34 +51,35 @@ __device__ void deviceLog(const char* file, int line, const char* msg) {
     atomicAdd(&d_logOffset, len);
 }
 
+// 🔁 Kernel zur Buffer-Rücksetzung (ein Block reicht)
 __global__ void resetLogKernel() {
     d_logOffset = 0;
     if (threadIdx.x == 0 && blockIdx.x == 0)
         d_logBuffer[0] = 0;
 }
 
+// 🌐 Hostseitige Reset-API
 void resetDeviceLog() {
     resetLogKernel<<<1,1>>>();
     cudaDeviceSynchronize();
 }
 
-void downloadLog(cudaStream_t stream) {
+// 📤 Kopiert den Device-Logbuffer in den Host-Puffer
+void downloadDeviceLog(cudaStream_t stream) {
     cudaMemcpyAsync(h_logBuffer, d_logBuffer, LOG_BUFFER_SIZE, cudaMemcpyDeviceToHost, stream);
 }
 
-void flushLogToConsole() {
-    char* ptr = h_logBuffer;
-    while (*ptr) {
-        char* lineEnd = strchr(ptr, '\n');
-        if (!lineEnd) break;
-        *lineEnd = 0;
+// 📣 Leitet die empfangenen Log-Zeilen an LuchsLogger weiter
+void flushDeviceLogToHost(cudaStream_t stream) {
+    downloadDeviceLog(stream);
+    cudaStreamSynchronize(stream);
 
-        std::time_t now = time(nullptr);
-        char timebuf[32];
-        std::strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
-        std::printf("[%-19s] %s\n", timebuf, ptr);        
-        ptr = lineEnd + 1;
+    h_logBuffer[LOG_BUFFER_SIZE - 1] = '\0';
+    const char* line = std::strtok(h_logBuffer, "\n");
+    while (line) {
+        logMessage("cuda_device_log", 0, line);
+        line = std::strtok(nullptr, "\n");
     }
 }
 
-} // namespace Luchs
+} // namespace LuchsLogger

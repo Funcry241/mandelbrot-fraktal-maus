@@ -71,7 +71,7 @@ add_executable(mandelbrot_otterdream
     src/zoom_command.cpp
     src/frame_pipeline.cpp
     src/luchs_logger.cpp
-    src/luchs_buffer.cu
+    src/luchs_device_buffer.cu
     src/luchs_upload.cpp
     src/luchs_logstream.cpp
 )
