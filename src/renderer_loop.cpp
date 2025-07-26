@@ -1,4 +1,6 @@
 // Datei: src/renderer_loop.cpp
+// 🐭 Maus-Kommentar: Erweiterter PerfLog – misst resize() + Swap-Zeit separat. Ermöglicht Analyse von FPS-Limitierung durch VSync oder Buffer-Recreation.
+
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
@@ -42,6 +44,8 @@ void beginFrame(RendererState& state) {
 
 void renderFrame_impl(RendererState& state) {
     auto frameStart = std::chrono::high_resolution_clock::now();
+    auto resizeStart = frameStart;
+
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -58,6 +62,7 @@ void renderFrame_impl(RendererState& state) {
         }
     }
 
+    float resizeMs = 0.0f;
     {
         int newTile = computeTileSizeFromZoom(static_cast<float>(state.zoom));
         if (newTile != state.lastTileSize) {
@@ -65,7 +70,11 @@ void renderFrame_impl(RendererState& state) {
                 std::printf("[Tile] Updating tileSize: %d → %d (zoom = %.4e)\n",
                     state.lastTileSize, newTile, state.zoom);
             state.lastTileSize = newTile;
+
+            auto r0 = std::chrono::high_resolution_clock::now();
             state.resize(state.width, state.height);
+            auto r1 = std::chrono::high_resolution_clock::now();
+            resizeMs = std::chrono::duration<float, std::milli>(r1 - r0).count();
         }
     }
 
@@ -118,18 +127,6 @@ void renderFrame_impl(RendererState& state) {
 
     auto t3 = std::chrono::high_resolution_clock::now();
 
-    if (Settings::debugLogging) {
-        float cudaMs    = std::chrono::duration<float, std::milli>(t1 - t0).count();
-        float drawMs    = std::chrono::duration<float, std::milli>(t2 - t1).count();
-        float analyzeMs = std::chrono::duration<float, std::milli>(t3 - t2).count();
-        float totalMs   = std::chrono::duration<float, std::milli>(t3 - frameStart).count();
-        float e0 = ctx.h_entropy.empty() ? 0.0f : ctx.h_entropy[0];
-        float c0 = ctx.h_contrast.empty() ? 0.0f : ctx.h_contrast[0];
-        std::printf("[Perf] cuda=%.2fms draw=%.2fms analyze=%.2fms total=%.2fms | E=%.4f C=%.4f\n",
-            cudaMs, drawMs, analyzeMs, totalMs, e0, c0);
-        std::printf("[DEBUG] WarzenschweinOverlay enabled = %d\n", static_cast<int>(state.warzenschweinOverlayEnabled));
-    }
-
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -154,11 +151,26 @@ void renderFrame_impl(RendererState& state) {
         WarzenschweinOverlay::drawOverlay(state);
     }
 
-    // 🐭 Maus: FPS hier korrekt setzen – inklusive vollständiger Framezeit
+    auto swapStart = std::chrono::high_resolution_clock::now();
+    glfwSwapBuffers(state.window);
+    auto swapEnd = std::chrono::high_resolution_clock::now();
+
     auto frameEnd = std::chrono::high_resolution_clock::now();
-    float totalMs = std::chrono::duration<float, std::milli>(frameEnd - frameStart).count();
+    float cudaMs    = std::chrono::duration<float, std::milli>(t1 - t0).count();
+    float drawMs    = std::chrono::duration<float, std::milli>(t2 - t1).count();
+    float analyzeMs = std::chrono::duration<float, std::milli>(t3 - t2).count();
+    float swapMs    = std::chrono::duration<float, std::milli>(swapEnd - swapStart).count();
+    float totalMs   = std::chrono::duration<float, std::milli>(frameEnd - frameStart).count();
+
     if (totalMs > 0.0f)
         state.fps = 1000.0f / totalMs;
+
+    if (Settings::debugLogging) {
+        float e0 = ctx.h_entropy.empty() ? 0.0f : ctx.h_entropy[0];
+        float c0 = ctx.h_contrast.empty() ? 0.0f : ctx.h_contrast[0];
+        std::printf("[Perf] cuda=%.2fms draw=%.2fms analyze=%.2fms resize=%.2fms swap=%.2fms total=%.2fms | E=%.4f C=%.4f\n",
+            cudaMs, drawMs, analyzeMs, resizeMs, swapMs, totalMs, e0, c0);
+    }
 
     state.zoom         = static_cast<double>(ctx.zoom);
     state.offset       = { ctx.offset.x, ctx.offset.y };
