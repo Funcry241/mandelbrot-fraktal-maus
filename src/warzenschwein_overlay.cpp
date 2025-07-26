@@ -1,5 +1,5 @@
 // Datei: src/warzenschwein_overlay.cpp
-// 🐭 Maus-Kommentar: Vollständig gekapselt wie HeatmapOverlay – Textzustand lokal. drawOverlay prüft `visible` und `currentText`, Shader/VAO/VBO intern verwaltet. Kein Zugriff auf ctx außer Zoom. Otter: saubere Trennung, Schneefuchs: klares Datenmodell.
+// 🐭 Maus-Kommentar: Seitenverhältnis-Korrektur implementiert. Alle X-Koordinaten skalieren mit aspectRatio. Kein Stauchen mehr bei breiten Fenstern. Otter: Endlich lesbar. Schneefuchs: Geometrisch korrekt.
 
 #include "warzenschwein_overlay.hpp"
 #include "warzenschwein_fontdata.hpp"
@@ -13,7 +13,7 @@ namespace WarzenschweinOverlay {
 
 constexpr int glyphW = 8, glyphH = 12;
 
-// 🔒 Interner Zustand
+// 🔐 Interner Zustand
 static GLuint vao = 0;
 static GLuint vbo = 0;
 static GLuint shader = 0;
@@ -94,7 +94,8 @@ static void buildBackground(float x0, float y0, float x1, float y1) {
 void generateOverlayQuads(
     const std::string& text,
     std::vector<float>& vertexOut,
-    std::vector<float>& backgroundOut
+    std::vector<float>& backgroundOut,
+    float aspectRatio
 ) {
     vertexOut.clear();
     backgroundOut.clear();
@@ -111,7 +112,7 @@ void generateOverlayQuads(
 
     size_t maxW = 0;
     for (const auto& l : lines) maxW = std::max(maxW, l.size());
-    float boxW = (maxW * (glyphW + 1) + 2) * px;
+    float boxW = (maxW * (glyphW + 1) + 2) * px * aspectRatio;
     float boxH = (lines.size() * (glyphH + 2) + 2) * px;
     buildBackground(x0 - px, y0 + px, x0 + boxW, y0 - boxH);
 
@@ -122,19 +123,19 @@ void generateOverlayQuads(
         float yBase = y0 - row * (glyphH + 2) * px;
         for (size_t col = 0; col < line.size(); ++col) {
             const auto& glyph = WarzenschweinFont::get(line[col]);
-            float xBase = x0 + col * (glyphW + 1) * px;
+            float xBase = x0 + col * (glyphW + 1) * px * aspectRatio;
             for (int gy = 0; gy < glyphH; ++gy) {
                 uint8_t bits = glyph[gy];
                 for (int gx = 0; gx < glyphW; ++gx) {
                     if ((bits >> (7 - gx)) & 1) {
-                        float x = xBase + gx * px;
+                        float x = xBase + gx * px * aspectRatio;
                         float y = yBase - gy * px;
                         float quad[6][5] = {
                             {x,       y,       r, g, b},
-                            {x + px,  y,       r, g, b},
-                            {x + px,  y - px,  r, g, b},
+                            {x + px * aspectRatio,  y,       r, g, b},
+                            {x + px * aspectRatio,  y - px,  r, g, b},
                             {x,       y,       r, g, b},
-                            {x + px,  y - px,  r, g, b},
+                            {x + px * aspectRatio,  y - px,  r, g, b},
                             {x,       y - px,  r, g, b},
                         };
                         vertexOut.insert(vertexOut.end(), &quad[0][0], &quad[0][0] + 6 * 5);
@@ -146,7 +147,7 @@ void generateOverlayQuads(
 }
 
 void drawOverlay(RendererState& ctx) {
-     if (Settings::debugLogging) {
+    if (Settings::debugLogging) {
         printf("[WS-Precheck] visible=%d | empty=%d\n",
             static_cast<int>(visible),
             static_cast<int>(currentText.empty())
@@ -157,7 +158,8 @@ void drawOverlay(RendererState& ctx) {
     if (!visible || currentText.empty()) return;
 
     initGL();
-    generateOverlayQuads(currentText, vertices, background);
+    float aspect = static_cast<float>(ctx.width) / ctx.height;
+    generateOverlayQuads(currentText, vertices, background, aspect);
 
     if (Settings::debugLogging) {
         printf("[WS-Overlay] Visible=%d | TextLen=%zu | Verts=%zu | BG=%zu | Zoom=%.3f\n",
