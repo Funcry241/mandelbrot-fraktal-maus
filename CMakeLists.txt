@@ -70,6 +70,10 @@ add_executable(mandelbrot_otterdream
     src/zoom_logic.cpp
     src/zoom_command.cpp
     src/frame_pipeline.cpp
+    src/luchs_logger.cpp
+    src/luchs_buffer.cu
+    src/luchs_upload.cpp
+    src/luchs_logstream.cpp
 )
 
 if (MSVC)
@@ -95,8 +99,6 @@ endif()
 set_target_properties(mandelbrot_otterdream PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
 )
-
-target_compile_features(mandelbrot_otterdream PRIVATE cxx_std_23)
 
 # ✅ explizit: CUDA bekommt --std=c++23, auch wenn CMake das Label nicht kennt
 target_compile_options(mandelbrot_otterdream PRIVATE
