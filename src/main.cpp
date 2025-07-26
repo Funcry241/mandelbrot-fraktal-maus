@@ -1,11 +1,10 @@
-// Datei: src/main.cpp
-// 🐭 Maus-Kommentar: Overlay wird direkt über RendererState initialisiert. Heatmap-Status aus Settings. Kompakt, klar, kein Overhead. Schneefuchs nickt.
 #include "pch.hpp"
 #include "renderer_core.hpp"
 #include "settings.hpp"
 #include "renderer_loop.hpp"
 #include "renderer_state.hpp"
 #include "cuda_interop.hpp"
+#include <chrono>
 
 int main() {        
     if (Settings::debugLogging)
@@ -23,9 +22,20 @@ int main() {
     CudaInterop::setPauseZoom(false);
 
     while (!renderer.shouldClose()) {
-        renderer.renderFrame_impl(); // Kein Parameter mehr (autoZoomEnabled entfernt)
+        auto frameStart = std::chrono::high_resolution_clock::now();
+
+        renderer.renderFrame_impl();
         glfwPollEvents();
+
+        auto swapStart = std::chrono::high_resolution_clock::now();
         glfwSwapBuffers(renderer.getState().window);
+        auto swapEnd = std::chrono::high_resolution_clock::now();
+
+        if (Settings::debugLogging) {
+            float swapMs  = std::chrono::duration<float, std::milli>(swapEnd - swapStart).count();
+            float totalMs = std::chrono::duration<float, std::milli>(swapEnd - frameStart).count();
+            std::printf("[Frame] swap=%.2fms total=%.2fms\n", swapMs, totalMs);
+        }
     }
 
     return 0;

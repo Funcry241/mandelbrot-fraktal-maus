@@ -151,15 +151,10 @@ void renderFrame_impl(RendererState& state) {
         WarzenschweinOverlay::drawOverlay(state);
     }
 
-    auto swapStart = std::chrono::high_resolution_clock::now();
-    glfwSwapBuffers(state.window);
-    auto swapEnd = std::chrono::high_resolution_clock::now();
-
     auto frameEnd = std::chrono::high_resolution_clock::now();
     float cudaMs    = std::chrono::duration<float, std::milli>(t1 - t0).count();
     float drawMs    = std::chrono::duration<float, std::milli>(t2 - t1).count();
-    float analyzeMs = std::chrono::duration<float, std::milli>(t3 - t2).count();
-    float swapMs    = std::chrono::duration<float, std::milli>(swapEnd - swapStart).count();
+    float analyzeMs = std::chrono::duration<float, std::milli>(t3 - t2).count();    
     float totalMs   = std::chrono::duration<float, std::milli>(frameEnd - frameStart).count();
 
     if (totalMs > 0.0f)
@@ -168,8 +163,8 @@ void renderFrame_impl(RendererState& state) {
     if (Settings::debugLogging) {
         float e0 = ctx.h_entropy.empty() ? 0.0f : ctx.h_entropy[0];
         float c0 = ctx.h_contrast.empty() ? 0.0f : ctx.h_contrast[0];
-        std::printf("[Perf] cuda=%.2fms draw=%.2fms analyze=%.2fms resize=%.2fms swap=%.2fms total=%.2fms | E=%.4f C=%.4f\n",
-            cudaMs, drawMs, analyzeMs, resizeMs, swapMs, totalMs, e0, c0);
+        std::printf("[Perf] cuda=%.2fms draw=%.2fms analyze=%.2fms resize=%.2fms total=%.2fms | E=%.4f C=%.4f\n",
+            cudaMs, drawMs, analyzeMs, resizeMs, totalMs, e0, c0);
     }
 
     state.zoom         = static_cast<double>(ctx.zoom);
