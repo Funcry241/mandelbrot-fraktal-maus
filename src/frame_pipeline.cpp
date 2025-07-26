@@ -1,3 +1,9 @@
+// Datei: src/frame_pipeline.cpp
+// 🐭 Maus-Kommentar: Alpha 49f - Supersampling restlos entfernt. `computeCudaFrame()` ohne `supersampling`, `d_tileSupersampling` oder `h_tileSupersampling`. Alles stabil, nichts vergessen. Otter: deterministisch. Schneefuchs: präzise.
+// 🐭 Maus-Kommentar: Alpha 63b - Setzt FrameContext-Dimensionen explizit aus RendererState – kein implizites GLFW nötig.
+// 🦦 Otter: Klare Datenflussregel: RendererState → FrameContext → CUDA. Kein Kontext-Zugriff im Pipeline-Code.
+// 🐑 Schneefuchs: Trennung von Plattformdetails und Logik ist jetzt durchgezogen.
+
 #include <GLFW/glfw3.h>
 #include <cmath>
 #include <vector>
@@ -120,6 +126,9 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
 
 void execute(RendererState& state) {
     beginFrame(g_ctx);
+    g_ctx.width  = state.width;
+    g_ctx.height = state.height;
+
     computeCudaFrame(g_ctx, state);
     applyZoomLogic(g_ctx, g_zoomBus);
     drawFrame(g_ctx, state.tex, state);
