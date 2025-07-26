@@ -1,6 +1,3 @@
-// Datei: src/renderer_loop.cpp
-// 🐭 Maus-Kommentar: Alpha 60b – Dynamische Tile-Größenanpassung bei Zoomänderung, sauber vor ctx-Befüllung. Schneefuchs: „Soft resize.“ Otter: „Konsistent, endlich.“
-
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
@@ -12,6 +9,7 @@
 #include "frame_pipeline.hpp"
 #include "zoom_command.hpp"
 #include <chrono>
+#include <cmath> // für std::sqrt, std::clamp
 
 namespace RendererLoop {
 
@@ -51,14 +49,26 @@ void renderFrame_impl(RendererState& state) {
 
     beginFrame(state);
 
-    // 🐭 Maus: Dynamische Anpassung der Tile-Größe bei Zoomänderung – ersetzt statisches Verhalten. Otter sagt: „Endlich weich.“
+    // 🐭 Maus: Iterationen an Zoom-Level anpassen – √Zoom-Skalierung
+    {
+        const double scale = std::sqrt(state.zoom);
+        const int scaledIters = static_cast<int>(5000.0 * scale);
+        state.maxIterations = std::clamp(scaledIters, 500, 50000);
+
+        if (Settings::debugLogging) {
+            std::printf("[AutoIter] zoom=%.3e scale=%.2f → iter=%d\n",
+                state.zoom, scale, state.maxIterations);
+        }
+    }
+
+    // 🐭 Maus: Dynamische Anpassung der Tile-Größe bei Zoomänderung – ersetzt statisches Verhalten.
     {
         int newTile = computeTileSizeFromZoom(static_cast<float>(state.zoom));
         if (newTile != state.lastTileSize) {
             if (Settings::debugLogging)
                 std::printf("[Tile] Updating tileSize: %d → %d (zoom = %.4e)\n",
                     state.lastTileSize, newTile, state.zoom);
-            state.lastTileSize = newTile; // <– entscheidend!
+            state.lastTileSize = newTile;
             state.resize(state.width, state.height);
         }
     }
