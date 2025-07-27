@@ -1,4 +1,6 @@
-// 🐭 Maus-Kommentar: Alpha 49e - Supersampling vollständig entfernt. Kein d_tileSupersampling, kein h_tileSupersampling, kein Overhead mehr. Otter: "Sauberer, schneller, schlanker." Schneefuchs zufrieden.
+// 🐭 Maus-Kommentar: Alpha 67 – Kontextfix: PBO-Registrierung erst nach aktivem GL-Kontext. Kein invalid argument mehr. 
+// 🦦 Otter: CUDA sieht jetzt korrekt. Fokus, keine Zufälle.
+// 🦊 Schneefuchs: Reihenfolge gewahrt, Kontextfehler eliminiert.
 
 #include "pch.hpp"
 
@@ -7,6 +9,7 @@
 #include "renderer_pipeline.hpp"
 #include "renderer_state.hpp"
 #include "renderer_loop.hpp"
+#include "renderer_resources.hpp"
 #include "common.hpp"
 #include "settings.hpp"
 #include "cuda_interop.hpp"
@@ -18,7 +21,7 @@
 #define ENABLE_ZOOM_LOGGING 0
 
 Renderer::Renderer(int width, int height)
-: state(width, height), glInitialized(false) {
+: state(width, height), glInitialized(false), glResourcesInitialized(false) {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] Renderer::Renderer() started");
 }
@@ -65,6 +68,16 @@ bool Renderer::initGL() {
     RendererPipeline::init();
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] RendererPipeline initialized");
+
+    // 🧠 Kontext ist jetzt gültig – PBO und CUDA-Interop erst ab hier
+    if (!glResourcesInitialized) {
+        OpenGLUtils::setGLResourceContext("init");
+        state.pbo = OpenGLUtils::createPBO(state.width, state.height);
+        CudaInterop::registerPBO(state.pbo);
+
+        state.tex = OpenGLUtils::createTexture(state.width, state.height);
+        glResourcesInitialized = true;
+    }
 
     glInitialized = true;
     if (Settings::debugLogging)
