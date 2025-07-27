@@ -1,3 +1,6 @@
+// Datei: src/cuda_interop.cu
+// 🐭 Maus-Kommentar: Supersampling entfernt – launch_mandelbrotHybrid jetzt minimal und direkt. Logging auf LUCHS_LOG_HOST. Otter: Klarer Fokus. Schneefuchs: deterministisch, transparent.
+
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
 #include "cuda_interop.hpp"
@@ -8,10 +11,6 @@
 #include "zoom_logic.hpp"
 #include <cuda_gl_interop.h>
 #include <vector>
-#include <cstdio>
-#include <iomanip>
-#include <sstream>
-#include <GLFW/glfw3.h>
 
 #ifndef __CUDA_ARCH__
   #include <chrono>
@@ -27,14 +26,7 @@ void registerPBO(unsigned int pbo) {
         LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!");
         return;
     }
-
-    LUCHS_LOG_HOST("[CU-INFO] registerPBO called with pbo=%u", pbo);
-    cudaError_t err = cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard);
-    if (err != cudaSuccess) {
-        LUCHS_LOG_HOST("[CUDA ERROR] cudaGraphicsGLRegisterBuffer failed: %s", cudaGetErrorString(err));
-    } else {
-        LUCHS_LOG_HOST("[CU-INFO] cudaGraphicsGLRegisterBuffer succeeded");
-    }
+    CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard));
 }
 
 void unregisterPBO() {
@@ -58,13 +50,6 @@ void renderCudaFrame(
     const auto t0 = std::chrono::high_resolution_clock::now();
 #endif
 
-    // 🧷 Kontextprüfung vor Mapping
-    GLFWwindow* ctx = glfwGetCurrentContext();
-    if (!ctx) {
-        LUCHS_LOG_HOST("[CU-FATAL] No current OpenGL context before cudaGraphicsMapResources");
-        return;
-    }
-
     const int totalPixels = width * height;
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
@@ -76,18 +61,7 @@ void renderCudaFrame(
         CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
     }
 
-    // 🛡️ CUDA-GL Mapping mit Fehlerprüfung
-    cudaError_t mapErr = cudaGraphicsMapResources(1, &cudaPboResource, 0);
-    if (mapErr != cudaSuccess) {
-        LUCHS_LOG_HOST("[CUDA ERROR] cudaGraphicsMapResources failed: %s", cudaGetErrorString(mapErr));
-
-        GLenum glErr = glGetError();
-        if (glErr != GL_NO_ERROR) {
-            LUCHS_LOG_HOST("[GL ERROR] glGetError() before CUDA mapping = 0x%X", glErr);
-        }
-        return;
-    }
-
+    CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
     uchar4* devPtr = nullptr;
     size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
@@ -111,7 +85,7 @@ void renderCudaFrame(
         launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
     }
 
-    computeCudaEntropyContrast(d_iterations, d_entropy, d_contrast, width, height, tileSize, maxIterations);
+    ::computeCudaEntropyContrast(d_iterations, d_entropy, d_contrast, width, height, tileSize, maxIterations);
 
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
