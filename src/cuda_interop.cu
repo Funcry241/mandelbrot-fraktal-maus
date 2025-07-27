@@ -29,7 +29,15 @@ void registerPBO(unsigned int pbo) {
         LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!");
         return;
     }
-    CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard));
+
+    LUCHS_LOG_HOST("[CU-INFO] registerPBO called with pbo=%u", pbo);
+
+    cudaError_t err = cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard);
+    if (err != cudaSuccess) {
+        LUCHS_LOG_HOST("[CU-ERROR] cudaGraphicsGLRegisterBuffer failed: %s", cudaGetErrorString(err));
+    } else {
+        LUCHS_LOG_HOST("[CU-INFO] cudaGraphicsGLRegisterBuffer succeeded");
+    }
 }
 
 void unregisterPBO() {
