@@ -32,7 +32,6 @@ void initResources(RendererState& state) {
     OpenGLUtils::setGLResourceContext("init");
     state.pbo = OpenGLUtils::createPBO(state.width, state.height);
     state.tex = OpenGLUtils::createTexture(state.width, state.height);
-    CudaInterop::registerPBO(state.pbo);
 
     state.lastTileSize = computeTileSizeFromZoom(static_cast<float>(state.zoom));
 }

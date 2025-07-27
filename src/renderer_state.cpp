@@ -1,5 +1,6 @@
-// Datei: src/renderer_state.cpp
-// 🐭 Maus-Kommentar: LUCHS_LOG_HOST statt LUCHS_LOG. Schneefuchs: Logging konsistent und eindeutig. Otter: keine Schattenmakros mehr.
+// 🐭 Maus-Kommentar: Keine Doppelregistrierung mehr – resize() übernimmt Verantwortung klar und kontrolliert.
+// 🦦 Otter: Device-Buffers und PBO sauber, kein Zombie-Handle mehr.
+// 🦊 Schneefuchs: Ressourcenfluss ist konsistent und deterministisch.
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -66,24 +67,29 @@ void RendererState::setupCudaBuffers() {
 }
 
 void RendererState::resize(int newWidth, int newHeight) {
+    // Device-Ressourcen freigeben
     if (d_iterations) { CUDA_CHECK(cudaFree(d_iterations)); d_iterations = nullptr; }
     if (d_entropy)    { CUDA_CHECK(cudaFree(d_entropy));    d_entropy    = nullptr; }
     if (d_contrast)   { CUDA_CHECK(cudaFree(d_contrast));   d_contrast   = nullptr; }
 
+    // CUDA-seitige Bindung zum alten PBO lösen
     CudaInterop::unregisterPBO();
 
+    // OpenGL-Ressourcen löschen
     if (pbo) { glDeleteBuffers(1, &pbo); pbo = 0; }
     if (tex) { glDeleteTextures(1, &tex); tex = 0; }
 
+    // Neue Größe setzen
     width  = newWidth;
     height = newHeight;
 
+    // Neu erzeugen & registrieren
+    OpenGLUtils::setGLResourceContext("resize");
     pbo = OpenGLUtils::createPBO(width, height);
     tex = OpenGLUtils::createTexture(width, height);
-
     CudaInterop::registerPBO(pbo);
-    setupCudaBuffers();
 
+    setupCudaBuffers();
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
 
     if (Settings::debugLogging)
