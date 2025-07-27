@@ -64,6 +64,11 @@ void renderCudaFrame(
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
     uchar4* devPtr = nullptr;
     size_t size = 0;
+
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CHECK] cudaPboResource = %p | devPtr (before map) = %p", (void*)cudaPboResource, (void*)devPtr);
+    }
+
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
     if (Settings::debugLogging) {
