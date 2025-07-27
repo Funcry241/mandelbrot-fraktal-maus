@@ -1,5 +1,6 @@
 // Datei: src/cuda_interop.cu
 // 🐭 Maus-Kommentar: Logging auf LUCHS_LOG_HOST umgestellt. Kein iostream mehr. Schneefuchs: deterministisch.
+// 🦦 Otter: Diagnose erweitert – CUDA-Interop Fehler transparent. GL-Kontextprüfung eingefügt.
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
@@ -31,12 +32,12 @@ void registerPBO(unsigned int pbo) {
     }
 
     LUCHS_LOG_HOST("[CU-INFO] registerPBO called with pbo=%u", pbo);
-
     cudaError_t err = cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard);
-    if (err != cudaSuccess) {
-        LUCHS_LOG_HOST("[CU-ERROR] cudaGraphicsGLRegisterBuffer failed: %s", cudaGetErrorString(err));
-    } else {
+    if (err == cudaSuccess) {
         LUCHS_LOG_HOST("[CU-INFO] cudaGraphicsGLRegisterBuffer succeeded");
+    } else {
+        LUCHS_LOG_HOST("[CU-ERROR] cudaGraphicsGLRegisterBuffer failed: %s", cudaGetErrorString(err));
+        cudaPboResource = nullptr;
     }
 }
 
@@ -54,8 +55,10 @@ void renderCudaFrame(
     float2& newOffset, bool& shouldZoom, int tileSize,
     RendererState& state
 ) {
-    if (!cudaPboResource)
-        throw std::runtime_error("[FATAL] CUDA PBO not registered!");
+    if (!cudaPboResource) {
+        LUCHS_LOG_HOST("[CU-FATAL] renderCudaFrame: cudaPboResource is null");
+        return;
+    }
 
 #ifndef __CUDA_ARCH__
     const auto t0 = std::chrono::high_resolution_clock::now();
@@ -72,7 +75,19 @@ void renderCudaFrame(
         CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
     }
 
-    CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
+    // 🧪 Diagnose: GL-Fehler prüfen vor CUDA-Zugriff
+    GLenum glErr = glGetError();
+    if (glErr != GL_NO_ERROR) {
+        LUCHS_LOG_HOST("[CU-WARN] OpenGL error state before mapping: 0x%X", glErr);
+    }
+
+    // 🔍 CUDA-Interop Mapping
+    cudaError_t mapErr = cudaGraphicsMapResources(1, &cudaPboResource, 0);
+    if (mapErr != cudaSuccess) {
+        LUCHS_LOG_HOST("[CUDA ERROR] cudaGraphicsMapResources failed: %s", cudaGetErrorString(mapErr));
+        return;
+    }
+
     uchar4* devPtr = nullptr;
     size_t size = 0;
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
