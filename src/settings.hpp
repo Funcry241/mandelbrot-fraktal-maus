@@ -22,8 +22,8 @@ constexpr float zoomFactor = 1.07f;
 //   - 2.0f-3.0f: realistische Schwelle für kontrastarme Tiles
 //   - 4.0f-5.0f: nur sehr strukturierte Bereiche
 //
-// Erhöhung → stärkerer Filter, langsameres Zoomen  
-// Reduktion → breitere Auswahl, aber potenziell uninteressanter Zoom
+// Erhöhung -> stärkerer Filter, langsameres Zoomen  
+// Reduktion -> breitere Auswahl, aber potenziell uninteressanter Zoom
 inline constexpr float ENTROPY_THRESHOLD_LOW = 2.5f;
 
 // 🔍 Debug-Modi: visuelle Darstellung & Konsolen-Ausgabe aktivieren

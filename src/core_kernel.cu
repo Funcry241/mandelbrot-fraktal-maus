@@ -67,8 +67,7 @@ __global__ void mandelbrotKernel(
     iterOut[idx] = it;
 
     if (Settings::debugLogging && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("Block (%d,%d) → Pixel (%d,%d), Iter = %d",
-                         blockIdx.x, blockIdx.y, x, y, it);
+        LUCHS_LOG_DEVICE("BlockXY");
     }
 }
 
@@ -100,7 +99,7 @@ __global__ void entropyKernel(const int* it, float* eOut, int w, int h, int tile
         eOut[tileIndex] = entropy;
 
         if (Settings::debugLogging) {
-            LUCHS_LOG_DEVICE("Entropy Tile (%d,%d) = %.4f", tX, tY, entropy);
+            LUCHS_LOG_DEVICE("EntropyXY");
         }
     }
 }
@@ -125,7 +124,7 @@ __global__ void contrastKernel(const float* e, float* cOut, int tilesX, int tile
     cOut[idx] = (cnt > 0) ? sum / cnt : 0.0f;
 
     if (Settings::debugLogging && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("Contrast Tile (%d,%d) = %.4f", tx, ty, cOut[idx]);
+        LUCHS_LOG_DEVICE("ContrastXY");
     }
 }
 
@@ -165,11 +164,8 @@ void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, f
         int it[10] = { 0 };
         cudaMemcpy(it, d_it, sizeof(it), cudaMemcpyDeviceToHost);
 
-        char buf[256] = {};
-        int len = snprintf(buf, sizeof(buf), "[Iter] First10:");
-        for (int i = 0; i < 10; ++i)
-            len += snprintf(buf + len, sizeof(buf) - len, " %d", it[i]);
-        LUCHS_LOG_HOST("%s", buf);
+        LUCHS_LOG_HOST("[Iter] First10: %d %d %d %d %d %d %d %d %d %d",
+                       it[0], it[1], it[2], it[3], it[4], it[5], it[6], it[7], it[8], it[9]);
     }
 
     // 🦦 Otter: Luchsifizierung abgeschlossen – alles sauber, alles kontrolliert
