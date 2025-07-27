@@ -1,3 +1,6 @@
+// Datei: src/renderer_state.cpp
+// 🐭 Maus-Kommentar: LUCHS_LOG_HOST statt LUCHS_LOG. Schneefuchs: Logging konsistent und eindeutig. Otter: keine Schattenmakros mehr.
+
 #include "pch.hpp"
 #include "renderer_state.hpp"
 #include "settings.hpp"
@@ -84,5 +87,5 @@ void RendererState::resize(int newWidth, int newHeight) {
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
 
     if (Settings::debugLogging)
-        LUCHS_LOG("[Resize] %d x %d buffers reallocated\n", width, height);
+        LUCHS_LOG_HOST("[Resize] %d x %d buffers reallocated", width, height);
 }

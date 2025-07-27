@@ -6,6 +6,7 @@
 #include <array>
 #include <string>
 #include <cstdio>
+#include "luchs_log_host.hpp"  // für LUCHS_LOG_HOST
 
 namespace WarzenschweinFont {
 
@@ -89,7 +90,7 @@ inline std::string toHexString(const Glyph& g) {
     std::string out;
     char buf[5];
     for (auto b : g) {
-        LUCHS_LOG(buf, sizeof(buf), "%02X ", b);
+        std::snprintf(buf, sizeof(buf), "%02X ", b);  // Formatierung rein lokal
         out += buf;
     }
     return out;

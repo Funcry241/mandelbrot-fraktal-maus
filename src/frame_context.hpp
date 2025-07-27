@@ -1,11 +1,18 @@
-/* 🐭 Maus-Kommentar: Alpha 49f - Supersampling restlos entfernt. `supersampling` raus, Konstruktor synchron mit Settings. Alles glasklar, wartbar, schnell. Schneefuchs: entkernt. Otter: minimalistisch. */
+// Datei: src/frame_context.hpp
+// 🦦 Otter: Klar sichtbar als Kapsel, keine faulen pragmas. Konstruktor & Logging unverändert.
+// 🦊 Schneefuchs: Speicherstruktur explizit – deterministisch, loggingkompatibel.
 
 #pragma once
 #include <vector>
 #include <cuda_runtime.h>
 #include "settings.hpp"  // Settings::BASE_TILE_SIZE etc.
+#include "luchs_log_host.hpp"
 
-struct FrameContext {
+#pragma warning(push)
+#pragma warning(disable: 4324) // 🛡️ MSVC: Padding wegen float2 erlaubt – Struktur korrekt genutzt
+
+class FrameContext {
+public:
     // Bilddimensionen
     int width = 0;
     int height = 0;
@@ -53,7 +60,7 @@ struct FrameContext {
     // Debug-Ausgaben
     void printDebug() const {
         if (!Settings::debugLogging) return;
-        LUCHS_LOG("[Frame] w=%d h=%d zoom=%.1e offset=(%.5f, %.5f) tiles=%d\n",
+        LUCHS_LOG_HOST("[Frame] w=%d h=%d zoom=%.1e offset=(%.5f, %.5f) tiles=%d",
             width, height, zoom, offset.x, offset.y, tileSize);
     }
 
@@ -67,3 +74,5 @@ struct FrameContext {
         shouldZoom = false;
     }
 };
+
+#pragma warning(pop)

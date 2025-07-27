@@ -1,8 +1,10 @@
 // Datei: src/renderer_resources.cpp
 // 🐭 Maus-Kommentar: Kontextsensitives Logging - Debug-Ausgabe nur noch bei aktiviertem Settings::debugLogging. Schneefuchs: „Finde den Ursprung, finde den Fehler.“ Keine Tippfehler mehr, keine Noise-Leaks.
+
 #include "pch.hpp"
 #include "renderer_resources.hpp"
 #include "settings.hpp"
+#include "luchs_log_host.hpp"
 #include <stdexcept>
 #include <cstdio>
 
@@ -25,7 +27,7 @@ GLuint createPBO(int width, int height) {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     if (Settings::debugLogging)
-        LUCHS_LOG("[DEBUG] OpenGLUtils::createPBO -> ID %u (ctx: %s, %dx%d)\n", pbo, resourceContext, width, height);
+        LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createPBO -> ID %u (ctx: %s, %dx%d)\n", pbo, resourceContext, width, height);
     return pbo;
 }
 
@@ -44,9 +46,8 @@ GLuint createTexture(int width, int height) {
     glBindTexture(GL_TEXTURE_2D, 0);
 
     if (Settings::debugLogging)
-        LUCHS_LOG("[DEBUG] OpenGLUtils::createTexture -> ID %u (ctx: %s, %dx%d)\n", tex, resourceContext, width, height);
+        LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createTexture -> ID %u (ctx: %s, %dx%d)\n", tex, resourceContext, width, height);
     return tex;
 }
 
 } // namespace OpenGLUtils
-

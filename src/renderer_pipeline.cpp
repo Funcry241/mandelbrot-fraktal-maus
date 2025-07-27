@@ -5,7 +5,7 @@
 #include "renderer_pipeline.hpp"
 #include "opengl_utils.hpp"
 #include "common.hpp"
-#include "luchs_logger.hpp"
+#include "luchs_log_host.hpp"
 #include <cstdlib>
 
 namespace RendererPipeline {
@@ -31,7 +31,7 @@ void main() { FragColor = texture(uTex, vTex); }
 void init() {
     program = OpenGLUtils::createProgramFromSource(vShader, fShader);
     if (!program) {
-        LUCHS_LOG("[FATAL] Shaderprogramm konnte nicht erstellt werden - OpenGL-Abbruch\n");
+        LUCHS_LOG_HOST("[FATAL] Shaderprogramm konnte nicht erstellt werden - OpenGL-Abbruch");
         std::exit(EXIT_FAILURE);
     }
 

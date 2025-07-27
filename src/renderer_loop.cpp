@@ -15,6 +15,7 @@
 #include "zoom_command.hpp"
 #include "zoom_logic.hpp"
 #include "frame_pipeline.hpp"
+#include "luchs_log_host.hpp"
 #include <chrono>
 #include <cmath> // für std::sqrt, std::clamp
 
@@ -52,7 +53,7 @@ void renderFrame_impl(RendererState& state) {
     FramePipeline::execute(state);
 
     if (Settings::debugLogging && state.frameCount % 60 == 0) {
-        LUCHS_LOG("[Loop] Frame %d, Δt = %.3f\n", state.frameCount, state.deltaTime);
+        LUCHS_LOG_HOST("[Loop] Frame %d, Δt = %.3f", state.frameCount, state.deltaTime);
     }
 }
 

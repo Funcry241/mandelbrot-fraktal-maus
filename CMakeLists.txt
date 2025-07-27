@@ -55,9 +55,9 @@ include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
 # ---------------------------------------------------------
 # 🛠 Executable: zentrale Dateien des Mandelbrot-Renderers
 add_executable(mandelbrot_otterdream
-    src/main.cpp
-    src/luchs_device_buffer.cu
+    src/main.cpp    
     src/luchs_logger.cpp
+    src/luchs_cuda_log_buffer.cu    
     src/renderer_core.cu
     src/renderer_loop.cpp
     src/renderer_state.cpp
@@ -71,8 +71,7 @@ add_executable(mandelbrot_otterdream
     src/core_kernel.cu
     src/zoom_logic.cpp
     src/zoom_command.cpp
-    src/frame_pipeline.cpp
-    src/luchs_logger.cpp       
+    src/frame_pipeline.cpp     
 )
 
 if (MSVC)
@@ -121,7 +120,7 @@ set_source_files_properties(
     src/renderer_core.cu    
     src/cuda_interop.cu
     src/core_kernel.cu
-    src/luchs_device_buffer.cu
+    src/luchs_cuda_log_buffer.cu    
     PROPERTIES LANGUAGE CUDA
 )
 

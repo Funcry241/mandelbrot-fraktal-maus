@@ -1,10 +1,10 @@
-// 🐭 Maus-Kommentar: Supersampling entfernt - einfache Kernlogik bleibt erhalten. Fokus liegt wieder auf Basissampling. Otter: Robustheit. Schneefuchs: Klarheit.
+// 🐭 Maus-Kommentar: Supersampling entfernt - einfache Kernlogik bleibt erhalten. Otter: Robustheit. Schneefuchs: Klarheit.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
 #include <cmath>
-#include "luchs_logger.hpp"
+#include "luchs_log_host.hpp"
 #include "common.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
@@ -128,24 +128,28 @@ void computeCudaEntropyContrast(const int* d_it, float* d_e, float* d_c, int w, 
 // ---- HOST-WRAPPER: Mandelbrot ----
 void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, float2 offset, int maxIter, int tile) {
     dim3 block(16, 16), grid((w + 15) / 16, (h + 15) / 16);
+
     if (Settings::debugLogging) {
-        LUCHS_LOG("[Kernel] %dx%d | Zoom: %.3e | Offset: (%.5f, %.5f) | Iter: %d | Tile: %d\n",
+        char logbuf[256];
+        snprintf(logbuf, sizeof(logbuf), "[Kernel] %dx%d | Zoom: %.3e | Offset: (%.5f, %.5f) | Iter: %d | Tile: %d",
             w, h, zoom, offset.x, offset.y, maxIter, tile);
+        LUCHS_LOG_HOST("%s", logbuf);
     }
 
     if (out && d_it)
         mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter, tile);
 
     cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess)
-        LUCHS_LOG( "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
+    if (err != cudaSuccess) {
+        LUCHS_LOG_HOST("[CUDA ERROR] Kernel launch failed: %s", cudaGetErrorString(err));
+    }
+
     cudaDeviceSynchronize();
 
     if (Settings::debugLogging) {
         int it[10] = { 0 };
         cudaMemcpy(it, d_it, sizeof(it), cudaMemcpyDeviceToHost);
-        LUCHS_LOG("[Iter] First10: ");
-        for (int i = 0; i < 10; ++i) LUCHS_LOG("%d ", it[i]);
-        LUCHS_LOG("");
+        LUCHS_LOG_HOST("[Iter] First10: %d %d %d %d %d %d %d %d %d %d",
+                 it[0], it[1], it[2], it[3], it[4], it[5], it[6], it[7], it[8], it[9]);
     }
 }

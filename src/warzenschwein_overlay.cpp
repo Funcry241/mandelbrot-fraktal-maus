@@ -5,6 +5,7 @@
 #include "warzenschwein_fontdata.hpp"
 #include "settings.hpp"
 #include "renderer_state.hpp"
+#include "luchs_log_host.hpp"
 #include <GL/glew.h>
 #include <vector>
 #include <string>
@@ -13,10 +14,7 @@ namespace WarzenschweinOverlay {
 
 constexpr int glyphW = 8, glyphH = 12;
 
-// 🔒 Interner Zustand
-static GLuint vao = 0;
-static GLuint vbo = 0;
-static GLuint shader = 0;
+static GLuint vao = 0, vbo = 0, shader = 0;
 static std::vector<float> vertices;
 static std::vector<float> background;
 static std::string currentText;
@@ -46,26 +44,49 @@ static GLuint compile(GLenum type, const char* src) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
     glCompileShader(s);
+
     GLint ok;
     glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
     if (!ok) {
         char buf[512];
         glGetShaderInfoLog(s, 512, nullptr, buf);
-        LUCHS_LOG( "[ShaderError] %s: %s\n", (type == GL_VERTEX_SHADER ? "Vertex" : "Fragment"), buf);
+        LUCHS_LOG_HOST("[ShaderError] Warzenschwein %s: %s\n",
+                       type == GL_VERTEX_SHADER ? "Vertex" : "Fragment", buf);
+        glDeleteShader(s);
+        return 0;
     }
+
     return s;
 }
 
 static void initGL() {
     if (vao != 0) return;
-    shader = glCreateProgram();
+
     GLuint vs = compile(GL_VERTEX_SHADER, vsSrc);
     GLuint fs = compile(GL_FRAGMENT_SHADER, fsSrc);
+
+    if (!vs || !fs) {
+        LUCHS_LOG_HOST("[FATAL] WarzenschweinOverlay: Shader-Kompilierung fehlgeschlagen");
+        return;
+    }
+
+    shader = glCreateProgram();
     glAttachShader(shader, vs);
     glAttachShader(shader, fs);
     glLinkProgram(shader);
     glDeleteShader(vs);
     glDeleteShader(fs);
+
+    GLint linked = GL_FALSE;
+    glGetProgramiv(shader, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char buf[512];
+        glGetProgramInfoLog(shader, 512, nullptr, buf);
+        LUCHS_LOG_HOST("[ShaderError] Warzenschwein Link: %s\n", buf);
+        glDeleteProgram(shader);
+        shader = 0;
+        return;
+    }
 
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
@@ -91,14 +112,10 @@ static void buildBackground(float x0, float y0, float x1, float y1) {
     background.insert(background.end(), &quad[0][0], &quad[0][0] + 6 * 5);
 }
 
-void generateOverlayQuads(
-    const std::string& text,
-    std::vector<float>& vertexOut,
-    std::vector<float>& backgroundOut,
-    const RendererState& ctx
-) {
+void generateOverlayQuads(const std::string& text, std::vector<float>& vertexOut, std::vector<float>& backgroundOut, const RendererState& ctx) {
     vertexOut.clear();
     backgroundOut.clear();
+
     const float px = Settings::hudPixelSize;
     const float pxX = 2.0f / ctx.width;
     const float pxY = 2.0f / ctx.height;
@@ -150,28 +167,13 @@ void generateOverlayQuads(
 }
 
 void drawOverlay(RendererState& ctx) {
-     if (Settings::debugLogging) {
-        LUCHS_LOG("[WS-Precheck] visible=%d | empty=%d\n",
-            static_cast<int>(visible),
-            static_cast<int>(currentText.empty())
-        );
-    }
-
-    if (!Settings::warzenschweinOverlayEnabled) return;
-    if (!visible || currentText.empty()) return;
+    if (!Settings::warzenschweinOverlayEnabled || !visible || currentText.empty())
+        return;
 
     initGL();
-    generateOverlayQuads(currentText, vertices, background, ctx);
+    if (!shader) return;
 
-    if (Settings::debugLogging) {
-        LUCHS_LOG("[WS-Overlay] Visible=%d | TextLen=%zu | Verts=%zu | BG=%zu | Zoom=%.3f\n",
-            visible,
-            currentText.length(),
-            vertices.size(),
-            background.size(),
-            ctx.zoom
-        );
-    }
+    generateOverlayQuads(currentText, vertices, background, ctx);
 
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
@@ -181,10 +183,10 @@ void drawOverlay(RendererState& ctx) {
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
 
     glBufferData(GL_ARRAY_BUFFER, background.size() * sizeof(float), background.data(), GL_DYNAMIC_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(background.size() / 5));
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(background.size() / 5));
 
     glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(vertices.size() / 5));
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 5));
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
@@ -193,7 +195,7 @@ void drawOverlay(RendererState& ctx) {
     if (Settings::debugLogging) {
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
-            LUCHS_LOG("[WS-GL] glGetError = 0x%04X\n", err);
+            LUCHS_LOG_HOST("[WS-GL] glGetError = 0x%04X\n", err);
         }
     }
 }

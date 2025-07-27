@@ -1,5 +1,6 @@
 // Datei: src/renderer_window.cpp
 // 🐭 Maus-Kommentar: Fixed-Function raus, moderner Kontext rein - für Warzenschwein wird OpenGL 4.3 erzwungen. Keine Kompromisse mehr, Otter-Style.
+// 🦦 Otter: LUCHS_LOG_HOST für GLFW-Fehler. Schneefuchs: Klarer Host-Kontext.
 
 #include "pch.hpp"
 #include "renderer_window.hpp"
@@ -13,7 +14,7 @@ namespace RendererInternals {
 // Erstellt GLFW-Fenster, setzt OpenGL-Kontext & VSync, Position aus Settings
 GLFWwindow* createGLFWWindow(int width, int height) {
     if (!glfwInit()) {
-        LUCHS_LOG( "[ERROR] GLFW init failed\n");
+        LUCHS_LOG_HOST("[ERROR] GLFW init failed\n");
         return nullptr;
     }
 
@@ -25,7 +26,7 @@ GLFWwindow* createGLFWWindow(int width, int height) {
 
     GLFWwindow* window = glfwCreateWindow(width, height, "OtterDream Mandelbrot", nullptr, nullptr);
     if (!window) {
-        LUCHS_LOG( "[ERROR] Window creation failed\n");
+        LUCHS_LOG_HOST("[ERROR] Window creation failed\n");
         glfwTerminate();
         return nullptr;
     }

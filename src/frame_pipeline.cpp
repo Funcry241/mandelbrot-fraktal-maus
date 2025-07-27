@@ -17,7 +17,7 @@
 #include "heatmap_overlay.hpp"
 #include "warzenschwein_overlay.hpp"
 #include "settings.hpp"
-#include "luchs_logger.hpp"
+#include "luchs_log_host.hpp"
 
 namespace FramePipeline {
 
@@ -40,7 +40,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     float2 gpuNewOffset  = gpuOffset;
 
     if (Settings::debugLogging) {
-        LUCHS_LOG("[DEBUG] Mandelbrot-Kernel Call: width=%d, height=%d, maxIter=%d, zoom=%.2f, offset=(%.10f, %.10f), tileSize=%d\n",
+        LUCHS_LOG_HOST("[DEBUG] Mandelbrot-Kernel Call: width=%d, height=%d, maxIter=%d, zoom=%.2f, offset=(%.10f, %.10f), tileSize=%d",
             frameCtx.width, frameCtx.height, frameCtx.maxIterations, frameCtx.zoom,
             frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
     }
@@ -67,8 +67,8 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     }
 
     if (Settings::debugLogging && !frameCtx.h_entropy.empty()) {
-        LUCHS_LOG("[CUDA] Input: offset=(%.10f, %.10f) | zoom=%.2f\n", frameCtx.offset.x, frameCtx.offset.y, frameCtx.zoom);
-        LUCHS_LOG("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f\n", frameCtx.h_entropy[0], frameCtx.h_contrast[0]);
+        LUCHS_LOG_HOST("[CUDA] Input: offset=(%.10f, %.10f) | zoom=%.2f", frameCtx.offset.x, frameCtx.offset.y, frameCtx.zoom);
+        LUCHS_LOG_HOST("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f", frameCtx.h_entropy[0], frameCtx.h_contrast[0]);
     }
 }
 
@@ -80,11 +80,11 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
     double dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
 
     if (Settings::debugLogging)
-        LUCHS_LOG("[Logic] Start | shouldZoom=%d | Zoom=%.2f | dO=%.4e\n", frameCtx.shouldZoom ? 1 : 0, frameCtx.zoom, dist);
+        LUCHS_LOG_HOST("[Logic] Start | shouldZoom=%d | Zoom=%.2f | dO=%.4e", frameCtx.shouldZoom ? 1 : 0, frameCtx.zoom, dist);
     if (!frameCtx.shouldZoom) return;
     if (dist < Settings::DEADZONE) {
         if (Settings::debugLogging)
-            LUCHS_LOG("[Logic] Offset in DEADZONE (%.4e) -> no movement\n", dist);
+            LUCHS_LOG_HOST("[Logic] Offset in DEADZONE (%.4e) -> no movement", dist);
         return;
     }
 
@@ -95,7 +95,7 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
     };
 
     if (Settings::debugLogging)
-        LUCHS_LOG("[Logic] Step len=%.4e | Zoom += %.5f\n", std::sqrt(step.x * step.x + step.y * step.y), Settings::AUTOZOOM_SPEED);
+        LUCHS_LOG_HOST("[Logic] Step len=%.4e | Zoom += %.5f", std::sqrt(step.x * step.x + step.y * step.y), Settings::AUTOZOOM_SPEED);
 
     ZoomCommand cmd;
     cmd.frameIndex = globalFrameCounter;

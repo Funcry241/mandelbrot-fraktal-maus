@@ -3,7 +3,7 @@
 
 #include "pch.hpp"
 #include "opengl_utils.hpp"
-#include "luchs_logger.hpp" 
+#include "luchs_log_host.hpp" 
 
 namespace OpenGLUtils {
 
@@ -18,7 +18,7 @@ static GLuint compileShader(GLenum type, const char* src) {
     if (!ok) {
         char buf[512];
         glGetShaderInfoLog(s, 512, nullptr, buf);
-        LUCHS_LOG("[ShaderError] Compilation failed (%s): %s\n",
+        LUCHS_LOG_HOST("[ShaderError] Compilation failed (%s): %s",
                   type == GL_VERTEX_SHADER ? "Vertex" : "Fragment", buf);
         glDeleteShader(s);
         return 0;
@@ -47,7 +47,7 @@ GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) {
     if (!ok) {
         char buf[512];
         glGetProgramInfoLog(prog, 512, nullptr, buf);
-        LUCHS_LOG("[ShaderError] Program link failed: %s\n", buf);
+        LUCHS_LOG_HOST("[ShaderError] Program link failed: %s", buf);
         glDeleteShader(v);
         glDeleteShader(f);
         glDeleteProgram(prog);

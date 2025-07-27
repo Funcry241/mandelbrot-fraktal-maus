@@ -1,4 +1,6 @@
-// 🐭 Maus-Kommentar: Alpha 49e - Supersampling entfernt. Keine Leichen im Speicher: d_tileSupersampling, h_tileSupersampling, supersampling sind weg. Otter: Endlich ohne Ballast. Schneefuchs: Speicher klar.
+// Datei: src/renderer_state.hpp
+// 🦦 Otter: Einheitlich in allen Forward-Deklarationen. Keine strukturelle Überraschung.
+// 🦊 Schneefuchs: Speicher & Buffer exakt definiert, feingliedrig und logisch.
 
 #pragma once
 
@@ -63,7 +65,7 @@ public:
 
     // 🧽 Setup & Verwaltung
     RendererState(int w, int h);
-    void reset();                            // stellt Initialzustand her
-    void setupCudaBuffers();                 // allokiert Device-Buffer
+    void reset();                             // stellt Initialzustand her
+    void setupCudaBuffers();                  // allokiert Device-Buffer
     void resize(int newWidth, int newHeight); // Fenstergröße ändern
 };

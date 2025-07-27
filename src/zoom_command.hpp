@@ -11,7 +11,11 @@
 #include <cstdio>
 #include <vector_types.h> // Für float2
 
-struct ZoomCommand {
+#pragma warning(push)
+#pragma warning(disable: 4324) // 🛡️ MSVC-Padding wegen float2 – akzeptiert, kein Fehler
+
+class ZoomCommand {
+public:
     int frameIndex = 0;
     float2 oldOffset = {0, 0};
     float2 newOffset = {0, 0};
@@ -22,10 +26,10 @@ struct ZoomCommand {
 
     std::string toCSV() const {
         char buf[128];
-        LUCHS_LOG(buf, sizeof(buf),
-                 "%d,%.5f,%.5f,%.1e,%.1e,%.4f,%.4f",
-                 frameIndex, newOffset.x, newOffset.y,
-                 zoomBefore, zoomAfter, entropy, contrast);
+        std::snprintf(buf, sizeof(buf),
+                      "%d,%.5f,%.5f,%.1e,%.1e,%.4f,%.4f",
+                      frameIndex, newOffset.x, newOffset.y,
+                      zoomBefore, zoomAfter, entropy, contrast);
         return std::string(buf);
     }
 
@@ -33,6 +37,8 @@ struct ZoomCommand {
         return "Frame,X,Y,ZoomBefore,ZoomAfter,Entropy,Contrast";
     }
 };
+
+#pragma warning(pop)
 
 class CommandBus {
 public:

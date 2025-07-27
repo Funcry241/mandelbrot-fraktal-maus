@@ -13,45 +13,46 @@
 #include "zoom_logic.hpp"
 #include "heatmap_overlay.hpp"
 #include "warzenschwein_overlay.hpp"
+#include "luchs_log_host.hpp"
 
 #define ENABLE_ZOOM_LOGGING 0
 
 Renderer::Renderer(int width, int height)
 : state(width, height), glInitialized(false) {
     if (Settings::debugLogging)
-        LUCHS_LOG("[DEBUG] Renderer::Renderer() started");
+        LUCHS_LOG_HOST("[DEBUG] Renderer::Renderer() started");
 }
 
 Renderer::~Renderer() {
     if (Settings::debugLogging && !glInitialized)
-        LUCHS_LOG("[DEBUG] Cleanup skipped - OpenGL not initialized");
+        LUCHS_LOG_HOST("[DEBUG] Cleanup skipped - OpenGL not initialized");
 
     if (glInitialized) {
         if (Settings::debugLogging)
-            LUCHS_LOG("[DEBUG] Calling cleanup()");
+            LUCHS_LOG_HOST("[DEBUG] Calling cleanup()");
         cleanup();
     }
 }
 
 bool Renderer::initGL() {
     if (Settings::debugLogging)
-        LUCHS_LOG("[DEBUG] initGL() called");
+        LUCHS_LOG_HOST("[DEBUG] initGL() called");
 
     state.window = RendererWindow::createWindow(state.width, state.height, this);
     if (!state.window) {
-        LUCHS_LOG("[ERROR] Failed to create GLFW window");
+        LUCHS_LOG_HOST("[ERROR] Failed to create GLFW window");
         return false;
     }
 
     if (Settings::debugLogging)
-        LUCHS_LOG("[DEBUG] GLFW window created successfully");
+        LUCHS_LOG_HOST("[DEBUG] GLFW window created successfully");
 
     glfwMakeContextCurrent(state.window);
     if (Settings::debugLogging)
-        LUCHS_LOG("[DEBUG] OpenGL context made current");
+        LUCHS_LOG_HOST("[DEBUG] OpenGL context made current");
 
     if (glewInit() != GLEW_OK) {
-        LUCHS_LOG("[ERROR] glewInit() failed");
+        LUCHS_LOG_HOST("[ERROR] glewInit() failed");
         RendererWindow::destroyWindow(state.window);
         state.window = nullptr;
         glfwTerminate();
@@ -59,15 +60,15 @@ bool Renderer::initGL() {
     }
 
     if (Settings::debugLogging)
-        LUCHS_LOG("[DEBUG] GLEW initialized successfully");
+        LUCHS_LOG_HOST("[DEBUG] GLEW initialized successfully");
 
     RendererPipeline::init();
     if (Settings::debugLogging)
-        LUCHS_LOG("[DEBUG] RendererPipeline initialized");
+        LUCHS_LOG_HOST("[DEBUG] RendererPipeline initialized");
 
     glInitialized = true;
     if (Settings::debugLogging)
-        LUCHS_LOG("[DEBUG] OpenGL init complete");
+        LUCHS_LOG_HOST("[DEBUG] OpenGL init complete");
 
     return true;
 }
@@ -107,8 +108,8 @@ void Renderer::renderFrame_impl() {
         stayCounter++;
     }
 
-    LUCHS_LOG(
-        "[ZoomLog] Z=%.5e Idx=%3d E=%.4f C=%.4f dE=%.4f dC=%.4f Dist=%.6f Thresh=%.6f RelE=%.3f RelC=%.3f New=%d Stay=%d\n",
+    LUCHS_LOG_HOST(
+        "[ZoomLog] Z=%.5e Idx=%3d E=%.4f C=%.4f dE=%.4f dC=%.4f Dist=%.6f Thresh=%.6f RelE=%.3f RelC=%.3f New=%d Stay=%d",
         state.zoom, zr.bestIndex,
         zr.bestEntropy, zr.bestContrast,
         zr.bestEntropy - state.lastEntropy, zr.bestContrast - state.lastContrast,
@@ -129,7 +130,7 @@ void Renderer::freeDeviceBuffers() {
 }
 
 void Renderer::resize(int newW, int newH) {
-    LUCHS_LOG("[INFO] Resize: %d x %d\n", newW, newH);
+    LUCHS_LOG_HOST("[INFO] Resize: %d x %d", newW, newH);
     state.resize(newW, newH);
     glViewport(0, 0, newW, newH);
 }

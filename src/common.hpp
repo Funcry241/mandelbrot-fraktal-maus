@@ -1,5 +1,7 @@
 // Datei: src/common.hpp
-// 🐭 Maus-Kommentar: Zentraler Header mit weicher Tile-Größenfunktion, CUDA-Fehlermakro und Standard-Includes. Schneefuchs empfiehlt: kein doppeltes <cmath>, computeTileSizeFromZoom immer aus genau dieser Quelle verwenden! Alles warnfrei, keine Doppel-Defines, keine Header-Schatten.
+// 🐭 Maus-Kommentar: Zentraler Header mit weicher Tile-Größenfunktion, CUDA-Fehlermakro und Standard-Includes.
+// Schneefuchs empfiehlt: kein doppeltes <cmath>, computeTileSizeFromZoom immer aus genau dieser Quelle verwenden! Alles warnfrei, keine Doppel-Defines, keine Header-Schatten.
+
 #pragma once
 
 // 🔧 Windows-spezifische Makros und Header
@@ -36,13 +38,15 @@
 #include <algorithm>
 #include <cstdint>
 
+// 🦾 Logging
+#include "luchs_log_host.hpp"
+
 // 🧪 CUDA-Fehlerprüfung
 #define CUDA_CHECK(call)                                                       \
     do {                                                                       \
         cudaError_t err = (call);                                              \
         if (err != cudaSuccess) {                                              \
-            LUCHS_LOG( "[CUDA ERROR] %s:%d: %s\n",                        \
-                    __FILE__, __LINE__, cudaGetErrorString(err));              \
+            LUCHS_LOG_HOST("[CUDA ERROR] %s", cudaGetErrorString(err));        \
             std::exit(EXIT_FAILURE);                                           \
         }                                                                      \
     } while (0)

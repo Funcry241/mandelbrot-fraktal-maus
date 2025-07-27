@@ -1,5 +1,8 @@
-#include "luchs_device_buffer.hpp"
-#include "luchs_logger.hpp"
+// Datei: src/luchs_cuda_log_buffer.cu
+// 🐭 Maus-Kommentar: CUDA-seitiges Logging mit hostseitigem Zeitstempel beim Auslesen.
+// Otter: Einheitliches Format mit Host-Logger. Schneefuchs: Formatbewahrer.
+
+#include "luchs_cuda_log_buffer.hpp"
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -7,17 +10,17 @@
 namespace LuchsLogger {
 
     // =========================================================================
-    // 🌌 Device-seitiger Logpuffer (1 MB) + Offset
+    // 🌌 Device-seitiger Logpuffer (1 MB) + Offset (nur hier definiert!)
     // =========================================================================
 
     __device__ char d_logBuffer[LOG_BUFFER_SIZE];
     __device__ int d_logOffset = 0;
 
-    // Hostseitiger Zwischenspeicher für Übertrag
+    // Hostseitiger Zwischenspeicher
     char h_logBuffer[LOG_BUFFER_SIZE] = {0};
 
     // =========================================================================
-    // 🚀 Device-Logfunktion (wird vom Makro LUCHS_LOG im __device__-Code gerufen)
+    // 🚀 Device-Logfunktion (wird vom Makro LUCHS_LOG_DEVICE im __device__-Code gerufen)
     // =========================================================================
 
     __device__ void deviceLog(const char* file, int line, const char* msg) {
@@ -26,11 +29,11 @@ namespace LuchsLogger {
 
         int len = 0;
 
-        // Dateiname kopieren
+        // Dateiname
         for (int i = 0; file[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
             d_logBuffer[idx + len++] = file[i];
 
-        // ":<line> | " anhängen
+        // ":" + Zeile + "] "
         if (len + 6 + idx < LOG_BUFFER_SIZE) {
             d_logBuffer[idx + len++] = ':';
             int l = line, div = 10000;
@@ -47,7 +50,7 @@ namespace LuchsLogger {
             d_logBuffer[idx + len++] = ' ';
         }
 
-        // Nachricht kopieren
+        // Nachricht
         for (int i = 0; msg[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
             d_logBuffer[idx + len++] = msg[i];
 
@@ -89,7 +92,8 @@ namespace LuchsLogger {
             std::time_t now = time(nullptr);
             char timebuf[32];
             std::strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
-            std::fprintf(stderr, "[%s] %s\n", timebuf, ptr);
+
+            std::fprintf(stderr, "[%s.000][%s]\n", timebuf, ptr);
 
             ptr = lineEnd + 1;
         }

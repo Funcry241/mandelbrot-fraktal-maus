@@ -7,15 +7,16 @@
 #include "renderer_loop.hpp"
 #include "renderer_state.hpp"
 #include "cuda_interop.hpp"
+#include "luchs_log_host.hpp"
 #include <chrono>
 
 int main() {
     if (Settings::debugLogging)
-        LUCHS_LOG("[DEBUG] Mandelbrot-Otterdream gestartet");
+        LUCHS_LOG_HOST("[DEBUG] Mandelbrot-Otterdream gestartet");
 
     Renderer renderer(Settings::width, Settings::height);
     if (!renderer.initGL()) {
-        LUCHS_LOG("[FATAL] OpenGL-Initialisierung fehlgeschlagen – Programm wird beendet");
+        LUCHS_LOG_HOST("[FATAL] OpenGL-Initialisierung fehlgeschlagen – Programm wird beendet");
         return EXIT_FAILURE;
     }
 
@@ -37,7 +38,7 @@ int main() {
         if (Settings::debugLogging) {
             float swapMs  = std::chrono::duration<float, std::milli>(swapEnd - swapStart).count();
             float totalMs = std::chrono::duration<float, std::milli>(swapEnd - frameStart).count();
-            LUCHS_LOG("[Frame] swap=%.2fms total=%.2fms\n", swapMs, totalMs);
+            LUCHS_LOG_HOST("[Frame] swap=%.2fms total=%.2fms", swapMs, totalMs);
         }
     }
 

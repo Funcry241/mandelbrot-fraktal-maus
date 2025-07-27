@@ -1,11 +1,12 @@
 // Datei: src/luchs_logger.cpp
-// 🐭 Maus-Kommentar: Host-Implementierung des Logging-Subsystems.
-// Otter: Zeitstempel, thread-safe Ausgabe. Schneefuchs: Kein std::cout, nur fprintf(stdout).
+// 🐭 Maus-Kommentar: Host-Logging mit präzisem Zeitformat und konsistentem Stil für alle Plattformen.
+// Otter: Gleiches Format wie Device. Schneefuchs: Keine Zeitabweichungen mehr!
 
-#include "luchs_logger.hpp"
+#include "luchs_log_host.hpp"
 #include <chrono>
 #include <ctime>
 #include <mutex>
+#include <cstdarg>
 
 namespace LuchsLogger {
 
@@ -13,26 +14,32 @@ namespace LuchsLogger {
         std::mutex logMutex;
     }
 
-    void logMessage(const char* file, int line, const char* msg) {
+    void logMessage(const char* file, int line, const char* fmt, ...) {
         std::lock_guard<std::mutex> lock(logMutex);
 
         auto now = std::chrono::system_clock::now();
         auto t = std::chrono::system_clock::to_time_t(now);
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      now.time_since_epoch()) %
-                  1000;
+                      now.time_since_epoch()) % 1000;
 
         std::tm tm_struct{};
-        localtime_s(&tm_struct, &t);
+        localtime_s(&tm_struct, &t); // 🦦 Otter: Sicherer Zeitzugriff, kein C4996 mehr.
 
-        std::fprintf(stdout, "[%02d:%02d:%02d.%03lld] %s:%d: %s\n",
-                     tm_struct.tm_hour,
-                     tm_struct.tm_min,
-                     tm_struct.tm_sec,
+        char timebuf[32];
+        std::strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", &tm_struct);
+
+        std::fprintf(stdout, "[%s.%03lld][%s][%d]: ",
+                     timebuf,
                      static_cast<long long>(ms.count()),
                      file,
-                     line,
-                     msg);
+                     line);
+
+        va_list args;
+        va_start(args, fmt);
+        std::vfprintf(stdout, fmt, args);
+        va_end(args);
+
+        std::fprintf(stdout, "\n");
         std::fflush(stdout);
     }
 
