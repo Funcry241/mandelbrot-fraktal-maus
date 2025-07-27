@@ -1,11 +1,11 @@
 // Datei: src/luchs_cuda_log_buffer.cu
-// 🐭 Maus-Kommentar: CUDA-seitiges Logging mit hostseitigem Zeitstempel beim Auslesen.
-// Otter: Einheitliches Format mit Host-Logger. Schneefuchs: Formatbewahrer.
+// 🐭 Maus-Kommentar: Rückbau auf klare Nicht-Formatierung – robust, simpel, sicher.
+// 🦦 Otter: Keine varargs mehr – Klartext-only im __device__-Code, kompatibel & portabel.
+// 🦊 Schneefuchs: Präzise Begrenzung, keine Host-Abhängigkeit, garantiert lauffähig.
 
 #include "luchs_cuda_log_buffer.hpp"
-#include <cstdio>
+#include "luchs_log_host.hpp"
 #include <cstring>
-#include <ctime>
 
 namespace LuchsLogger {
 
@@ -20,12 +20,12 @@ namespace LuchsLogger {
     char h_logBuffer[LOG_BUFFER_SIZE] = {0};
 
     // =========================================================================
-    // 🚀 Device-Logfunktion (wird vom Makro LUCHS_LOG_DEVICE im __device__-Code gerufen)
+    // 🚀 Device-Logfunktion – kein Format, nur Klartext (LUCHS_LOG_DEVICE)
     // =========================================================================
 
     __device__ void deviceLog(const char* file, int line, const char* msg) {
         int idx = atomicAdd(&d_logOffset, 0);  // Nur lesen
-        if (idx >= LOG_BUFFER_SIZE - 128) return;
+        if (idx >= LOG_BUFFER_SIZE - 256) return;
 
         int len = 0;
 
@@ -33,7 +33,7 @@ namespace LuchsLogger {
         for (int i = 0; file[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
             d_logBuffer[idx + len++] = file[i];
 
-        // ":" + Zeile + "] "
+        // ":" + Zeile + "| "
         if (len + 6 + idx < LOG_BUFFER_SIZE) {
             d_logBuffer[idx + len++] = ':';
             int l = line, div = 10000;
@@ -50,7 +50,7 @@ namespace LuchsLogger {
             d_logBuffer[idx + len++] = ' ';
         }
 
-        // Nachricht
+        // Nachricht (klartext, keine Formatierung)
         for (int i = 0; msg[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
             d_logBuffer[idx + len++] = msg[i];
 
@@ -76,7 +76,7 @@ namespace LuchsLogger {
     }
 
     // =========================================================================
-    // 📤 Host: Device-Logbuffer auslesen und in Konsole ausgeben
+    // 📤 Host: Device-Logbuffer auslesen und über LUCHS_LOG_HOST ausgeben
     // =========================================================================
 
     void flushDeviceLogToHost(cudaStream_t stream) {
@@ -89,12 +89,7 @@ namespace LuchsLogger {
             if (!lineEnd) break;
             *lineEnd = 0;
 
-            std::time_t now = time(nullptr);
-            char timebuf[32];
-            std::strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
-
-            std::fprintf(stderr, "[%s.000][%s]\n", timebuf, ptr);
-
+            LUCHS_LOG_HOST("[CUDA] %s", ptr);
             ptr = lineEnd + 1;
         }
     }

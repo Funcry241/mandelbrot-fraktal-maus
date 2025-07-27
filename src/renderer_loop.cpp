@@ -16,6 +16,7 @@
 #include "zoom_logic.hpp"
 #include "frame_pipeline.hpp"
 #include "luchs_log_host.hpp"
+#include "luchs_cuda_log_buffer.hpp"
 #include <chrono>
 #include <cmath> // für std::sqrt, std::clamp
 
@@ -51,6 +52,11 @@ void renderFrame_impl(RendererState& state) {
     initResources(state);
 
     FramePipeline::execute(state);
+
+    // 🦦 Otter: CUDA-Device-Logs abrufen, falls aktiviert.
+    if (Settings::debugLogging) {
+        LuchsLogger::flushDeviceLogToHost(0);
+    }
 
     if (Settings::debugLogging && state.frameCount % 60 == 0) {
         LUCHS_LOG_HOST("[Loop] Frame %d, Δt = %.3f", state.frameCount, state.deltaTime);

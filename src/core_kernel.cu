@@ -1,5 +1,7 @@
 // Datei: src/core_kernel.cu
-// 🐭 Maus-Kommentar: Alpha 64 – Supersampling vollständig entfernt. Klare Kernel-Signatur, Logging über Settings::debugLogging, deterministisch. Otter: aufgeräumt. Schneefuchs: präzise.
+// 🐭 Maus-Kommentar: Alpha 64 – Supersampling vollständig entfernt. Klare Kernel-Signatur, Logging über Settings::debugLogging, deterministisch.
+// 🦦 Otter: Vollständige Luchsifizierung – alle Logs über LUCHS_LOG_HOST/DEVICE. Keine Rohausgaben mehr.
+// 🦊 Schneefuchs: Struktur bewahrt, keine Flüchtigkeit, keine faulen Tricks.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -8,6 +10,8 @@
 #include "common.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
+#include "luchs_log_device.hpp"
+#include "luchs_log_host.hpp"
 
 // ---- FARB-MAPPING ----
 __device__ __forceinline__ uchar4 elegantColor(float t) {
@@ -61,6 +65,11 @@ __global__ void mandelbrotKernel(
 
     out[idx] = elegantColor(t);
     iterOut[idx] = it;
+
+    if (Settings::debugLogging && threadIdx.x == 0 && threadIdx.y == 0) {
+        LUCHS_LOG_DEVICE("Block (%d,%d) → Pixel (%d,%d), Iter = %d",
+                         blockIdx.x, blockIdx.y, x, y, it);
+    }
 }
 
 // ---- ENTROPY & CONTRAST ----
@@ -89,6 +98,10 @@ __global__ void entropyKernel(const int* it, float* eOut, int w, int h, int tile
         int tilesX = (w + tile - 1) / tile;
         int tileIndex = tY * tilesX + tX;
         eOut[tileIndex] = entropy;
+
+        if (Settings::debugLogging) {
+            LUCHS_LOG_DEVICE("Entropy Tile (%d,%d) = %.4f", tX, tY, entropy);
+        }
     }
 }
 
@@ -110,39 +123,54 @@ __global__ void contrastKernel(const float* e, float* cOut, int tilesX, int tile
         }
 
     cOut[idx] = (cnt > 0) ? sum / cnt : 0.0f;
+
+    if (Settings::debugLogging && threadIdx.x == 0 && threadIdx.y == 0) {
+        LUCHS_LOG_DEVICE("Contrast Tile (%d,%d) = %.4f", tx, ty, cOut[idx]);
+    }
 }
 
 // ---- HOST-WRAPPER: Entropie & Kontrast ----
 void computeCudaEntropyContrast(const int* d_it, float* d_e, float* d_c, int w, int h, int tile, int maxIter) {
-    int tilesX = (w + tile - 1) / tile, tilesY = (h + tile - 1) / tile;
+    int tilesX = (w + tile - 1) / tile;
+    int tilesY = (h + tile - 1) / tile;
+
     entropyKernel<<<dim3(tilesX, tilesY), 128>>>(d_it, d_e, w, h, tile, maxIter);
     cudaDeviceSynchronize();
+
     contrastKernel<<<dim3((tilesX + 15) / 16, (tilesY + 15) / 16), dim3(16, 16)>>>(d_e, d_c, tilesX, tilesY);
     cudaDeviceSynchronize();
 }
 
 // ---- HOST-WRAPPER: Mandelbrot ----
 void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, float2 offset, int maxIter, int tile) {
-    dim3 block(16, 16), grid((w + 15) / 16, (h + 15) / 16);
+    dim3 block(16, 16);
+    dim3 grid((w + 15) / 16, (h + 15) / 16);
+
     if (Settings::debugLogging) {
-        std::printf("[Kernel] %dx%d | Zoom: %.3e | Offset: (%.5f, %.5f) | Iter: %d | Tile: %d\n",
-            w, h, zoom, offset.x, offset.y, maxIter, tile);
+        LUCHS_LOG_HOST("[Kernel] %dx%d | Zoom: %.3e | Offset: (%.5f, %.5f) | Iter: %d | Tile: %d",
+                       w, h, zoom, offset.x, offset.y, maxIter, tile);
     }
 
     if (out && d_it)
         mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter);
 
     cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess)
-        std::fprintf(stderr, "[CUDA ERROR] Kernel launch failed: %s\n", cudaGetErrorString(err));
+    if (err != cudaSuccess) {
+        LUCHS_LOG_HOST("[CUDA ERROR] Kernel launch failed: %s", cudaGetErrorString(err));
+    }
 
     cudaDeviceSynchronize();
 
     if (Settings::debugLogging) {
         int it[10] = { 0 };
         cudaMemcpy(it, d_it, sizeof(it), cudaMemcpyDeviceToHost);
-        std::printf("[Iter] First10: ");
-        for (int i = 0; i < 10; ++i) std::printf("%d ", it[i]);
-        std::puts("");
+
+        char buf[256] = {};
+        int len = snprintf(buf, sizeof(buf), "[Iter] First10:");
+        for (int i = 0; i < 10; ++i)
+            len += snprintf(buf + len, sizeof(buf) - len, " %d", it[i]);
+        LUCHS_LOG_HOST("%s", buf);
     }
+
+    // 🦦 Otter: Luchsifizierung abgeschlossen – alles sauber, alles kontrolliert
 }

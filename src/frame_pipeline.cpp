@@ -18,6 +18,7 @@
 #include "warzenschwein_overlay.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
+#include "luchs_cuda_log_buffer.hpp"
 
 namespace FramePipeline {
 

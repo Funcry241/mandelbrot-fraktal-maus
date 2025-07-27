@@ -1,5 +1,7 @@
 // Datei: src/luchs_cuda_log_buffer.hpp
-// 🐭 Maus-Kommentar: Otter hat die Device-Loggingstruktur generalisiert. Schneefuchs sorgt für deterministisches Pufferhandling. Alpha 63.
+// 🐭 Maus-Kommentar: Rückkehr zur Einfachheit – Klartext-Logging statt variadisch. Kein vsnprintf im __device__-Code.
+// 🦦 Otter: Formatierung raus, Sicherheit rein. Header konsistent zur .cu-Implementierung.
+// 🦊 Schneefuchs: Determinismus durch Reduktion – Formatierungsfreiheit auf CUDA-Level.
 
 #pragma once
 #include <cuda_runtime.h>
@@ -13,6 +15,7 @@
 
 // =========================================================================
 // 🧠 Device-Logging Makro (verwendbar in __device__ Funktionen)
+//     Nur Klartext – keine Formatierung im __device__-Code
 // =========================================================================
 #define LUCHS_LOG_DEVICE(msg) LuchsLogger::deviceLog(__FILE__, __LINE__, msg)
 
@@ -21,16 +24,21 @@
 // =========================================================================
 namespace LuchsLogger {
 
-    // Device-seitiger Funktionsaufruf, speichert Nachricht im Puffer
+    // Device-seitiger Funktionsaufruf, speichert Nachricht im Logpuffer
     __device__ void deviceLog(const char* file, int line, const char* msg);
 
-    // Kernel zum Zurücksetzen des Puffers (nur intern verwendet)
+    // Kernel zum Zurücksetzen des Logpuffers (nur intern verwendet)
     __global__ void resetLogKernel();
 
     // Host-seitig: Löscht den Logpuffer auf dem Device
     void resetDeviceLog();
 
-    // Host-seitig: Überträgt den Device-Puffer in die stderr-Ausgabe
+    // Host-seitig: Überträgt den Device-Puffer via Stream auf den Host
     void flushDeviceLogToHost(cudaStream_t stream);
+
+    // 🦦 Otter: Convenience-Funktion ohne Stream – nutzt Default-Stream (0)
+    inline void flushDeviceLogToHost() {
+        flushDeviceLogToHost(0);
+    }
 
 } // namespace LuchsLogger
