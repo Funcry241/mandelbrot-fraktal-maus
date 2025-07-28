@@ -171,4 +171,13 @@ void renderCudaFrame(
 void setPauseZoom(bool pause) { pauseZoom = pause; }
 [[nodiscard]] bool getPauseZoom() { return pauseZoom; }
 
+bool precheckCudaRuntime() {
+    int deviceCount = 0;
+    cudaError_t err1 = cudaFree(0); // zwingt Init
+    cudaError_t err2 = cudaGetDeviceCount(&deviceCount);
+
+    LUCHS_LOG_HOST("[CUDA] precheck err1=%d err2=%d count=%d", (int)err1, (int)err2, deviceCount);
+    return (err1 == cudaSuccess && err2 == cudaSuccess && deviceCount > 0);
+}
+
 } // namespace CudaInterop

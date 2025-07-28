@@ -20,6 +20,11 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    if (!CudaInterop::precheckCudaRuntime()) {
+        LUCHS_LOG_HOST("[FATAL] CUDA-Vorinitialisierung fehlgeschlagen – kein Gerät verfügbar");
+        return EXIT_FAILURE;
+    }
+
     renderer.getState().setupCudaBuffers();
     renderer.getState().heatmapOverlayEnabled = Settings::heatmapOverlayEnabled;
     renderer.getState().warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;

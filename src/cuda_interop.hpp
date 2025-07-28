@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: Alpha 49f - Supersampling ausgebaut, Signatur verschlankt. Nur noch klare Parameter für CUDA-Interop. Otter: scharf. Schneefuchs: kein Ballast.
+// 🐭 Maus-Kommentar: Alpha 68 – Früherkennung von CUDA-Geräten vor Pufferbindung. Otter: fail fast. Schneefuchs: stabil ab Start.
 
 #ifndef CUDA_INTEROP_HPP
 #define CUDA_INTEROP_HPP
@@ -35,6 +35,9 @@ void renderCudaFrame(
 
 void setPauseZoom(bool pause);
 bool getPauseZoom();
+
+// Alpha 68: Früher Check für CUDA-Verfügbarkeit – nur numerische Codes
+bool precheckCudaRuntime(); // 🐭 Schneefuchs: keine Devices = kein Rendererstart
 
 // Capybara: Inline-Wrapper für extern "C" Kernel (core_kernel.cu)
 inline void computeCudaEntropyContrast(
