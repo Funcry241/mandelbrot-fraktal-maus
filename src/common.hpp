@@ -1,7 +1,7 @@
 // Datei: src/common.hpp
-// 🐭 Maus-Kommentar: Zentraler Header mit weicher Tile-Größenfunktion, CUDA-Fehlermakro und Standard-Includes.
-// Schneefuchs empfiehlt: kein doppeltes <cmath>, computeTileSizeFromZoom immer aus genau dieser Quelle verwenden! Alles warnfrei, keine Doppel-Defines, keine Header-Schatten.
-
+// 🐭 Maus-Kommentar: Jetzt mit deterministischem CUDA_CHECK. Keine stderr-Leichen mehr. Nur ASCII. Nur Klartext.
+// 🦦 Otter: Keine stille Panik mehr. Jeder Fehler hat einen Pfad.
+// 🦊 Schneefuchs: Sichtbarkeit vor Geschwindigkeit. Logging ist Debugging.
 #pragma once
 
 // 🔧 Windows-spezifische Makros und Header
@@ -37,18 +37,19 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdint>
-#include <ctime> // ⏰ Zeitfunktionen
+#include <ctime>
 
 // 🦾 Logging
 #include "luchs_log_host.hpp"
 
-// 🧪 CUDA-Fehlerprüfung
-#define CUDA_CHECK(call)                                                       \
+// 🧪 CUDA-Fehlerprüfung – deterministisch, sichtbar, ASCII-only
+#define CUDA_CHECK(expr)                                                       \
     do {                                                                       \
-        cudaError_t err = (call);                                              \
-        if (err != cudaSuccess) {                                              \
-            LUCHS_LOG_HOST("[CUDA ERROR] %s", cudaGetErrorString(err));        \
-            std::exit(EXIT_FAILURE);                                           \
+        cudaError_t err__ = (expr);                                            \
+        if (err__ != cudaSuccess) {                                            \
+            LUCHS_LOG_HOST("[CUDA ERROR] %s failed at %s:%d → %s",             \
+                           #expr, __FILE__, __LINE__, cudaGetErrorString(err__)); \
+            throw std::runtime_error("CUDA failure: " #expr);                  \
         }                                                                      \
     } while (0)
 
@@ -60,7 +61,6 @@ inline int computeTileSizeFromZoom(float zoom) {
 }
 
 // ⏰ Plattformübergreifend threadsicheres localtime
-// 🦊 Schneefuchs: Keine Race Conditions, kein MSVC-only, überall nutzbar
 inline bool getLocalTime(std::tm& outTm, std::time_t t) {
 #if defined(_WIN32)
     return localtime_s(&outTm, &t) == 0;

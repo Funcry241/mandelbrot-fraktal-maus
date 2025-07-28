@@ -1,8 +1,7 @@
 // Datei: src/luchs_cuda_log_buffer.cu
-// 🐭 Maus-Kommentar: Rückbau auf klare Nicht-Formatierung - robust, simpel, sicher.
-// 🦦 Otter: Keine varargs mehr - Klartext-only im __device__-Code, kompatibel & portabel.
+// 🐭 Maus-Kommentar: Rückbau auf klare Nicht-Formatierung – robust, simpel, sicher.
+// 🦦 Otter: Keine varargs mehr – Klartext-only im device-Code, kompatibel & portabel.
 // 🦊 Schneefuchs: Präzise Begrenzung, keine Host-Abhängigkeit, garantiert lauffähig.
-
 #include "luchs_cuda_log_buffer.hpp"
 #include "luchs_log_host.hpp"
 #include <cstring>
@@ -20,7 +19,7 @@ namespace LuchsLogger {
     char h_logBuffer[LOG_BUFFER_SIZE] = {0};
 
     // =========================================================================
-    // 🚀 Device-Logfunktion - kein Format, nur Klartext (LUCHS_LOG_DEVICE)
+    // 🚀 Device-Logfunktion – kein Format, nur Klartext (LUCHS_LOG_DEVICE)
     // =========================================================================
 
     __device__ void deviceLog(const char* file, int line, const char* msg) {
@@ -72,7 +71,7 @@ namespace LuchsLogger {
 
     void resetDeviceLog() {
         resetLogKernel<<<1,1>>>();
-        cudaDeviceSynchronize();
+        CUDA_CHECK(cudaDeviceSynchronize());
     }
 
     // =========================================================================
@@ -80,8 +79,8 @@ namespace LuchsLogger {
     // =========================================================================
 
     void flushDeviceLogToHost(cudaStream_t stream) {
-        cudaMemcpyAsync(h_logBuffer, d_logBuffer, LOG_BUFFER_SIZE, cudaMemcpyDeviceToHost, stream);
-        cudaStreamSynchronize(stream);
+        CUDA_CHECK(cudaMemcpyAsync(h_logBuffer, d_logBuffer, LOG_BUFFER_SIZE, cudaMemcpyDeviceToHost, stream));
+        CUDA_CHECK(cudaStreamSynchronize(stream));
 
         char* ptr = h_logBuffer;
         while (*ptr) {
