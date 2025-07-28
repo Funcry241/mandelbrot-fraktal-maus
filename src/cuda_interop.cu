@@ -27,13 +27,28 @@ void registerPBO(unsigned int pbo) {
         return;
     }
 
-    if (Settings::debugLogging) {
-        GLint bound = 0;
-        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &bound);
-        LUCHS_LOG_HOST("[CU-PBO] Preparing to register PBO ID %u (GL bound: %d)", pbo, bound);
+    // --- Expliziter GL-Bind-Check vor dem Binding ---
+    GLint boundBefore = 0;
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundBefore);
+    LUCHS_LOG_HOST("[CHECK] GL bind state BEFORE bind: %d", boundBefore);
+
+    // --- Dummy-Unbind + echtes Bind-Kommando ---
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0); // Reset bind state
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo); // Versuche Bind durchzuführen
+
+    // --- Expliziter GL-Bind-Check nach dem Binding ---
+    GLint boundAfter = 0;
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundAfter);
+    LUCHS_LOG_HOST("[CHECK] GL bind state AFTER  bind: %d (expected: %u)", boundAfter, pbo);
+
+    // Optional: Abbruch wenn Binding fehlschlug
+    if (boundAfter != static_cast<GLint>(pbo)) {
+        LUCHS_LOG_HOST("[FATAL] GL bind failed – buffer %u was not bound (GL reports: %d)", pbo, boundAfter);
+        throw std::runtime_error("glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo) failed – buffer not active");
     }
 
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo); // wichtig für manche Treiber
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[CU-PBO] Preparing to register PBO ID %u", pbo);
 
     cudaError_t err = cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard);
     if (err != cudaSuccess) {
