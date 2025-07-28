@@ -43,8 +43,8 @@ void registerPBO(unsigned int pbo) {
 
     // Optional: Abbruch wenn Binding fehlschlug
     if (boundAfter != static_cast<GLint>(pbo)) {
-        LUCHS_LOG_HOST("[FATAL] GL bind failed – buffer %u was not bound (GL reports: %d)", pbo, boundAfter);
-        throw std::runtime_error("glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo) failed – buffer not active");
+        LUCHS_LOG_HOST("[FATAL] GL bind failed - buffer %u was not bound (GL reports: %d)", pbo, boundAfter);
+        throw std::runtime_error("glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo) failed - buffer not active");
     }
 
     if (Settings::debugLogging)
@@ -193,6 +193,23 @@ bool precheckCudaRuntime() {
 
     LUCHS_LOG_HOST("[CUDA] precheck err1=%d err2=%d count=%d", (int)err1, (int)err2, deviceCount);
     return (err1 == cudaSuccess && err2 == cudaSuccess && deviceCount > 0);
+}
+
+bool verifyCudaGetErrorStringSafe() {
+    // 🐭 Maus-Kommentar: Wir rufen cudaGetErrorString in völliger Isolation auf.
+    // Schneefuchs: Wenn es hier kracht, kracht alles. Otter: Und wir wissen wenigstens warum.
+
+    cudaError_t dummy = cudaErrorInvalidValue;
+    const char* msg = cudaGetErrorString(dummy); // potenziell kritisch
+
+    if (msg) {
+        LUCHS_LOG_HOST("[CHECK] cudaGetErrorString(dummy) = \"%s\"", msg);
+        LUCHS_LOG_HOST("[PASS] Host-seitige Fehlerauflösung funktioniert gefahrlos");
+        return true;
+    } else {
+        LUCHS_LOG_HOST("[FATAL] cudaGetErrorString returned null - das riecht nach Treibergift");
+        return false;
+    }
 }
 
 } // namespace CudaInterop

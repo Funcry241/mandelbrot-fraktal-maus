@@ -1,5 +1,5 @@
 // Datei: src/main.cpp
-// 🐭 Maus-Kommentar: Main-Loop ruft nur noch Renderer::renderFrame ohne Parameter. Setup ist klar, Logging vollständig integriert. Schneefuchs: „Eleganter geht’s nicht.“
+// 🐭 Maus-Kommentar: Main-Loop ruft nur noch Renderer::renderFrame ohne Parameter. Setup ist klar, Logging vollständig integriert. Schneefuchs: „Eleganter geht’s nicht.“ Otter: Jetzt sogar mit toxischem API-Test.
 
 #include "pch.hpp"
 #include "renderer_core.hpp"
@@ -22,6 +22,11 @@ int main() {
 
     if (!CudaInterop::precheckCudaRuntime()) {
         LUCHS_LOG_HOST("[FATAL] CUDA-Vorinitialisierung fehlgeschlagen - kein Gerät verfügbar");
+        return EXIT_FAILURE;
+    }
+
+    if (!CudaInterop::verifyCudaGetErrorStringSafe()) {
+        LUCHS_LOG_HOST("[FATAL] CUDA-Fehlermeldungsfunktion defekt - wir fassen nichts mehr an");
         return EXIT_FAILURE;
     }
 

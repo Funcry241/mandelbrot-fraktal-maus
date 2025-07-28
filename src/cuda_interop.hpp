@@ -1,4 +1,5 @@
-// 🐭 Maus-Kommentar: Alpha 68 - Früherkennung von CUDA-Geräten vor Pufferbindung. Otter: fail fast. Schneefuchs: stabil ab Start.
+// 🐭 Maus-Kommentar: Alpha 68½ - Früherkennung von CUDA-Geräten + sicherer API-Test für Fehlerauflösung.
+// Otter: fail fast. Schneefuchs: keine Überraschungen. Maus: aber elegant.
 
 #ifndef CUDA_INTEROP_HPP
 #define CUDA_INTEROP_HPP
@@ -38,6 +39,9 @@ bool getPauseZoom();
 
 // Alpha 68: Früher Check für CUDA-Verfügbarkeit - nur numerische Codes
 bool precheckCudaRuntime(); // 🐭 Schneefuchs: keine Devices = kein Rendererstart
+
+// Alpha 68½: Früher Test, ob cudaGetErrorString gefahrlos aufrufbar ist
+bool verifyCudaGetErrorStringSafe(); // 🐭 Otter: Nur im Precheck erlaubt!
 
 // Capybara: Inline-Wrapper für extern "C" Kernel (core_kernel.cu)
 inline void computeCudaEntropyContrast(
