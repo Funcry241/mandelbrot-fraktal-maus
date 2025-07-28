@@ -78,16 +78,35 @@ void renderCudaFrame(
         CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
     }
 
-    CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
+    // --- Mapping mit Logging ---
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[DEBUG] About to map PBO resource: %p", (void*)cudaPboResource);
+
+    cudaError_t errMap = cudaGraphicsMapResources(1, &cudaPboResource, 0);
+    if (errMap != cudaSuccess) {
+        LUCHS_LOG_HOST("[ERROR] cudaGraphicsMapResources failed: %s", cudaGetErrorString(errMap));
+        throw std::runtime_error("cudaGraphicsMapResources failed");
+    }
+
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[DEBUG] Successfully mapped cudaPboResource");
+
     uchar4* devPtr = nullptr;
     size_t size = 0;
 
-    if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[CHECK] cudaPboResource = %p | devPtr (before map) = %p", (void*)cudaPboResource, (void*)devPtr);
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[DEBUG] About to get mapped pointer...");
+
+    cudaError_t errPtr = cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource);
+    if (errPtr != cudaSuccess) {
+        LUCHS_LOG_HOST("[ERROR] cudaGraphicsResourceGetMappedPointer failed: %s", cudaGetErrorString(errPtr));
+        throw std::runtime_error("cudaGraphicsResourceGetMappedPointer failed");
     }
 
-    CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[DEBUG] Mapped pointer acquired: devPtr=%p size=%zu", (void*)devPtr, size);
 
+    // --- Kernelaufruf und Debug ---
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[CU-FRAME] zoom=%.5f offset=(%.5f %.5f) iter=%d tile=%d",
                        zoom, offset.x, offset.y, maxIterations, tileSize);
