@@ -24,16 +24,6 @@ namespace RendererLoop {
 static FrameContext ctx;
 static CommandBus zoomBus;
 
-void initResources(RendererState& state) {
-    if (state.pbo != 0 || state.tex != 0) return;
-
-    OpenGLUtils::setGLResourceContext("init");
-    state.pbo = OpenGLUtils::createPBO(state.width, state.height);
-    state.tex = OpenGLUtils::createTexture(state.width, state.height);
-
-    state.lastTileSize = computeTileSizeFromZoom(static_cast<float>(state.zoom));
-}
-
 void beginFrame(RendererState& state) {
     float currentTime = static_cast<float>(glfwGetTime());
     float delta = currentTime - static_cast<float>(state.lastTime);
@@ -46,7 +36,6 @@ void beginFrame(RendererState& state) {
 
 void renderFrame_impl(RendererState& state) {
     beginFrame(state);
-    initResources(state);
 
     FramePipeline::execute(state);
 

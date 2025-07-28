@@ -26,7 +26,24 @@ void registerPBO(unsigned int pbo) {
         LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!");
         return;
     }
-    CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard));
+
+    if (Settings::debugLogging) {
+        GLint bound = 0;
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &bound);
+        LUCHS_LOG_HOST("[CU-PBO] Preparing to register PBO ID %u (GL bound: %d)", pbo, bound);
+    }
+
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo); // wichtig für manche Treiber
+
+    cudaError_t err = cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard);
+    if (err != cudaSuccess) {
+        LUCHS_LOG_HOST("[CU-PBO] cudaGraphicsGLRegisterBuffer FAILED: %s", cudaGetErrorString(err));
+        throw std::runtime_error("cudaGraphicsGLRegisterBuffer failed");
+    }
+
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CU-PBO] Registered GL buffer ID %u -> cudaPboResource: %p", pbo, (void*)cudaPboResource);
+    }
 }
 
 void unregisterPBO() {

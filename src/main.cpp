@@ -20,7 +20,6 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    RendererLoop::initResources(renderer.getState());
     renderer.getState().setupCudaBuffers();
     renderer.getState().heatmapOverlayEnabled = Settings::heatmapOverlayEnabled;
     renderer.getState().warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
