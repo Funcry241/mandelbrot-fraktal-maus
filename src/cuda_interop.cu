@@ -1,5 +1,5 @@
 // Datei: src/cuda_interop.cu
-// 🐭 Maus-Kommentar: Supersampling entfernt - launch_mandelbrotHybrid jetzt minimal und direkt. Logging auf LUCHS_LOG_HOST. Otter: Klarer Fokus. Schneefuchs: deterministisch, transparent.
+// 🐽 Maus-Kommentar: Supersampling entfernt - launch_mandelbrotHybrid jetzt minimal und direkt. Logging auf LUCHS_LOG_HOST. Otter: Klarer Fokus. Schneefuchs: deterministisch, transparent.
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
@@ -96,6 +96,10 @@ void renderCudaFrame(
     // --- Mapping mit Logging ---
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] About to map PBO resource: %p", (void*)cudaPboResource);
+
+    // --- Neue Synchronisation vor Mapping ---
+    cudaError_t syncErr = cudaDeviceSynchronize();
+    LUCHS_LOG_HOST("[CHECK] cudaDeviceSynchronize before map: %d", (int)syncErr);
 
     cudaError_t errMap = cudaGraphicsMapResources(1, &cudaPboResource, 0);
     if (errMap != cudaSuccess) {
@@ -196,7 +200,7 @@ bool precheckCudaRuntime() {
 }
 
 bool verifyCudaGetErrorStringSafe() {
-    // 🐭 Maus-Kommentar: Wir rufen cudaGetErrorString in völliger Isolation auf.
+    // 🐽 Maus-Kommentar: Wir rufen cudaGetErrorString in völliger Isolation auf.
     // Schneefuchs: Wenn es hier kracht, kracht alles. Otter: Und wir wissen wenigstens warum.
 
     cudaError_t dummy = cudaErrorInvalidValue;
