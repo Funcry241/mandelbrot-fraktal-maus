@@ -23,7 +23,6 @@ namespace RendererLoop {
 
 static FrameContext ctx;
 static CommandBus zoomBus;
-static bool isFirstFrame = true;
 
 void initResources(RendererState& state) {
     if (state.pbo != 0 || state.tex != 0) return;
