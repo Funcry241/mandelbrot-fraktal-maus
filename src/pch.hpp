@@ -1,5 +1,5 @@
 // Datei: src/pch.hpp
-// 🐭 Maus-Kommentar: Reine Host-PCH. Otter: Kompiliert in jeder .cpp-Datei. Schneefuchs: Keine CUDA-Fallen.
+// 🐭 Maus-Kommentar: PCH für dynamisches GLEW überall. Otter: DLL wird automatisch kopiert. Schneefuchs: Kein statisches Linkchaos.
 
 #pragma once
 
