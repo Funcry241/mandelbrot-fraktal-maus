@@ -80,10 +80,15 @@ cd ..
 
 ---
 
+## Plattformkompatibilität
+
+- Zeitformatierung plattformunabhängig via `getLocalTime(...)`
+- MSVC-spezifische `#pragma warning(...)` sind in `#ifdef _MSC_VER` gekapselt
+
 ### 🪟 Windows Build
 
-```powershell
-.uild.ps1
+```powershells
+.build.ps1
 ```
 
 > 🧼 Der Build-Skript erkennt und behebt automatisch bekannte Fallstricke:

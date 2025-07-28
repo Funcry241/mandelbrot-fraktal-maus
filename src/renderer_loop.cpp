@@ -17,7 +17,6 @@
 #include "frame_pipeline.hpp"
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
-#include <chrono>
 #include <cmath> // für std::sqrt, std::clamp
 
 namespace RendererLoop {

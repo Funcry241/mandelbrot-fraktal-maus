@@ -8,8 +8,10 @@
 #include "settings.hpp"  // Settings::BASE_TILE_SIZE etc.
 #include "luchs_log_host.hpp"
 
-#pragma warning(push)
-#pragma warning(disable: 4324) // 🛡️ MSVC: Padding wegen float2 erlaubt – Struktur korrekt genutzt
+#ifdef _MSC_VER
+    #pragma warning(push)
+    #pragma warning(disable: 4324) // 🛡️ MSVC: Padding wegen float2 erlaubt – Struktur korrekt genutzt
+#endif
 
 class FrameContext {
 public:
@@ -75,4 +77,6 @@ public:
     }
 };
 
-#pragma warning(pop)
+#ifdef _MSC_VER
+    #pragma warning(pop)
+#endif

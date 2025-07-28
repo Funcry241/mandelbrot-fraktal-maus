@@ -37,6 +37,7 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdint>
+#include <ctime> // ⏰ Zeitfunktionen
 
 // 🦾 Logging
 #include "luchs_log_host.hpp"
@@ -56,4 +57,14 @@ inline int computeTileSizeFromZoom(float zoom) {
     float raw = 32.0f - std::log2f(zoom + 1.0f);  // weich fallend
     int clamped = std::max(4, std::min(256, static_cast<int>(std::round(raw))));
     return clamped;
+}
+
+// ⏰ Plattformübergreifend threadsicheres localtime
+// 🦊 Schneefuchs: Keine Race Conditions, kein MSVC-only, überall nutzbar
+inline bool getLocalTime(std::tm& outTm, std::time_t t) {
+#if defined(_WIN32)
+    return localtime_s(&outTm, &t) == 0;
+#else
+    return localtime_r(&t, &outTm) != nullptr;
+#endif
 }

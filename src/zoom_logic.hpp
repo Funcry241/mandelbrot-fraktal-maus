@@ -19,8 +19,10 @@ namespace ZoomLogic {
 }
 #endif
 
-#pragma warning(push)
-#pragma warning(disable: 4324) // Struktur gepadded wegen float2 am Ende
+#ifdef _MSC_VER
+    #pragma warning(push)
+    #pragma warning(disable: 4324) // Struktur gepadded wegen float2 am Ende
+#endif
 
 /// 🎯 Datenstruktur für das beste Zoom-Ziel
 /// Wird jedes Frame neu berechnet – enthält Bewertung & Koordinaten
@@ -44,7 +46,9 @@ public:
     std::vector<float> perTileContrast;         // Optional: Rückkanal für Heatmap
 };
 
-#pragma warning(pop)
+#ifdef _MSC_VER
+    #pragma warning(pop)
+#endif
 
 /// 🐼 Panda: Entropie-Kontrastberechnung – mittelt über 4 direkte Nachbarn (oben, unten, links, rechts)
 [[nodiscard]]

@@ -12,7 +12,6 @@
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
-#include <chrono>
 #include <mutex>
 #include <cstdint>
 #include <cstdlib>

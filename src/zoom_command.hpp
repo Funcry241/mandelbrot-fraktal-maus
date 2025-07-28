@@ -11,8 +11,10 @@
 #include <cstdio>
 #include <vector_types.h> // Für float2
 
-#pragma warning(push)
-#pragma warning(disable: 4324) // 🛡️ MSVC-Padding wegen float2 – akzeptiert, kein Fehler
+#ifdef _MSC_VER
+    #pragma warning(push)
+    #pragma warning(disable: 4324) // 🛡️ MSVC-Padding wegen float2 – akzeptiert, kein Fehler
+#endif
 
 class ZoomCommand {
 public:
@@ -38,7 +40,9 @@ public:
     }
 };
 
-#pragma warning(pop)
+#ifdef _MSC_VER
+    #pragma warning(pop)
+#endif
 
 class CommandBus {
 public:

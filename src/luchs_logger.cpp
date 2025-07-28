@@ -3,8 +3,8 @@
 // Otter: Gleiches Format wie Device. Schneefuchs: Keine Zeitabweichungen mehr!
 
 #include "luchs_log_host.hpp"
+#include "common.hpp" // 🦊 Schneefuchs: getLocalTime(...) für plattformübergreifende Zeit
 #include <chrono>
-#include <ctime>
 #include <mutex>
 #include <cstdarg>
 
@@ -23,7 +23,7 @@ namespace LuchsLogger {
                       now.time_since_epoch()) % 1000;
 
         std::tm tm_struct{};
-        localtime_s(&tm_struct, &t); // 🦦 Otter: Sicherer Zeitzugriff, kein C4996 mehr.
+        getLocalTime(tm_struct, t); // 🦊 Schneefuchs: Plattformübergreifend, threadsicher
 
         char timebuf[32];
         std::strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", &tm_struct);
