@@ -93,51 +93,36 @@ void renderCudaFrame(
         CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
     }
 
-    // --- Mapping mit Logging ---
+    // --- Mapping & Prüfung ---
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] About to map PBO resource: %p", (void*)cudaPboResource);
+        LUCHS_LOG_HOST("[MAP] cudaGraphicsMapResources → %p", (void*)cudaPboResource);
 
-    // --- Neue Synchronisation vor Mapping ---
-    cudaError_t syncErr = cudaDeviceSynchronize();
-    LUCHS_LOG_HOST("[CHECK] cudaDeviceSynchronize before map: %d", (int)syncErr);
+    CUDA_CHECK(cudaDeviceSynchronize());
 
-    cudaError_t errMap = cudaGraphicsMapResources(1, &cudaPboResource, 0);
-    if (errMap != cudaSuccess) {
-        LUCHS_LOG_HOST("[ERROR] cudaGraphicsMapResources failed: %s", cudaGetErrorString(errMap));
-        throw std::runtime_error("cudaGraphicsMapResources failed");
-    }
-
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] Successfully mapped cudaPboResource");
+    CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
 
     uchar4* devPtr = nullptr;
     size_t size = 0;
+    CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource));
 
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] About to get mapped pointer...");
+        LUCHS_LOG_HOST("[MAP] Mapped pointer: %p (%zu bytes)", (void*)devPtr, size);
 
-    cudaError_t errPtr = cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaPboResource);
-    if (errPtr != cudaSuccess) {
-        LUCHS_LOG_HOST("[ERROR] cudaGraphicsResourceGetMappedPointer failed: %s", cudaGetErrorString(errPtr));
-        throw std::runtime_error("cudaGraphicsResourceGetMappedPointer failed");
-    }
-
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] Mapped pointer acquired: devPtr=%p size=%zu", (void*)devPtr, size);
-
-    // --- Kernelaufruf und Debug ---
-    if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[CU-FRAME] zoom=%.5f offset=(%.5f %.5f) iter=%d tile=%d",
-                       zoom, offset.x, offset.y, maxIterations, tileSize);
-    }
-
-    if (Settings::debugLogging) {
+    // --- Kernel-Logik ---
+    if (!devPtr) {
+        LUCHS_LOG_HOST("[FATAL] Kernel skipped: surface pointer is null");
+    } else if (Settings::debugLogging) {
         int dbg_before[3]{};
         CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, sizeof(dbg_before), cudaMemcpyDeviceToHost));
+
+        LUCHS_LOG_HOST("[KERNEL] launch_mandelbrotHybrid(surface=%p, w=%d, h=%d, zoom=%.5f, offset=(%.5f %.5f), iter=%d)",
+                       (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations);
+
         launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
+
         int dbg_after[3]{};
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, sizeof(dbg_after), cudaMemcpyDeviceToHost));
-        LUCHS_LOG_HOST("[CU-KERNEL] iters: %d->%d | %d->%d | %d->%d",
+        LUCHS_LOG_HOST("[KERNEL] iters changed: %d→%d | %d→%d | %d→%d",
                        dbg_before[0], dbg_after[0],
                        dbg_before[1], dbg_after[1],
                        dbg_before[2], dbg_after[2]);
@@ -152,19 +137,21 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
+    // --- Zoomlogik ---
     shouldZoom = false;
     if (!pauseZoom) {
         const auto result = ZoomLogic::evaluateZoomTarget(
             h_entropy, h_contrast, offset, zoom, width, height, tileSize,
             state.offset, state.zoomResult.bestIndex, state.zoomResult.bestEntropy, state.zoomResult.bestContrast
         );
+
         if (result.bestIndex >= 0) {
             newOffset = result.newOffset;
             shouldZoom = result.shouldZoom;
             state.zoomResult = result;
 
             if (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[CU-ZOOM] idx=%d entropy=%.3f contrast=%.3f -> (%.5f %.5f) new=%d zoom=%d",
+                LUCHS_LOG_HOST("[ZOOM] idx=%d entropy=%.3f contrast=%.3f → (%.5f %.5f) new=%d zoom=%d",
                                result.bestIndex,
                                result.bestEntropy,
                                result.bestContrast,
@@ -173,7 +160,7 @@ void renderCudaFrame(
                                result.shouldZoom ? 1 : 0);
             }
         } else if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[CU-ZOOM] No suitable target");
+            LUCHS_LOG_HOST("[ZOOM] No suitable target");
         }
     }
 
@@ -183,7 +170,7 @@ void renderCudaFrame(
     const auto t1 = std::chrono::high_resolution_clock::now();
     const float totalMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[CU-PERF] total=%.2f ms", totalMs);
+        LUCHS_LOG_HOST("[PERF] renderCudaFrame() = %.2f ms", totalMs);
 #endif
 }
 
