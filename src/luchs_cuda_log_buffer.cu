@@ -1,6 +1,6 @@
 // Datei: src/luchs_cuda_log_buffer.cu
-// 🐭 Maus-Kommentar: Rückbau auf klare Nicht-Formatierung – robust, simpel, sicher.
-// 🦦 Otter: Keine varargs mehr – Klartext-only im __device__-Code, kompatibel & portabel.
+// 🐭 Maus-Kommentar: Rückbau auf klare Nicht-Formatierung - robust, simpel, sicher.
+// 🦦 Otter: Keine varargs mehr - Klartext-only im __device__-Code, kompatibel & portabel.
 // 🦊 Schneefuchs: Präzise Begrenzung, keine Host-Abhängigkeit, garantiert lauffähig.
 
 #include "luchs_cuda_log_buffer.hpp"
@@ -20,7 +20,7 @@ namespace LuchsLogger {
     char h_logBuffer[LOG_BUFFER_SIZE] = {0};
 
     // =========================================================================
-    // 🚀 Device-Logfunktion – kein Format, nur Klartext (LUCHS_LOG_DEVICE)
+    // 🚀 Device-Logfunktion - kein Format, nur Klartext (LUCHS_LOG_DEVICE)
     // =========================================================================
 
     __device__ void deviceLog(const char* file, int line, const char* msg) {

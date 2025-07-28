@@ -9,7 +9,7 @@
 
 namespace ZoomLogic {
 
-// 🛡️ Fallback für make_float2() – nur wenn nicht CUDA-seitig vorhanden
+// 🛡️ Fallback für make_float2() - nur wenn nicht CUDA-seitig vorhanden
 #ifndef __CUDACC__
 [[nodiscard]] static inline float2 make_float2(float x, float y) {
     float2 f;
@@ -25,7 +25,7 @@ namespace ZoomLogic {
 #endif
 
 /// 🎯 Datenstruktur für das beste Zoom-Ziel
-/// Wird jedes Frame neu berechnet – enthält Bewertung & Koordinaten
+/// Wird jedes Frame neu berechnet - enthält Bewertung & Koordinaten
 class ZoomResult {
 public:
     int bestIndex = -1;                // Index im Tile-Raster
@@ -50,11 +50,11 @@ public:
     #pragma warning(pop)
 #endif
 
-/// 🐼 Panda: Entropie-Kontrastberechnung – mittelt über 4 direkte Nachbarn (oben, unten, links, rechts)
+/// 🐼 Panda: Entropie-Kontrastberechnung - mittelt über 4 direkte Nachbarn (oben, unten, links, rechts)
 [[nodiscard]]
 float computeEntropyContrast(const std::vector<float>& entropy, int width, int height, int tileSize);
 
-/// 🐘 + 🦦 + 🕊️ evaluateZoomTarget – zentrales Entscheidungssystem für Auto-Zoom.
+/// 🐘 + 🦦 + 🕊️ evaluateZoomTarget - zentrales Entscheidungssystem für Auto-Zoom.
 [[nodiscard]]
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,

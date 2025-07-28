@@ -1,9 +1,9 @@
 // Datei: src/zoom_logic.cpp
-// 🐭 Maus-Kommentar: Alpha 49 "Pinguin" – sanftes, kontinuierliches Zoomen ohne Elefant! Ziel wird immer interpoliert verfolgt, Score fließt in Glättung ein. Kein Warten, kein Hüpfen. Schneefuchs genießt den Flug, Otter testet Stabilität.
+// 🐭 Maus-Kommentar: Alpha 49 "Pinguin" - sanftes, kontinuierliches Zoomen ohne Elefant! Ziel wird immer interpoliert verfolgt, Score fließt in Glättung ein. Kein Warten, kein Hüpfen. Schneefuchs genießt den Flug, Otter testet Stabilität.
 // 🐼 Panda: Bewertet Entropie × (1 + Kontrast) als Zielscore.
 // 🐝 Kolibri: Weiche Bewegung via LERP (Zoom ist Gleitflug).
 // 🐍 Flugente: float2 bleibt für Performance aktiv.
-// 🔬 Blaupause: Laufzeitmessung mit std::chrono – erkennt Zoomlogik-Overhead.
+// 🔬 Blaupause: Laufzeitmessung mit std::chrono - erkennt Zoomlogik-Overhead.
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"

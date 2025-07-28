@@ -9,7 +9,7 @@ Deklariert klar getrennte Schritte:
     Bildausgabe (Heatmap & Fraktal)
 
     -> Alles basiert auf FrameContext, keine globalen Zustände.
-    ❤️ FIX: computeCudaFrame explizit mit RendererState – Maus liebt Präzision, Schneefuchs liebt Klarheit.
+    ❤️ FIX: computeCudaFrame explizit mit RendererState - Maus liebt Präzision, Schneefuchs liebt Klarheit.
     ❤️ FIX: drawFrame braucht jetzt RendererState für HeatmapOverlay (neuer Parameter).
 */
 

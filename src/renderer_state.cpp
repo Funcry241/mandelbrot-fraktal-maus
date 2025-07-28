@@ -1,4 +1,4 @@
-// 🐭 Maus-Kommentar: Keine Doppelregistrierung mehr – resize() übernimmt Verantwortung klar und kontrolliert.
+// 🐭 Maus-Kommentar: Keine Doppelregistrierung mehr - resize() übernimmt Verantwortung klar und kontrolliert.
 // 🦦 Otter: Device-Buffers und PBO sauber, kein Zombie-Handle mehr.
 // 🦊 Schneefuchs: Ressourcenfluss ist konsistent und deterministisch.
 

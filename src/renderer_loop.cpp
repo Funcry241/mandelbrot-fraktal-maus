@@ -1,6 +1,6 @@
 // Datei: src/renderer_loop.cpp
-// 🐭 Maus-Kommentar: Erweiterter PerfLog – misst resize() + Swap-Zeit separat. Ermöglicht Analyse von FPS-Limitierung durch VSync oder Buffer-Recreation.
-// 🦦 Otter: `renderFrame_impl` ist jetzt voll implementiert – keine Linkerleichen mehr!
+// 🐭 Maus-Kommentar: Erweiterter PerfLog - misst resize() + Swap-Zeit separat. Ermöglicht Analyse von FPS-Limitierung durch VSync oder Buffer-Recreation.
+// 🦦 Otter: `renderFrame_impl` ist jetzt voll implementiert - keine Linkerleichen mehr!
 // 🐑 Schneefuchs: Ressourcensicher, nachvollziehbar und ready für Release-Debugging.
 
 #include "pch.hpp"

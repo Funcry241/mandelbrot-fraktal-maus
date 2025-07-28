@@ -1,6 +1,6 @@
 // Datei: src/heatmap_overlay.hpp
 /*
-Maus-Kommentar 🐭: Overlay ist jetzt vollständig zustandslos – kein interner bool mehr. Alle Kontrollfunktionen arbeiten direkt mit RendererState&. drawOverlay-API akzeptiert ctx. Schneefuchs: „Kein Schatten, nur Klarheit.“ Otter: Kein struct/class-Konflikt mehr.
+Maus-Kommentar 🐭: Overlay ist jetzt vollständig zustandslos - kein interner bool mehr. Alle Kontrollfunktionen arbeiten direkt mit RendererState&. drawOverlay-API akzeptiert ctx. Schneefuchs: „Kein Schatten, nur Klarheit.“ Otter: Kein struct/class-Konflikt mehr.
 */
 
 #pragma once

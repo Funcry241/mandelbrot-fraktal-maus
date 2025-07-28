@@ -1,6 +1,6 @@
 // Datei: src/frame_context.hpp
 // 🦦 Otter: Klar sichtbar als Kapsel, keine faulen pragmas. Konstruktor & Logging unverändert.
-// 🦊 Schneefuchs: Speicherstruktur explizit – deterministisch, loggingkompatibel.
+// 🦊 Schneefuchs: Speicherstruktur explizit - deterministisch, loggingkompatibel.
 
 #pragma once
 #include <vector>
@@ -10,7 +10,7 @@
 
 #ifdef _MSC_VER
     #pragma warning(push)
-    #pragma warning(disable: 4324) // 🛡️ MSVC: Padding wegen float2 erlaubt – Struktur korrekt genutzt
+    #pragma warning(disable: 4324) // 🛡️ MSVC: Padding wegen float2 erlaubt - Struktur korrekt genutzt
 #endif
 
 class FrameContext {

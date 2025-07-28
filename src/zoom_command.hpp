@@ -13,7 +13,7 @@
 
 #ifdef _MSC_VER
     #pragma warning(push)
-    #pragma warning(disable: 4324) // 🛡️ MSVC-Padding wegen float2 – akzeptiert, kein Fehler
+    #pragma warning(disable: 4324) // 🛡️ MSVC-Padding wegen float2 - akzeptiert, kein Fehler
 #endif
 
 class ZoomCommand {

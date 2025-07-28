@@ -1,5 +1,5 @@
-// 🐭 Maus-Kommentar: Header für das Rendering-Modul. Keine überflüssigen Parameter mehr – volle Synchronität zur Source. Funktioniert exakt mit der einparametrigen Loop-Signatur. Otter und Schneefuchs sind stolz.
-// 🦦 Otter: Kontextlogik korrekt einkapsuliert – keine Frühregistrierung möglich.
+// 🐭 Maus-Kommentar: Header für das Rendering-Modul. Keine überflüssigen Parameter mehr - volle Synchronität zur Source. Funktioniert exakt mit der einparametrigen Loop-Signatur. Otter und Schneefuchs sind stolz.
+// 🦦 Otter: Kontextlogik korrekt einkapsuliert - keine Frühregistrierung möglich.
 // 🦊 Schneefuchs: Header synchron zur Source. Keine Schattenvariablen. Keine Lücken.
 
 #pragma once

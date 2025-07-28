@@ -1,6 +1,6 @@
 // Datei: src/luchs_log_device.hpp
 // 🐭 Maus-Kommentar: Nur für __device__-Code. Kein __CUDA_ARCH__-Branching, sondern bewusst selektiv eingebunden.
-// 🦦 Otter: Rückkehr zu stabiler Einfachheit – keine Formatierung, nur Klartext.
+// 🦦 Otter: Rückkehr zu stabiler Einfachheit - keine Formatierung, nur Klartext.
 // 🦊 Schneefuchs: Sicher auf allen Architekturen, kein undefined behavior.
 
 #pragma once

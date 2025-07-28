@@ -16,12 +16,12 @@ int main() {
 
     Renderer renderer(Settings::width, Settings::height);
     if (!renderer.initGL()) {
-        LUCHS_LOG_HOST("[FATAL] OpenGL-Initialisierung fehlgeschlagen – Programm wird beendet");
+        LUCHS_LOG_HOST("[FATAL] OpenGL-Initialisierung fehlgeschlagen - Programm wird beendet");
         return EXIT_FAILURE;
     }
 
     if (!CudaInterop::precheckCudaRuntime()) {
-        LUCHS_LOG_HOST("[FATAL] CUDA-Vorinitialisierung fehlgeschlagen – kein Gerät verfügbar");
+        LUCHS_LOG_HOST("[FATAL] CUDA-Vorinitialisierung fehlgeschlagen - kein Gerät verfügbar");
         return EXIT_FAILURE;
     }
 

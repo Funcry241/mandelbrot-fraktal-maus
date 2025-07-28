@@ -1,6 +1,6 @@
 // Datei: src/core_kernel.cu
-// 🐭 Maus-Kommentar: Alpha 64 – Supersampling vollständig entfernt. Klare Kernel-Signatur, Logging über Settings::debugLogging, deterministisch.
-// 🦦 Otter: Vollständige Luchsifizierung – alle Logs über LUCHS_LOG_HOST/DEVICE. Keine Rohausgaben mehr.
+// 🐭 Maus-Kommentar: Alpha 64 - Supersampling vollständig entfernt. Klare Kernel-Signatur, Logging über Settings::debugLogging, deterministisch.
+// 🦦 Otter: Vollständige Luchsifizierung - alle Logs über LUCHS_LOG_HOST/DEVICE. Keine Rohausgaben mehr.
 // 🦊 Schneefuchs: Struktur bewahrt, keine Flüchtigkeit, keine faulen Tricks.
 
 #include <cuda_runtime.h>
@@ -168,5 +168,5 @@ void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, f
                        it[0], it[1], it[2], it[3], it[4], it[5], it[6], it[7], it[8], it[9]);
     }
 
-    // 🦦 Otter: Luchsifizierung abgeschlossen – alles sauber, alles kontrolliert
+    // 🦦 Otter: Luchsifizierung abgeschlossen - alles sauber, alles kontrolliert
 }

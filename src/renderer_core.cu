@@ -1,5 +1,5 @@
 // Datei: src/renderer_core.cu
-// 🐭 Maus-Kommentar: Alpha 67 – Kontextfix: PBO-Registrierung erst nach aktivem GL-Kontext. Kein invalid argument mehr. 
+// 🐭 Maus-Kommentar: Alpha 67 - Kontextfix: PBO-Registrierung erst nach aktivem GL-Kontext. Kein invalid argument mehr. 
 // 🦦 Otter: CUDA sieht jetzt korrekt. Fokus, keine Zufälle.
 // 🦊 Schneefuchs: Reihenfolge gewahrt, Kontextfehler eliminiert.
 
@@ -70,7 +70,7 @@ bool Renderer::initGL() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] RendererPipeline initialized");
 
-    // 🧠 Kontext ist jetzt gültig – PBO und CUDA-Interop erst ab hier
+    // 🧠 Kontext ist jetzt gültig - PBO und CUDA-Interop erst ab hier
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
         state.pbo = OpenGLUtils::createPBO(state.width, state.height);
@@ -82,7 +82,7 @@ bool Renderer::initGL() {
         if (Settings::debugLogging) {
             GLint boundPBO = 0;
             glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundPBO);
-            LUCHS_LOG_HOST("[CHECK] initGL – OpenGL PBO bound: %d | Created PBO ID: %u", boundPBO, state.pbo);
+            LUCHS_LOG_HOST("[CHECK] initGL - OpenGL PBO bound: %d | Created PBO ID: %u", boundPBO, state.pbo);
         }
     }
 
@@ -157,7 +157,7 @@ void Renderer::resize(int newW, int newH) {
     if (Settings::debugLogging) {
         GLint boundPBO = 0;
         glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundPBO);
-        LUCHS_LOG_HOST("[CHECK] resize – OpenGL PBO bound: %d | Active PBO ID: %u", boundPBO, state.pbo);
+        LUCHS_LOG_HOST("[CHECK] resize - OpenGL PBO bound: %d | Active PBO ID: %u", boundPBO, state.pbo);
     }
 }
 
