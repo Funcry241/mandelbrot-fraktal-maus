@@ -46,6 +46,15 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
             frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
     }
 
+    const int tilesX = (frameCtx.width + frameCtx.tileSize - 1) / frameCtx.tileSize;
+    const int tilesY = (frameCtx.height + frameCtx.tileSize - 1) / frameCtx.tileSize;
+    const int numTiles = tilesX * tilesY;
+
+    if (frameCtx.tileSize <= 0 || numTiles <= 0) {
+        LUCHS_LOG_HOST("[FATAL] computeCudaFrame: Invalid tileSize (%d) or numTiles (%d)", frameCtx.tileSize, numTiles);
+        return;
+    }
+
     CudaInterop::renderCudaFrame(
         frameCtx.d_iterations,
         frameCtx.d_entropy,
