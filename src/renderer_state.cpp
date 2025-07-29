@@ -59,6 +59,8 @@ void RendererState::setupCudaBuffers() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] setupCudaBuffers: %d x %d -> tileSize=%d -> %d tiles",
                        width, height, tileSize, numTiles);
+    
+    CUDA_CHECK(cudaSetDevice(0));
 
     // --- Iteration-Puffer ---
     CUDA_CHECK(cudaMalloc(&d_iterations, totalPixels * sizeof(int)));
