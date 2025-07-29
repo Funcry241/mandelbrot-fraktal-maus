@@ -29,8 +29,7 @@ int main() {
         LUCHS_LOG_HOST("[FATAL] CUDA-Fehlermeldungsfunktion defekt - wir fassen nichts mehr an");
         return EXIT_FAILURE;
     }
-
-    renderer.getState().setupCudaBuffers();
+    
     renderer.getState().heatmapOverlayEnabled = Settings::heatmapOverlayEnabled;
     renderer.getState().warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
     CudaInterop::setPauseZoom(false);
