@@ -1,6 +1,7 @@
-// 🐭 Maus-Kommentar: Keine Doppelregistrierung mehr - resize() übernimmt Verantwortung klar und kontrolliert.
-// 🦦 Otter: Device-Buffers und PBO sauber, kein Zombie-Handle mehr.
-// 🦊 Schneefuchs: Ressourcenfluss ist konsistent und deterministisch.
+// Datei: src/renderer_state.cpp
+// 🐭 Maus-Kommentar: Tile-Größe jetzt sichtbar. Kein malloc ins Leere mehr.
+// 🦦 Otter: Fehler sichtbar, deterministisch, kein division-by-zero.
+// 🦊 Schneefuchs: Wenn es kracht, wissen wir exakt wo.
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -11,7 +12,7 @@
 
 RendererState::RendererState(int w, int h)
 : width(w), height(h) {
-    reset();    
+    reset();
 }
 
 void RendererState::reset() {
@@ -34,7 +35,6 @@ void RendererState::reset() {
     heatmapOverlayEnabled       = Settings::heatmapOverlayEnabled;
     warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
 
-    // 🐭 Maus: Initialisierung exakt in Struct-Reihenfolge gemäß zoom_logic.hpp
     zoomResult.bestIndex       = -1;
     zoomResult.bestEntropy     = 0.0f;
     zoomResult.bestContrast    = 0.0f;
@@ -50,11 +50,21 @@ void RendererState::reset() {
 }
 
 void RendererState::setupCudaBuffers() {
+    if (lastTileSize <= 0) {
+        LUCHS_LOG_HOST("[FATAL] setupCudaBuffers: invalid tileSize %d", lastTileSize);
+        throw std::runtime_error("lastTileSize must be > 0 before setupCudaBuffers()");
+    }
+
     const int totalPixels = width * height;
     const int tileSize    = lastTileSize;
     const int tilesX      = (width + tileSize - 1) / tileSize;
     const int tilesY      = (height + tileSize - 1) / tileSize;
     const int numTiles    = tilesX * tilesY;
+
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[DEBUG] setupCudaBuffers: %d x %d -> tileSize=%d -> %d tiles",
+                       width, height, tileSize, numTiles);
+    }
 
     CUDA_CHECK(cudaMalloc(&d_iterations, totalPixels * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
@@ -90,6 +100,9 @@ void RendererState::resize(int newWidth, int newHeight) {
     CudaInterop::registerPBO(pbo);
 
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[DEBUG] resize(): zoom=%.5f → tileSize=%d", zoom, lastTileSize);
+
     setupCudaBuffers();
 
     if (Settings::debugLogging)
