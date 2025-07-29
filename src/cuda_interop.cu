@@ -75,13 +75,16 @@ void renderCudaFrame(
     float2& newOffset, bool& shouldZoom, int tileSize,
     RendererState& state
 ) {
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[ENTER] renderCudaFrame()");
+
     if (!cudaPboResource)
         throw std::runtime_error("[FATAL] CUDA PBO not registered!");
 
 #ifndef __CUDA_ARCH__
     const auto t0 = std::chrono::high_resolution_clock::now();
 #endif
-
+    
     const int totalPixels = width * height;
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
@@ -130,6 +133,9 @@ void renderCudaFrame(
 
         launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
 
+        if (Settings::debugLogging)
+            LUCHS_LOG_HOST("[KERNEL] mandelbrotKernel(...) launched");
+
         int dbg_after[3]{};
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, sizeof(dbg_after), cudaMemcpyDeviceToHost));
         LUCHS_LOG_HOST("[KERNEL] iters changed: %d→%d | %d→%d | %d→%d",
@@ -175,6 +181,9 @@ void renderCudaFrame(
     }
 
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
+
+    if (Settings::debugLogging)
+    LUCHS_LOG_HOST("[KERNEL] renderCudaFrame finished");
 
 #ifndef __CUDA_ARCH__
     const auto t1 = std::chrono::high_resolution_clock::now();
