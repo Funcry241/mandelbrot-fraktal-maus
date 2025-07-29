@@ -97,9 +97,9 @@ void renderCudaFrame(
         LUCHS_LOG_HOST("cudaMemset d_iterations: %d", static_cast<int>(err));
         if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_iterations failed");
 
-        err = cudaMemset(d_entropy, 0, numTiles * sizeof(float));
-        LUCHS_LOG_HOST("cudaMemset d_entropy: %d", static_cast<int>(err));
-        if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_entropy failed");
+        LUCHS_LOG_HOST("[MEM] preparing memset d_entropy (%d tiles = %zu bytes)", numTiles, numTiles * sizeof(float));
+        CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
+        LUCHS_LOG_HOST("[MEM] memset d_entropy done");
 
         err = cudaMemset(d_contrast, 0, numTiles * sizeof(float));
         LUCHS_LOG_HOST("cudaMemset d_contrast: %d", static_cast<int>(err));
