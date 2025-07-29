@@ -63,6 +63,12 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         state
     );
 
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[KERNEL] Mandelbrot kernel launched - synchronizing");
+    CUDA_CHECK(cudaDeviceSynchronize());
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[KERNEL] Mandelbrot kernel completed");
+
     if (frameCtx.shouldZoom) {
         frameCtx.newOffset = { gpuNewOffset.x, gpuNewOffset.y };
     }
