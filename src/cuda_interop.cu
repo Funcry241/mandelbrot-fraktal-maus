@@ -93,8 +93,11 @@ void renderCudaFrame(
     if (Settings::debugLogging) {
         cudaError_t err;
 
+        cudaError_t ctxCheck = cudaSetDevice(0); // stellt aktiven Kontext sicher
+        LUCHS_LOG_HOST("[CHECK] cudaSetDevice(0) = %d", ctxCheck);
+
         err = cudaMemset(d_iterations, 0, totalPixels * sizeof(int));
-        LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels → %zu bytes", totalPixels, totalPixels * sizeof(int));
+        LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels -> %zu bytes", totalPixels, totalPixels * sizeof(int));
         LUCHS_LOG_HOST("cudaMemset d_iterations: %d", static_cast<int>(err));
         if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_iterations failed");
 
