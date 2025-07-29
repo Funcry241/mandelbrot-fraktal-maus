@@ -1,5 +1,6 @@
+// Datei: src/cuda_interop.hpp
 // 🐭 Maus-Kommentar: Alpha 68½ - Früherkennung von CUDA-Geräten + sicherer API-Test für Fehlerauflösung.
-// Otter: fail fast. Schneefuchs: keine Überraschungen. Maus: aber elegant.
+// 🦦 Otter: fail fast. 🦊 Schneefuchs: keine Überraschungen. 🐭 Maus: aber elegant.
 
 #ifndef CUDA_INTEROP_HPP
 #define CUDA_INTEROP_HPP
@@ -42,6 +43,9 @@ bool precheckCudaRuntime(); // 🐭 Schneefuchs: keine Devices = kein Rendererst
 
 // Alpha 68½: Früher Test, ob cudaGetErrorString gefahrlos aufrufbar ist
 bool verifyCudaGetErrorStringSafe(); // 🐭 Otter: Nur im Precheck erlaubt!
+
+// 🧪 Alpha 72: Logging des aktiven Device-Kontexts zu Debugzwecken
+void logCudaDeviceContext(const char* context); // 🦦 Sichtbarer Device-Kontext vor Kernel und memset
 
 // Capybara: Inline-Wrapper für extern "C" Kernel (core_kernel.cu)
 inline void computeCudaEntropyContrast(

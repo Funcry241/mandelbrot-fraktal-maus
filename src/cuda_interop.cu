@@ -22,6 +22,12 @@ namespace CudaInterop {
 static cudaGraphicsResource_t cudaPboResource = nullptr;
 static bool pauseZoom = false;
 
+void logCudaDeviceContext(const char* context) {
+    int device = -1;
+    cudaError_t err = cudaGetDevice(&device);
+    LUCHS_LOG_HOST("[CTX] %s: cudaGetDevice() = %d (%s)", context, device, cudaGetErrorString(err));
+}
+
 void registerPBO(unsigned int pbo) {
     if (cudaPboResource) {
         LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!");
@@ -56,13 +62,9 @@ void registerPBO(unsigned int pbo) {
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[CU-PBO] Registered GL buffer ID %u -> cudaPboResource: %p", pbo, (void*)cudaPboResource);
     }
-}
 
-void unregisterPBO() {
-    if (cudaPboResource) {
-        CUDA_CHECK(cudaGraphicsUnregisterResource(cudaPboResource));
-        cudaPboResource = nullptr;
-    }
+    // 🧪 Neue Logging-Stelle
+    logCudaDeviceContext("after registerPBO");
 }
 
 void renderCudaFrame(
@@ -74,6 +76,9 @@ void renderCudaFrame(
 ) {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[ENTER] renderCudaFrame()");
+    
+    // 🧪 Neue Logging-Stelle
+    logCudaDeviceContext("renderCudaFrame ENTER");
 
     if (!cudaPboResource)
         throw std::runtime_error("[FATAL] CUDA PBO not registered!");
@@ -92,6 +97,9 @@ void renderCudaFrame(
 
         cudaError_t ctxCheck = cudaSetDevice(0);
         LUCHS_LOG_HOST("[CHECK] cudaSetDevice(0) = %d", ctxCheck);
+
+        // 🧪 Logging vor dem Attributcheck
+        logCudaDeviceContext("before cudaPointerGetAttributes");
 
         cudaPointerAttributes attr;
         cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_iterations);
@@ -223,6 +231,15 @@ bool verifyCudaGetErrorStringSafe() {
     } else {
         LUCHS_LOG_HOST("[FATAL] cudaGetErrorString returned null - das riecht nach Treibergift");
         return false;
+    }
+}
+
+void unregisterPBO() {
+    if (cudaPboResource) {
+        cudaGraphicsUnregisterResource(cudaPboResource);
+        cudaPboResource = nullptr;
+        if (Settings::debugLogging)
+            LUCHS_LOG_HOST("[CU-PBO] Unregistered PBO resource");
     }
 }
 

@@ -61,6 +61,7 @@ void RendererState::setupCudaBuffers() {
                        width, height, tileSize, numTiles);
     
     CUDA_CHECK(cudaSetDevice(0));
+    CudaInterop::logCudaDeviceContext("setupCudaBuffers");
 
     // --- Iteration-Puffer ---
     CUDA_CHECK(cudaMalloc(&d_iterations, totalPixels * sizeof(int)));
@@ -95,7 +96,6 @@ void RendererState::setupCudaBuffers() {
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
 }
-
 
 void RendererState::resize(int newWidth, int newHeight) {
     // Device-Ressourcen freigeben
