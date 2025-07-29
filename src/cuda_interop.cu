@@ -63,7 +63,6 @@ void registerPBO(unsigned int pbo) {
         LUCHS_LOG_HOST("[CU-PBO] Registered GL buffer ID %u -> cudaPboResource: %p", pbo, (void*)cudaPboResource);
     }
 
-    // 🧪 Neue Logging-Stelle
     logCudaDeviceContext("after registerPBO");
 }
 
@@ -76,8 +75,7 @@ void renderCudaFrame(
 ) {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[ENTER] renderCudaFrame()");
-    
-    // 🧪 Neue Logging-Stelle
+
     logCudaDeviceContext("renderCudaFrame ENTER");
 
     if (!cudaPboResource)
@@ -92,39 +90,36 @@ void renderCudaFrame(
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int numTiles = tilesX * tilesY;
 
-    if (Settings::debugLogging) {
-        cudaError_t err;
+    cudaError_t ctxCheck = cudaSetDevice(0);
+    LUCHS_LOG_HOST("[CHECK] cudaSetDevice(0) = %d", ctxCheck);
 
-        cudaError_t ctxCheck = cudaSetDevice(0);
-        LUCHS_LOG_HOST("[CHECK] cudaSetDevice(0) = %d", ctxCheck);
+    logCudaDeviceContext("before cudaPointerGetAttributes");
 
-        // 🧪 Logging vor dem Attributcheck
-        logCudaDeviceContext("before cudaPointerGetAttributes");
+    LUCHS_LOG_HOST("[DEBUG] d_iterations ptr = %p", (void*)d_iterations);
 
-        cudaPointerAttributes attr;
-        cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_iterations);
-        LUCHS_LOG_HOST("[CHECK] cudaPointerGetAttributes(d_iterations): err=%d | device=%d | type=%d",
-                    (int)attrErr, (int)attr.device, (int)attr.type);
+    cudaPointerAttributes attrCheck;
+    cudaError_t attrErr = cudaPointerGetAttributes(&attrCheck, d_iterations);
+    LUCHS_LOG_HOST("[DEBUG] attrCheck result: err=%d, type=%d, device=%d, hostPtr=%p, devicePtr=%p",
+        (int)attrErr, (int)attrCheck.type, (int)attrCheck.device,
+        (void*)attrCheck.hostPointer, (void*)attrCheck.devicePointer);
 
-        err = cudaMemset(d_iterations, 0, totalPixels * sizeof(int));
-        LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels -> %zu bytes", totalPixels, totalPixels * sizeof(int));
-        LUCHS_LOG_HOST("cudaMemset d_iterations: %d", static_cast<int>(err));
-        if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_iterations failed");
+    cudaError_t err = cudaMemset(d_iterations, 0, totalPixels * sizeof(int));
+    LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels -> %zu bytes", totalPixels, totalPixels * sizeof(int));
+    LUCHS_LOG_HOST("cudaMemset d_iterations: %d", static_cast<int>(err));
+    if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_iterations failed");
 
-        LUCHS_LOG_HOST("[MEM] preparing memset d_entropy (%d tiles = %zu bytes)", numTiles, numTiles * sizeof(float));
-        CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
-        LUCHS_LOG_HOST("[MEM] memset d_entropy done");
+    LUCHS_LOG_HOST("[MEM] preparing memset d_entropy (%d tiles = %zu bytes)", numTiles, numTiles * sizeof(float));
+    CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
+    LUCHS_LOG_HOST("[MEM] memset d_entropy done");
 
-        err = cudaMemset(d_contrast, 0, numTiles * sizeof(float));
-        LUCHS_LOG_HOST("cudaMemset d_contrast: %d", static_cast<int>(err));
-        if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_contrast failed");
-    }
+    err = cudaMemset(d_contrast, 0, numTiles * sizeof(float));
+    LUCHS_LOG_HOST("cudaMemset d_contrast: %d", static_cast<int>(err));
+    if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_contrast failed");
 
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[MAP] cudaGraphicsMapResources → %p", (void*)cudaPboResource);
 
     CUDA_CHECK(cudaDeviceSynchronize());
-
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
 
     uchar4* devPtr = nullptr;
