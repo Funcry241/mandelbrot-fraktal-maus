@@ -55,10 +55,11 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         return;
     }
 
+    // 🦦 Otter-Fix: Verwende gültige CUDA-Pointer aus RendererState
     CudaInterop::renderCudaFrame(
-        frameCtx.d_iterations,
-        frameCtx.d_entropy,
-        frameCtx.d_contrast,
+        state.d_iterations,
+        state.d_entropy,
+        state.d_contrast,
         frameCtx.width,
         frameCtx.height,
         (float)frameCtx.zoom,
