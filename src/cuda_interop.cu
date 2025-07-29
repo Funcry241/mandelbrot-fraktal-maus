@@ -88,9 +88,19 @@ void renderCudaFrame(
     const int numTiles = tilesX * tilesY;
 
     if (Settings::debugLogging) {
-        CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
-        CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
-        CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
+        cudaError_t err;
+
+        err = cudaMemset(d_iterations, 0, totalPixels * sizeof(int));
+        LUCHS_LOG_HOST("cudaMemset d_iterations: %d", static_cast<int>(err));
+        if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_iterations failed");
+
+        err = cudaMemset(d_entropy, 0, numTiles * sizeof(float));
+        LUCHS_LOG_HOST("cudaMemset d_entropy: %d", static_cast<int>(err));
+        if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_entropy failed");
+
+        err = cudaMemset(d_contrast, 0, numTiles * sizeof(float));
+        LUCHS_LOG_HOST("cudaMemset d_contrast: %d", static_cast<int>(err));
+        if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_contrast failed");
     }
 
     // --- Mapping & Prüfung ---
