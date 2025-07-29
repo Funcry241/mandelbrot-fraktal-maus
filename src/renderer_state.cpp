@@ -50,31 +50,29 @@ void RendererState::reset() {
 }
 
 void RendererState::setupCudaBuffers() {
-    if (lastTileSize <= 0) {
-        LUCHS_LOG_HOST("[FATAL] setupCudaBuffers: invalid tileSize %d", lastTileSize);
-        throw std::runtime_error("lastTileSize must be > 0 before setupCudaBuffers()");
-    }
-
     const int totalPixels = width * height;
     const int tileSize    = lastTileSize;
     const int tilesX      = (width + tileSize - 1) / tileSize;
     const int tilesY      = (height + tileSize - 1) / tileSize;
     const int numTiles    = tilesX * tilesY;
 
-    if (Settings::debugLogging) {
+    if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] setupCudaBuffers: %d x %d -> tileSize=%d -> %d tiles",
                        width, height, tileSize, numTiles);
-    }
 
     CUDA_CHECK(cudaMalloc(&d_iterations, totalPixels * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
 
     CUDA_CHECK(cudaMalloc(&d_entropy,  numTiles * sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_entropy,  0, numTiles * sizeof(float)));
+
     CUDA_CHECK(cudaMalloc(&d_contrast, numTiles * sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
 
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
 }
+
 
 void RendererState::resize(int newWidth, int newHeight) {
     // Device-Ressourcen freigeben
