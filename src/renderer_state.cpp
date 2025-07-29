@@ -1,7 +1,6 @@
-// Datei: src/renderer_state.cpp
-// 🐭 Maus-Kommentar: Keine Doppelregistrierung mehr – resize() übernimmt Verantwortung klar und kontrolliert.
-// 🦦 Otter: Konstruktor ruft resize() direkt auf – Device-Buffers und PBO sauber, kein Zombie-Handle mehr.
-// 🦊 Schneefuchs: Ressourcenfluss ist konsistent und deterministisch, auch beim allerersten Frame.
+// 🐭 Maus-Kommentar: Keine Doppelregistrierung mehr - resize() übernimmt Verantwortung klar und kontrolliert.
+// 🦦 Otter: Device-Buffers und PBO sauber, kein Zombie-Handle mehr.
+// 🦊 Schneefuchs: Ressourcenfluss ist konsistent und deterministisch.
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -13,7 +12,6 @@
 RendererState::RendererState(int w, int h)
 : width(w), height(h) {
     reset();
-    resize(width, height); // 🛠️ Garantiert gültige Ressourcen beim Start
 }
 
 void RendererState::reset() {
@@ -91,8 +89,8 @@ void RendererState::resize(int newWidth, int newHeight) {
     tex = OpenGLUtils::createTexture(width, height);
     CudaInterop::registerPBO(pbo);
 
-    lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
     setupCudaBuffers();
+    lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
 
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[Resize] %d x %d buffers reallocated", width, height);
