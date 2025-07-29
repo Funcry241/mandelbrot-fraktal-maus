@@ -93,6 +93,11 @@ void renderCudaFrame(
         cudaError_t ctxCheck = cudaSetDevice(0);
         LUCHS_LOG_HOST("[CHECK] cudaSetDevice(0) = %d", ctxCheck);
 
+        cudaPointerAttributes attr;
+        cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_iterations);
+        LUCHS_LOG_HOST("[CHECK] cudaPointerGetAttributes(d_iterations): err=%d | device=%d | type=%d",
+                    (int)attrErr, (int)attr.device, (int)attr.type);
+
         err = cudaMemset(d_iterations, 0, totalPixels * sizeof(int));
         LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels -> %zu bytes", totalPixels, totalPixels * sizeof(int));
         LUCHS_LOG_HOST("cudaMemset d_iterations: %d", static_cast<int>(err));
