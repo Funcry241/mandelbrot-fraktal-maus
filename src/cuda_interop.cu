@@ -186,8 +186,10 @@ void renderCudaFrame(
 
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
 
-    if (Settings::debugLogging)
-    LUCHS_LOG_HOST("[KERNEL] renderCudaFrame finished");
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[UNMAP] PBO unmapped successfully");
+        LUCHS_LOG_HOST("[KERNEL] renderCudaFrame finished");
+    }
 
 #ifndef __CUDA_ARCH__
     const auto t1 = std::chrono::high_resolution_clock::now();
