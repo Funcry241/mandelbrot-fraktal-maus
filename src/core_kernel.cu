@@ -45,11 +45,19 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fx, 
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut, int w, int h, float zoom, float2 offset, int maxIter)
 {
+    // --- Frühes Device-Log für Crash-Ortung ---
+    if (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0) {
+        LUCHS_LOG_DEVICE("mandelbrotKernel entered");
+        LUCHS_LOG_DEVICE("params w=%d h=%d zoom=%.5f", w, h, zoom);
+    }
+
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * w + x;
 
+    // --- Boundscheck hart ---
     if (x >= w || y >= h || idx >= w * h) return;
+    if (!out || !iterOut || w <= 0 || h <= 0) return;
 
     float scale = 1.0f / zoom;
     float spanX = 3.5f * scale;
@@ -148,25 +156,38 @@ void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, f
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[Kernel] %dx%d | Zoom: %.3e | Offset: (%.5f, %.5f) | Iter: %d | Tile: %d",
                        w, h, zoom, offset.x, offset.y, maxIter, tile);
+
+        // --- Sanity-Check für device ptr ---
+        cudaPointerAttributes attr;
+        cudaError_t attrErr = cudaPointerGetAttributes(&attr, out);
+        LUCHS_LOG_HOST("[DEBUG] cudaPointerGetAttributes(out): err=%d type=%d", attrErr, attr.type);
     }
 
-    if (out && d_it)
+    if (out && d_it) {
         mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter);
+        LUCHS_LOG_HOST("[DEBUG] Kernel launched");
+    } else {
+        LUCHS_LOG_HOST("[FATAL] launch_mandelbrotHybrid aborted: null device pointer(s)");
+        return;
+    }
 
+    // --- Kernel Launch Error ---
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         LUCHS_LOG_HOST("[CUDA ERROR] Kernel launch failed: %s", cudaGetErrorString(err));
+    } else {
+        LUCHS_LOG_HOST("[CHECK] cudaGetLastError returned success");
     }
 
-    cudaDeviceSynchronize();
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     if (Settings::debugLogging) {
         int it[10] = { 0 };
         cudaMemcpy(it, d_it, sizeof(it), cudaMemcpyDeviceToHost);
-
         LUCHS_LOG_HOST("[Iter] First10: %d %d %d %d %d %d %d %d %d %d",
                        it[0], it[1], it[2], it[3], it[4], it[5], it[6], it[7], it[8], it[9]);
     }
 
     // 🦦 Otter: Luchsifizierung abgeschlossen - alles sauber, alles kontrolliert
 }
+
