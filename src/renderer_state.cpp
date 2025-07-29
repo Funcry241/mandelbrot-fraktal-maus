@@ -11,12 +11,7 @@
 
 RendererState::RendererState(int w, int h)
 : width(w), height(h) {
-    reset();
-
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] RendererState constructed - calling resize(%d, %d)", width, height);
-
-    resize(width, height);
+    reset();    
 }
 
 void RendererState::reset() {
