@@ -89,8 +89,8 @@ void RendererState::resize(int newWidth, int newHeight) {
     tex = OpenGLUtils::createTexture(width, height);
     CudaInterop::registerPBO(pbo);
 
-    setupCudaBuffers();
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
+    setupCudaBuffers();
 
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[Resize] %d x %d buffers reallocated", width, height);
