@@ -12,6 +12,7 @@
 RendererState::RendererState(int w, int h)
 : width(w), height(h) {
     reset();
+    resize(width, height);
 }
 
 void RendererState::reset() {
