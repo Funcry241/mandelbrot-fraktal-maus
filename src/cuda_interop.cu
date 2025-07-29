@@ -94,6 +94,7 @@ void renderCudaFrame(
         cudaError_t err;
 
         err = cudaMemset(d_iterations, 0, totalPixels * sizeof(int));
+        LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels → %zu bytes", totalPixels, totalPixels * sizeof(int));
         LUCHS_LOG_HOST("cudaMemset d_iterations: %d", static_cast<int>(err));
         if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_iterations failed");
 
