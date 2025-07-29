@@ -60,40 +60,35 @@ void RendererState::setupCudaBuffers() {
         LUCHS_LOG_HOST("[DEBUG] setupCudaBuffers: %d x %d -> tileSize=%d -> %d tiles",
                        width, height, tileSize, numTiles);
 
-    // --- d_iterations ---
-    cudaError_t err = cudaMalloc(&d_iterations, totalPixels * sizeof(int));
-    LUCHS_LOG_HOST("[CHECK] cudaMalloc d_iterations: err=%d → %p (%d bytes)",
-                   (int)err, (void*)d_iterations, totalPixels * (int)sizeof(int));
-    if (err != cudaSuccess) throw std::runtime_error("cudaMalloc d_iterations failed");
+    // --- Iteration-Puffer ---
+    CUDA_CHECK(cudaMalloc(&d_iterations, totalPixels * sizeof(int)));
+    LUCHS_LOG_HOST("[CHECK] cudaMalloc d_iterations: err=%d -> %p (%d bytes)", 0, (void*)d_iterations, totalPixels * (int)sizeof(int));
+    CUDA_CHECK(cudaMemset(d_iterations, 0, totalPixels * sizeof(int)));
+    LUCHS_LOG_HOST("[CHECK] cudaMemset d_iterations: err=%d", 0);
 
-    err = cudaMemset(d_iterations, 0, totalPixels * sizeof(int));
-    LUCHS_LOG_HOST("[CHECK] cudaMemset d_iterations: err=%d", (int)err);
-    if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_iterations failed");
+    // --- Entropy-Puffer ---
+    CUDA_CHECK(cudaMalloc(&d_entropy,  numTiles * sizeof(float)));
+    LUCHS_LOG_HOST("[CHECK] cudaMalloc d_entropy: err=%d -> %p (%d bytes)", 0, (void*)d_entropy, numTiles * (int)sizeof(float));
+    CUDA_CHECK(cudaMemset(d_entropy,  0, numTiles * sizeof(float)));
+    LUCHS_LOG_HOST("[CHECK] cudaMemset d_entropy: issued");
 
-    // --- d_entropy ---
-    err = cudaMalloc(&d_entropy, numTiles * sizeof(float));
-    LUCHS_LOG_HOST("[CHECK] cudaMalloc d_entropy: err=%d → %p (%d bytes)",
-                   (int)err, (void*)d_entropy, numTiles * (int)sizeof(float));
-    if (err != cudaSuccess) throw std::runtime_error("cudaMalloc d_entropy failed");
+    // --- Synchronisation zur Absturzprüfung ---
+    cudaDeviceSynchronize();
+    cudaError_t syncErr = cudaGetLastError();
+    LUCHS_LOG_HOST("[CHECK] cudaDeviceSynchronize after d_entropy memset: err=%d", (int)syncErr);
+    if (syncErr != cudaSuccess)
+        throw std::runtime_error("cudaMemset d_entropy failed (post-sync)"); // 🦦 Otter: Expliziter Fehlercheck nach async-Operation
 
-    err = cudaMemset(d_entropy, 0, numTiles * sizeof(float));
-    LUCHS_LOG_HOST("[CHECK] cudaMemset d_entropy: err=%d", (int)err);
-    if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_entropy failed");
+    // --- Contrast-Puffer ---
+    CUDA_CHECK(cudaMalloc(&d_contrast, numTiles * sizeof(float)));
+    LUCHS_LOG_HOST("[CHECK] cudaMalloc d_contrast: err=%d -> %p (%d bytes)", 0, (void*)d_contrast, numTiles * (int)sizeof(float));
+    CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
+    LUCHS_LOG_HOST("[CHECK] cudaMemset d_contrast: err=%d", 0);
 
-    // --- d_contrast ---
-    err = cudaMalloc(&d_contrast, numTiles * sizeof(float));
-    LUCHS_LOG_HOST("[CHECK] cudaMalloc d_contrast: err=%d → %p (%d bytes)",
-                   (int)err, (void*)d_contrast, numTiles * (int)sizeof(float));
-    if (err != cudaSuccess) throw std::runtime_error("cudaMalloc d_contrast failed");
-
-    err = cudaMemset(d_contrast, 0, numTiles * sizeof(float));
-    LUCHS_LOG_HOST("[CHECK] cudaMemset d_contrast: err=%d", (int)err);
-    if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_contrast failed");
-
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[ALLOC] d_iterations=%p d_entropy=%p d_contrast=%p | %dx%d px -> tileSize=%d -> %d tiles",
-                       (void*)d_iterations, (void*)d_entropy, (void*)d_contrast,
-                       width, height, tileSize, numTiles);
+    // --- Zusammenfassung ---
+    LUCHS_LOG_HOST("[ALLOC] d_iterations=%p d_entropy=%p d_contrast=%p | %dx%d px -> tileSize=%d -> %d tiles",
+                   (void*)d_iterations, (void*)d_entropy, (void*)d_contrast,
+                   width, height, tileSize, numTiles);
 
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
