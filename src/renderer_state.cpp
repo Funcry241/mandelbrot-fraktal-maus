@@ -69,6 +69,11 @@ void RendererState::setupCudaBuffers() {
     CUDA_CHECK(cudaMalloc(&d_contrast, numTiles * sizeof(float)));
     CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
 
+    if (Settings::debugLogging)
+    LUCHS_LOG_HOST("[ALLOC] d_iterations=%p d_entropy=%p d_contrast=%p | %dx%d px -> tileSize=%d -> %d tiles",
+                   (void*)d_iterations, (void*)d_entropy, (void*)d_contrast,
+                   width, height, tileSize, numTiles);
+
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
 }
