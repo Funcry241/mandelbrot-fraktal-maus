@@ -56,7 +56,7 @@ include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
 # 🛠 Executable: zentrale Dateien des Mandelbrot-Renderers
 add_executable(mandelbrot_otterdream
     src/main.cpp    
-    src/luchs_logger.cpp
+    src/luchs_log_host.cpp
     src/luchs_cuda_log_buffer.cu    
     src/renderer_core.cu
     src/renderer_loop.cpp

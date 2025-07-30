@@ -28,11 +28,18 @@ namespace LuchsLogger {
 
         int len = 0;
 
-        // Dateiname
-        for (int i = 0; file[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
-            d_logBuffer[idx + len++] = file[i];
+        // Rückwärts über das C-String-Ende iterieren
+        const char* filenameOnly = file;
+        for (int i = 0; file[i] != '\0'; ++i) {
+            if (file[i] == '/' || file[i] == '\\')
+                filenameOnly = &file[i + 1];
+        }
 
-        // ":" + Zeile + "| "
+        // Filename schreiben
+        for (int i = 0; filenameOnly[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
+            d_logBuffer[idx + len++] = filenameOnly[i];
+
+        // ":" + Zeile + " | "
         if (len + 6 + idx < LOG_BUFFER_SIZE) {
             d_logBuffer[idx + len++] = ':';
             int l = line, div = 10000;
@@ -49,7 +56,7 @@ namespace LuchsLogger {
             d_logBuffer[idx + len++] = ' ';
         }
 
-        // Nachricht (klartext, keine Formatierung)
+        // Nachricht (Klartext)
         for (int i = 0; msg[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
             d_logBuffer[idx + len++] = msg[i];
 

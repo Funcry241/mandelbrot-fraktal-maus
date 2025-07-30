@@ -1,4 +1,4 @@
-// Datei: src/luchs_logger.cpp
+// Datei: src/luchs_log_host.cpp
 // 🐭 Maus-Kommentar: Host-Logging mit präzisem Zeitformat und konsistentem Stil für alle Plattformen.
 // Otter: Gleiches Format wie Device. Schneefuchs: Keine Zeitabweichungen mehr!
 
@@ -7,6 +7,7 @@
 #include <chrono>
 #include <mutex>
 #include <cstdarg>
+#include <cstring> // 🐭 Für strrchr()
 
 namespace LuchsLogger {
 
@@ -16,6 +17,11 @@ namespace LuchsLogger {
 
     void logMessage(const char* file, int line, const char* fmt, ...) {
         std::lock_guard<std::mutex> lock(logMutex);
+
+        // 🐭 Maus: nur Dateiname extrahieren, kein Pfad
+        const char* filenameOnly = std::strrchr(file, '\\');
+        if (!filenameOnly) filenameOnly = std::strrchr(file, '/');
+        filenameOnly = filenameOnly ? filenameOnly + 1 : file;
 
         auto now = std::chrono::system_clock::now();
         auto t = std::chrono::system_clock::to_time_t(now);
@@ -31,7 +37,7 @@ namespace LuchsLogger {
         std::fprintf(stdout, "[%s.%03lld][%s][%d]: ",
                      timebuf,
                      static_cast<long long>(ms.count()),
-                     file,
+                     filenameOnly,
                      line);
 
         va_list args;
