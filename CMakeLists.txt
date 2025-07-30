@@ -71,7 +71,8 @@ add_executable(mandelbrot_otterdream
     src/core_kernel.cu
     src/zoom_logic.cpp
     src/zoom_command.cpp
-    src/frame_pipeline.cpp     
+    src/frame_pipeline.cpp    
+    src/frame_context.cpp
 )
 
 if (MSVC)

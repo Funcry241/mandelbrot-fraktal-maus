@@ -3,6 +3,7 @@
 // 🐭 Maus-Kommentar: Alpha 63b - Setzt FrameContext-Dimensionen explizit aus RendererState - kein implizites GLFW nötig.
 // 🦦 Otter: Klare Datenflussregel: RendererState .> FrameContext . CUDA. Kein Kontext-Zugriff im Pipeline-Code.
 // 🐑 Schneefuchs: Trennung von Plattformdetails und Logik ist jetzt durchgezogen.
+// Funktion: execute (komplett mit Schwarze Ameise Fix)
 
 #include <GLFW/glfw3.h>
 #include <cmath>
@@ -55,7 +56,6 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         return;
     }
 
-    // 🦦 Otter-Fix: Verwende gültige CUDA-Pointer aus RendererState
     CudaInterop::renderCudaFrame(
         state.d_iterations,
         state.d_entropy,
@@ -141,11 +141,17 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     RendererPipeline::drawFullscreenQuad(tex);
 }
 
+
 void execute(RendererState& state) {
     beginFrame(g_ctx);
-    g_ctx.width  = state.width;
-    g_ctx.height = state.height;
-    g_ctx.tileSize = state.lastTileSize; // <--- Fix: tileSize synchronisieren
+
+    // Schwarze Ameise: Explizite Synchronisierung aller relevanten FrameContext-Parameter aus RendererState
+    g_ctx.width        = state.width;
+    g_ctx.height       = state.height;
+    g_ctx.tileSize     = state.lastTileSize;
+    g_ctx.zoom         = static_cast<float>(state.zoom);
+    g_ctx.offset       = state.offset;
+    g_ctx.maxIterations = state.maxIterations;
 
     computeCudaFrame(g_ctx, state);
     applyZoomLogic(g_ctx, g_zoomBus);

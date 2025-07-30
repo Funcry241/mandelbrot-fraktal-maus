@@ -1,5 +1,5 @@
 // Datei: src/frame_context.hpp
-// 🦦 Otter: Klar sichtbar als Kapsel, keine faulen pragmas. Konstruktor & Logging unverändert.
+// 🦦 Otter: Klar sichtbar als Kapsel, keine faulen pragmas. Konstruktor & Logging deklariert.
 // 🦊 Schneefuchs: Speicherstruktur explizit - deterministisch, loggingkompatibel.
 
 #pragma once
@@ -52,29 +52,13 @@ public:
     double timeSinceLastZoom = 0.0;
 
     // Konstruktor initialisiert aus Settings
-    FrameContext()
-        : maxIterations(Settings::INITIAL_ITERATIONS),
-          tileSize(Settings::BASE_TILE_SIZE),
-          zoom(Settings::initialZoom),
-          offset{Settings::initialOffsetX, Settings::initialOffsetY}
-    {}
+    FrameContext();
 
     // Debug-Ausgaben
-    void printDebug() const {
-        if (!Settings::debugLogging) return;
-        LUCHS_LOG_HOST("[Frame] w=%d h=%d zoom=%.1e offset=(%.5f, %.5f) tiles=%d",
-            width, height, zoom, offset.x, offset.y, tileSize);
-    }
+    void printDebug() const;
 
     // Speicher zurücksetzen - z. B. bei Resize
-    void clear() {
-        h_entropy.clear();
-        h_contrast.clear();
-        d_entropy = nullptr;
-        d_contrast = nullptr;
-        d_iterations = nullptr;
-        shouldZoom = false;
-    }
+    void clear();
 };
 
 #ifdef _MSC_VER
