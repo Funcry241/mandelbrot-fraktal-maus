@@ -22,6 +22,9 @@ namespace CudaInterop {
 static cudaGraphicsResource_t cudaPboResource = nullptr;
 static bool pauseZoom = false;
 
+// 🦦 Otter: Luchs Baby Init Flag
+static bool luchsBabyInitDone = false;
+
 void logCudaDeviceContext(const char* context) {
     int device = -1;
     cudaError_t err = cudaGetDevice(&device);
@@ -117,7 +120,7 @@ void renderCudaFrame(
     if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_contrast failed");
 
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[MAP] cudaGraphicsMapResources → %p", (void*)cudaPboResource);
+        LUCHS_LOG_HOST("[MAP] cudaGraphicsMapResources -> %p", (void*)cudaPboResource);
 
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
@@ -131,28 +134,35 @@ void renderCudaFrame(
 
     if (!devPtr) {
         LUCHS_LOG_HOST("[FATAL] Kernel skipped: surface pointer is null");
-    } else if (Settings::debugLogging) {
-        int dbg_before[3]{};
-        CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, sizeof(dbg_before), cudaMemcpyDeviceToHost));
+    } else {
+        // --- Luchs Baby Init, einmalig ---
+        if (!luchsBabyInitDone) {
+            LuchsLogger::initCudaLogBuffer(0); // Default-Stream 0 nutzen, oder ggf. eigenen Stream übergeben
+            luchsBabyInitDone = true;
+        }
 
-        LUCHS_LOG_HOST("[KERNEL] launch_mandelbrotHybrid(surface=%p, w=%d, h=%d, zoom=%.5f, offset=(%.5f %.5f), iter=%d)",
-                       (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations);
+        if (Settings::debugLogging) {
+            int dbg_before[3]{};
+            CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, sizeof(dbg_before), cudaMemcpyDeviceToHost));
 
-        launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
-        LuchsLogger::flushDeviceLogToHost();
+            LUCHS_LOG_HOST("[KERNEL] launch_mandelbrotHybrid(surface=%p, w=%d, h=%d, zoom=%.5f, offset=(%.5f %.5f), iter=%d, tile=%d)",
+                (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations, tileSize);
 
-        if (Settings::debugLogging)
+            launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
+            LuchsLogger::flushDeviceLogToHost();
+
             LUCHS_LOG_HOST("[KERNEL] mandelbrotKernel(...) launched");
 
-        int dbg_after[3]{};
-        CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, sizeof(dbg_after), cudaMemcpyDeviceToHost));
-        LUCHS_LOG_HOST("[KERNEL] iters changed: %d→%d | %d→%d | %d→%d",
-                       dbg_before[0], dbg_after[0],
-                       dbg_before[1], dbg_after[1],
-                       dbg_before[2], dbg_after[2]);
-    } else {
-        launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
-        LuchsLogger::flushDeviceLogToHost();
+            int dbg_after[3]{};
+            CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, sizeof(dbg_after), cudaMemcpyDeviceToHost));
+            LUCHS_LOG_HOST("[KERNEL] iters changed: %d->%d | %d->%d | %d->%d",
+                           dbg_before[0], dbg_after[0],
+                           dbg_before[1], dbg_after[1],
+                           dbg_before[2], dbg_after[2]);
+        } else {
+            launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
+            LuchsLogger::flushDeviceLogToHost();
+        }
     }
 
     ::computeCudaEntropyContrast(d_iterations, d_entropy, d_contrast, width, height, tileSize, maxIterations);
@@ -175,7 +185,7 @@ void renderCudaFrame(
             state.zoomResult = result;
 
             if (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ZOOM] idx=%d entropy=%.3f contrast=%.3f → (%.5f %.5f) new=%d zoom=%d",
+                LUCHS_LOG_HOST("[ZOOM] idx=%d entropy=%.3f contrast=%.3f -> (%.5f %.5f) new=%d zoom=%d",
                                result.bestIndex,
                                result.bestEntropy,
                                result.bestContrast,

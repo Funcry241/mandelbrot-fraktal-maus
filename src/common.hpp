@@ -47,7 +47,7 @@
     do {                                                                       \
         cudaError_t err__ = (expr);                                            \
         if (err__ != cudaSuccess) {                                            \
-            LUCHS_LOG_HOST("[CUDA ERROR] %s failed at %s:%d → %s",             \
+            LUCHS_LOG_HOST("[CUDA ERROR] %s failed at %s:%d -> %s",             \
                            #expr, __FILE__, __LINE__, cudaGetErrorString(err__)); \
             throw std::runtime_error("CUDA failure: " #expr);                  \
         }                                                                      \

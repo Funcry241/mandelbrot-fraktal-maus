@@ -41,4 +41,17 @@ namespace LuchsLogger {
         flushDeviceLogToHost(0);
     }
 
+    // -------------------------
+    // 🐾 Luchs Baby Architektur: Initialisierungskontrolle
+    // -------------------------
+
+    // Initialisiert den CUDA-Logpuffer, muss vor flushDeviceLogToHost aufgerufen werden!
+    void initCudaLogBuffer(cudaStream_t stream);
+
+    // Gibt Ressourcen frei, falls nötig (optional)
+    void freeCudaLogBuffer();
+
+    // Prüft, ob der Logbuffer initialisiert ist
+    bool isCudaLogBufferInitialized();
+
 } // namespace LuchsLogger

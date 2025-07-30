@@ -145,6 +145,7 @@ void execute(RendererState& state) {
     beginFrame(g_ctx);
     g_ctx.width  = state.width;
     g_ctx.height = state.height;
+    g_ctx.tileSize = state.lastTileSize; // <--- Fix: tileSize synchronisieren
 
     computeCudaFrame(g_ctx, state);
     applyZoomLogic(g_ctx, g_zoomBus);

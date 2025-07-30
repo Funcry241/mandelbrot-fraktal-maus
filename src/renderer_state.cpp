@@ -126,7 +126,7 @@ void RendererState::resize(int newWidth, int newHeight) {
 
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] resize(): zoom=%.5f → tileSize=%d", zoom, lastTileSize);
+        LUCHS_LOG_HOST("[DEBUG] resize(): zoom=%.5f -> tileSize=%d", zoom, lastTileSize);
 
     setupCudaBuffers(lastTileSize);
 
