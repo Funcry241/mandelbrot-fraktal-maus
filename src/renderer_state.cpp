@@ -1,6 +1,8 @@
 // Datei: src/renderer_state.cpp
 // 🐭 Maus-Kommentar: Tile-Größe jetzt sichtbar. Kein malloc ins Leere mehr.
 // 🦦 Otter: Fehler sichtbar, deterministisch, kein division-by-zero.
+// 🐜 Rote Ameise: setupCudaBuffers nimmt tileSize explizit entgegen – Datenfluss 100% klar.
+// 🐑 Hirte: Validierung via cudaPointerGetAttributes – wenn’s kracht, wissen wir was d_entropy wirklich ist.
 // 🦊 Schneefuchs: Wenn es kracht, wissen wir exakt wo.
 
 #include "pch.hpp"
@@ -49,9 +51,8 @@ void RendererState::reset() {
     zoomResult.perTileContrast.clear();
 }
 
-void RendererState::setupCudaBuffers() {
+void RendererState::setupCudaBuffers(int tileSize) {
     const int totalPixels = width * height;
-    const int tileSize    = lastTileSize;
     const int tilesX      = (width + tileSize - 1) / tileSize;
     const int tilesY      = (height + tileSize - 1) / tileSize;
     const int numTiles    = tilesX * tilesY;
@@ -59,7 +60,7 @@ void RendererState::setupCudaBuffers() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] setupCudaBuffers: %d x %d -> tileSize=%d -> %d tiles",
                        width, height, tileSize, numTiles);
-    
+
     CUDA_CHECK(cudaSetDevice(0));
     CudaInterop::logCudaDeviceContext("setupCudaBuffers");
 
@@ -70,9 +71,17 @@ void RendererState::setupCudaBuffers() {
     LUCHS_LOG_HOST("[CHECK] cudaMemset d_iterations: err=%d", 0);
 
     // --- Entropy-Puffer ---
-    CUDA_CHECK(cudaMalloc(&d_entropy,  numTiles * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_entropy, numTiles * sizeof(float)));
     LUCHS_LOG_HOST("[CHECK] cudaMalloc d_entropy: err=%d -> %p (%d bytes)", 0, (void*)d_entropy, numTiles * (int)sizeof(float));
-    CUDA_CHECK(cudaMemset(d_entropy,  0, numTiles * sizeof(float)));
+    
+    // 🐑 Hirte: Validierung der Device-Pointer-Eigenschaften nach malloc
+    cudaPointerAttributes attr = {};
+    cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_entropy);
+    LUCHS_LOG_HOST("[CHECK] d_entropy: attrErr=%d type=%d device=%d hostPtr=%p devicePtr=%p",
+                   (int)attrErr, (int)attr.type, (int)attr.device,
+                   (void*)attr.hostPointer, (void*)attr.devicePointer);
+
+    CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
     LUCHS_LOG_HOST("[CHECK] cudaMemset d_entropy: issued");
 
     // --- Synchronisation zur Absturzprüfung ---
@@ -80,7 +89,7 @@ void RendererState::setupCudaBuffers() {
     cudaError_t syncErr = cudaGetLastError();
     LUCHS_LOG_HOST("[CHECK] cudaDeviceSynchronize after d_entropy memset: err=%d", (int)syncErr);
     if (syncErr != cudaSuccess)
-        throw std::runtime_error("cudaMemset d_entropy failed (post-sync)"); // 🦦 Otter: Expliziter Fehlercheck nach async-Operation
+        throw std::runtime_error("cudaMemset d_entropy failed (post-sync)");
 
     // --- Contrast-Puffer ---
     CUDA_CHECK(cudaMalloc(&d_contrast, numTiles * sizeof(float)));
@@ -98,23 +107,18 @@ void RendererState::setupCudaBuffers() {
 }
 
 void RendererState::resize(int newWidth, int newHeight) {
-    // Device-Ressourcen freigeben
     if (d_iterations) { CUDA_CHECK(cudaFree(d_iterations)); d_iterations = nullptr; }
     if (d_entropy)    { CUDA_CHECK(cudaFree(d_entropy));    d_entropy    = nullptr; }
     if (d_contrast)   { CUDA_CHECK(cudaFree(d_contrast));   d_contrast   = nullptr; }
 
-    // CUDA-seitige Bindung zum alten PBO lösen
     CudaInterop::unregisterPBO();
 
-    // OpenGL-Ressourcen löschen
     if (pbo) { glDeleteBuffers(1, &pbo); pbo = 0; }
     if (tex) { glDeleteTextures(1, &tex); tex = 0; }
 
-    // Neue Größe setzen
     width  = newWidth;
     height = newHeight;
 
-    // Neu erzeugen & registrieren
     OpenGLUtils::setGLResourceContext("resize");
     pbo = OpenGLUtils::createPBO(width, height);
     tex = OpenGLUtils::createTexture(width, height);
@@ -124,7 +128,7 @@ void RendererState::resize(int newWidth, int newHeight) {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] resize(): zoom=%.5f → tileSize=%d", zoom, lastTileSize);
 
-    setupCudaBuffers();
+    setupCudaBuffers(lastTileSize);
 
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[Resize] %d x %d buffers reallocated", width, height);

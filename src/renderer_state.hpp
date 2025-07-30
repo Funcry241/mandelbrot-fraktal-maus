@@ -1,6 +1,7 @@
 // Datei: src/renderer_state.hpp
 // 🦦 Otter: Einheitlich in allen Forward-Deklarationen. Keine strukturelle Überraschung.
 // 🦊 Schneefuchs: Speicher & Buffer exakt definiert, feingliedrig und logisch.
+// 🐜 Rote Ameise: tileSize explizit übergeben, deterministisch & sichtbar, keine impliziten Berechnungen mehr.
 
 #pragma once
 
@@ -66,6 +67,6 @@ public:
     // 🧽 Setup & Verwaltung
     RendererState(int w, int h);
     void reset();                             // stellt Initialzustand her
-    void setupCudaBuffers();                  // allokiert Device-Buffer
+    void setupCudaBuffers(int tileSize);      // allokiert Device-Buffer – tileSize explizit (🐜)
     void resize(int newWidth, int newHeight); // Fenstergröße ändern
 };

@@ -96,7 +96,7 @@ constexpr int INITIAL_ITERATIONS = 100;    // Basiswert - empfohlen: 50 bis 200
 constexpr int MAX_ITERATIONS_CAP = 50000;  // Hardlimit - je höher, desto langsamer, aber detaillierter
 
 // 💚 CUDA Tile-Größen (neu quantisiert!)
-constexpr int BASE_TILE_SIZE = 24; // Empfohlen: 16-32 - idealer Kompromiss aus Qualität & Performance
+constexpr int BASE_TILE_SIZE = 32; // Legacy: nur für Rückwärtskompatibilität – nutze computeTileSizeFromZoom(...)
 constexpr int MIN_TILE_SIZE  = 8;  // Untergrenze - kleinere Werte = feinere Analyse, aber höhere Last
 constexpr int MAX_TILE_SIZE  = 64; // Obergrenze - größere Werte = weniger Rechenlast, aber ungenauer
 

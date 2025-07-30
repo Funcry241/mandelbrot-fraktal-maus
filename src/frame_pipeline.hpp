@@ -11,6 +11,7 @@ Deklariert klar getrennte Schritte:
     -> Alles basiert auf FrameContext, keine globalen Zustände.
     ❤️ FIX: computeCudaFrame explizit mit RendererState - Maus liebt Präzision, Schneefuchs liebt Klarheit.
     ❤️ FIX: drawFrame braucht jetzt RendererState für HeatmapOverlay (neuer Parameter).
+    🐜 Rote Ameise: tileSize explizit übergeben für deterministische Pipeline
 */
 
 #pragma once
