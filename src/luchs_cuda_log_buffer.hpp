@@ -1,7 +1,7 @@
 // Datei: src/luchs_cuda_log_buffer.hpp
-// 🐭 Maus-Kommentar: Rückkehr zur Einfachheit - Klartext-Logging statt variadisch. Kein vsnprintf im __device__-Code.
-// 🦦 Otter: Formatierung raus, Sicherheit rein. Header konsistent zur .cu-Implementierung.
-// 🦊 Schneefuchs: Determinismus durch Reduktion - Formatierungsfreiheit auf CUDA-Level.
+// 🐭 Maus-Kommentar: Rückkehr zur Einfachheit – Klartext-Logging, jetzt mit `constexpr` statt Makro.
+// 🦦 Otter: Kein Makro-Murks mehr – stabil, sicher, sichtbar in allen Translation Units.
+// 🦊 Schneefuchs: Determinismus durch statisch geprüfte Größen – kein Bitmüll, keine Zufälligkeit.
 
 #pragma once
 #include <cuda_runtime.h>
@@ -11,11 +11,11 @@
 // =========================================================================
 // 🔒 Konfiguration des CUDA-Logbuffers
 // =========================================================================
-#define LOG_BUFFER_SIZE 1048576 // 1 MB Logpuffer (Empfehlung: 128 KB - 2 MB)
+static constexpr size_t LOG_BUFFER_SIZE = 1024 * 1024; // 1 MB Logpuffer (Empfehlung: 128 KB – 2 MB)
 
 // =========================================================================
 // 🧠 Device-Logging Makro (verwendbar in __device__ Funktionen)
-//     Nur Klartext - keine Formatierung im __device__-Code
+//     Nur Klartext – keine Formatierung im __device__-Code
 // =========================================================================
 #define LUCHS_LOG_DEVICE(msg) LuchsLogger::deviceLog(__FILE__, __LINE__, msg)
 
@@ -36,7 +36,7 @@ namespace LuchsLogger {
     // Host-seitig: Überträgt den Device-Puffer via Stream auf den Host
     void flushDeviceLogToHost(cudaStream_t stream);
 
-    // 🦦 Otter: Convenience-Funktion ohne Stream - nutzt Default-Stream (0)
+    // 🦦 Otter: Convenience-Funktion ohne Stream – nutzt Default-Stream (0)
     inline void flushDeviceLogToHost() {
         flushDeviceLogToHost(0);
     }
