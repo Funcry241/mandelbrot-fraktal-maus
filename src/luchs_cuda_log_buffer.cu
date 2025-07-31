@@ -1,7 +1,8 @@
 // Datei: src/luchs_cuda_log_buffer.cu
 // 🐭 Maus-Kommentar: Rückbau auf klare Nicht-Formatierung – robust, simpel, sicher.
 // 🦦 Otter: Keine varargs mehr – Klartext-only im device-Code, kompatibel & portabel.
-// 🦊 Schneefuchs: Präzise Begrenzung, keine Host-Abhängigkeit, garantiert lauffähig.
+// 🦊 Schneefuchs: cudaMemcpyFromSymbolAsync statt ungültiger Symbol-Zeiger – deterministisch, korrekt.
+
 #include "luchs_cuda_log_buffer.hpp"
 #include "luchs_log_host.hpp"
 #include <cstring>
@@ -35,18 +36,15 @@ namespace LuchsLogger {
 
         int len = 0;
 
-        // Rückwärts über das C-String-Ende iterieren, Filename extrahieren
         const char* filenameOnly = file;
         for (int i = 0; file[i] != '\0'; ++i) {
             if (file[i] == '/' || file[i] == '\\')
                 filenameOnly = &file[i + 1];
         }
 
-        // Filename schreiben
         for (int i = 0; filenameOnly[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
             d_logBuffer[idx + len++] = filenameOnly[i];
 
-        // ":" + Zeile + " | "
         if (len + 6 + idx < LOG_BUFFER_SIZE) {
             d_logBuffer[idx + len++] = ':';
             int l = line, div = 10000;
@@ -63,7 +61,6 @@ namespace LuchsLogger {
             d_logBuffer[idx + len++] = ' ';
         }
 
-        // Nachricht (Klartext)
         for (int i = 0; msg[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
             d_logBuffer[idx + len++] = msg[i];
 
@@ -113,7 +110,6 @@ namespace LuchsLogger {
             LUCHS_LOG_HOST("[LuchsBaby INFO] freeCudaLogBuffer called but not initialized.");
             return;
         }
-        // Derzeit keine dynamischen Ressourcen, nur Flag resetten
         s_isInitialized = false;
         s_logStream = nullptr;
         LUCHS_LOG_HOST("[LuchsBaby] LogBuffer freed");
@@ -133,22 +129,28 @@ namespace LuchsLogger {
             return;
         }
 
-        if (!h_logBuffer || !d_logBuffer) {
-            LUCHS_LOG_HOST("[LuchsBaby ERROR] flushDeviceLogToHost: null pointer -> h=%p d=%p", (void*)h_logBuffer, (void*)d_logBuffer);
+        if (!h_logBuffer) {
+            LUCHS_LOG_HOST("[LuchsBaby ERROR] flushDeviceLogToHost: h_logBuffer null!");
             return;
         }
 
-        // Fallback auf Stream 0 wenn nicht gesetzt
         if (stream == nullptr) {
             LUCHS_LOG_HOST("[LuchsBaby] stream==nullptr, using default stream 0");
             stream = 0;
         }
 
-        LUCHS_LOG_HOST("[DEBUG] flushDeviceLogToHost: h_logBuffer=%p, d_logBuffer=%p, size=%zu, stream=%p", (void*)h_logBuffer, (void*)d_logBuffer, LOG_BUFFER_SIZE, (void*)stream);
+        LUCHS_LOG_HOST("[DEBUG] flushDeviceLogToHost: using cudaMemcpyFromSymbolAsync (size=%zu)", LOG_BUFFER_SIZE);
 
-        cudaError_t copyErr = cudaMemcpyAsync(h_logBuffer, d_logBuffer, LOG_BUFFER_SIZE, cudaMemcpyDeviceToHost, stream);
+        cudaError_t copyErr = cudaMemcpyFromSymbolAsync(
+            h_logBuffer,
+            d_logBuffer,
+            LOG_BUFFER_SIZE,
+            0,
+            cudaMemcpyDeviceToHost,
+            stream
+        );
         if (copyErr != cudaSuccess) {
-            LUCHS_LOG_HOST("[CUDA ERROR] cudaMemcpyAsync failed: %s", cudaGetErrorString(copyErr));
+            LUCHS_LOG_HOST("[CUDA ERROR] cudaMemcpyFromSymbolAsync failed: %s", cudaGetErrorString(copyErr));
             return;
         }
 
