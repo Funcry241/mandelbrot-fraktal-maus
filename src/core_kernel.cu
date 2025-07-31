@@ -72,19 +72,15 @@ __global__ void mandelbrotKernel(
     out[idx] = elegantColor(tClamped);
     iterOut[idx] = it;
 
-    // 🐭 Maus: Pixel-Logik im Fokus – norm, t, tClamped
-    if (Settings::debugLogging &&
-        blockIdx.x == 0 && blockIdx.y == 0 &&
-        threadIdx.x == 0 && threadIdx.y < 3) {
-
-        LUCHS_LOG_DEVICE("=== PIXEL DEBUG START ===");
-
-        if (it <= 5) LUCHS_LOG_DEVICE("it low");
-        if (norm < 1.0f) LUCHS_LOG_DEVICE("norm < 1.0");
-        if (t < 0.0f) LUCHS_LOG_DEVICE("t < 0");
-        if (tClamped == 0.0f) LUCHS_LOG_DEVICE("tClamped = 0");
-
-        LUCHS_LOG_DEVICE("=== PIXEL DEBUG END ===");
+    // 🐭 Maus: Unbedingter Log – kein Filter mehr
+    if (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0) {
+        LUCHS_LOG_DEVICE("=== PIXEL CHECK ===");
+        LUCHS_LOG_DEVICE("CHECK: it = 2?");
+        if (it == 2)       LUCHS_LOG_DEVICE("it == 2");
+        if (norm < 1.0f)   LUCHS_LOG_DEVICE("norm < 1.0");
+        if (t < 0.0f)      LUCHS_LOG_DEVICE("t < 0");
+        if (tClamped == 0) LUCHS_LOG_DEVICE("tClamped == 0");
+        LUCHS_LOG_DEVICE("=== END PIXEL CHECK ===");
     }
 
     if (Settings::debugLogging && threadIdx.x == 0 && threadIdx.y == 0) {
