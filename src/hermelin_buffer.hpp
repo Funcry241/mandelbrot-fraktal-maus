@@ -6,113 +6,56 @@
 #pragma once
 
 #include <cuda_runtime.h>
-#include <stdexcept>
 #include <GL/glew.h>
+#include <cstddef>
 
 namespace Hermelin {
 
-// RAII für CUDA Device Memory (z.B. d_iterations, d_entropy)
 class CudaDeviceBuffer {
 public:
-CudaDeviceBuffer() : ptr_(nullptr), sizeBytes_(0) {}
-~CudaDeviceBuffer() { free(); }
+    CudaDeviceBuffer();
+    ~CudaDeviceBuffer();
 
-// Nicht kopierbar
-CudaDeviceBuffer(const CudaDeviceBuffer&) = delete;
-CudaDeviceBuffer& operator=(const CudaDeviceBuffer&) = delete;
+    CudaDeviceBuffer(const CudaDeviceBuffer&) = delete;
+    CudaDeviceBuffer& operator=(const CudaDeviceBuffer&) = delete;
 
-// Verschiebbar
-CudaDeviceBuffer(CudaDeviceBuffer&& other) noexcept : ptr_(other.ptr_), sizeBytes_(other.sizeBytes_) {
-    other.ptr_ = nullptr;
-    other.sizeBytes_ = 0;
-}
-CudaDeviceBuffer& operator=(CudaDeviceBuffer&& other) noexcept {
-    if (this != &other) {
-        free();
-        ptr_ = other.ptr_;
-        sizeBytes_ = other.sizeBytes_;
-        other.ptr_ = nullptr;
-        other.sizeBytes_ = 0;
-    }
-    return *this;
-}
+    CudaDeviceBuffer(CudaDeviceBuffer&& other) noexcept;
+    CudaDeviceBuffer& operator=(CudaDeviceBuffer&& other) noexcept;
 
-void allocate(size_t sizeBytes) {
-    free();
-    cudaError_t err = cudaMalloc(&ptr_, sizeBytes);
-    if (err != cudaSuccess) {
-        ptr_ = nullptr;
-        sizeBytes_ = 0;
-        throw std::runtime_error("Hermelin: cudaMalloc failed");
-    }
-    sizeBytes_ = sizeBytes;
-}
+    void allocate(size_t sizeBytes);
+    void free();
 
-void free() {
-    if (ptr_) {
-        cudaFree(ptr_);
-        ptr_ = nullptr;
-        sizeBytes_ = 0;
-    }
-}
-
-void* get() const { return ptr_; }
-size_t size() const { return sizeBytes_; }
-
-// Explizites Nullptr-Check für Sicherheit
-explicit operator bool() const { return ptr_ != nullptr; }
+    void* get() const;
+    size_t size() const;
+    explicit operator bool() const;
 
 private:
-void* ptr_;
-size_t sizeBytes_;
+    void* ptr_;
+    size_t sizeBytes_;
 };
 
-// RAII für OpenGL Buffer (z.B. PBO)
 class GLBuffer {
 public:
-GLBuffer() : id_(0) {}
-~GLBuffer() { free(); }
+    GLBuffer();
+    ~GLBuffer();
 
-// Nicht kopierbar
-GLBuffer(const GLBuffer&) = delete;
-GLBuffer& operator=(const GLBuffer&) = delete;
+    GLBuffer(const GLBuffer&) = delete;
+    GLBuffer& operator=(const GLBuffer&) = delete;
 
-// Verschiebbar
-GLBuffer(GLBuffer&& other) noexcept : id_(other.id_) {
-    other.id_ = 0;
-}
-GLBuffer& operator=(GLBuffer&& other) noexcept {
-    if (this != &other) {
-        free();
-        id_ = other.id_;
-        other.id_ = 0;
-    }
-    return *this;
-}
+    GLBuffer(GLBuffer&& other) noexcept;
+    GLBuffer& operator=(GLBuffer&& other) noexcept;
 
-// Neuer Konstruktor: explizit aus GLuint
-explicit GLBuffer(GLuint id) noexcept : id_(id) {}
+    explicit GLBuffer(GLuint id) noexcept;
 
-void create() {
-    free();
-    glGenBuffers(1, &id_);
-    if (id_ == 0)
-        throw std::runtime_error("Hermelin: glGenBuffers failed");
-}
+    void create();
+    void allocate(GLsizeiptr sizeBytes, GLenum usage = GL_DYNAMIC_DRAW);
+    void free();
 
-void free() {
-    if (id_ != 0) {
-        glDeleteBuffers(1, &id_);
-        id_ = 0;
-    }
-}
-
-GLuint id() const { return id_; }
-
-explicit operator bool() const { return id_ != 0; }
+    GLuint id() const;
+    explicit operator bool() const;
 
 private:
-GLuint id_;
+    GLuint id_;
 };
 
 } // namespace Hermelin

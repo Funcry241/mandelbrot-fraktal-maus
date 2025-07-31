@@ -73,6 +73,7 @@ add_executable(mandelbrot_otterdream
     src/zoom_command.cpp
     src/frame_pipeline.cpp    
     src/frame_context.cpp
+    src/hermelin_buffer.cpp
 )
 
 if (MSVC)
