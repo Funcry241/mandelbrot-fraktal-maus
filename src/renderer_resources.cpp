@@ -13,7 +13,6 @@ namespace OpenGLUtils {
 // 🕵️ Kontext-String für Logging (z.B. "init", "resize")
 static const char* resourceContext = "unknown";
 
-// Kontext setzen für folgende Ressourcenoperationen
 void setGLResourceContext(const char* context) {
     resourceContext = context ? context : "unknown";
 }

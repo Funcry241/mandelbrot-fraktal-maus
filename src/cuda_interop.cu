@@ -12,6 +12,7 @@
 #include "renderer_state.hpp"
 #include "zoom_logic.hpp"
 #include "luchs_cuda_log_buffer.hpp"
+#include "hermelin_buffer.hpp" // Hermelin RAII Buffer
 #include <cuda_gl_interop.h>
 #include <vector>
 
@@ -31,7 +32,7 @@ cudaError_t err = cudaGetDevice(&device);
 LUCHS_LOG_HOST("[CTX] %s: cudaGetDevice() = %d (%s)", context, device, cudaGetErrorString(err));
 }
 
-void registerPBO(unsigned int pbo) {
+void registerPBO(const Hermelin::GLBuffer& pbo) {
 if (cudaPboResource) {
 LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!");
 return;
@@ -42,28 +43,28 @@ glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundBefore);
 LUCHS_LOG_HOST("[CHECK] GL bind state BEFORE bind: %d", boundBefore);
 
 glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo.id());
 
 GLint boundAfter = 0;
 glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundAfter);
-LUCHS_LOG_HOST("[CHECK] GL bind state AFTER  bind: %d (expected: %u)", boundAfter, pbo);
+LUCHS_LOG_HOST("[CHECK] GL bind state AFTER bind: %d (expected: %u)", boundAfter, pbo.id());
 
-if (boundAfter != static_cast<GLint>(pbo)) {
-    LUCHS_LOG_HOST("[FATAL] GL bind failed - buffer %u was not bound (GL reports: %d)", pbo, boundAfter);
+if (boundAfter != static_cast<GLint>(pbo.id())) {
+    LUCHS_LOG_HOST("[FATAL] GL bind failed - buffer %u was not bound (GL reports: %d)", pbo.id(), boundAfter);
     throw std::runtime_error("glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo) failed - buffer not active");
 }
 
 if (Settings::debugLogging)
-    LUCHS_LOG_HOST("[CU-PBO] Preparing to register PBO ID %u", pbo);
+    LUCHS_LOG_HOST("[CU-PBO] Preparing to register PBO ID %u", pbo.id());
 
-cudaError_t err = cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo, cudaGraphicsRegisterFlagsWriteDiscard);
+cudaError_t err = cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo.id(), cudaGraphicsRegisterFlagsWriteDiscard);
 if (err != cudaSuccess) {
     LUCHS_LOG_HOST("[CU-PBO] cudaGraphicsGLRegisterBuffer FAILED: %s", cudaGetErrorString(err));
     throw std::runtime_error("cudaGraphicsGLRegisterBuffer failed");
 }
 
 if (Settings::debugLogging) {
-    LUCHS_LOG_HOST("[CU-PBO] Registered GL buffer ID %u -> cudaPboResource: %p", pbo, (void*)cudaPboResource);
+    LUCHS_LOG_HOST("[CU-PBO] Registered GL buffer ID %u -> cudaPboResource: %p", pbo.id(), (void*)cudaPboResource);
 }
 
 logCudaDeviceContext("after registerPBO");
@@ -71,9 +72,9 @@ logCudaDeviceContext("after registerPBO");
 }
 
 void renderCudaFrame(
-int* d_iterations,
-float* d_entropy,
-float* d_contrast,
+Hermelin::CudaDeviceBuffer& d_iterations,
+Hermelin::CudaDeviceBuffer& d_entropy,
+Hermelin::CudaDeviceBuffer& d_contrast,
 int width,
 int height,
 float zoom,
@@ -105,20 +106,18 @@ const int numTiles = tilesX * tilesY;
 
 CUDA_CHECK(cudaSetDevice(0));
 
-// Debug: Pointer-Attribute prüfen
 cudaPointerAttributes attrCheck;
-cudaError_t attrErr = cudaPointerGetAttributes(&attrCheck, d_iterations);
+cudaError_t attrErr = cudaPointerGetAttributes(&attrCheck, d_iterations.get());
 LUCHS_LOG_HOST("[DEBUG] attrCheck result: err=%d, type=%d, device=%d, hostPtr=%p, devicePtr=%p",
     (int)attrErr, (int)attrCheck.type, (int)attrCheck.device,
     (void*)attrCheck.hostPointer, (void*)attrCheck.devicePointer);
 
-// Speicher initialisieren
-cudaError_t err = cudaMemset(d_iterations, 0, totalPixels * sizeof(int));
-LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels -> %zu bytes", totalPixels, totalPixels * sizeof(int));
+cudaError_t err = cudaMemset(d_iterations.get(), 0, d_iterations.size());
+LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels -> %zu bytes", totalPixels, d_iterations.size());
 if (err != cudaSuccess) throw std::runtime_error("cudaMemset d_iterations failed");
 
-CUDA_CHECK(cudaMemset(d_entropy, 0, numTiles * sizeof(float)));
-CUDA_CHECK(cudaMemset(d_contrast, 0, numTiles * sizeof(float)));
+CUDA_CHECK(cudaMemset(d_entropy.get(), 0, d_entropy.size()));
+CUDA_CHECK(cudaMemset(d_contrast.get(), 0, d_contrast.size()));
 
 if (Settings::debugLogging)
     LUCHS_LOG_HOST("[MAP] Mapping CUDA-GL resource %p", (void*)cudaPboResource);
@@ -138,7 +137,6 @@ if (!devPtr) {
     return;
 }
 
-// Einmalige Initialisierung Device-Logbuffer
 if (!luchsBabyInitDone) {
     LuchsLogger::initCudaLogBuffer(0);
     luchsBabyInitDone = true;
@@ -146,33 +144,37 @@ if (!luchsBabyInitDone) {
 
 if (Settings::debugLogging) {
     int dbg_before[3]{};
-    CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations, sizeof(dbg_before), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(dbg_before, d_iterations.get(), sizeof(dbg_before), cudaMemcpyDeviceToHost));
 
     LUCHS_LOG_HOST("[KERNEL] launch_mandelbrotHybrid(surface=%p, w=%d, h=%d, zoom=%.5f, offset=(%.5f %.5f), iter=%d, tile=%d)",
         (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations, tileSize);
 
-    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
+    launch_mandelbrotHybrid(devPtr, static_cast<int*>(d_iterations.get()), width, height, zoom, offset, maxIterations, tileSize);
     LuchsLogger::flushDeviceLogToHost();
 
     LUCHS_LOG_HOST("[KERNEL] mandelbrotKernel(...) launched");
 
     int dbg_after[3]{};
-    CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations, sizeof(dbg_after), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations.get(), sizeof(dbg_after), cudaMemcpyDeviceToHost));
     LUCHS_LOG_HOST("[KERNEL] iters changed: %d->%d | %d->%d | %d->%d",
                    dbg_before[0], dbg_after[0],
                    dbg_before[1], dbg_after[1],
                    dbg_before[2], dbg_after[2]);
 } else {
-    launch_mandelbrotHybrid(devPtr, d_iterations, width, height, zoom, offset, maxIterations, tileSize);
+    launch_mandelbrotHybrid(devPtr, static_cast<int*>(d_iterations.get()), width, height, zoom, offset, maxIterations, tileSize);
     LuchsLogger::flushDeviceLogToHost();
 }
 
-::computeCudaEntropyContrast(d_iterations, d_entropy, d_contrast, width, height, tileSize, maxIterations);
+::computeCudaEntropyContrast(
+    static_cast<const int*>(d_iterations.get()),
+    static_cast<float*>(d_entropy.get()),
+    static_cast<float*>(d_contrast.get()),
+    width, height, tileSize, maxIterations);
 
 h_entropy.resize(numTiles);
 h_contrast.resize(numTiles);
-CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
-CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast, numTiles * sizeof(float), cudaMemcpyDeviceToHost));
+CUDA_CHECK(cudaMemcpy(h_entropy.data(), d_entropy.get(), numTiles * sizeof(float), cudaMemcpyDeviceToHost));
+CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(), numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
 shouldZoom = false;
 if (!pauseZoom) {

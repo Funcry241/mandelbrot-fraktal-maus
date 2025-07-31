@@ -155,7 +155,7 @@ void execute(RendererState& state) {
 
     computeCudaFrame(g_ctx, state);
     applyZoomLogic(g_ctx, g_zoomBus);
-    drawFrame(g_ctx, state.tex, state);
+    drawFrame(g_ctx, state.tex.id(), state);
 }
 
 } // namespace FramePipeline

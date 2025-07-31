@@ -22,4 +22,4 @@ GLuint createTexture(int width, int height);
 
 } // namespace OpenGLUtils
 
-#endif // RENDERER_RESOURCES_HPPs
+#endif // RENDERER_RESOURCES_HPP
