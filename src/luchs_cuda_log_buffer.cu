@@ -132,15 +132,35 @@ namespace LuchsLogger {
             LUCHS_LOG_HOST("[LuchsBaby ERROR] flushDeviceLogToHost called before init!");
             return;
         }
-        CUDA_CHECK(cudaMemcpyAsync(h_logBuffer, d_logBuffer, LOG_BUFFER_SIZE, cudaMemcpyDeviceToHost, stream));
-        CUDA_CHECK(cudaStreamSynchronize(stream));
+
+        if (!h_logBuffer || !d_logBuffer) {
+            LUCHS_LOG_HOST("[LuchsBaby ERROR] flushDeviceLogToHost: null pointer -> h=%p d=%p", (void*)h_logBuffer, (void*)d_logBuffer);
+            return;
+        }
+
+        // Fallback auf Stream 0 wenn nicht gesetzt
+        if (stream == nullptr) {
+            LUCHS_LOG_HOST("[LuchsBaby] stream==nullptr, using default stream 0");
+            stream = 0;
+        }
+
+        cudaError_t copyErr = cudaMemcpyAsync(h_logBuffer, d_logBuffer, LOG_BUFFER_SIZE, cudaMemcpyDeviceToHost, stream);
+        if (copyErr != cudaSuccess) {
+            LUCHS_LOG_HOST("[CUDA ERROR] cudaMemcpyAsync failed: %s", cudaGetErrorString(copyErr));
+            return;
+        }
+
+        cudaError_t syncErr = cudaStreamSynchronize(stream);
+        if (syncErr != cudaSuccess) {
+            LUCHS_LOG_HOST("[CUDA ERROR] cudaStreamSynchronize failed: %s", cudaGetErrorString(syncErr));
+            return;
+        }
 
         char* ptr = h_logBuffer;
         while (*ptr) {
             char* lineEnd = strchr(ptr, '\n');
             if (!lineEnd) break;
             *lineEnd = 0;
-
             LUCHS_LOG_HOST("[CUDA] %s", ptr);
             ptr = lineEnd + 1;
         }
