@@ -94,7 +94,7 @@ ZoomResult evaluateZoomTarget(
     auto ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
     if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ZoomEval] i=%d E=%.2f C=%.2f d=%.4f g=%.2f a=%.2f Z | %.3fms\n",
+        LUCHS_LOG_HOST("[ZoomEval] i=%d E=%.2f C=%.2f d=%.4f g=%.2f a=%.2f Z | %.3fms",
             result.bestIndex,
             result.bestEntropy,
             result.bestContrast,

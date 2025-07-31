@@ -45,10 +45,9 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fx, 
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut, int w, int h, float zoom, float2 offset, int maxIter)
 {
-    // --- Frühes Device-Log für Crash-Ortung ---
     if (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("mandelbrotKernel entered");
-        LUCHS_LOG_DEVICE("params set");
+        LUCHS_LOG_DEVICE("MandelbrotKernel: entered");
+        LUCHS_LOG_DEVICE("MandelbrotKernel: params set");
     }
 
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -74,7 +73,7 @@ __global__ void mandelbrotKernel(
     iterOut[idx] = it;
 
     if (Settings::debugLogging && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("block processed");
+        LUCHS_LOG_DEVICE("MandelbrotKernel: block processed");
     }
 }
 
@@ -106,7 +105,7 @@ __global__ void entropyKernel(const int* it, float* eOut, int w, int h, int tile
         eOut[tileIndex] = entropy;
 
         if (Settings::debugLogging) {
-            LUCHS_LOG_DEVICE("entropy computed");
+            LUCHS_LOG_DEVICE("EntropyKernel: entropy computed");
         }
     }
 }
@@ -131,7 +130,7 @@ __global__ void contrastKernel(const float* e, float* cOut, int tilesX, int tile
     cOut[idx] = (cnt > 0) ? sum / cnt : 0.0f;
 
     if (Settings::debugLogging && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("contrast computed");
+        LUCHS_LOG_DEVICE("ContrastKernel: contrast computed");
     }
 }
 
@@ -163,7 +162,7 @@ void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, f
 
     if (out && d_it) {
         mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter);
-        LUCHS_LOG_HOST("[DEBUG] Kernel launched");
+        LUCHS_LOG_HOST("[KERNEL] mandelbrotKernel<<<%d,%d>>> launched", grid.x, block.x);
     } else {
         LUCHS_LOG_HOST("[FATAL] launch_mandelbrotHybrid aborted: null device pointer(s)");
         return;
@@ -176,12 +175,16 @@ void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, f
         LUCHS_LOG_HOST("[CHECK] cudaGetLastError returned success");
     }
 
-    CUDA_CHECK(cudaDeviceSynchronize());
+    cudaError_t syncErr = cudaDeviceSynchronize();
+    if (syncErr != cudaSuccess) {
+        LUCHS_LOG_HOST("[CUDA ERROR] Kernel sync failed: %s", cudaGetErrorString(syncErr));
+        return;
+    }
 
     if (Settings::debugLogging) {
         int it[10] = { 0 };
         cudaMemcpy(it, d_it, sizeof(it), cudaMemcpyDeviceToHost);
-        LUCHS_LOG_HOST("[Iter] First10: %d %d %d %d %d %d %d %d %d %d",
+        LUCHS_LOG_HOST("[Mandelbrot] Iteration sample: %d %d %d %d %d %d %d %d %d %d",
                        it[0], it[1], it[2], it[3], it[4], it[5], it[6], it[7], it[8], it[9]);
     }
 }

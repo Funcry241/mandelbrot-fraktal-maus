@@ -26,7 +26,7 @@ GLuint createPBO(int width, int height) {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createPBO -> ID %u (ctx: %s, %dx%d)\n", pbo, resourceContext, width, height);
+        LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createPBO -> ID %u (ctx: %s, %dx%d)", pbo, resourceContext, width, height);
     return pbo;
 }
 
@@ -45,7 +45,7 @@ GLuint createTexture(int width, int height) {
     glBindTexture(GL_TEXTURE_2D, 0);
 
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createTexture -> ID %u (ctx: %s, %dx%d)\n", tex, resourceContext, width, height);
+        LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createTexture -> ID %u (ctx: %s, %dx%d)", tex, resourceContext, width, height);
     return tex;
 }
 

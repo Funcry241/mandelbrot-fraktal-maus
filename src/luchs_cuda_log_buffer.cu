@@ -144,6 +144,8 @@ namespace LuchsLogger {
             stream = 0;
         }
 
+        LUCHS_LOG_HOST("[DEBUG] flushDeviceLogToHost: h_logBuffer=%p, d_logBuffer=%p, size=%zu, stream=%p", (void*)h_logBuffer, (void*)d_logBuffer, LOG_BUFFER_SIZE, (void*)stream);
+
         cudaError_t copyErr = cudaMemcpyAsync(h_logBuffer, d_logBuffer, LOG_BUFFER_SIZE, cudaMemcpyDeviceToHost, stream);
         if (copyErr != cudaSuccess) {
             LUCHS_LOG_HOST("[CUDA ERROR] cudaMemcpyAsync failed: %s", cudaGetErrorString(copyErr));

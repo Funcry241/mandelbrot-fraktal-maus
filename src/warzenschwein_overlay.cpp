@@ -50,7 +50,7 @@ static GLuint compile(GLenum type, const char* src) {
     if (!ok) {
         char buf[512];
         glGetShaderInfoLog(s, 512, nullptr, buf);
-        LUCHS_LOG_HOST("[ShaderError] Warzenschwein %s: %s\n",
+        LUCHS_LOG_HOST("[ShaderError] Warzenschwein %s: %s",
                        type == GL_VERTEX_SHADER ? "Vertex" : "Fragment", buf);
         glDeleteShader(s);
         return 0;
@@ -82,7 +82,7 @@ static void initGL() {
     if (!linked) {
         char buf[512];
         glGetProgramInfoLog(shader, 512, nullptr, buf);
-        LUCHS_LOG_HOST("[ShaderError] Warzenschwein Link: %s\n", buf);
+        LUCHS_LOG_HOST("[ShaderError] Warzenschwein Link: %s", buf);
         glDeleteProgram(shader);
         shader = 0;
         return;
@@ -195,7 +195,7 @@ void drawOverlay(RendererState& ctx) {
     if (Settings::debugLogging) {
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
-            LUCHS_LOG_HOST("[WS-GL] glGetError = 0x%04X\n", err);
+            LUCHS_LOG_HOST("[WS-GL] glGetError = 0x%04X", err);
         }
     }
 }

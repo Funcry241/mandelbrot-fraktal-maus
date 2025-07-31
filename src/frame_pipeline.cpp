@@ -79,6 +79,10 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[KERNEL] Mandelbrot kernel completed");
 
+    // 🐜 Ameise: Device-Log nach Kernel flushen
+    if (Settings::debugLogging)
+        LuchsLogger::flushDeviceLogToHost(0);
+
     if (frameCtx.shouldZoom) {
         frameCtx.newOffset = { gpuNewOffset.x, gpuNewOffset.y };
     }
