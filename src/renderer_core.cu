@@ -76,9 +76,8 @@ if (!glResourcesInitialized) {
     OpenGLUtils::setGLResourceContext("init");
 
     // Hermelin RAII Wrapper nutzen
-    state.pbo.create();
+    state.pbo.initAsPixelBuffer(state.width, state.height); // 🦊 Schneefuchs: Formatlogik gekapselt.
     state.tex.create();
-
     CudaInterop::registerPBO(state.pbo);
 
     glResourcesInitialized = true;

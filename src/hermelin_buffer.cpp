@@ -108,6 +108,12 @@ void GLBuffer::allocate(GLsizeiptr sizeBytes, GLenum usage) {
         throw std::runtime_error("Hermelin: glBufferData failed or allocated 0 bytes");
 }
 
+void GLBuffer::initAsPixelBuffer(int width, int height, int bytesPerPixel) {
+    create();
+    const size_t size = static_cast<size_t>(width) * height * bytesPerPixel;
+    allocate(size);
+}
+
 void GLBuffer::free() {
     if (id_ != 0) {
         glDeleteBuffers(1, &id_);

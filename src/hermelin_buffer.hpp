@@ -49,6 +49,7 @@ public:
 
     void create();
     void allocate(GLsizeiptr sizeBytes, GLenum usage = GL_DYNAMIC_DRAW);
+    void initAsPixelBuffer(int width, int height, int bytesPerPixel = 4); // 🦊 Schneefuchs: Formatlogik gekapselt.
     void free();
 
     GLuint id() const;
