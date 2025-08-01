@@ -1,7 +1,7 @@
 // Datei: src/core_kernel.cu
 // 🐭 Maus-Kommentar: Alpha 64 - Supersampling vollständig entfernt. Klare Kernel-Signatur, Logging über Settings::debugLogging, deterministisch.
-// 🦦 Otter: Vollständige Luchsifizierung - alle Logs über LUCHS_LOG_HOST/DEVICE. Keine Rohausgaben mehr.
-// 🦊 Schneefuchs: Struktur bewahrt, keine Flüchtigkeit, keine faulen Tricks.
+// 🦾 Otter: Vollständige Luchsifizierung - alle Logs über LUCHS_LOG_HOST/DEVICE. Keine Rohausgaben mehr.
+// 🧸 Schneefuchs: Struktur bewahrt, keine Flüchtigkeit, keine faulen Tricks.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -46,8 +46,8 @@ __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut, int w, int h, float zoom, float2 offset, int maxIter)
 {
     if (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("MandelbrotKernel: entered");
-        LUCHS_LOG_DEVICE("MandelbrotKernel: params set");
+        LUCHS_LOG_DEVICE("[KERNEL] MandelbrotKernel: entered");
+        LUCHS_LOG_DEVICE("[KERNEL] MandelbrotKernel: params set");
     }
 
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -69,25 +69,33 @@ __global__ void mandelbrotKernel(
     float t = it - log2f(log2f(fmaxf(norm, 1.000001f)));
     float tClamped = fminf(fmaxf(t / maxIter, 0.0f), 1.0f);
 
-    out[idx] = elegantColor(tClamped);
+    if (Settings::debugLogging &&
+        blockIdx.x == 0 && blockIdx.y == 0 &&
+        threadIdx.x == 0 && threadIdx.y == 0) {
+
+        LUCHS_LOG_DEVICE("[WRITE] Color write check begins");
+
+        if (tClamped == 0.0f) LUCHS_LOG_DEVICE("[WRITE] Warning: tClamped == 0.0f");
+        if (it < 3)           LUCHS_LOG_DEVICE("[WRITE] Warning: it < 3");
+        if (norm < 1.0f)      LUCHS_LOG_DEVICE("[WRITE] Warning: norm suspiciously low");
+
+        LUCHS_LOG_DEVICE("[WRITE] Proceeding to write elegantColor(tClamped)");
+    }
+
+    uchar4 finalColor = elegantColor(tClamped);
+    out[idx] = finalColor;
     iterOut[idx] = it;
 
-    // 🐭 Maus: Unbedingter Log – kein Filter mehr
-    if (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("=== PIXEL CHECK ===");
-        LUCHS_LOG_DEVICE("CHECK: it = 2?");
-        if (it == 2)       LUCHS_LOG_DEVICE("it == 2");
-        if (norm < 1.0f)   LUCHS_LOG_DEVICE("norm < 1.0");
-        if (t < 0.0f)      LUCHS_LOG_DEVICE("t < 0");
-        if (tClamped == 0) LUCHS_LOG_DEVICE("tClamped == 0");
-        LUCHS_LOG_DEVICE("=== END PIXEL CHECK ===");
+    if (Settings::debugLogging &&
+        blockIdx.x == 0 && blockIdx.y == 0 &&
+        threadIdx.x == 0 && threadIdx.y == 0) {
+        LUCHS_LOG_DEVICE("[WRITE] Color write completed");
     }
 
     if (Settings::debugLogging && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("MandelbrotKernel: block processed");
+        LUCHS_LOG_DEVICE("[KERNEL] MandelbrotKernel: block processed");
     }
 }
-
 
 // ---- ENTROPY & CONTRAST ----
 __global__ void entropyKernel(const int* it, float* eOut, int w, int h, int tile, int maxIter) {
