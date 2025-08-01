@@ -1,4 +1,3 @@
-// Datei: src/core_kernel.cu
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
