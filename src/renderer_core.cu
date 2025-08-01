@@ -51,10 +51,19 @@ bool Renderer::initGL() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] GLFW window created successfully");
 
+    // Bind OpenGL context to window
     glfwMakeContextCurrent(state.window);
-    if (Settings::debugLogging)
+    if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] OpenGL context made current");
+        // Check context binding
+        if (glfwGetCurrentContext() != state.window) {
+            LUCHS_LOG_HOST("[ERROR] Current OpenGL context is not the GLFW window!");
+        } else {
+            LUCHS_LOG_HOST("[CHECK] OpenGL context correctly bound to window");
+        }
+    }
 
+    // Initialize GLEW and verify
     if (glewInit() != GLEW_OK) {
         LUCHS_LOG_HOST("[ERROR] glewInit() failed");
         RendererWindow::destroyWindow(state.window);
@@ -62,9 +71,13 @@ bool Renderer::initGL() {
         glfwTerminate();
         return false;
     }
-
-    if (Settings::debugLogging)
+    if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] GLEW initialized successfully");
+        const GLubyte* version = glGetString(GL_VERSION);
+        LUCHS_LOG_HOST("[CHECK] OpenGL version: %s", version ? reinterpret_cast<const char*>(version) : "unknown");
+        GLenum err = glGetError();
+        LUCHS_LOG_HOST("[CHECK] glGetError after context init = 0x%04X", err);
+    }
 
     RendererPipeline::init();
     if (Settings::debugLogging)
