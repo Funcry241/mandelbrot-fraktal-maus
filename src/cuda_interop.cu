@@ -12,7 +12,7 @@
 #include "renderer_state.hpp"
 #include "zoom_logic.hpp"
 #include "luchs_cuda_log_buffer.hpp"
-#include "hermelin_buffer.hpp" // Hermelin RAII Buffer
+#include "hermelin_buffer.hpp"
 #include <cuda_gl_interop.h>
 #include <vector>
 
@@ -143,11 +143,14 @@ void renderCudaFrame(
     }
 
     // ─── Debug-Gradient-Test ───────────────────────────────────────────────────
+    LUCHS_LOG_HOST("[CHECK] debugGradient flag = %d", Settings::debugGradient ? 1 : 0);
     if (Settings::debugGradient) {
         dim3 block(16,16);
         dim3 grid((width+15)/16, (height+15)/16);
+        LUCHS_LOG_HOST("[CHECK] Launching testKernel with grid=(%d,%d), block=(%d,%d)", grid.x, grid.y, block.x, block.y);
         testKernel<<<grid,block>>>(devPtr, width, height);
         CUDA_CHECK(cudaDeviceSynchronize());
+        LuchsLogger::flushDeviceLogToHost();
         CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
         return;
     }
@@ -164,7 +167,7 @@ void renderCudaFrame(
     LuchsLogger::flushDeviceLogToHost();
 
     if (Settings::debugLogging) {
-        int dbg_after[3]={};
+        int dbg_after[3] = {};
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations.get(), sizeof(dbg_after), cudaMemcpyDeviceToHost));
         LUCHS_LOG_HOST("[KERNEL] iters sample: %d %d %d", dbg_after[0], dbg_after[1], dbg_after[2]);
     }
@@ -178,8 +181,8 @@ void renderCudaFrame(
 
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
-    CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),   numTiles*sizeof(float), cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(),  numTiles*sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),   numTiles * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(),  numTiles * sizeof(float), cudaMemcpyDeviceToHost));
 
     shouldZoom = false;
     if (!pauseZoom) {
@@ -196,7 +199,7 @@ void renderCudaFrame(
                 LUCHS_LOG_HOST("[ZOOM] idx=%d entropy=%.3f contrast=%.3f -> (%.5f,%.5f) new=%d zoom=%d",
                                result.bestIndex, result.bestEntropy, result.bestContrast,
                                result.newOffset.x, result.newOffset.y,
-                               result.isNewTarget?1:0, result.shouldZoom?1:0);
+                               result.isNewTarget ? 1 : 0, result.shouldZoom ? 1 : 0);
             }
         } else if (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ZOOM] No suitable target");
@@ -225,7 +228,7 @@ bool precheckCudaRuntime() {
     cudaError_t e1 = cudaFree(0);
     cudaError_t e2 = cudaGetDeviceCount(&deviceCount);
     LUCHS_LOG_HOST("[CUDA] precheck err1=%d err2=%d count=%d", (int)e1, (int)e2, deviceCount);
-    return e1==cudaSuccess && e2==cudaSuccess && deviceCount>0;
+    return e1 == cudaSuccess && e2 == cudaSuccess && deviceCount > 0;
 }
 
 bool verifyCudaGetErrorStringSafe() {
