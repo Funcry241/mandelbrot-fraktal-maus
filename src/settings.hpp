@@ -27,7 +27,7 @@ constexpr float zoomFactor = 1.07f;
 inline constexpr float ENTROPY_THRESHOLD_LOW = 2.5f;
 
 // 🔍 Debug-Modi: visuelle Darstellung & Konsolen-Ausgabe aktivieren
-constexpr bool debugGradient = false; // Aktiviert reine Entropie-Ansicht (keine Farben) - nur zu Analysezwecken
+constexpr bool debugGradient = true; // Aktiviert reine Entropie-Ansicht (keine Farben) - nur zu Analysezwecken
 constexpr bool debugLogging  = true;  // Aktiviert Konsolenausgaben für Auto-Zoom, Tile-Entropie etc.
 
 // 🔥 Sichtbarkeit des Heatmap-Overlays beim Programmstart
