@@ -1,7 +1,7 @@
 // Datei: src/core_kernel.cu
-// 🐭 Maus-Kommentar: Alpha 73 - Kernel mit gezieltem Logging bei norm < 4, it == 2 etc., Logging kontrolliert über Settings::debugLogging.
-// 🦦 Otter: Alle [WRITE] oder [MAP]-Logs sind gezielt und debug-geschützt. Kein unkontrolliertes Logging.
-// 🦊 Schneefuchs: Präzise Iterationsanalyse, kein Schattenbereich bleibt unloggt.
+// 🐭 Maus-Kommentar: Logging-Zustände jetzt explizit kontrolliert. Kein Spam, klare Zustände.
+// 🦦 Otter: DebugLogging respektiert – keine unnötige Ausgabe. Alle Pfade eindeutig.
+// 🦊 Schneefuchs: Struktur erhalten, keine Ausgabe ohne Anlass, Clarity bewahrt.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -41,6 +41,13 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fx, 
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut, int w, int h, float zoom, float2 offset, int maxIter)
 {
+    const bool doLog = Settings::debugLogging;
+    const bool isFirstThread = (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0);
+
+    if (doLog && isFirstThread) {
+        LUCHS_LOG_DEVICE("[KERNEL] mandelbrotKernel entered");
+    }
+
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * w + x;
@@ -63,23 +70,17 @@ __global__ void mandelbrotKernel(
     out[idx] = elegantColor(tClamped);
     iterOut[idx] = it;
 
-    if (Settings::debugLogging && x == 0 && y == 0) {
-        LUCHS_LOG_DEVICE("[MAP] pixelToComplex = (%.5f, %.5f)", c.x, c.y);
-        LUCHS_LOG_DEVICE("[MAP] norm = %.5f", norm);
-        LUCHS_LOG_DEVICE("[MAP] it = %d", it);
-        LUCHS_LOG_DEVICE("[MAP] t = %.5f", t);
-        LUCHS_LOG_DEVICE("[MAP] tClamped = %.5f", tClamped);
-        if (it <= 2)       LUCHS_LOG_DEVICE("[WRITE] it <= 2");
-        if (norm < 1.0f)   LUCHS_LOG_DEVICE("[WRITE] norm < 1.0");
-        if (t < 0.0f)      LUCHS_LOG_DEVICE("[WRITE] t < 0");
-        if (tClamped == 0) LUCHS_LOG_DEVICE("[WRITE] tClamped == 0");
+    if (doLog && isFirstThread) {
+        if (it <= 2)        LUCHS_LOG_DEVICE("[WRITE] it <= 2");
+        if (norm < 1.0f)    LUCHS_LOG_DEVICE("[MAP] norm < 1.0");
+        if (t < 0.0f)       LUCHS_LOG_DEVICE("[MAP] t < 0");
+        if (tClamped == 0)  LUCHS_LOG_DEVICE("[MAP] tClamped == 0");
     }
 
-    if (Settings::debugLogging && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("[WRITE] MandelbrotKernel: block %d,%d processed", blockIdx.x, blockIdx.y);
+    if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
+        LUCHS_LOG_DEVICE("[KERNEL] block (%d,%d) done", blockIdx.x, blockIdx.y);
     }
 }
-
 
 // ---- ENTROPY & CONTRAST ----
 __global__ void entropyKernel(const int* it, float* eOut, int w, int h, int tile, int maxIter) {
