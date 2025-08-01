@@ -1,10 +1,13 @@
+// Otter
 // Datei: src/renderer_pipeline.cpp
-// 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean - HUD/Heatmap bleiben garantiert sichtbar. Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines.
+// 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean - HUD/Heatmap bleiben garantiert sichtbar.
+// 🦦 Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines.
 
 #include "pch.hpp"
 #include "renderer_pipeline.hpp"
 #include "opengl_utils.hpp"
 #include "common.hpp"
+#include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include <cstdlib>
 
@@ -31,44 +34,75 @@ void main() { FragColor = texture(uTex, vTex); }
 void init() {
     program = OpenGLUtils::createProgramFromSource(vShader, fShader);
     if (!program) {
-        LUCHS_LOG_HOST("[FATAL] Shaderprogramm konnte nicht erstellt werden - OpenGL-Abbruch");
+        LUCHS_LOG_HOST("[FATAL] Shader program creation failed - aborting");
         std::exit(EXIT_FAILURE);
     }
-
+    LUCHS_LOG_HOST("[PIPELINE] Shader program created: %u", program);
+    
     glUseProgram(program);
     glUniform1i(glGetUniformLocation(program, "uTex"), 0);
     glUseProgram(0);
+    LUCHS_LOG_HOST("[PIPELINE] Uniform 'uTex' set to texture unit 0");
 
     OpenGLUtils::createFullscreenQuad(&VAO, &VBO, &EBO);
+    LUCHS_LOG_HOST("[PIPELINE] Fullscreen quad VAO=%u VBO=%u EBO=%u created", VAO, VBO, EBO);
 }
 
 void updateTexture(GLuint pbo, GLuint tex, int width, int height) {
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[GL-UPLOAD] Binding PBO=%u and Texture=%u for upload", pbo, tex);
+    }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBindTexture(GL_TEXTURE_2D, tex);
+
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[GL-UPLOAD] Calling glTexSubImage2D with dimensions %dx%d", width, height);
+    }
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+    GLenum err = glGetError();
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[GL-UPLOAD] glTexSubImage2D glGetError() = 0x%04X", err);
+
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[GL-UPLOAD] Texture update from PBO complete");
 }
 
 void drawFullscreenQuad(GLuint tex) {
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[DRAW] About to draw fullscreen quad with Texture=%u", tex);
+
     glUseProgram(program);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
-    // Kein Blend-Disable - HUD benötigt Alpha-Blending!
+    // Blend enabled for HUD/Heatmap
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindVertexArray(VAO);
+
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+    GLenum err = glGetError();
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[DRAW] glDrawElements glGetError() = 0x%04X", err);
+
     glBindVertexArray(0);
     glUseProgram(0);
+
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[DRAW] Fullscreen quad drawn");
 }
 
 void cleanup() {
-    if (program) glDeleteProgram(program);
-    if (VAO) glDeleteVertexArrays(1, &VAO);
-    if (VBO) glDeleteBuffers(1, &VBO);
-    if (EBO) glDeleteBuffers(1, &EBO);
+    if (program) { glDeleteProgram(program); LUCHS_LOG_HOST("[CLEANUP] Deleted program %u", program); }
+    if (VAO)    { glDeleteVertexArrays(1, &VAO); LUCHS_LOG_HOST("[CLEANUP] Deleted VAO %u", VAO); }
+    if (VBO)    { glDeleteBuffers(1, &VBO);        LUCHS_LOG_HOST("[CLEANUP] Deleted VBO %u", VBO); }
+    if (EBO)    { glDeleteBuffers(1, &EBO);        LUCHS_LOG_HOST("[CLEANUP] Deleted EBO %u", EBO); }
     program = VAO = VBO = EBO = 0;
+    LUCHS_LOG_HOST("[CLEANUP] RendererPipeline resources cleaned up");
 }
 
 } // namespace RendererPipeline
