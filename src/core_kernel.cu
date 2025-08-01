@@ -1,3 +1,4 @@
+// Datei: src/core_kernel.cu
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
@@ -25,7 +26,8 @@ __device__ __forceinline__ float2 pixelToComplex(float px, float py, int w, int 
 
 // ---- MANDELBROT-ITERATION ----
 __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fx, float& fy) {
-    float x = 0.0f, y = 0.0f; int i = 0;
+    float x = 0.0f, y = 0.0f;
+    int i = 0;
     while (x * x + y * y <= 4.0f && i < maxIter) {
         float xt = x * x - y * y + x0;
         y = 2.0f * x * y + y0;
@@ -44,7 +46,7 @@ __global__ void mandelbrotKernel(
     const bool isFirstThread = (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0);
 
     if (doLog && isFirstThread) {
-        LUCHS_LOG_DEVICE("[KERNEL] mandelbrotKernel entered");
+        LUCHS_LOG_DEVICE("mandelbrotKernel entered");
     }
 
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -70,14 +72,14 @@ __global__ void mandelbrotKernel(
     iterOut[idx] = it;
 
     if (doLog && isFirstThread) {
-        if (it <= 2)        LUCHS_LOG_DEVICE("[WRITE] it <= 2");
-        if (norm < 1.0f)    LUCHS_LOG_DEVICE("[MAP] norm < 1.0");
-        if (t < 0.0f)       LUCHS_LOG_DEVICE("[MAP] t < 0");
-        if (tClamped == 0)  LUCHS_LOG_DEVICE("[MAP] tClamped == 0");
+        if (it <= 2)       LUCHS_LOG_DEVICE("it <= 2");
+        if (norm < 1.0f)   LUCHS_LOG_DEVICE("norm < 1.0");
+        if (t < 0.0f)      LUCHS_LOG_DEVICE("t < 0");
+        if (tClamped == 0) LUCHS_LOG_DEVICE("tClamped == 0");
     }
 
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("[KERNEL] block (%d,%d) done", blockIdx.x, blockIdx.y);
+        LUCHS_LOG_DEVICE("block processed");
     }
 }
 
@@ -85,21 +87,23 @@ __global__ void mandelbrotKernel(
 __global__ void entropyKernel(const int* it, float* eOut, int w, int h, int tile, int maxIter) {
     const bool doLog = Settings::debugLogging;
 
-    int tX = blockIdx.x, tY = blockIdx.y, startX = tX * tile, startY = tY * tile;
+    int tX = blockIdx.x, tY = blockIdx.y;
+    int startX = tX * tile, startY = tY * tile;
     __shared__ int histo[256];
     for (int i = threadIdx.x; i < 256; i += blockDim.x) histo[i] = 0;
     __syncthreads();
 
-    int total = tile * tile, tid = threadIdx.x, threads = blockDim.x;
-    for (int idx = tid; idx < total; idx += threads) {
-        int dx = idx % tile, dy = idx / tile, x = startX + dx, y = startY + dy;
+    int total = tile * tile;
+    for (int idx = threadIdx.x; idx < total; idx += blockDim.x) {
+        int dx = idx % tile, dy = idx / tile;
+        int x = startX + dx, y = startY + dy;
         if (x >= w || y >= h) continue;
         int v = it[y * w + x]; v = max(0, v);
         int bin = min(v * 256 / (maxIter + 1), 255);
         atomicAdd(&histo[bin], 1);
     }
-
     __syncthreads();
+
     if (threadIdx.x == 0) {
         float entropy = 0.0f;
         for (int i = 0; i < 256; ++i) {
@@ -111,7 +115,7 @@ __global__ void entropyKernel(const int* it, float* eOut, int w, int h, int tile
         eOut[tileIndex] = entropy;
 
         if (doLog) {
-            LUCHS_LOG_DEVICE("[ENTROPY] Tile (%d,%d) = %.4f", tX, tY, entropy);
+            LUCHS_LOG_DEVICE("entropy computed");
         }
     }
 }
@@ -125,21 +129,21 @@ __global__ void contrastKernel(const float* e, float* cOut, int tilesX, int tile
     if (tx >= tilesX || ty >= tilesY) return;
 
     int idx = ty * tilesX + tx;
-    float center = e[idx], sum = 0.0f; int cnt = 0;
-
+    float center = e[idx], sum = 0.0f;
+    int cnt = 0;
     for (int dy = -1; dy <= 1; ++dy)
-        for (int dx = -1; dx <= 1; ++dx) {
-            if (dx == 0 && dy == 0) continue;
-            int nx = tx + dx, ny = ty + dy;
-            if (nx < 0 || ny < 0 || nx >= tilesX || ny >= tilesY) continue;
-            int nIdx = ny * tilesX + nx;
-            sum += fabsf(e[nIdx] - center); cnt++;
-        }
-
+      for (int dx = -1; dx <= 1; ++dx) {
+        if (dx == 0 && dy == 0) continue;
+        int nx = tx + dx, ny = ty + dy;
+        if (nx < 0 || ny < 0 || nx >= tilesX || ny >= tilesY) continue;
+        int nIdx = ny * tilesX + nx;
+        sum += fabsf(e[nIdx] - center);
+        cnt++;
+      }
     cOut[idx] = (cnt > 0) ? sum / cnt : 0.0f;
 
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("[CONTRAST] Tile (%d,%d) = %.4f", tx, ty, cOut[idx]);
+        LUCHS_LOG_DEVICE("contrast computed");
     }
 }
 
@@ -147,10 +151,8 @@ __global__ void contrastKernel(const float* e, float* cOut, int tilesX, int tile
 void computeCudaEntropyContrast(const int* d_it, float* d_e, float* d_c, int w, int h, int tile, int maxIter) {
     int tilesX = (w + tile - 1) / tile;
     int tilesY = (h + tile - 1) / tile;
-
     entropyKernel<<<dim3(tilesX, tilesY), 128>>>(d_it, d_e, w, h, tile, maxIter);
     cudaDeviceSynchronize();
-
     contrastKernel<<<dim3((tilesX + 15) / 16, (tilesY + 15) / 16), dim3(16, 16)>>>(d_e, d_c, tilesX, tilesY);
     cudaDeviceSynchronize();
 }
@@ -163,17 +165,13 @@ void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, f
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[LAUNCH] %dx%d | Zoom=%.3e | Offset=(%.5f, %.5f) | Iter=%d | Tile=%d",
                        w, h, zoom, offset.x, offset.y, maxIter, tile);
-
-        cudaPointerAttributes attr;
-        cudaError_t attrErr = cudaPointerGetAttributes(&attr, out);
-        LUCHS_LOG_HOST("[DEBUG] cudaPointerGetAttributes(out): err=%d type=%d", attrErr, attr.type);
     }
 
     if (out && d_it) {
         mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter);
         LUCHS_LOG_HOST("[KERNEL] mandelbrotKernel<<<%d,%d>>> launched", grid.x, block.x);
     } else {
-        LUCHS_LOG_HOST("[FATAL] launch_mandelbrotHybrid aborted: null device pointer(s)");
+        LUCHS_LOG_HOST("[FATAL] launch_mandelbrotHybrid aborted: null pointer");
         return;
     }
 
@@ -191,9 +189,10 @@ void launch_mandelbrotHybrid(uchar4* out, int* d_it, int w, int h, float zoom, f
     }
 
     if (Settings::debugLogging) {
-        int it[10] = { 0 };
-        cudaMemcpy(it, d_it, sizeof(it), cudaMemcpyDeviceToHost);
+        int sample[10] = {0};
+        cudaMemcpy(sample, d_it, sizeof(sample), cudaMemcpyDeviceToHost);
         LUCHS_LOG_HOST("[SAMPLE] Iteration: %d %d %d %d %d %d %d %d %d %d",
-                       it[0], it[1], it[2], it[3], it[4], it[5], it[6], it[7], it[8], it[9]);
+                       sample[0], sample[1], sample[2], sample[3], sample[4],
+                       sample[5], sample[6], sample[7], sample[8], sample[9]);
     }
 }
