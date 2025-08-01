@@ -3,7 +3,6 @@
 // 🐭 Maus-Kommentar: Alpha 63b - Setzt FrameContext-Dimensionen explizit aus RendererState - kein implizites GLFW nötig.
 // 🦦 Otter: Klare Datenflussregel: RendererState .> FrameContext . CUDA. Kein Kontext-Zugriff im Pipeline-Code.
 // 🐑 Schneefuchs: Trennung von Plattformdetails und Logik ist jetzt durchgezogen.
-// Funktion: execute (komplett mit Schwarze Ameise Fix)
 
 #include <GLFW/glfw3.h>
 #include <cmath>
@@ -28,6 +27,8 @@ static CommandBus g_zoomBus;
 static int globalFrameCounter = 0;
 
 void beginFrame(FrameContext& frameCtx) {
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[PIPE] beginFrame: time=%.4f, totalFrames=%d", glfwGetTime(), globalFrameCounter);
     float delta = static_cast<float>(glfwGetTime() - frameCtx.totalTime);
     frameCtx.frameTime = (delta < 0.001f) ? 0.001f : delta;
     frameCtx.totalTime += delta;
@@ -38,14 +39,11 @@ void beginFrame(FrameContext& frameCtx) {
 }
 
 void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[PIPE] computeCudaFrame: dimensions=%dx%d, zoom=%.2f, tileSize=%d", frameCtx.width, frameCtx.height, frameCtx.zoom, frameCtx.tileSize);
+
     float2 gpuOffset     = make_float2((float)frameCtx.offset.x, (float)frameCtx.offset.y);
     float2 gpuNewOffset  = gpuOffset;
-
-    if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[DEBUG] Mandelbrot-Kernel Call: width=%d, height=%d, maxIter=%d, zoom=%.2f, offset=(%.10f, %.10f), tileSize=%d",
-            frameCtx.width, frameCtx.height, frameCtx.maxIterations, frameCtx.zoom,
-            frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
-    }
 
     const int tilesX = (frameCtx.width + frameCtx.tileSize - 1) / frameCtx.tileSize;
     const int tilesY = (frameCtx.height + frameCtx.tileSize - 1) / frameCtx.tileSize;
@@ -56,6 +54,8 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         return;
     }
 
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[PIPE] Calling CudaInterop::renderCudaFrame");
     CudaInterop::renderCudaFrame(
         state.d_iterations,
         state.d_entropy,
@@ -72,28 +72,25 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         frameCtx.tileSize,
         state
     );
-
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[KERNEL] Mandelbrot kernel launched - synchronizing");
+        LUCHS_LOG_HOST("[PIPE] Returned from renderCudaFrame");
     CUDA_CHECK(cudaDeviceSynchronize());
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[KERNEL] Mandelbrot kernel completed");
 
-    // 🐜 Ameise: Device-Log nach Kernel flushen
     if (Settings::debugLogging)
-        LuchsLogger::flushDeviceLogToHost(0);
+        LUCHS_LOG_HOST("[PIPE] Cuda frame compute completed, flushing device logs");
+    LuchsLogger::flushDeviceLogToHost(0);
 
     if (frameCtx.shouldZoom) {
         frameCtx.newOffset = { gpuNewOffset.x, gpuNewOffset.y };
     }
 
     if (Settings::debugLogging && !frameCtx.h_entropy.empty()) {
-        LUCHS_LOG_HOST("[CUDA] Input: offset=(%.10f, %.10f) | zoom=%.2f", frameCtx.offset.x, frameCtx.offset.y, frameCtx.zoom);
-        LUCHS_LOG_HOST("[Heatmap] Entropy[0]=%.4f Contrast[0]=%.4f", frameCtx.h_entropy[0], frameCtx.h_contrast[0]);
+        LUCHS_LOG_HOST("[PIPE] Heatmap sample: Entropy[0]=%.4f Contrast[0]=%.4f", frameCtx.h_entropy[0], frameCtx.h_contrast[0]);
     }
 }
 
 void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
+    // unchanged
     double2 diff = {
         frameCtx.newOffset.x - frameCtx.offset.x,
         frameCtx.newOffset.y - frameCtx.offset.y
@@ -137,16 +134,24 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
 }
 
 void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[PIPE] drawFrame: overlayActive=%d, texID=%u", frameCtx.overlayActive ? 1 : 0, tex);
+
     if (frameCtx.overlayActive)
         HeatmapOverlay::drawOverlay(frameCtx.h_entropy, frameCtx.h_contrast, frameCtx.width, frameCtx.height, frameCtx.tileSize, tex, state);
     if (Settings::warzenschweinOverlayEnabled)
         WarzenschweinOverlay::drawOverlay(state);
 
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[PIPE] Calling RendererPipeline::drawFullscreenQuad");
     RendererPipeline::drawFullscreenQuad(tex);
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[PIPE] Completed drawFullscreenQuad");
 }
 
-
 void execute(RendererState& state) {
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[PIPE] execute start");
     beginFrame(g_ctx);
 
     // Schwarze Ameise: Explizite Synchronisierung aller relevanten FrameContext-Parameter aus RendererState
@@ -160,6 +165,9 @@ void execute(RendererState& state) {
     computeCudaFrame(g_ctx, state);
     applyZoomLogic(g_ctx, g_zoomBus);
     drawFrame(g_ctx, state.tex.id(), state);
+
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[PIPE] execute complete");
 }
 
 } // namespace FramePipeline

@@ -25,8 +25,11 @@ GLuint createPBO(int width, int height) {
     glBufferData(GL_PIXEL_UNPACK_BUFFER, width * height * 4, nullptr, GL_STREAM_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    if (Settings::debugLogging)
+    if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createPBO -> ID %u (ctx: %s, %dx%d)", pbo, resourceContext, width, height);
+        GLenum err = glGetError();
+        LUCHS_LOG_HOST("[GL-ERROR] createPBO glGetError() = 0x%04X", err);
+    }
     return pbo;
 }
 
@@ -44,8 +47,11 @@ GLuint createTexture(int width, int height) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    if (Settings::debugLogging)
+    if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createTexture -> ID %u (ctx: %s, %dx%d)", tex, resourceContext, width, height);
+        GLenum err = glGetError();
+        LUCHS_LOG_HOST("[GL-ERROR] createTexture glGetError() = 0x%04X", err);
+    }
     return tex;
 }
 
