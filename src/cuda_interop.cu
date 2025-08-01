@@ -13,6 +13,7 @@
 #include "zoom_logic.hpp"
 #include "luchs_cuda_log_buffer.hpp"
 #include "hermelin_buffer.hpp"
+#include "bear_CudaPBOResource.hpp"
 #include <cuda_gl_interop.h>
 #include <vector>
 
@@ -22,7 +23,7 @@
 
 namespace CudaInterop {
 
-// ─── Test-Kernel: einfacher Farbverlauf mit Device-Log ─────────────────────
+// ─── Test-Kernel für Debug-Gradient ────────────────────────────────────────────
 __global__ void testKernel(uchar4* out, int width, int height) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -33,11 +34,10 @@ __global__ void testKernel(uchar4* out, int width, int height) {
     int idx = y * width + x;
     unsigned char r = static_cast<unsigned char>(255 * x / width);
     unsigned char g = static_cast<unsigned char>(255 * y / height);
-    unsigned char b = 0;
-    out[idx] = make_uchar4(r, g, b, 255);
+    out[idx] = make_uchar4(r, g, 0, 255);
 }
 
-static cudaGraphicsResource_t cudaPboResource = nullptr;
+static bear_CudaPBOResource* pboResource = nullptr;
 static bool pauseZoom = false;
 static bool luchsBabyInitDone = false;
 
@@ -48,7 +48,7 @@ void logCudaDeviceContext(const char* context) {
 }
 
 void registerPBO(const Hermelin::GLBuffer& pbo) {
-    if (cudaPboResource) {
+    if (pboResource) {
         LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!");
         return;
     }
@@ -64,20 +64,13 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
 
     if (boundAfter != static_cast<GLint>(pbo.id())) {
         LUCHS_LOG_HOST("[FATAL] GL bind failed - buffer %u was not bound (GL reports: %d)", pbo.id(), boundAfter);
-        throw std::runtime_error("glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo) failed");
+        throw std::runtime_error("glBindBuffer(GL_PIXEL_UNPACK_BUFFER) failed");
     }
 
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[CU-PBO] Preparing to register PBO ID %u", pbo.id());
 
-    cudaError_t err = cudaGraphicsGLRegisterBuffer(&cudaPboResource, pbo.id(), cudaGraphicsRegisterFlagsWriteDiscard);
-    if (err != cudaSuccess) {
-        LUCHS_LOG_HOST("[CU-PBO] cudaGraphicsGLRegisterBuffer FAILED: %s", cudaGetErrorString(err));
-        throw std::runtime_error("cudaGraphicsGLRegisterBuffer failed");
-    }
-
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[CU-PBO] Registered GL buffer ID %u -> cudaPboResource: %p", pbo.id(), (void*)cudaPboResource);
+    pboResource = new bear_CudaPBOResource(pbo.id());
 
     logCudaDeviceContext("after registerPBO");
 }
@@ -103,12 +96,12 @@ void renderCudaFrame(
 
     logCudaDeviceContext("renderCudaFrame ENTER");
 
-    if (!cudaPboResource)
+    if (!pboResource)
         throw std::runtime_error("[FATAL] CUDA PBO not registered!");
 
-    #ifndef CUDA_ARCH
+#ifndef CUDA_ARCH
     const auto t0 = std::chrono::high_resolution_clock::now();
-    #endif
+#endif
 
     const int totalPixels = width * height;
     const int tilesX = (width + tileSize - 1) / tileSize;
@@ -122,13 +115,17 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemset(d_contrast.get(),  0, d_contrast.size()));
 
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[MAP] Mapping CUDA-GL resource %p", (void*)cudaPboResource);
+        LUCHS_LOG_HOST("[MAP] Mapping CUDA-GL resource %p", (void*)pboResource->get());
     CUDA_CHECK(cudaDeviceSynchronize());
-    CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
+    {
+        // Map using a local handle lvalue
+        cudaGraphicsResource_t handle = pboResource->get();
+        CUDA_CHECK(cudaGraphicsMapResources(1, &handle, 0));
+    }
 
     uchar4* devPtr = nullptr;
     size_t sizeBytes = 0;
-    CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &sizeBytes, cudaPboResource));
+    CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &sizeBytes, pboResource->get()));
 
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[MAP] Mapped pointer: %p (%zu bytes)", (void*)devPtr, sizeBytes);
@@ -143,9 +140,8 @@ void renderCudaFrame(
         luchsBabyInitDone = true;
     }
 
-    // ─── Debug-Gradient-Test ───────────────────────────────────────────────────
     LUCHS_LOG_HOST("[CHECK] debugGradient flag = %d", Settings::debugGradient);
-    if (Settings::debugGradient) {
+    if (Settings::debugLogging && Settings::debugGradient) {
         dim3 block(16,16);
         dim3 grid((width+15)/16, (height+15)/16);
         LUCHS_LOG_HOST("[CHECK] Launching testKernel with grid=(%d,%d), block=(%d,%d)", grid.x, grid.y, block.x, block.y);
@@ -153,19 +149,24 @@ void renderCudaFrame(
         CUDA_CHECK(cudaDeviceSynchronize());
         LuchsLogger::flushDeviceLogToHost();
         LUCHS_LOG_HOST("[UNMAP DEBUG] PBO unmapped after testKernel");
-        CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
+        {
+            cudaGraphicsResource_t handle = pboResource->get();
+            CUDA_CHECK(cudaGraphicsUnmapResources(1, &handle, 0));
+        }
         return;
     }
-    // ────────────────────────────────────────────────────────────────────────────
 
-    // immer Mandelbrot-Kernel starten
     if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[KERNEL] launch_mandelbrotHybrid(surface=%p, w=%d, h=%d, zoom=%.5f, offset=(%.5f,%.5f), iter=%d, tile=%d)",
-                       (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations, tileSize);
+        LUCHS_LOG_HOST(
+            "[KERNEL] launch_mandelbrotHybrid(surface=%p, w=%d, h=%d, zoom=%.5f, offset=(%.5f,%.5f), iter=%d, tile=%d)",
+            (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations, tileSize
+        );
     }
-    launch_mandelbrotHybrid(devPtr,
-                            static_cast<int*>(d_iterations.get()),
-                            width, height, zoom, offset, maxIterations, tileSize);
+    launch_mandelbrotHybrid(
+        devPtr,
+        static_cast<int*>(d_iterations.get()),
+        width, height, zoom, offset, maxIterations, tileSize
+    );
     LuchsLogger::flushDeviceLogToHost();
 
     if (Settings::debugLogging) {
@@ -198,28 +199,34 @@ void renderCudaFrame(
             shouldZoom = result.shouldZoom;
             state.zoomResult = result;
             if (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ZOOM] idx=%d entropy=%.3f contrast=%.3f -> (%.5f,%.5f) new=%d zoom=%d",
-                               result.bestIndex, result.bestEntropy, result.bestContrast,
-                               result.newOffset.x, result.newOffset.y,
-                               result.isNewTarget ? 1 : 0, result.shouldZoom ? 1 : 0);
+                LUCHS_LOG_HOST(
+                    "[ZOOM] idx=%d entropy=%.3f contrast=%.3f -> (%.5f,%.5f) new=%d zoom=%d",
+                    result.bestIndex, result.bestEntropy, result.bestContrast,
+                    result.newOffset.x, result.newOffset.y,
+                    result.isNewTarget ? 1 : 0, result.shouldZoom ? 1 : 0
+                );
             }
         } else if (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ZOOM] No suitable target");
         }
     }
 
-    CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
+    {
+        // Unmap using a local handle lvalue
+        cudaGraphicsResource_t handle = pboResource->get();
+        CUDA_CHECK(cudaGraphicsUnmapResources(1, &handle, 0));
+    }
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[UNMAP] PBO unmapped successfully");
         LUCHS_LOG_HOST("[KERNEL] renderCudaFrame finished");
     }
 
-    #ifndef CUDA_ARCH
+#ifndef CUDA_ARCH
     const auto t1 = std::chrono::high_resolution_clock::now();
     float totalMs = std::chrono::duration<float,std::milli>(t1 - t0).count();
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PERF] renderCudaFrame() = %.2f ms", totalMs);
-    #endif
+#endif
 }
 
 void setPauseZoom(bool pause) { pauseZoom = pause; }
@@ -238,7 +245,7 @@ bool verifyCudaGetErrorStringSafe() {
     const char* msg = cudaGetErrorString(dummy);
     if (msg) {
         LUCHS_LOG_HOST("[CHECK] cudaGetErrorString(dummy) = \"%s\"", msg);
-        LUCHS_LOG_HOST("[PASS] Host-seitige Fehleraufloesung funktioniert gefahrlos");
+        LUCHS_LOG_HOST("[PASS] Host-seitige Fehlerauflösung funktioniert gefahrlos");
         return true;
     } else {
         LUCHS_LOG_HOST("[FATAL] cudaGetErrorString returned null");
@@ -247,12 +254,8 @@ bool verifyCudaGetErrorStringSafe() {
 }
 
 void unregisterPBO() {
-    if (cudaPboResource) {
-        cudaGraphicsUnregisterResource(cudaPboResource);
-        cudaPboResource = nullptr;
-        if (Settings::debugLogging)
-            LUCHS_LOG_HOST("[CU-PBO] Unregistered PBO resource");
-    }
+    delete pboResource;
+    pboResource = nullptr;
 }
 
 } // namespace CudaInterop

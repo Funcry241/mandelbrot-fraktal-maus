@@ -74,6 +74,7 @@ add_executable(mandelbrot_otterdream
     src/frame_pipeline.cpp    
     src/frame_context.cpp
     src/hermelin_buffer.cpp
+    src/bear_CudaPBOResource.cpp
 )
 
 if (MSVC)
