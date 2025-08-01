@@ -7,12 +7,22 @@
 #include "renderer_core.hpp"
 #include "settings.hpp"
 #include "renderer_loop.hpp" // für RendererLoop::keyCallback
+#include "luchs_log_host.hpp"
+#include <GLFW/glfw3.h>
 #include <cstdio>
 
 namespace RendererInternals {
 
+// 🔔 Otter: GLFW-Error-Callback für robustes Fehler-Logging
+static void glfwErrorCallback(int code, const char* description) {
+    LUCHS_LOG_HOST("[GLFW-ERROR] Code=%d | %s", code, description);
+}
+
 // Erstellt GLFW-Fenster, setzt OpenGL-Kontext & VSync, Position aus Settings
 GLFWwindow* createGLFWWindow(int width, int height) {
+    // Setze Error-Callback bevor glfwInit()
+    glfwSetErrorCallback(glfwErrorCallback);
+
     if (!glfwInit()) {
         LUCHS_LOG_HOST("[ERROR] GLFW init failed");
         return nullptr;
