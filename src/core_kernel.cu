@@ -1,7 +1,7 @@
 // Datei: src/core_kernel.cu
-// 🐭 Maus-Kommentar: Alpha 64 - Supersampling vollständig entfernt. Klare Kernel-Signatur, Logging über Settings::debugLogging, deterministisch.
-// 🦾 Otter: Vollständige Luchsifizierung - alle Logs über LUCHS_LOG_HOST/DEVICE. Keine Rohausgaben mehr.
-// 🧸 Schneefuchs: Struktur bewahrt, keine Flüchtigkeit, keine faulen Tricks.
+// 🐭 Maus-Kommentar: Alpha 72 - CX/CY-Mapping Logging eingebaut für c=(cx, cy).
+// 🦦 Otter: Debug-Wahrheit vor Änderung. Fraktale starten deterministisch sichtbar.
+// 🦊 Schneefuchs: Kein Rateversuch, sondern Logbeweis über Mapping und Skalen.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -45,11 +45,6 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fx, 
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut, int w, int h, float zoom, float2 offset, int maxIter)
 {
-    if (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("[KERNEL] MandelbrotKernel: entered");
-        LUCHS_LOG_DEVICE("[KERNEL] MandelbrotKernel: params set");
-    }
-
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * w + x;
@@ -69,31 +64,23 @@ __global__ void mandelbrotKernel(
     float t = it - log2f(log2f(fmaxf(norm, 1.000001f)));
     float tClamped = fminf(fmaxf(t / maxIter, 0.0f), 1.0f);
 
-    if (Settings::debugLogging &&
-        blockIdx.x == 0 && blockIdx.y == 0 &&
-        threadIdx.x == 0 && threadIdx.y == 0) {
-
-        LUCHS_LOG_DEVICE("[WRITE] Color write check begins");
-
-        if (tClamped == 0.0f) LUCHS_LOG_DEVICE("[WRITE] Warning: tClamped == 0.0f");
-        if (it < 3)           LUCHS_LOG_DEVICE("[WRITE] Warning: it < 3");
-        if (norm < 1.0f)      LUCHS_LOG_DEVICE("[WRITE] Warning: norm suspiciously low");
-
-        LUCHS_LOG_DEVICE("[WRITE] Proceeding to write elegantColor(tClamped)");
-    }
-
-    uchar4 finalColor = elegantColor(tClamped);
-    out[idx] = finalColor;
+    out[idx] = elegantColor(tClamped);
     iterOut[idx] = it;
 
-    if (Settings::debugLogging &&
-        blockIdx.x == 0 && blockIdx.y == 0 &&
-        threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("[WRITE] Color write completed");
+    // 🐭 Maus: Nur Block 0,0 loggt Mapping-Werte
+    if (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0) {
+        if (Settings::debugLogging) {
+            LUCHS_LOG_DEVICE("[MAP] MandelbrotKernel: entered");
+            LUCHS_LOG_DEVICE("[MAP] Resolution: %d x %d", w, h);
+            LUCHS_LOG_DEVICE("[MAP] scale=%.6f spanX=%.6f spanY=%.6f", scale, spanX, spanY);
+            LUCHS_LOG_DEVICE("[MAP] offset=(%.6f, %.6f)", offset.x, offset.y);
+            LUCHS_LOG_DEVICE("[MAP] pixel=(%d, %d) → c=(%.6f, %.6f)", x, y, c.x, c.y);
+            LUCHS_LOG_DEVICE("[MAP] it=%d norm=%.6f t=%.6f tClamped=%.6f", it, norm, t, tClamped);
+        }
     }
 
     if (Settings::debugLogging && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("[KERNEL] MandelbrotKernel: block processed");
+        LUCHS_LOG_DEVICE("[WRITE] MandelbrotKernel: block processed");
     }
 }
 
