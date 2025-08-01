@@ -1,7 +1,7 @@
 // Datei: src/core_kernel.cu
-// 🐭 Maus-Kommentar: Alpha 72 - CX/CY-Mapping Logging eingebaut für c=(cx, cy).
-// 🦦 Otter: Debug-Wahrheit vor Änderung. Fraktale starten deterministisch sichtbar.
-// 🦊 Schneefuchs: Kein Rateversuch, sondern Logbeweis über Mapping und Skalen.
+// 🐭 Maus-Kommentar: Alpha 73 - Kernel mit gezieltem Logging bei norm < 4, it == 2 etc., Logging kontrolliert über Settings::debugLogging.
+// 🦦 Otter: Alle [WRITE] oder [MAP]-Logs sind gezielt und debug-geschützt. Kein unkontrolliertes Logging.
+// 🦊 Schneefuchs: Präzise Iterationsanalyse, kein Schattenbereich bleibt unloggt.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -13,7 +13,6 @@
 #include "luchs_log_device.hpp"
 #include "luchs_log_host.hpp"
 
-// ---- FARB-MAPPING ----
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     t = sqrtf(fminf(fmaxf(t, 0.0f), 1.0f));
     float r = 0.5f + 0.5f * __sinf(6.2831f * (t + 0.0f));
@@ -22,13 +21,11 @@ __device__ __forceinline__ uchar4 elegantColor(float t) {
     return make_uchar4(r * 255, g * 255, b * 255, 255);
 }
 
-// ---- KOORDINATEN-MAPPING ----
 __device__ __forceinline__ float2 pixelToComplex(float px, float py, int w, int h, float spanX, float spanY, float2 offset) {
     return make_float2((px / w - 0.5f) * spanX + offset.x,
                        (py / h - 0.5f) * spanY + offset.y);
 }
 
-// ---- MANDELBROT-ITERATION ----
 __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fx, float& fy) {
     float x = 0.0f, y = 0.0f; int i = 0;
     while (x * x + y * y <= 4.0f && i < maxIter) {
@@ -41,7 +38,6 @@ __device__ int mandelbrotIterations(float x0, float y0, int maxIter, float& fx, 
     return i;
 }
 
-// ---- MANDELBROT-KERNEL ----
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut, int w, int h, float zoom, float2 offset, int maxIter)
 {
@@ -67,22 +63,23 @@ __global__ void mandelbrotKernel(
     out[idx] = elegantColor(tClamped);
     iterOut[idx] = it;
 
-    // 🐭 Maus: Nur Block 0,0 loggt Mapping-Werte
-    if (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0) {
-        if (Settings::debugLogging) {
-            LUCHS_LOG_DEVICE("[MAP] MandelbrotKernel: entered");
-            LUCHS_LOG_DEVICE("[MAP] Resolution: %d x %d", w, h);
-            LUCHS_LOG_DEVICE("[MAP] scale=%.6f spanX=%.6f spanY=%.6f", scale, spanX, spanY);
-            LUCHS_LOG_DEVICE("[MAP] offset=(%.6f, %.6f)", offset.x, offset.y);
-            LUCHS_LOG_DEVICE("[MAP] pixel=(%d, %d) → c=(%.6f, %.6f)", x, y, c.x, c.y);
-            LUCHS_LOG_DEVICE("[MAP] it=%d norm=%.6f t=%.6f tClamped=%.6f", it, norm, t, tClamped);
-        }
+    if (Settings::debugLogging && x == 0 && y == 0) {
+        LUCHS_LOG_DEVICE("[MAP] pixelToComplex = (%.5f, %.5f)", c.x, c.y);
+        LUCHS_LOG_DEVICE("[MAP] norm = %.5f", norm);
+        LUCHS_LOG_DEVICE("[MAP] it = %d", it);
+        LUCHS_LOG_DEVICE("[MAP] t = %.5f", t);
+        LUCHS_LOG_DEVICE("[MAP] tClamped = %.5f", tClamped);
+        if (it <= 2)       LUCHS_LOG_DEVICE("[WRITE] it <= 2");
+        if (norm < 1.0f)   LUCHS_LOG_DEVICE("[WRITE] norm < 1.0");
+        if (t < 0.0f)      LUCHS_LOG_DEVICE("[WRITE] t < 0");
+        if (tClamped == 0) LUCHS_LOG_DEVICE("[WRITE] tClamped == 0");
     }
 
     if (Settings::debugLogging && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("[WRITE] MandelbrotKernel: block processed");
+        LUCHS_LOG_DEVICE("[WRITE] MandelbrotKernel: block %d,%d processed", blockIdx.x, blockIdx.y);
     }
 }
+
 
 // ---- ENTROPY & CONTRAST ----
 __global__ void entropyKernel(const int* it, float* eOut, int w, int h, int tile, int maxIter) {
