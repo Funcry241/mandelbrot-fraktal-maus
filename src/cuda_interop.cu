@@ -22,10 +22,13 @@
 
 namespace CudaInterop {
 
-// ─── Test-Kernel: einfacher Farbverlauf ──────────────────────────────────────
+// ─── Test-Kernel: einfacher Farbverlauf mit Device-Log ─────────────────────
 __global__ void testKernel(uchar4* out, int width, int height) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x == 0 && y == 0) {
+        LUCHS_LOG_DEVICE("testKernel invoked on device");
+    }
     if (x >= width || y >= height) return;
     int idx = y * width + x;
     unsigned char r = static_cast<unsigned char>(255 * x / width);
@@ -33,7 +36,6 @@ __global__ void testKernel(uchar4* out, int width, int height) {
     unsigned char b = 0;
     out[idx] = make_uchar4(r, g, b, 255);
 }
-// ────────────────────────────────────────────────────────────────────────────
 
 static cudaGraphicsResource_t cudaPboResource = nullptr;
 static bool pauseZoom = false;
@@ -121,7 +123,6 @@ void renderCudaFrame(
 
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[MAP] Mapping CUDA-GL resource %p", (void*)cudaPboResource);
-
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaGraphicsMapResources(1, &cudaPboResource, 0));
 
@@ -143,7 +144,7 @@ void renderCudaFrame(
     }
 
     // ─── Debug-Gradient-Test ───────────────────────────────────────────────────
-    LUCHS_LOG_HOST("[CHECK] debugGradient flag = %d", Settings::debugGradient ? 1 : 0);
+    LUCHS_LOG_HOST("[CHECK] debugGradient flag = %d", Settings::debugGradient);
     if (Settings::debugGradient) {
         dim3 block(16,16);
         dim3 grid((width+15)/16, (height+15)/16);
@@ -151,6 +152,7 @@ void renderCudaFrame(
         testKernel<<<grid,block>>>(devPtr, width, height);
         CUDA_CHECK(cudaDeviceSynchronize());
         LuchsLogger::flushDeviceLogToHost();
+        LUCHS_LOG_HOST("[UNMAP DEBUG] PBO unmapped after testKernel");
         CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaPboResource, 0));
         return;
     }
