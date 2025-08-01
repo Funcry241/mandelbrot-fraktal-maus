@@ -20,6 +20,9 @@ void setGLResourceContext(const char* context);
 GLuint createPBO(int width, int height);
 GLuint createTexture(int width, int height);
 
+// 🦦 Otter: Kopiert PBO-Inhalt in Texture, transparentes Ressourcen-Handling.
+void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height);
+
 } // namespace OpenGLUtils
 
 #endif // RENDERER_RESOURCES_HPP
