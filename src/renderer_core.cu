@@ -51,11 +51,9 @@ bool Renderer::initGL() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] GLFW window created successfully");
 
-    // Bind OpenGL context to window
     glfwMakeContextCurrent(state.window);
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] OpenGL context made current");
-        // Check context binding
         if (glfwGetCurrentContext() != state.window) {
             LUCHS_LOG_HOST("[ERROR] Current OpenGL context is not the GLFW window!");
         } else {
@@ -63,7 +61,6 @@ bool Renderer::initGL() {
         }
     }
 
-    // Initialize GLEW and verify
     if (glewInit() != GLEW_OK) {
         LUCHS_LOG_HOST("[ERROR] glewInit() failed");
         RendererWindow::destroyWindow(state.window);
@@ -72,7 +69,6 @@ bool Renderer::initGL() {
         return false;
     }
     if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[DEBUG] GLEW initialized successfully");
         const GLubyte* version = glGetString(GL_VERSION);
         LUCHS_LOG_HOST("[CHECK] OpenGL version: %s", version ? reinterpret_cast<const char*>(version) : "unknown");
         GLenum err = glGetError();
@@ -83,16 +79,12 @@ bool Renderer::initGL() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] RendererPipeline initialized");
 
-    // 🧠 Kontext ist jetzt gültig - PBO und CUDA-Interop erst ab hier
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
-
         state.pbo.initAsPixelBuffer(state.width, state.height);
         state.tex.create();
         CudaInterop::registerPBO(state.pbo);
-
         glResourcesInitialized = true;
-
         if (Settings::debugLogging) {
             GLint boundPBO = 0;
             glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundPBO);
@@ -112,37 +104,27 @@ bool Renderer::shouldClose() const {
 }
 
 void Renderer::renderFrame_impl() {
-    // 🚀 Pipeline Logging
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Entering renderFrame_impl");
 
-    // GPU Rendering
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Calling RendererLoop::renderFrame_impl");
     RendererLoop::renderFrame_impl(state);
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Returned from RendererLoop::renderFrame_impl");
 
-    // Debug: Prepare for draw
-    if (Settings::debugLogging) {
+    if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DRAW] About to draw fullscreen quad");
-    }
-    
-    // Zeichnen (Fullscreen Quad)
     glDrawArrays(GL_TRIANGLES, 0, 6);
-    
     if (Settings::debugLogging) {
         GLenum err = glGetError();
         LUCHS_LOG_HOST("[DRAW] glDrawArrays glGetError() = 0x%04X", err);
         LUCHS_LOG_HOST("[DRAW] Fullscreen quad drawn, swapping buffers");
     }
-    
-    // Swap
     glfwSwapBuffers(state.window);
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DRAW] glfwSwapBuffers called");
 
-    // State Update
     if (state.zoomResult.isNewTarget) {
         state.lastEntropy  = state.zoomResult.bestEntropy;
         state.lastContrast = state.zoomResult.bestContrast;
@@ -152,7 +134,29 @@ void Renderer::renderFrame_impl() {
         state.zoom *= Settings::zoomFactor;
 
 #if ENABLE_ZOOM_LOGGING
-    // ... existing zoom logging ...
+    {
+        const auto& zr = state.zoomResult;
+        const auto& off = state.offset;
+        const auto& tgt = zr.newOffset;
+        float dx = tgt.x - off.x;
+        float dy = tgt.y - off.y;
+        float dist = std::sqrt(dx*dx + dy*dy);
+        LUCHS_LOG_HOST(
+            "[ZOOM] Z=%.5e | Idx=%3d | E=%.4f | C=%.4f | dE=%.4f | dC=%.4f | Dist=%.6f | Thresh=%.6f | RelE=%.3f | RelC=%.3f | New=%d | Zoom=%d",
+            state.zoom,
+            zr.bestIndex,
+            zr.bestEntropy,
+            zr.bestContrast,
+            zr.bestEntropy - state.lastEntropy,
+            zr.bestContrast - state.lastContrast,
+            dist,
+            zr.minDistance,
+            zr.relEntropyGain,
+            zr.relContrastGain,
+            zr.isNewTarget ? 1 : 0,
+            zr.shouldZoom ? 1 : 0
+        );
+    }
 #endif
 }
 
@@ -165,7 +169,6 @@ void Renderer::resize(int newW, int newH) {
     LUCHS_LOG_HOST("[INFO] Resize: %d x %d", newW, newH);
     state.resize(newW, newH);
     glViewport(0, 0, newW, newH);
-
     if (Settings::debugLogging) {
         GLint boundPBO = 0;
         glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundPBO);
