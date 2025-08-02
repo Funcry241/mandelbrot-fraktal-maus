@@ -137,6 +137,10 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] drawFrame: overlayActive=%d, texID=%u", frameCtx.overlayActive ? 1 : 0, tex);
 
+    // 🔧 Hier erfolgt jetzt der Upload vom PBO in die Textur
+    OpenGLUtils::setGLResourceContext("frame");
+    OpenGLUtils::updateTextureFromPBO(state.pbo.id(), tex, frameCtx.width, frameCtx.height);
+
     if (frameCtx.overlayActive)
         HeatmapOverlay::drawOverlay(frameCtx.h_entropy, frameCtx.h_contrast, frameCtx.width, frameCtx.height, frameCtx.tileSize, tex, state);
     if (Settings::warzenschweinOverlayEnabled)
