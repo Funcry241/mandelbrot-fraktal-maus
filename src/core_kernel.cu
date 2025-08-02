@@ -1,4 +1,3 @@
-// Datei: src/core_kernel.cu
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
@@ -9,7 +8,12 @@
 #include "luchs_log_device.hpp"
 #include "luchs_log_host.hpp"
 
-// ---- FARB-MAPPING ----
+// 🐭 fract ersetzt – CUDA kennt kein GLSL
+__device__ __forceinline__ float fract(float x) {
+    return x - floorf(x); // Schneefuchs: wie GLSL, aber CUDA-eigen
+}
+
+// ---- FARB-MAPPING (legacy) ----
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     t = sqrtf(fminf(fmaxf(t, 0.0f), 1.0f));
     float rf = 0.5f + 0.5f * __sinf(6.2831f * (t + 0.0f));
@@ -50,6 +54,31 @@ __device__ int mandelbrotIterations(
     return i;
 }
 
+// ---- RÜSSELWARZE: HSV-Konvertierung & Strukturchaos ----
+__device__ float3 hsvToRgb(float h, float s, float v) {
+    float r, g, b;
+    int i = int(h * 6.0f);
+    float f = h * 6.0f - i;
+    float p = v * (1.0f - s);
+    float q = v * (1.0f - f * s);
+    float t = v * (1.0f - (1.0f - f) * s);
+    switch (i % 6) {
+        case 0: r = v, g = t, b = p; break;
+        case 1: r = q, g = v, b = p; break;
+        case 2: r = p, g = v, b = t; break;
+        case 3: r = p, g = q, b = v; break;
+        case 4: r = t, g = p, b = v; break;
+        case 5: r = v, g = p, b = q; break;
+    }
+    return make_float3(r, g, b);
+}
+
+__device__ float pseudoRandomWarze(float x, float y) {
+    float r = sqrtf(x * x + y * y);
+    float angle = atan2f(y, x);
+    return 0.5f + 0.5f * __sinf(r * 6.0f + angle * 4.0f);
+}
+
 // ---- MANDELBROT-KERNEL ----
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut,
@@ -82,7 +111,21 @@ __global__ void mandelbrotKernel(
     float t = it - log2f(log2f(fmaxf(norm, 1.000001f)));
     float tClamped = fminf(fmaxf(t / maxIter, 0.0f), 1.0f);
 
-    out[idx] = elegantColor(tClamped);
+    // ---- 🐽 RÜSSELWARZE-FARBREGELUNG ----
+    float3 rgb;
+    if (it == maxIter) {
+        rgb = make_float3(0.05f, 0.05f, 0.08f);
+    } else {
+        float r = sqrtf(c.x * c.x + c.y * c.y);
+        float angle = atan2f(c.y, c.x);
+        float h = fract(angle / (2.0f * CUDART_PI_F));
+        float v = 0.3f + 0.5f * pseudoRandomWarze(c.x, c.y);
+        rgb = hsvToRgb(h, 0.85f, v);
+    }
+    unsigned char rC = static_cast<unsigned char>(rgb.x * 255.0f);
+    unsigned char gC = static_cast<unsigned char>(rgb.y * 255.0f);
+    unsigned char bC = static_cast<unsigned char>(rgb.z * 255.0f);
+    out[idx] = make_uchar4(rC, gC, bC, 255);
     iterOut[idx] = it;
 
     if (doLog && isFirstThread) {
