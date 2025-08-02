@@ -6,6 +6,8 @@
 #include <cuda_runtime.h>
 #include <vector_types.h>
 
+void launch_fillTestColorKernel(uchar4* surface, int width, int height);
+
 // Startet den hybriden Mandelbrot-Kernel (Bild + Iterationen)
 // - devPtr: Zielbild (OpenGL PBO, gemappt auf CUDA)
 // - d_iterations: Iterationsbuffer (pro Pixel)

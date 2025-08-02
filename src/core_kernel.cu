@@ -9,6 +9,27 @@
 #include "luchs_log_device.hpp"
 #include "luchs_log_host.hpp"
 
+// 🧪 Dirty-Testkernel: Füllt gesamten Surface mit solid red (255,0,0,255)
+__global__ void fillTestColorKernel(uchar4* surface, int width, int height) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int idx = y * width + x;
+
+    if (x >= width || y >= height) return;
+
+    surface[idx] = make_uchar4(255, 0, 0, 255);
+}
+
+// Aufrufbare Host-Funktion für einfachen Zugriff
+void launch_fillTestColorKernel(uchar4* surface, int width, int height) {
+    dim3 block(16, 16);
+    dim3 grid((width + block.x - 1) / block.x,
+              (height + block.y - 1) / block.y);
+
+    fillTestColorKernel<<<grid, block>>>(surface, width, height);
+    cudaDeviceSynchronize();
+}
+
 // ---- FARB-MAPPING ----
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     t = sqrtf(fminf(fmaxf(t, 0.0f), 1.0f));

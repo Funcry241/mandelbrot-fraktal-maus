@@ -124,11 +124,12 @@ void renderCudaFrame(
             (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations, tileSize
         );
     }
-    launch_mandelbrotHybrid(
-        devPtr,
-        static_cast<int*>(d_iterations.get()),
-        width, height, zoom, offset, maxIterations, tileSize
-    );
+    // launch_mandelbrotHybrid(
+    //     devPtr,
+    //     static_cast<int*>(d_iterations.get()),
+    //     width, height, zoom, offset, maxIterations, tileSize
+    // );
+    launch_fillTestColorKernel(devPtr, width, height);
     LuchsLogger::flushDeviceLogToHost();
 
     if (Settings::debugLogging) {
