@@ -2,10 +2,11 @@
   "name": "mandelbrot-fraktal",
   "version": "1.0.0",
   "dependencies": [
-    "glfw3",
     {
       "name": "glew",
-      "default-features": false
-    }
+      "default-features": false,
+      "features": []
+    },
+    "glfw3"
   ]
 }
