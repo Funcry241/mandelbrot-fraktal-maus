@@ -90,6 +90,10 @@ __global__ void mandelbrotKernel(
     iterOut[idx] = it;
 
     if (doLog && isFirstThread) {
+        LUCHS_LOG_DEVICE("mandelbrotKernel entered");
+        LUCHS_LOG_DEVICE("x=%d y=%d idx=%d", x, y, idx);
+        LUCHS_LOG_DEVICE("c.x=%.6f c.y=%.6f", c.x, c.y);
+        LUCHS_LOG_DEVICE("it=%d norm=%.6f", it, norm);
         if (it <= 2)       LUCHS_LOG_DEVICE("it <= 2");
         if (norm < 1.0f)   LUCHS_LOG_DEVICE("norm < 1.0");
         if (t < 0.0f)      LUCHS_LOG_DEVICE("t < 0");
