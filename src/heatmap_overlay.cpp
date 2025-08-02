@@ -23,9 +23,9 @@ out float vValue;
 uniform vec2 uOffset;
 uniform vec2 uScale;
 void main() {
-vec2 pos = aPos * uScale + uOffset;
-gl_Position = vec4(pos, 0.0, 1.0);
-vValue = aValue;
+    vec2 pos = aPos * uScale + uOffset;
+    gl_Position = vec4(pos, 0.0, 1.0);
+    vValue = aValue;
 }
 )GLSL";
 
@@ -34,11 +34,11 @@ static const char* fragmentShaderSrc = R"GLSL(
 in float vValue;
 out vec4 FragColor;
 vec3 colormap(float v) {
-float g = smoothstep(0.0, 1.0, v);
-return mix(vec3(0.08, 0.08, 0.10), vec3(1.0, 0.6, 0.2), g);
+    float g = smoothstep(0.0, 1.0, v);
+    return mix(vec3(0.08, 0.08, 0.10), vec3(1.0, 0.6, 0.2), g);
 }
 void main() {
-FragColor = vec4(colormap(clamp(vValue, 0.0, 1.0)), 0.85);
+    FragColor = vec4(colormap(clamp(vValue, 0.0, 1.0)), 0.85);
 }
 )GLSL";
 
@@ -94,7 +94,7 @@ void drawOverlay(const std::vector<float>& entropy,
                  RendererState& ctx) {
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[HM] drawOverlay called: entropy=%zu contrast=%zu enabled=%d",
-                    entropy.size(), contrast.size(), ctx.heatmapOverlayEnabled ? 1 : 0);
+                       entropy.size(), contrast.size(), ctx.heatmapOverlayEnabled ? 1 : 0);
     }
 
     if (!ctx.heatmapOverlayEnabled) return;
@@ -143,6 +143,9 @@ void drawOverlay(const std::vector<float>& entropy,
         glGenVertexArrays(1, &overlayVAO);
         glGenBuffers(1, &overlayVBO);
         overlayShader = createShaderProgram();
+        if (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[HM] Overlay initialized: VAO=%u VBO=%u Shader=%u", overlayVAO, overlayVBO, overlayShader);
+        }
     }
 
     glUseProgram(overlayShader);
@@ -165,11 +168,13 @@ void drawOverlay(const std::vector<float>& entropy,
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)(2 * sizeof(float)));
 
+    GLenum errBefore = glGetError();
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(data.size() / 3));
+    GLenum errAfter = glGetError();
 
-    GLenum err = glGetError();
-    if (Settings::debugLogging && err != GL_NO_ERROR) {
-        LUCHS_LOG_HOST("[DEBUG] HeatmapOverlay: OpenGL error 0x%x", err);
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[HM] glDrawArrays issued: %zu vertices", data.size() / 3);
+        LUCHS_LOG_HOST("[HM] glGetError before=0x%x after=0x%x", errBefore, errAfter);
     }
 
     glDisableVertexAttribArray(0);
@@ -179,5 +184,3 @@ void drawOverlay(const std::vector<float>& entropy,
 }
 
 } // namespace HeatmapOverlay
-
-// 📣 Globale Funktion entfernt - benutze explizit HeatmapOverlay::drawOverlay im Render-Loop.
