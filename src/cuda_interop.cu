@@ -23,20 +23,6 @@
 
 namespace CudaInterop {
 
-// ─── Test-Kernel für Debug-Gradient ────────────────────────────────────────────
-__global__ void testKernel(uchar4* out, int width, int height) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x == 0 && y == 0) {
-        LUCHS_LOG_DEVICE("testKernel invoked on device");
-    }
-    if (x >= width || y >= height) return;
-    int idx = y * width + x;
-    unsigned char r = static_cast<unsigned char>(255 * x / width);
-    unsigned char g = static_cast<unsigned char>(255 * y / height);
-    out[idx] = make_uchar4(r, g, 0, 255);
-}
-
 static bear_CudaPBOResource* pboResource = nullptr;
 static bool pauseZoom = false;
 static bool luchsBabyInitDone = false;
@@ -118,7 +104,6 @@ void renderCudaFrame(
         LUCHS_LOG_HOST("[MAP] Mapping CUDA-GL resource %p", (void*)pboResource->get());
     CUDA_CHECK(cudaDeviceSynchronize());
     {
-        // Map using a local handle lvalue
         cudaGraphicsResource_t handle = pboResource->get();
         CUDA_CHECK(cudaGraphicsMapResources(1, &handle, 0));
     }
@@ -138,22 +123,6 @@ void renderCudaFrame(
     if (!luchsBabyInitDone) {
         LuchsLogger::initCudaLogBuffer(0);
         luchsBabyInitDone = true;
-    }
-
-    LUCHS_LOG_HOST("[CHECK] debugGradient flag = %d", Settings::debugGradient);
-    if (Settings::debugLogging && Settings::debugGradient) {
-        dim3 block(16,16);
-        dim3 grid((width+15)/16, (height+15)/16);
-        LUCHS_LOG_HOST("[CHECK] Launching testKernel with grid=(%d,%d), block=(%d,%d)", grid.x, grid.y, block.x, block.y);
-        testKernel<<<grid,block>>>(devPtr, width, height);
-        CUDA_CHECK(cudaDeviceSynchronize());
-        LuchsLogger::flushDeviceLogToHost();
-        LUCHS_LOG_HOST("[UNMAP DEBUG] PBO unmapped after testKernel");
-        {
-            cudaGraphicsResource_t handle = pboResource->get();
-            CUDA_CHECK(cudaGraphicsUnmapResources(1, &handle, 0));
-        }
-        return;
     }
 
     if (Settings::debugLogging) {
@@ -212,7 +181,6 @@ void renderCudaFrame(
     }
 
     {
-        // Unmap using a local handle lvalue
         cudaGraphicsResource_t handle = pboResource->get();
         CUDA_CHECK(cudaGraphicsUnmapResources(1, &handle, 0));
     }

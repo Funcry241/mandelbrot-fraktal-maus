@@ -32,22 +32,6 @@ __device__ __forceinline__ float2 pixelToComplex(
     );
 }
 
-// ---- TEST-KERNEL ----
-__global__ void testKernel(uchar4* out, int w, int h) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= w || y >= h) return;
-
-    float fx = float(x) / float(w - 1);
-    float fy = float(y) / float(h - 1);
-
-    unsigned char r = static_cast<unsigned char>(fx * 255.0f);
-    unsigned char g = static_cast<unsigned char>(fy * 255.0f);
-    unsigned char b = static_cast<unsigned char>(((fx + fy) * 0.5f) * 255.0f);
-
-    out[y * w + x] = make_uchar4(r, g, b, 255);
-}
-
 // ---- MANDELBROT-ITERATION ----
 __device__ int mandelbrotIterations(
     float x0, float y0, int maxIter,
