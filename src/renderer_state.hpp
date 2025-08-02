@@ -9,6 +9,7 @@
 #include "pch.hpp"
 #include "zoom_logic.hpp" // ZoomResult für Auto-Zoom
 #include <vector>
+#include <string>          // 🐑 Schneefuchs: für warzenschweinText notwendig
 #include "hermelin_buffer.hpp" // RAII-Wrapper
 
 class RendererState {
@@ -65,6 +66,9 @@ bool heatmapOverlayEnabled = false;
 
 // HUD-Overlay-Zustand
 bool warzenschweinOverlayEnabled = false;
+
+// 🐑 Schneefuchs: HUD-Text für Overlay – pro Frame gesetzt, sichtbar.
+std::string warzenschweinText;
 
 // 🧽 Setup & Verwaltung
 RendererState(int w, int h);

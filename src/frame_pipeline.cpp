@@ -1,12 +1,14 @@
-// 🐭 Maus-Kommentar: Alpha 49f - Supersampling restlos entfernt. `computeCudaFrame()` ohne `supersampling`, `d_tileSupersampling` oder `h_tileSupersampling`. Alles stabil, nichts vergessen. Otter: deterministisch. Schneefuchs: präzise.
-// 🐭 Maus-Kommentar: Alpha 63b - Setzt FrameContext-Dimensionen explizit aus RendererState - kein implizites GLFW nötig.
-// 🦦 Otter: Klare Datenflussregel: RendererState .> FrameContext . CUDA. Kein Kontext-Zugriff im Pipeline-Code.
+// Datei: src/frame_pipeline.cpp
+// 🐭 Maus-Kommentar: Alpha 49f – Supersampling restlos entfernt.
+// 🦦 Otter: Klare Datenflussregel: RendererState .> FrameContext . CUDA. Kein Kontext-Zugriff im Pipeline-Code
 // 🐑 Schneefuchs: Trennung von Plattformdetails und Logik ist jetzt durchgezogen.
 
 #include <GLFW/glfw3.h>
 #include <cmath>
 #include <vector>
 #include <vector_types.h>
+#include <sstream>
+#include <iomanip>
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
@@ -61,7 +63,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         state.d_contrast,
         frameCtx.width,
         frameCtx.height,
-        (float)frameCtx.zoom,
+        frameCtx.zoom,
         gpuOffset,
         frameCtx.maxIterations,
         frameCtx.h_entropy,
@@ -131,9 +133,6 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
     frameCtx.timeSinceLastZoom = 0.0f;
 }
 
-// 🦦 Otter: Klarer Datenfluss. Textur wird sauber aus dem PBO aktualisiert. Alle Overlays sind korrekt integriert.
-// 🐭 Maus: drawFrame ist zentral – hier entscheidet sich, was sichtbar ist. Kein PBO-Upload = schwarze Fläche.
-// 🦊 Schneefuchs: Reihenfolge beachtet: PBO → Textur → Overlay → Draw. Nichts implizit, alles kontrolliert.
 void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST(
@@ -149,6 +148,12 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     OpenGLUtils::setGLResourceContext("frame");
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), tex, frameCtx.width, frameCtx.height);
 
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[PIPE] Calling RendererPipeline::drawFullscreenQuad");
+    RendererPipeline::drawFullscreenQuad(tex);
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[PIPE] Completed drawFullscreenQuad");
+
     if (frameCtx.overlayActive)
         HeatmapOverlay::drawOverlay(
             frameCtx.h_entropy,
@@ -160,14 +165,8 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
             state
         );
 
-    if (Settings::warzenschweinOverlayEnabled)
+    if (Settings::warzenschweinOverlayEnabled && !state.warzenschweinText.empty())
         WarzenschweinOverlay::drawOverlay(state);
-
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] Calling RendererPipeline::drawFullscreenQuad");
-    RendererPipeline::drawFullscreenQuad(tex);
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] Completed drawFullscreenQuad");
 }
 
 void execute(RendererState& state) {
@@ -178,15 +177,24 @@ void execute(RendererState& state) {
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
     g_ctx.tileSize      = state.lastTileSize;
-    g_ctx.zoom          = static_cast<float>(state.zoom);
+    g_ctx.zoom          = static_cast<float>(state.zoom); // 🦦 Otter: /WX-sicher, explizit gecastet
     g_ctx.offset        = state.offset;
     g_ctx.maxIterations = state.maxIterations;
 
     computeCudaFrame(g_ctx, state);
     applyZoomLogic(g_ctx, g_zoomBus);
 
-    // 🦦 Otter: Overlay-Zustand explizit NACH Logic setzen – jedes Frame neu, kein vergessener Zustand.
-    g_ctx.overlayActive = state.heatmapOverlayEnabled;
+    g_ctx.overlayActive = state.heatmapOverlayEnabled; // 🦦 Otter: explizit
+
+    // 🐑 Schneefuchs: HUD-Text aktualisiert sich deterministisch pro Frame.
+    std::ostringstream oss;
+    oss << "Zoom: " << std::fixed << std::setprecision(4) << g_ctx.zoom
+        << " | Offset: (" << g_ctx.offset.x << ", " << g_ctx.offset.y << ")";
+    if (!g_ctx.h_entropy.empty())
+        oss << " | Entropy[0]: " << std::setprecision(3) << g_ctx.h_entropy[0];
+    float fps = static_cast<float>(1.0 / g_ctx.frameTime); // 🐑 Schneefuchs: sicherer Cast
+    oss << " | FPS: " << std::setprecision(1) << fps;
+    state.warzenschweinText = oss.str();
 
     drawFrame(g_ctx, state.tex.id(), state);
 
