@@ -38,7 +38,7 @@ vec3 colormap(float v) {
     return mix(vec3(0.08, 0.08, 0.10), vec3(1.0, 0.6, 0.2), g);
 }
 void main() {
-    FragColor = vec4(1.0, 0.0, 1.0, 1.0);
+    FragColor = vec4(colormap(clamp(vValue, 0.0, 1.0)), 0.85);
 }
 )GLSL";
 
@@ -150,11 +150,17 @@ void drawOverlay(const std::vector<float>& entropy,
 
     glUseProgram(overlayShader);
 
-    constexpr int overlayPixelsX = 160, overlayPixelsY = 90, paddingX = 16, paddingY = 16;
-    float scaleX = static_cast<float>(overlayPixelsX) / width / tilesX * 2.0f;
-    float scaleY = static_cast<float>(overlayPixelsY) / height / tilesY * 2.0f;
-    float offsetX = 1.0f - (static_cast<float>(overlayPixelsX + paddingX) / width * 2.0f);
-    float offsetY = 1.0f - (static_cast<float>(overlayPixelsY + paddingY) / height * 2.0f);
+    // constexpr int overlayPixelsX = 160, overlayPixelsY = 90, paddingX = 16, paddingY = 16;
+    // float scaleX = static_cast<float>(overlayPixelsX) / width / tilesX * 2.0f;
+    // float scaleY = static_cast<float>(overlayPixelsY) / height / tilesY * 2.0f;
+    // float offsetX = 1.0f - (static_cast<float>(overlayPixelsX + paddingX) / width * 2.0f);
+    // float offsetY = 1.0f - (static_cast<float>(overlayPixelsY + paddingY) / height * 2.0f);
+
+    float scaleX = 2.0f / tilesX;
+    float scaleY = 2.0f / tilesY;
+    float offsetX = -1.0f;
+    float offsetY = -1.0f;
+
 
     glUniform2f(glGetUniformLocation(overlayShader, "uScale"), scaleX, scaleY);
     glUniform2f(glGetUniformLocation(overlayShader, "uOffset"), offsetX, offsetY);
