@@ -195,9 +195,34 @@ void launch_mandelbrotHybrid(
     dim3 grid((w + 15)/16, (h + 15)/16);
 
     if (Settings::debugLogging) {
+        float scale = 1.0f / zoom;
+        float spanX = 3.5f * scale;
+        float spanY = spanX * h / w;
+
+        float2 topLeft = {
+            (-0.5f * spanX) + offset.x,
+            (-0.5f * spanY) + offset.y
+        };
+        float2 bottomRight = {
+            (0.5f * spanX) + offset.x,
+            (0.5f * spanY) + offset.y
+        };
+
         LUCHS_LOG_HOST(
-            "[LAUNCH] %dx%d | Zoom=%.3e | Offset=(%.5f,%.5f) | Iter=%d | Tile=%d",
+            "[LAUNCH] %dx%d | Zoom=%.6f | Offset=(%.6f, %.6f) | Iter=%d | Tile=%d",
             w, h, zoom, offset.x, offset.y, maxIter, tile
+        );
+        LUCHS_LOG_HOST(
+            "[VIEWPORT] spanX=%.6f spanY=%.6f",
+            spanX, spanY
+        );
+        LUCHS_LOG_HOST(
+            "[VIEWPORT] complex area: topLeft=(%.6f, %.6f) → bottomRight=(%.6f, %.6f)",
+            topLeft.x, topLeft.y, bottomRight.x, bottomRight.y
+        );
+        LUCHS_LOG_HOST(
+            "[THREADS] Launch blocks=%dx%d | blockSize=%dx%d | total threads=%d",
+            grid.x, grid.y, block.x, block.y, grid.x * grid.y * block.x * block.y
         );
     }
 
@@ -226,3 +251,4 @@ void launch_mandelbrotHybrid(
         );
     }
 }
+
