@@ -1,4 +1,11 @@
-// 🐭 Maus-Kommentar: Supersampling entfernt - launch_mandelbrotHybrid jetzt minimal und direkt. Otter: Klarer Fokus. Schneefuchs: Nur das, was gebraucht wird.
+// Datei: src/core_kernel.h
+
+// 🐭 Maus-Kommentar: Supersampling entfernt – launch_mandelbrotHybrid jetzt minimal und direkt.
+// Otter: Klarer Fokus. Schneefuchs: Nur das, was gebraucht wird.
+
+// 🌈 Rüsselwarze-Baustein: Farbcodierung basiert auf iterativen Escape-Pattern
+// und strukturiertem Pseudozufall außerhalb des Fraktals.
+// → Siehe core_kernel.cu: pseudoRandomWarze, hsvToRgb, mandelbrotKernel
 
 #ifndef CORE_KERNEL_H
 #define CORE_KERNEL_H
@@ -13,6 +20,7 @@
 // - zoom, offset: Fraktalausschnitt
 // - maxIterations: Iterationslimit
 // - tileSize: Größe der Entropie-Tiles
+// - Rüsselwarze: Innerhalb → dunkel. Außerhalb → strukturierter Zufall (radial, hue-basiert).
 extern "C"
 void launch_mandelbrotHybrid(
     uchar4* devPtr,
@@ -25,7 +33,7 @@ void launch_mandelbrotHybrid(
     int tileSize
 );
 
-// Entropie- und Kontrastberechnung pro Tile - Panda & Capybara
+// Entropie- und Kontrastberechnung pro Tile – Panda & Capybara
 extern "C"
 void computeCudaEntropyContrast(
     const int* d_iterations,
