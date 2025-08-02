@@ -1,4 +1,3 @@
-// Datei: src/frame_pipeline.cpp
 // 🐭 Maus-Kommentar: Alpha 49f - Supersampling restlos entfernt. `computeCudaFrame()` ohne `supersampling`, `d_tileSupersampling` oder `h_tileSupersampling`. Alles stabil, nichts vergessen. Otter: deterministisch. Schneefuchs: präzise.
 // 🐭 Maus-Kommentar: Alpha 63b - Setzt FrameContext-Dimensionen explizit aus RendererState - kein implizites GLFW nötig.
 // 🦦 Otter: Klare Datenflussregel: RendererState .> FrameContext . CUDA. Kein Kontext-Zugriff im Pipeline-Code.
@@ -90,7 +89,6 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
 }
 
 void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
-    // unchanged
     double2 diff = {
         frameCtx.newOffset.x - frameCtx.offset.x,
         frameCtx.newOffset.y - frameCtx.offset.y
@@ -137,17 +135,20 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
 // 🐭 Maus: drawFrame ist zentral – hier entscheidet sich, was sichtbar ist. Kein PBO-Upload = schwarze Fläche.
 // 🦊 Schneefuchs: Reihenfolge beachtet: PBO → Textur → Overlay → Draw. Nichts implizit, alles kontrolliert.
 void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] drawFrame: overlayActive=%d, texID=%u", frameCtx.overlayActive ? 1 : 0, tex);
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST(
+            "[PIPE] drawFrame: overlay=%d warzenschwein=%d entropy=%zu contrast=%zu tex=%u",
+            frameCtx.overlayActive ? 1 : 0,
+            Settings::warzenschweinOverlayEnabled ? 1 : 0,
+            frameCtx.h_entropy.size(),
+            frameCtx.h_contrast.size(),
+            tex
+        );
+    }
 
-    // 1️⃣ CUDA hat vorher in den OpenGL-PBO geschrieben.
-    //     Jetzt übertragen wir den Inhalt explizit in die OpenGL-Textur (GL_TEXTURE_2D),
-    //     da OpenGL nicht direkt aus dem PBO rendert.
     OpenGLUtils::setGLResourceContext("frame");
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), tex, frameCtx.width, frameCtx.height);
 
-    // 2️⃣ Optionales Overlay: Heatmap basierend auf Entropie-/Kontrastdaten.
-    //     Wird auf Basis der aktualisierten Textur gezeichnet.
     if (frameCtx.overlayActive)
         HeatmapOverlay::drawOverlay(
             frameCtx.h_entropy,
@@ -159,13 +160,9 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
             state
         );
 
-    // 3️⃣ Optionales Overlay: Warzenschwein (z.B. Debug- oder HUD-Anzeige).
-    //     Kommt immer obendrauf, unabhängig von der Heatmap.
     if (Settings::warzenschweinOverlayEnabled)
         WarzenschweinOverlay::drawOverlay(state);
 
-    // 4️⃣ Jetzt wird das finale Bild (inkl. Overlays) auf den Screen gezeichnet.
-    //     Das Fullscreen-Quad nutzt die zuvor aktualisierte Textur.
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Calling RendererPipeline::drawFullscreenQuad");
     RendererPipeline::drawFullscreenQuad(tex);
@@ -178,7 +175,6 @@ void execute(RendererState& state) {
         LUCHS_LOG_HOST("[PIPE] execute start");
     beginFrame(g_ctx);
 
-    // Schwarze Ameise: Explizite Synchronisierung aller relevanten FrameContext-Parameter aus RendererState
     g_ctx.width        = state.width;
     g_ctx.height       = state.height;
     g_ctx.tileSize     = state.lastTileSize;
