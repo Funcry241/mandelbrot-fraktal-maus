@@ -1,5 +1,5 @@
 // Datei: src/frame_pipeline.cpp
-// 🐭 Maus-Kommentar: Alpha 49f – Supersampling restlos entfernt.
+// 🐭 Maus-Kommentar: Alpha 78 – Overlays korrekt nach Fraktal gezeichnet
 // 🦦 Otter: Klare Datenflussregel: RendererState .> FrameContext . CUDA. Kein Kontext-Zugriff im Pipeline-Code
 // 🐑 Schneefuchs: Trennung von Plattformdetails und Logik ist jetzt durchgezogen.
 
@@ -148,12 +148,10 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     OpenGLUtils::setGLResourceContext("frame");
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), tex, frameCtx.width, frameCtx.height);
 
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] Calling RendererPipeline::drawFullscreenQuad");
+    // 🎨 Erst Fraktal
     RendererPipeline::drawFullscreenQuad(tex);
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] Completed drawFullscreenQuad");
 
+    // 🔥 Dann Heatmap-Overlay
     if (frameCtx.overlayActive)
         HeatmapOverlay::drawOverlay(
             frameCtx.h_entropy,
@@ -165,6 +163,7 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
             state
         );
 
+    // 🐗 Dann HUD
     if (Settings::warzenschweinOverlayEnabled && !state.warzenschweinText.empty())
         WarzenschweinOverlay::drawOverlay(state);
 }
