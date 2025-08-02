@@ -101,19 +101,12 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemset(d_contrast.get(),  0, d_contrast.size()));
 
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[MAP] Mapping CUDA-GL resource %p", (void*)pboResource->get());
+        LUCHS_LOG_HOST("[MAP] Using Bär to map CUDA-GL resource");
+
     CUDA_CHECK(cudaDeviceSynchronize());
-    {
-        cudaGraphicsResource_t handle = pboResource->get();
-        CUDA_CHECK(cudaGraphicsMapResources(1, &handle, 0));
-    }
 
-    uchar4* devPtr = nullptr;
     size_t sizeBytes = 0;
-    CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &sizeBytes, pboResource->get()));
-
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[MAP] Mapped pointer: %p (%zu bytes)", (void*)devPtr, sizeBytes);
+    uchar4* devPtr = static_cast<uchar4*>(pboResource->mapAndLog(sizeBytes));
 
     if (!devPtr) {
         LUCHS_LOG_HOST("[FATAL] Kernel skipped: surface pointer is null");
@@ -180,10 +173,8 @@ void renderCudaFrame(
         }
     }
 
-    {
-        cudaGraphicsResource_t handle = pboResource->get();
-        CUDA_CHECK(cudaGraphicsUnmapResources(1, &handle, 0));
-    }
+    pboResource->unmap();
+
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[UNMAP] PBO unmapped successfully");
         LUCHS_LOG_HOST("[KERNEL] renderCudaFrame finished");

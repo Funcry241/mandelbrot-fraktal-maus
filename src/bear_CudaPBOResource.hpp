@@ -1,4 +1,4 @@
-// Datei: src/bear_CudaPBOResource.hpp
+// Datei: include/bear_CudaPBOResource.hpp
 // 🐻 Bär: RAII-Wrapper für CUDA-PBO-Registrierung – automatisches Aufräumen im Destruktor.
 // 🐻 Bär: Dieses Projekt steht unter dem Codenamen "Bär".
 
@@ -22,6 +22,12 @@ public:
 
     // 🐻 Bär: Liefert das CUDA-Resource-Handle für Mapping/Unmapping
     cudaGraphicsResource_t get() const noexcept;
+
+    // 🐻 Bär: mappt CUDA-Resource und liefert Dev-Pointer zurück, loggt Zustand
+    void* mapAndLog(size_t& sizeOut);
+
+    // 🐻 Bär: unmappt CUDA-Resource
+    void unmap();
 
     // 🐻 Bär: Nicht kopierbar, um doppelte Registrierung zu vermeiden
     bear_CudaPBOResource(const bear_CudaPBOResource&) = delete;

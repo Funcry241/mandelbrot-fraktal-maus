@@ -4,11 +4,18 @@
 
 #include "bear_CudaPBOResource.hpp"
 #include "luchs_log_host.hpp"
+#include <GL/glew.h>
 
 namespace CudaInterop {
 
 // 🐻 Bär: Konstruktor – registriert PBO bei Erstellung
 bear_CudaPBOResource::bear_CudaPBOResource(GLuint pboId) {
+    // 🐻 Otter: explizit sicherstellen, dass GL-Buffer gebunden ist
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboId);
+    GLint bound = 0;
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &bound);
+    LUCHS_LOG_HOST("[PBO] Bär: Bound PBO %u, GL_PIXEL_UNPACK_BUFFER_BINDING = %d", pboId, bound);
+
     cudaError_t err = cudaGraphicsGLRegisterBuffer(&resource_, pboId, cudaGraphicsRegisterFlagsWriteDiscard);
     if (err != cudaSuccess) {
         LUCHS_LOG_HOST("[ERROR] Bär: cudaGraphicsGLRegisterBuffer failed: %s", cudaGetErrorString(err));
@@ -30,6 +37,33 @@ bear_CudaPBOResource::~bear_CudaPBOResource() {
     }
 }
 
+// 🐻 Bär: mapAndLog – mappt und loggt DevPtr + Size
+void* bear_CudaPBOResource::mapAndLog(size_t& sizeOut) {
+    void* devPtr = nullptr;
+    sizeOut = 0;
+
+    if (!resource_) {
+        LUCHS_LOG_HOST("[ERROR] Bär: mapAndLog() called with null resource.");
+        return nullptr;
+    }
+
+    cudaError_t err = cudaGraphicsMapResources(1, &resource_);
+    LUCHS_LOG_HOST("[PBO] Bär: cudaGraphicsMapResources returned %d", static_cast<int>(err));
+    if (err != cudaSuccess) return nullptr;
+
+    err = cudaGraphicsResourceGetMappedPointer(&devPtr, &sizeOut, resource_);
+    LUCHS_LOG_HOST("[PBO] Bär: Mapped pointer = %p, size = %zu, err = %d", devPtr, sizeOut, static_cast<int>(err));
+
+    return devPtr;
+}
+
+// 🐻 Bär: unmap – gibt gemappte Resource frei
+void bear_CudaPBOResource::unmap() {
+    if (!resource_) return;
+    cudaError_t err = cudaGraphicsUnmapResources(1, &resource_);
+    LUCHS_LOG_HOST("[PBO] Bär: cudaGraphicsUnmapResources returned %d", static_cast<int>(err));
+}
+
 // 🐻 Bär: Getter für das Resource-Handle
 cudaGraphicsResource_t bear_CudaPBOResource::get() const noexcept {
     return resource_;
@@ -38,14 +72,14 @@ cudaGraphicsResource_t bear_CudaPBOResource::get() const noexcept {
 // 🐻 Bär: Move-Konstruktor – übernimmt Ownership
 bear_CudaPBOResource::bear_CudaPBOResource(bear_CudaPBOResource&& other) noexcept
 : resource_(other.resource_) {
-    other.resource_ = nullptr;  // Bär: clear source
+    other.resource_ = nullptr;
 }
 
 // 🐻 Bär: Move-Assignment – übernimmt Ownership und räumt auf
 bear_CudaPBOResource& bear_CudaPBOResource::operator=(bear_CudaPBOResource&& other) noexcept {
     if (this != &other) {
         if (resource_) {
-            cudaGraphicsUnregisterResource(resource_);  // Bär: clean existing
+            cudaGraphicsUnregisterResource(resource_);
         }
         resource_ = other.resource_;
         other.resource_ = nullptr;
