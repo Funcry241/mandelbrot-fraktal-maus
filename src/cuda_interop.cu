@@ -118,17 +118,26 @@ void renderCudaFrame(
         luchsBabyInitDone = true;
     }
 
-    if (Settings::debugLogging) {
-        LUCHS_LOG_HOST(
-            "[KERNEL] launch_mandelbrotHybrid(surface=%p, w=%d, h=%d, zoom=%.5f, offset=(%.5f,%.5f), iter=%d, tile=%d)",
-            (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations, tileSize
-        );
-    }
+    // if (Settings::debugLogging) {
+    //     LUCHS_LOG_HOST(
+    //         "[KERNEL] launch_mandelbrotHybrid(surface=%p, w=%d, h=%d, zoom=%.5f, offset=(%.5f,%.5f), iter=%d, tile=%d)",
+    //         (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations, tileSize
+    //     );
+    // }
     // launch_mandelbrotHybrid(
     //     devPtr,
     //     static_cast<int*>(d_iterations.get()),
     //     width, height, zoom, offset, maxIterations, tileSize
     // );
+
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST(
+            "[KERNEL] launch_fillTestColorKernel(surface=%p, w=%d, h=%d, zoom=%.5f, offset=(%.5f,%.5f), iter=%d, tile=%d)",
+            (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations, tileSize
+        );
+    }
+
+
     launch_fillTestColorKernel(devPtr, width, height);
     LuchsLogger::flushDeviceLogToHost();
 

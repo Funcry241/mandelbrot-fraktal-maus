@@ -11,14 +11,13 @@
 
 // 🧪 Dirty-Testkernel: Füllt gesamten Surface mit solid red (255,0,0,255)
 __global__ void fillTestColorKernel(uchar4* surface, int width, int height) {
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    const int idx = y * width + x;
-
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= width || y >= height) return;
-
-    surface[idx] = make_uchar4(255, 0, 0, 255);
+    int idx = y * width + x;
+    surface[idx] = make_uchar4(255, 0, 255, 255);  // MAGENTA => sofort sichtbar
 }
+
 
 // Aufrufbare Host-Funktion für einfachen Zugriff
 void launch_fillTestColorKernel(uchar4* surface, int width, int height) {
