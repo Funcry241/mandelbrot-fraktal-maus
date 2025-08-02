@@ -38,7 +38,7 @@ vec3 colormap(float v) {
     return mix(vec3(0.08, 0.08, 0.10), vec3(1.0, 0.6, 0.2), g);
 }
 void main() {
-    FragColor = vec4(colormap(clamp(vValue, 0.0, 1.0)), 0.85);
+    FragColor = vec4(1.0, 0.0, 1.0, 1.0);
 }
 )GLSL";
 
