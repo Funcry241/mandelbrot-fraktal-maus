@@ -2,9 +2,13 @@ cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# 🏗️ Architektur
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 86 CACHE STRING "Default architecture if none provided")
 endif()
+
+# 🧩 Vcpkg Triplet statisch festlegen
+set(VCPKG_TARGET_TRIPLET "x64-windows-static")
 
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
@@ -19,9 +23,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# ⚠️ Fallback: CMake kennt "CUDA23" nicht offiziell - daher auf 20 setzen,
-# aber explizit mit --std=c++23 im target_compile_options aktivieren.
-set(CMAKE_CUDA_STANDARD 20)
+set(CMAKE_CUDA_STANDARD 20)  # CUDA23 wird nicht erkannt, explizit per compile_option unten
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
@@ -77,6 +79,14 @@ add_executable(mandelbrot_otterdream
     src/bear_CudaPBOResource.cpp
 )
 
+# 🛡️ GLEW: Imaging-Fehler verhindern durch explizite Compile-Definitionen
+target_compile_definitions(mandelbrot_otterdream PRIVATE 
+    GLEW_STATIC
+    GLEW_NO_IMAGING
+    GLEW_NO_GLU
+)
+
+# 🧠 PCH nur bei MSVC
 if (MSVC)
   target_precompile_headers(mandelbrot_otterdream PRIVATE src/pch.hpp)
 endif()
@@ -97,6 +107,7 @@ if (MSVC)
     endforeach()
 endif()
 
+# 🔧 CUDA-separat builden
 set_target_properties(mandelbrot_otterdream PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
 )
@@ -119,6 +130,7 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
     Threads::Threads    
 )
 
+# 🧠 CUDA-Dateien explizit markieren
 set_source_files_properties(
     src/renderer_core.cu    
     src/cuda_interop.cu
@@ -127,6 +139,7 @@ set_source_files_properties(
     PROPERTIES LANGUAGE CUDA
 )
 
+# 🛠️ Build-Typ Default setzen
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
