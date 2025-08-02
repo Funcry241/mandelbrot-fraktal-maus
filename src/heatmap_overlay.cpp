@@ -92,6 +92,11 @@ void drawOverlay(const std::vector<float>& entropy,
                  int tileSize,
                  [[maybe_unused]] GLuint textureId,
                  RendererState& ctx) {
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[HM] drawOverlay called: entropy=%zu contrast=%zu enabled=%d",
+                    entropy.size(), contrast.size(), ctx.heatmapOverlayEnabled ? 1 : 0);
+    }
+
     if (!ctx.heatmapOverlayEnabled) return;
 
     static bool warned = false;

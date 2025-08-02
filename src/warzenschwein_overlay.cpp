@@ -167,6 +167,12 @@ void generateOverlayQuads(const std::string& text, std::vector<float>& vertexOut
 }
 
 void drawOverlay(RendererState& ctx) {
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[WZ] drawOverlay called, visible=%d, currentText.empty=%d",
+                       visible ? 1 : 0,
+                       currentText.empty() ? 1 : 0);
+    }
+
     if (!Settings::warzenschweinOverlayEnabled || !visible || currentText.empty())
         return;
 

@@ -14,14 +14,14 @@ bear_CudaPBOResource::bear_CudaPBOResource(GLuint pboId) {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboId);
     GLint bound = 0;
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &bound);
-    LUCHS_LOG_HOST("[PBO] Bär: Bound PBO %u, GL_PIXEL_UNPACK_BUFFER_BINDING = %d", pboId, bound);
+    LUCHS_LOG_HOST("[PBO] Bound PBO %u, GL_PIXEL_UNPACK_BUFFER_BINDING = %d", pboId, bound);
 
     cudaError_t err = cudaGraphicsGLRegisterBuffer(&resource_, pboId, cudaGraphicsRegisterFlagsWriteDiscard);
     if (err != cudaSuccess) {
-        LUCHS_LOG_HOST("[ERROR] Bär: cudaGraphicsGLRegisterBuffer failed: %s", cudaGetErrorString(err));
+        LUCHS_LOG_HOST("[ERROR] cudaGraphicsGLRegisterBuffer failed: %s", cudaGetErrorString(err));
         resource_ = nullptr;
     } else {
-        LUCHS_LOG_HOST("[DEBUG] Bär: Registered PBO %u as CUDA resource %p", pboId, (void*)resource_);
+        LUCHS_LOG_HOST("[DEBUG] Registered PBO %u as CUDA resource %p", pboId, (void*)resource_);
     }
 }
 
@@ -30,9 +30,9 @@ bear_CudaPBOResource::~bear_CudaPBOResource() {
     if (resource_) {
         cudaError_t err = cudaGraphicsUnregisterResource(resource_);
         if (err != cudaSuccess) {
-            LUCHS_LOG_HOST("[ERROR] Bär: cudaGraphicsUnregisterResource failed: %s", cudaGetErrorString(err));
+            LUCHS_LOG_HOST("[ERROR] cudaGraphicsUnregisterResource failed: %s", cudaGetErrorString(err));
         } else {
-            LUCHS_LOG_HOST("[DEBUG] Bär: Unregistered CUDA resource %p", (void*)resource_);
+            LUCHS_LOG_HOST("[DEBUG] Unregistered CUDA resource %p", (void*)resource_);
         }
     }
 }
@@ -43,16 +43,16 @@ void* bear_CudaPBOResource::mapAndLog(size_t& sizeOut) {
     sizeOut = 0;
 
     if (!resource_) {
-        LUCHS_LOG_HOST("[ERROR] Bär: mapAndLog() called with null resource.");
+        LUCHS_LOG_HOST("[ERROR] mapAndLog() called with null resource.");
         return nullptr;
     }
 
     cudaError_t err = cudaGraphicsMapResources(1, &resource_);
-    LUCHS_LOG_HOST("[PBO] Bär: cudaGraphicsMapResources returned %d", static_cast<int>(err));
+    LUCHS_LOG_HOST("[PBO] cudaGraphicsMapResources returned %d", static_cast<int>(err));
     if (err != cudaSuccess) return nullptr;
 
     err = cudaGraphicsResourceGetMappedPointer(&devPtr, &sizeOut, resource_);
-    LUCHS_LOG_HOST("[PBO] Bär: Mapped pointer = %p, size = %zu, err = %d", devPtr, sizeOut, static_cast<int>(err));
+    LUCHS_LOG_HOST("[PBO] Mapped pointer = %p, size = %zu, err = %d", devPtr, sizeOut, static_cast<int>(err));
 
     return devPtr;
 }
@@ -61,7 +61,7 @@ void* bear_CudaPBOResource::mapAndLog(size_t& sizeOut) {
 void bear_CudaPBOResource::unmap() {
     if (!resource_) return;
     cudaError_t err = cudaGraphicsUnmapResources(1, &resource_);
-    LUCHS_LOG_HOST("[PBO] Bär: cudaGraphicsUnmapResources returned %d", static_cast<int>(err));
+    LUCHS_LOG_HOST("[PBO] cudaGraphicsUnmapResources returned %d", static_cast<int>(err));
 }
 
 // 🐻 Bär: Getter für das Resource-Handle
