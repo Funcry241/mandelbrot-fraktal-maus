@@ -14,12 +14,6 @@
 static constexpr size_t LOG_BUFFER_SIZE = 1024 * 1024; // 1 MB Logpuffer (Empfehlung: 128 KB – 2 MB)
 
 // =========================================================================
-// 🧠 Device-Logging Makro (verwendbar in __device__ Funktionen)
-//     Nur Klartext – keine Formatierung im __device__-Code
-// =========================================================================
-#define LUCHS_LOG_DEVICE(msg) LuchsLogger::deviceLog(__FILE__, __LINE__, msg)
-
-// =========================================================================
 // 🧵 Namespace: LuchsLogger für Device-Logging
 // =========================================================================
 namespace LuchsLogger {
