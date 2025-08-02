@@ -86,15 +86,9 @@ __global__ void mandelbrotKernel(
     iterOut[idx] = it;
 
     if (doLog && isFirstThread) {
-        LUCHS_LOG_DEVICE("mandelbrotKernel entered | x=%d y=%d idx=%d | c=(%.6f,%.6f) | it=%d norm=%.6f | %s %s %s %s",
-            x, y, idx,
-            c.x, c.y,
-            it, norm,
-            (it <= 2 ? "it<=2" : ""),
-            (norm < 1.0f ? "norm<1" : ""),
-            (t < 0.0f ? "t<0" : ""),
-            (tClamped == 0 ? "tClamped=0" : ""));
+        LUCHS_LOG_DEVICE("mandelbrotKernel entered | x=? y=? idx=? | c=(?,?) | it=? norm=? | it<=2 norm<1 t<0 tClamped=0");
     }
+
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
         LUCHS_LOG_DEVICE("block processed");
     }
