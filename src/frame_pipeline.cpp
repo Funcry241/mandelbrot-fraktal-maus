@@ -133,19 +133,39 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
     frameCtx.timeSinceLastZoom = 0.0f;
 }
 
+// 🦦 Otter: Klarer Datenfluss. Textur wird sauber aus dem PBO aktualisiert. Alle Overlays sind korrekt integriert.
+// 🐭 Maus: drawFrame ist zentral – hier entscheidet sich, was sichtbar ist. Kein PBO-Upload = schwarze Fläche.
+// 🦊 Schneefuchs: Reihenfolge beachtet: PBO → Textur → Overlay → Draw. Nichts implizit, alles kontrolliert.
 void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] drawFrame: overlayActive=%d, texID=%u", frameCtx.overlayActive ? 1 : 0, tex);
 
-    // 🔧 Hier erfolgt jetzt der Upload vom PBO in die Textur
+    // 1️⃣ CUDA hat vorher in den OpenGL-PBO geschrieben.
+    //     Jetzt übertragen wir den Inhalt explizit in die OpenGL-Textur (GL_TEXTURE_2D),
+    //     da OpenGL nicht direkt aus dem PBO rendert.
     OpenGLUtils::setGLResourceContext("frame");
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), tex, frameCtx.width, frameCtx.height);
 
+    // 2️⃣ Optionales Overlay: Heatmap basierend auf Entropie-/Kontrastdaten.
+    //     Wird auf Basis der aktualisierten Textur gezeichnet.
     if (frameCtx.overlayActive)
-        HeatmapOverlay::drawOverlay(frameCtx.h_entropy, frameCtx.h_contrast, frameCtx.width, frameCtx.height, frameCtx.tileSize, tex, state);
+        HeatmapOverlay::drawOverlay(
+            frameCtx.h_entropy,
+            frameCtx.h_contrast,
+            frameCtx.width,
+            frameCtx.height,
+            frameCtx.tileSize,
+            tex,
+            state
+        );
+
+    // 3️⃣ Optionales Overlay: Warzenschwein (z.B. Debug- oder HUD-Anzeige).
+    //     Kommt immer obendrauf, unabhängig von der Heatmap.
     if (Settings::warzenschweinOverlayEnabled)
         WarzenschweinOverlay::drawOverlay(state);
 
+    // 4️⃣ Jetzt wird das finale Bild (inkl. Overlays) auf den Screen gezeichnet.
+    //     Das Fullscreen-Quad nutzt die zuvor aktualisierte Textur.
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Calling RendererPipeline::drawFullscreenQuad");
     RendererPipeline::drawFullscreenQuad(tex);
