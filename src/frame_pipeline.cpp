@@ -185,14 +185,14 @@ void execute(RendererState& state) {
 
     g_ctx.overlayActive = state.heatmapOverlayEnabled; // 🦦 Otter: explizit
 
-    // 🐑 Schneefuchs: HUD-Text aktualisiert sich deterministisch pro Frame.
+    // 🐑 Schneefuchs: HUD-Text aktualisiert sich deterministisch pro Frame, mehrzeilig formatiert
     std::ostringstream oss;
-    oss << "Zoom: " << std::fixed << std::setprecision(4) << g_ctx.zoom
-        << " | Offset: (" << g_ctx.offset.x << ", " << g_ctx.offset.y << ")";
+    oss << "Zoom: " << std::fixed << std::setprecision(4) << g_ctx.zoom << "\n";
+    oss << "Offset: (" << g_ctx.offset.x << ", " << g_ctx.offset.y << ")\n";
     if (!g_ctx.h_entropy.empty())
-        oss << " | Entropy[0]: " << std::setprecision(3) << g_ctx.h_entropy[0];
+        oss << "Entropy[0]: " << std::setprecision(3) << g_ctx.h_entropy[0] << "\n";
     float fps = static_cast<float>(1.0 / g_ctx.frameTime); // 🐑 Schneefuchs: sicherer Cast
-    oss << " | FPS: " << std::setprecision(1) << fps;
+    oss << "FPS: " << std::setprecision(1) << fps;
     state.warzenschweinText = oss.str();
     WarzenschweinOverlay::setText(state.warzenschweinText); // 🐑 Schneefuchs: Text aktiv an Overlay übertragen
 
