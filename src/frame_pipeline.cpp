@@ -182,6 +182,9 @@ void execute(RendererState& state) {
     g_ctx.offset       = state.offset;
     g_ctx.maxIterations = state.maxIterations;
 
+    // 🔥 Overlay-Zustand übernehmen
+    g_ctx.overlayActive = state.heatmapOverlayEnabled;
+
     computeCudaFrame(g_ctx, state);
     applyZoomLogic(g_ctx, g_zoomBus);
     drawFrame(g_ctx, state.tex.id(), state);
