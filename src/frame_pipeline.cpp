@@ -175,18 +175,19 @@ void execute(RendererState& state) {
         LUCHS_LOG_HOST("[PIPE] execute start");
     beginFrame(g_ctx);
 
-    g_ctx.width        = state.width;
-    g_ctx.height       = state.height;
-    g_ctx.tileSize     = state.lastTileSize;
-    g_ctx.zoom         = static_cast<float>(state.zoom);
-    g_ctx.offset       = state.offset;
+    g_ctx.width         = state.width;
+    g_ctx.height        = state.height;
+    g_ctx.tileSize      = state.lastTileSize;
+    g_ctx.zoom          = static_cast<float>(state.zoom);
+    g_ctx.offset        = state.offset;
     g_ctx.maxIterations = state.maxIterations;
-
-    // 🔥 Overlay-Zustand übernehmen
-    g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
     computeCudaFrame(g_ctx, state);
     applyZoomLogic(g_ctx, g_zoomBus);
+
+    // 🦦 Otter: Overlay-Zustand explizit NACH Logic setzen – jedes Frame neu, kein vergessener Zustand.
+    g_ctx.overlayActive = state.heatmapOverlayEnabled;
+
     drawFrame(g_ctx, state.tex.id(), state);
 
     if (Settings::debugLogging)
