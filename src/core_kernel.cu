@@ -60,10 +60,6 @@ __global__ void mandelbrotKernel(
         blockIdx.x == 0 && blockIdx.y == 0 &&
         threadIdx.x == 0 && threadIdx.y == 0;
 
-    if (doLog && isFirstThread) {
-        LUCHS_LOG_DEVICE("mandelbrotKernel entered");
-    }
-
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * w + x;
@@ -90,16 +86,15 @@ __global__ void mandelbrotKernel(
     iterOut[idx] = it;
 
     if (doLog && isFirstThread) {
-        LUCHS_LOG_DEVICE("mandelbrotKernel entered");
-        LUCHS_LOG_DEVICE("x=%d y=%d idx=%d", x, y, idx);
-        LUCHS_LOG_DEVICE("c.x=%.6f c.y=%.6f", c.x, c.y);
-        LUCHS_LOG_DEVICE("it=%d norm=%.6f", it, norm);
-        if (it <= 2)       LUCHS_LOG_DEVICE("it <= 2");
-        if (norm < 1.0f)   LUCHS_LOG_DEVICE("norm < 1.0");
-        if (t < 0.0f)      LUCHS_LOG_DEVICE("t < 0");
-        if (tClamped == 0) LUCHS_LOG_DEVICE("tClamped == 0");
+        LUCHS_LOG_DEVICE("mandelbrotKernel entered | x=%d y=%d idx=%d | c=(%.6f,%.6f) | it=%d norm=%.6f | %s %s %s %s",
+            x, y, idx,
+            c.x, c.y,
+            it, norm,
+            (it <= 2 ? "it<=2" : ""),
+            (norm < 1.0f ? "norm<1" : ""),
+            (t < 0.0f ? "t<0" : ""),
+            (tClamped == 0 ? "tClamped=0" : ""));
     }
-
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
         LUCHS_LOG_DEVICE("block processed");
     }
@@ -255,4 +250,3 @@ void launch_mandelbrotHybrid(
         );
     }
 }
-

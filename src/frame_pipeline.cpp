@@ -194,6 +194,7 @@ void execute(RendererState& state) {
     float fps = static_cast<float>(1.0 / g_ctx.frameTime); // 🐑 Schneefuchs: sicherer Cast
     oss << " | FPS: " << std::setprecision(1) << fps;
     state.warzenschweinText = oss.str();
+    WarzenschweinOverlay::setText(state.warzenschweinText); // 🐑 Schneefuchs: Text aktiv an Overlay übertragen
 
     drawFrame(g_ctx, state.tex.id(), state);
 
