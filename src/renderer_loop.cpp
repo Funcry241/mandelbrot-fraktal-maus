@@ -14,7 +14,6 @@
 #include "frame_pipeline.hpp"
 #include "zoom_command.hpp"
 #include "zoom_logic.hpp"
-#include "frame_pipeline.hpp"
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
 #include <cmath> // für std::sqrt, std::clamp
