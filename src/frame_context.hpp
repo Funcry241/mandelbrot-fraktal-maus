@@ -5,7 +5,7 @@
 #pragma once
 #include <vector>
 #include <cuda_runtime.h>
-#include "settings.hpp"  // Settings::BASE_TILE_SIZE etc.
+#include "settings.hpp"
 #include "luchs_log_host.hpp"
 
 #ifdef _MSC_VER
