@@ -28,7 +28,7 @@ void beginFrame(FrameContext& ctx);
 void computeCudaFrame(FrameContext& ctx, RendererState& state);
 
 // 🌀 Zoom-Verarbeitung + Zustand aktualisieren
-void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus, RendererState& state);
+void applyZoomLogic(FrameContext& ctx, CommandBus& zoomBus);
 
 // 🎨 Ausgabe: Fraktal + Heatmap + Overlays
 void drawFrame(FrameContext& ctx, GLuint tex, RendererState& state);
