@@ -31,6 +31,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cuda-toolkit-12-9
 
+      - name: Set CUDA compiler path
+        run: echo "CUDACXX=/usr/local/cuda/bin/nvcc" >> $GITHUB_ENV
+
+      - name: Check CUDA version
+        run: /usr/local/cuda/bin/nvcc --version
+
       - name: Clone vcpkg
         run: git clone https://github.com/microsoft/vcpkg.git
 
