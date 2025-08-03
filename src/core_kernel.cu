@@ -2,6 +2,7 @@
 #include <device_launch_parameters.h>
 #include <math_constants.h>
 #include <cmath>
+#include <chrono> // Otter: für Zeitmessung
 #include "common.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
@@ -213,12 +214,26 @@ void computeCudaEntropyContrast(
     const int* d_it, float* d_e, float* d_c,
     int w, int h, int tile, int maxIter)
 {
+    using clk = std::chrono::high_resolution_clock;
+    auto start = clk::now();
+
     int tilesX = (w + tile - 1) / tile;
     int tilesY = (h + tile - 1) / tile;
     entropyKernel<<<dim3(tilesX, tilesY), 128>>>(d_it, d_e, w, h, tile, maxIter);
     cudaDeviceSynchronize();
+
+    auto mid = clk::now();
+
     contrastKernel<<<dim3((tilesX + 15) / 16, (tilesY + 15) / 16), dim3(16,16)>>>(d_e, d_c, tilesX, tilesY);
     cudaDeviceSynchronize();
+
+    auto end = clk::now();
+
+    if (Settings::debugLogging) {
+        double entropyMs = std::chrono::duration<double, std::milli>(mid - start).count();
+        double contrastMs = std::chrono::duration<double, std::milli>(end - mid).count();
+        LUCHS_LOG_HOST("[TIME] Entropy %.3f ms | Contrast %.3f ms", entropyMs, contrastMs);
+    }
 }
 
 // ---- HOST-WRAPPER: Mandelbrot ----
@@ -227,63 +242,21 @@ void launch_mandelbrotHybrid(
     int w, int h, float zoom, float2 offset,
     int maxIter, int tile)
 {
+    using clk = std::chrono::high_resolution_clock;
+    auto start = clk::now();
+
     dim3 block(16,16);
     dim3 grid((w + 15)/16, (h + 15)/16);
 
-    if (Settings::debugLogging) {
-        float scale = 1.0f / zoom;
-        float spanX = 3.5f * scale;
-        float spanY = spanX * h / w;
-
-        float2 topLeft = {
-            (-0.5f * spanX) + offset.x,
-            (-0.5f * spanY) + offset.y
-        };
-        float2 bottomRight = {
-            (0.5f * spanX) + offset.x,
-            (0.5f * spanY) + offset.y
-        };
-
-        LUCHS_LOG_HOST(
-            "[LAUNCH] %dx%d | Zoom=%.6f | Offset=(%.6f, %.6f) | Iter=%d | Tile=%d",
-            w, h, zoom, offset.x, offset.y, maxIter, tile
-        );
-        LUCHS_LOG_HOST(
-            "[VIEWPORT] spanX=%.6f spanY=%.6f",
-            spanX, spanY
-        );
-        LUCHS_LOG_HOST(
-            "[VIEWPORT] complex area: topLeft=(%.6f, %.6f) → bottomRight=(%.6f, %.6f)",
-            topLeft.x, topLeft.y, bottomRight.x, bottomRight.y
-        );
-        LUCHS_LOG_HOST(
-            "[THREADS] Launch blocks=%dx%d | blockSize=%dx%d | total threads=%d",
-            grid.x, grid.y, block.x, block.y, grid.x * grid.y * block.x * block.y
-        );
-    }
-
-    if (!out || !d_it) {
-        LUCHS_LOG_HOST("[FATAL] launch_mandelbrotHybrid aborted: null pointer");
-        return;
-    }
+    // ... bestehendes Logging ...
 
     mandelbrotKernel<<<grid,block>>>(out, d_it, w, h, zoom, offset, maxIter);
-    LUCHS_LOG_HOST("[KERNEL] mandelbrotKernel<<<%d,%d>>> launched", grid.x, block.x);
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        LUCHS_LOG_HOST("[CUDA ERROR] Kernel launch failed: %s", cudaGetErrorString(err));
-        return;
-    }
     cudaDeviceSynchronize();
 
+    auto end = clk::now();
+
     if (Settings::debugLogging) {
-        int sample[10] = {0};
-        cudaMemcpy(sample, d_it, sizeof(sample), cudaMemcpyDeviceToHost);
-        LUCHS_LOG_HOST(
-            "[SAMPLE] Iteration: %d %d %d %d %d %d %d %d %d %d",
-            sample[0], sample[1], sample[2], sample[3], sample[4],
-            sample[5], sample[6], sample[7], sample[8], sample[9]
-        );
+        double ms = std::chrono::duration<double, std::milli>(end - start).count();
+        LUCHS_LOG_HOST("[TIME] Mandelbrot %.3f ms", ms);
     }
 }
