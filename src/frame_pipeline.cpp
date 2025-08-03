@@ -1,7 +1,7 @@
 // Datei: src/frame_pipeline.cpp
-// 🐭 Maus-Kommentar: Alpha 78 – Overlays korrekt nach Fraktal gezeichnet
-// 🦦 Otter: Klare Datenflussregel: RendererState .> FrameContext . CUDA. Kein Kontext-Zugriff im Pipeline-Code
-// 🐑 Schneefuchs: Trennung von Plattformdetails und Logik ist jetzt durchgezogen.
+// 🐭 Maus-Kommentar: Alpha 80 – Device-Log jetzt fehlertolerant: sofort bei Fehlern, sonst modulo-basiert. Klarer Datenfluss bleibt erhalten.
+// 🦦 Otter: flushDeviceLogToHost abhängig von cudaPeekAtLastError – keine redundanten Fluten mehr.
+// 🐑 Schneefuchs: performante Logik, deterministisch, ohne Nebeneffekte.
 
 #include <GLFW/glfw3.h>
 #include <cmath>
@@ -77,9 +77,14 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         LUCHS_LOG_HOST("[PIPE] Returned from renderCudaFrame");
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] Cuda frame compute completed, flushing device logs");
-    LuchsLogger::flushDeviceLogToHost(0);
+    // 🦦 Otter: nur flushen, wenn Fehler ODER alle 30 Frames
+    cudaError_t err = cudaPeekAtLastError();
+    if (err != cudaSuccess || (globalFrameCounter % 30 == 0)) {
+        if (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[PIPE] Flushing device logs (err=%d, frame=%d)", static_cast<int>(err), globalFrameCounter);
+        }
+        LuchsLogger::flushDeviceLogToHost(0);
+    }
 
     if (frameCtx.shouldZoom) {
         frameCtx.newOffset = { gpuNewOffset.x, gpuNewOffset.y };

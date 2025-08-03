@@ -2,6 +2,7 @@
 // 🐭 Maus-Kommentar: Erweiterter PerfLog - misst resize() + Swap-Zeit separat. Ermöglicht Analyse von FPS-Limitierung durch VSync oder Buffer-Recreation.
 // 🦦 Otter: renderFrame_impl ist jetzt voll implementiert - keine Linkerleichen mehr!
 // 🐑 Schneefuchs: Ressourcensicher, nachvollziehbar und ready für Release-Debugging.
+
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
@@ -16,6 +17,7 @@
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
 #include <cmath> // für std::sqrt, std::clamp
+#include <cuda_runtime.h> // für cudaPeekAtLastError
 
 namespace RendererLoop {
 
@@ -44,9 +46,13 @@ void renderFrame_impl(RendererState& state) {
     // 🦦 Otter: Kontext-Frameindex aktualisieren für CommandBus
     ctx.frameIndex = state.frameCount;
 
-    // 🦦 Otter: CUDA-Device-Logs abrufen, falls aktiviert.
+    // 🦦 Otter: CUDA-Device-Logs nur bei Fehler oder jede 60 Frames
     if (Settings::debugLogging) {
-        LuchsLogger::flushDeviceLogToHost(0);
+        cudaError_t err = cudaPeekAtLastError();
+        if (err != cudaSuccess || (state.frameCount % 60 == 0)) {
+            LUCHS_LOG_HOST("[Loop] Flushing device logs (err=%d, frame=%d)", static_cast<int>(err), state.frameCount);
+            LuchsLogger::flushDeviceLogToHost(0);
+        }
     }
 
     if (Settings::debugLogging && state.frameCount % 60 == 0) {
