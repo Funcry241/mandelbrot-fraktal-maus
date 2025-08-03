@@ -243,20 +243,29 @@ void launch_mandelbrotHybrid(
     int maxIter, int tile)
 {
     using clk = std::chrono::high_resolution_clock;
-    auto start = clk::now();
+    auto t0 = clk::now();
 
     dim3 block(16,16);
     dim3 grid((w + 15)/16, (h + 15)/16);
 
-    // ... bestehendes Logging ...
+    // 🦦 Otter: Timing für Kernel-Launch
+    auto t_launchStart = clk::now();
+    mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter);
+    auto t_launchEnd = clk::now();
 
-    mandelbrotKernel<<<grid,block>>>(out, d_it, w, h, zoom, offset, maxIter);
+    // 🐑 Schneefuchs: Timing für Device-Synchronisation
+    auto t_syncStart = clk::now();
     cudaDeviceSynchronize();
+    auto t_syncEnd = clk::now();
 
-    auto end = clk::now();
+    // 🦦 Otter: Gesamtzeit
+    auto t1 = clk::now();
 
     if (Settings::debugLogging) {
-        double ms = std::chrono::duration<double, std::milli>(end - start).count();
-        LUCHS_LOG_HOST("[TIME] Mandelbrot %.3f ms", ms);
+        double launchMs = std::chrono::duration<double, std::milli>(t_launchEnd - t_launchStart).count();
+        double syncMs   = std::chrono::duration<double, std::milli>(t_syncEnd - t_syncStart).count();
+        double totalMs  = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        LUCHS_LOG_HOST("[TIME] Mandelbrot | Launch %.3f ms | Sync %.3f ms | Total %.3f ms", launchMs, syncMs, totalMs);
     }
 }
+

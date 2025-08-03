@@ -56,7 +56,6 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         return;
     }
 
-    // 🐭 Zeitmessung starten
     auto t0 = std::chrono::high_resolution_clock::now();
 
     if (Settings::debugLogging)
@@ -83,10 +82,22 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
 
     auto t1 = std::chrono::high_resolution_clock::now();
     double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[TIME] CUDA kernel + sync: %.3f ms", ms);
 
-    // 🦦 Otter: nur flushen, wenn Fehler ODER alle 30 Frames
+    if (Settings::debugLogging && state.lastTimings.valid) {
+        LUCHS_LOG_HOST(
+            "[FRAME] Mandelbrot=%.3f | Launch=%.3f | Sync=%.3f | Entropy=%.3f | Contrast=%.3f | LogFlush=%.3f | PBOMap=%.3f",
+            state.lastTimings.mandelbrotTotal,
+            state.lastTimings.mandelbrotLaunch,
+            state.lastTimings.mandelbrotSync,
+            state.lastTimings.entropy,
+            state.lastTimings.contrast,
+            state.lastTimings.deviceLogFlush,
+            state.lastTimings.pboMap
+        );
+    } else if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[TIME] CUDA kernel + sync: %.3f ms", ms);
+    }
+
     cudaError_t err = cudaPeekAtLastError();
     if (err != cudaSuccess || (globalFrameCounter % 30 == 0)) {
         if (Settings::debugLogging) {
@@ -103,7 +114,6 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         LUCHS_LOG_HOST("[PIPE] Heatmap sample: Entropy[0]=%.4f Contrast[0]=%.4f", frameCtx.h_entropy[0], frameCtx.h_contrast[0]);
     }
 
-    // 🧠 Otter-FIX: Analysewerte (Entropy & Contrast) nach CUDA-Renderphase übernehmen
     frameCtx.lastEntropy  = state.zoomResult.bestEntropy;
     frameCtx.lastContrast = state.zoomResult.bestContrast;
 }
@@ -166,10 +176,8 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     OpenGLUtils::setGLResourceContext("frame");
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), tex, frameCtx.width, frameCtx.height);
 
-    // 🎨 Erst Fraktal
     RendererPipeline::drawFullscreenQuad(tex);
 
-    // 🔥 Dann Heatmap-Overlay
     if (frameCtx.overlayActive)
         HeatmapOverlay::drawOverlay(
             frameCtx.h_entropy,
@@ -181,7 +189,6 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
             state
         );
 
-    // 🐗 Dann HUD
     if (Settings::warzenschweinOverlayEnabled && !state.warzenschweinText.empty())
         WarzenschweinOverlay::drawOverlay(state);
 }
@@ -194,7 +201,7 @@ void execute(RendererState& state) {
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
     g_ctx.tileSize      = state.lastTileSize;
-    g_ctx.zoom          = static_cast<float>(state.zoom); // 🦦 Otter: /WX-sicher, explizit gecastet
+    g_ctx.zoom          = static_cast<float>(state.zoom);
     g_ctx.offset        = state.offset;
     g_ctx.maxIterations = state.maxIterations;
 
@@ -206,22 +213,19 @@ void execute(RendererState& state) {
         LUCHS_LOG_HOST("[ZoomLog] Updated tileSize after zoom: %.5f -> tileSize=%d", g_ctx.zoom, g_ctx.tileSize);
     }
 
-    // 🐭 Rückschreiben der neuen Zoom-/Offset-Werte
     state.zoom = g_ctx.zoom;
     state.offset = g_ctx.offset;
+    g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
-    g_ctx.overlayActive = state.heatmapOverlayEnabled; // 🦦 Otter: explizit
-
-    // 🐑 Schneefuchs: HUD-Text aktualisiert sich deterministisch pro Frame, mehrzeilig formatiert
     std::ostringstream oss;
     oss << "Zoom: " << std::fixed << std::setprecision(4) << g_ctx.zoom << "\n";
     oss << "Offset: (" << g_ctx.offset.x << ", " << g_ctx.offset.y << ")\n";
     if (!g_ctx.h_entropy.empty())
         oss << "Entropy[0]: " << std::setprecision(3) << g_ctx.h_entropy[0] << "\n";
-    float fps = static_cast<float>(1.0 / g_ctx.frameTime); // 🐑 Schneefuchs: sicherer Cast
+    float fps = static_cast<float>(1.0 / g_ctx.frameTime);
     oss << "FPS: " << std::setprecision(1) << fps;
     state.warzenschweinText = oss.str();
-    WarzenschweinOverlay::setText(state.warzenschweinText); // 🐑 Schneefuchs: Text aktiv an Overlay übertragen
+    WarzenschweinOverlay::setText(state.warzenschweinText);
 
     drawFrame(g_ctx, state.tex.id(), state);
 

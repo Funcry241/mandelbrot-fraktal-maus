@@ -69,6 +69,19 @@ bool warzenschweinOverlayEnabled = false;
 // 🐑 Schneefuchs: HUD-Text für Overlay – pro Frame gesetzt, sichtbar.
 std::string warzenschweinText;
 
+// 🧮 CUDA-Laufzeit-Timings für Analysezwecke – gesetzt von renderCudaFrame
+struct CudaPhaseTimings {
+    bool valid = false;
+    double mandelbrotTotal = 0.0;
+    double mandelbrotLaunch = 0.0;
+    double mandelbrotSync = 0.0;
+    double entropy = 0.0;
+    double contrast = 0.0;
+    double deviceLogFlush = 0.0;
+    double pboMap = 0.0;
+};
+CudaPhaseTimings lastTimings; // 🐑 Schneefuchs: für [FRAME]-Log
+
 // 🧽 Setup & Verwaltung
 RendererState(int w, int h);
 void reset();                             // stellt Initialzustand her
