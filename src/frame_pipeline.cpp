@@ -1,6 +1,6 @@
 // Datei: src/frame_pipeline.cpp
 // 🐭 Maus-Kommentar: Alpha 80 – Device-Log jetzt fehlertolerant: sofort bei Fehlern, sonst modulo-basiert. Klarer Datenfluss bleibt erhalten.
-// 🦦 Otter: flushDeviceLogToHost abhängig von cudaPeekAtLastError – keine redundanten Fluten mehr.
+// 🦦 Otter: flushDeviceLogToHost abhängig von cudaPeekAtLastError – keine redundanten Fluten mehr. CPU-Zeitmessung nun pro CUDA-Frame aktiv.
 // 🐑 Schneefuchs: performante Logik, deterministisch, ohne Nebeneffekte.
 
 #include <GLFW/glfw3.h>
@@ -9,6 +9,7 @@
 #include <vector_types.h>
 #include <sstream>
 #include <iomanip>
+#include <chrono>  // für Zeitmessung
 #include "pch.hpp"
 #include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
@@ -55,6 +56,9 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         return;
     }
 
+    // 🐭 Zeitmessung starten
+    auto t0 = std::chrono::high_resolution_clock::now();
+
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Calling CudaInterop::renderCudaFrame");
     CudaInterop::renderCudaFrame(
@@ -76,6 +80,11 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Returned from renderCudaFrame");
     CUDA_CHECK(cudaDeviceSynchronize());
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[TIME] CUDA kernel + sync: %.3f ms", ms);
 
     // 🦦 Otter: nur flushen, wenn Fehler ODER alle 30 Frames
     cudaError_t err = cudaPeekAtLastError();
