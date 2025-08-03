@@ -4,6 +4,7 @@
 
 #include "bear_CudaPBOResource.hpp"
 #include "luchs_log_host.hpp"
+#include <chrono>
 #include <GL/glew.h>
 
 namespace CudaInterop {
@@ -47,7 +48,14 @@ void* bear_CudaPBOResource::mapAndLog(size_t& sizeOut) {
         return nullptr;
     }
 
+    // 🐑 Schneefuchs: Messung vor Map-Call zur Blockanalyse
+    auto tMapStart = std::chrono::high_resolution_clock::now();
     cudaError_t err = cudaGraphicsMapResources(1, &resource_);
+    auto tMapEnd = std::chrono::high_resolution_clock::now();
+
+    double mapMs = std::chrono::duration<double, std::milli>(tMapEnd - tMapStart).count();
+    LUCHS_LOG_HOST("[PERF] MapResources: %.3f ms", mapMs);
+
     LUCHS_LOG_HOST("[PBO] cudaGraphicsMapResources returned %d", static_cast<int>(err));
     if (err != cudaSuccess) return nullptr;
 
