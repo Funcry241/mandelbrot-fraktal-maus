@@ -3,14 +3,9 @@
 // 🦦 Otter: flushDeviceLogToHost abhängig von cudaPeekAtLastError – keine redundanten Fluten mehr. CPU-Zeitmessung nun pro CUDA-Frame aktiv.
 // 🐑 Schneefuchs: performante Logik, deterministisch, ohne Nebeneffekte.
 
-#include <GLFW/glfw3.h>
-#include <cmath>
-#include <vector>
-#include <vector_types.h>
-#include <sstream>
-#include <iomanip>
-#include <chrono>  // für Zeitmessung
 #include "pch.hpp"
+#include <vector_types.h>
+#include <chrono>  // für Zeitmessung
 #include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
 #include "frame_context.hpp"
