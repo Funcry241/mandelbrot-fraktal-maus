@@ -217,13 +217,20 @@ void execute(RendererState& state) {
     state.offset = g_ctx.offset;
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
-    std::ostringstream oss;
-    oss << "Zoom: " << std::fixed << std::setprecision(4) << g_ctx.zoom << "\n";
-    oss << "Offset: (" << g_ctx.offset.x << ", " << g_ctx.offset.y << ")\n";
-    if (!g_ctx.h_entropy.empty())
-        oss << "Entropy[0]: " << std::setprecision(3) << g_ctx.h_entropy[0] << "\n";
+        std::ostringstream oss;
+    oss << std::fixed << std::setprecision(4);
+    oss << "Zoom:    " << g_ctx.zoom << "\n";
+    oss << "Offset:  (" << g_ctx.offset.x << ", " << g_ctx.offset.y << ")\n";
+
+    if (!g_ctx.h_entropy.empty()) {
+        oss << std::setprecision(3);
+        oss << "Entropy: " << g_ctx.h_entropy[0] << "\n";
+    }
+
     float fps = static_cast<float>(1.0 / g_ctx.frameTime);
-    oss << "FPS: " << std::setprecision(1) << fps;
+    oss << std::setprecision(1);
+    oss << "FPS:     " << fps << "\n";
+
     state.warzenschweinText = oss.str();
     WarzenschweinOverlay::setText(state.warzenschweinText);
 
