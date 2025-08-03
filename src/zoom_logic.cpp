@@ -1,9 +1,9 @@
 // Datei: src/zoom_logic.cpp
-// 🐭 Maus-Kommentar: Alpha 49 "Pinguin" – sanftes, kontinuierliches Zoomen ohne Elefant! Ziel wird immer interpoliert verfolgt, Score fließt in Glättung ein. Kein Warten, kein Hüpfen. Schneefuchs genießt den Flug, Otter testet Stabilität.
-// 🐼 Panda: Bewertet Entropie × (1 + Kontrast) als Zielscore.
-// 🐝 Kolibri: Weiche Bewegung via LERP (Zoom ist Gleitflug).
-// 🐍 Flugente: float2 bleibt für Performance aktiv.
-// 🔬 Blaupause: Laufzeitmessung mit std::chrono – erkennt Zoomlogik-Overhead.
+// Maus-Kommentar: Alpha 49 "Pinguin" - sanftes, kontinuierliches Zoomen ohne Elefant! Ziel wird immer interpoliert verfolgt, Score fließt in Glaettung ein. Kein Warten, kein Huepfen. Schneefuchs geniesst den Flug, Otter testet Stabilitaet.
+// Panda: Bewertet Entropie x (1 + Kontrast) als Zielscore.
+// Kolibri: Weiche Bewegung via LERP (Zoom ist Gleitflug).
+// Flugente: float2 bleibt fuer Performance aktiv.
+// Blaupause: Laufzeitmessung mit std::chrono - erkennt Zoomlogik-Overhead.
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -26,7 +26,7 @@ ZoomResult evaluateZoomTarget(
     float previousEntropy,
     float previousContrast
 ) {
-    auto t0 = std::chrono::high_resolution_clock::now(); // 🔬 Startzeit
+    auto t0 = std::chrono::high_resolution_clock::now(); // Blaupause: Startzeit
 
     ZoomResult result;
     result.bestIndex = -1;
@@ -36,12 +36,12 @@ ZoomResult evaluateZoomTarget(
 
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
-    const int totalTiles = tilesX * tilesY;
+    const std::size_t totalTiles = static_cast<std::size_t>(tilesX * tilesY);
 
     if (Settings::debugLogging) {
         float minE = 9999.0f, maxE = -9999.0f;
         float minC = 9999.0f, maxC = -9999.0f;
-        for (int i = 0; i < totalTiles; ++i) {
+        for (std::size_t i = 0; i < totalTiles; ++i) {
             if (i >= entropy.size() || i >= contrast.size()) continue;
             float e = entropy[i];
             float c = contrast[i];
@@ -55,10 +55,10 @@ ZoomResult evaluateZoomTarget(
 
     float bestScore = -1.0f;
 
-    // 🐭 Maus: Zugriffssicherheit hinzugefügt – validiert Entropie-/Kontrastgröße vor Zugriff
-    for (int i = 0; i < totalTiles; ++i) {
+    // Maus: Zugriffssicherheit hinzugefuegt - validiert Entropie-/Kontrastgroesse vor Zugriff
+    for (std::size_t i = 0; i < totalTiles; ++i) {
         if (i >= entropy.size() || i >= contrast.size()) {
-            LUCHS_LOG_HOST("[ZoomEval] Index %d out of bounds (entropy=%zu, contrast=%zu)", i, entropy.size(), contrast.size());
+            LUCHS_LOG_HOST("[ZoomEval] Index %zu out of bounds (entropy=%zu, contrast=%zu)", i, entropy.size(), contrast.size());
             continue;
         }
 
@@ -68,7 +68,7 @@ ZoomResult evaluateZoomTarget(
         float score = entropyVal * (1.0f + contrastVal);
         if (score > bestScore) {
             bestScore = score;
-            result.bestIndex    = i;
+            result.bestIndex    = static_cast<int>(i);
             result.bestEntropy  = entropyVal;
             result.bestContrast = contrastVal;
         }
@@ -76,7 +76,7 @@ ZoomResult evaluateZoomTarget(
 
     if (result.bestIndex < 0) {
         if (Settings::debugLogging)
-            LUCHS_LOG_HOST("[ZoomEval] No target found – bestScore=%.4f", bestScore);
+            LUCHS_LOG_HOST("[ZoomEval] No target found - bestScore=%.4f", bestScore);
         return result;
     }
 
@@ -104,7 +104,7 @@ ZoomResult evaluateZoomTarget(
     result.isNewTarget  = true;
     result.shouldZoom   = true;
 
-    float alpha = Settings::ALPHA_LERP_MAX; // 🐝 Pinguin-Gleitflug – aggressiver LERP
+    float alpha = Settings::ALPHA_LERP_MAX; // Kolibri: Pinguin-Gleitflug - aggressiver LERP
     result.newOffset = make_float2(
         previousOffset.x * (1.0f - alpha) + proposedOffset.x * alpha,
         previousOffset.y * (1.0f - alpha) + proposedOffset.y * alpha
@@ -119,7 +119,7 @@ ZoomResult evaluateZoomTarget(
                              ? (result.bestContrast - previousContrast) / previousContrast
                              : 1.0f;
 
-    auto t1 = std::chrono::high_resolution_clock::now(); // 🔬 Endzeit
+    auto t1 = std::chrono::high_resolution_clock::now(); // Blaupause: Endzeit
     auto ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
     if (Settings::debugLogging) {
