@@ -183,6 +183,11 @@ void execute(RendererState& state) {
     computeCudaFrame(g_ctx, state);
     applyZoomLogic(g_ctx, g_zoomBus);
 
+    if (g_ctx.shouldZoom) {
+        g_ctx.tileSize = computeTileSizeFromZoom(g_ctx.zoom);
+        LUCHS_LOG_HOST("[ZoomLog] Updated tileSize after zoom: %.5f -> tileSize=%d", g_ctx.zoom, g_ctx.tileSize);
+    }
+
     // 🐭 Rückschreiben der neuen Zoom-/Offset-Werte
     state.zoom = g_ctx.zoom;
     state.offset = g_ctx.offset;
