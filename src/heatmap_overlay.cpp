@@ -151,14 +151,10 @@ void drawOverlay(const std::vector<float>& entropy,
     glUseProgram(overlayShader);
 
     constexpr int overlayPixelsX = 160, overlayPixelsY = 90, paddingX = 16, paddingY = 16;
-    float overlayW = overlayPixelsX / static_cast<float>(tileSize);
-    float overlayH = overlayPixelsY / static_cast<float>(tileSize);
-
-    float scaleX = 2.0f / tilesX;
-    float scaleY = 2.0f / tilesY;
-
-    float offsetX = 1.0f - ((overlayW + paddingX / static_cast<float>(tileSize)) * scaleX);
-    float offsetY = 1.0f - ((overlayH + paddingY / static_cast<float>(tileSize)) * scaleY);
+    float scaleX = static_cast<float>(overlayPixelsX) / width / tilesX * 2.0f;
+    float scaleY = static_cast<float>(overlayPixelsY) / height / tilesY * 2.0f;
+    float offsetX = 1.0f - (static_cast<float>(overlayPixelsX + paddingX) / width * 2.0f);
+    float offsetY = 1.0f - (static_cast<float>(overlayPixelsY + paddingY) / height * 2.0f);
 
     glUniform2f(glGetUniformLocation(overlayShader, "uScale"), scaleX, scaleY);
     glUniform2f(glGetUniformLocation(overlayShader, "uOffset"), offsetX, offsetY);
