@@ -61,8 +61,7 @@ ZoomResult evaluateZoomTarget(
     // 🐼 Bewertung: score = entropy × (1 + contrast)
     for (int i = 0; i < totalTiles; ++i) {
         float entropyVal  = entropy[i];
-        float contrastVal = contrast[i];
-        if (entropyVal < Settings::ENTROPY_THRESHOLD_LOW) continue;
+        float contrastVal = contrast[i];        
 
         float score = entropyVal * (1.0f + contrastVal);
         if (score > bestScore) {

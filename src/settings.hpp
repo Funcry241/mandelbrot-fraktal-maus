@@ -14,18 +14,6 @@ namespace Settings {
 // Höhere Werte vergrößern den Bildausschnitt schneller, aber riskieren visuelle Artefakte.
 constexpr float zoomFactor = 1.07f;
 
-// Untere Entropie-Schwelle für Auto-Zoom-Zielauswahl.
-// Nur Tiles mit Entropie > ENTROPY_THRESHOLD_LOW werden als Kandidaten betrachtet.
-//
-// Wertempfehlung:
-//   - 0.0f: kein Filter (auch langweilige Bereiche werden berücksichtigt)
-//   - 2.0f-3.0f: realistische Schwelle für kontrastarme Tiles
-//   - 4.0f-5.0f: nur sehr strukturierte Bereiche
-//
-// Erhöhung -> stärkerer Filter, langsameres Zoomen  
-// Reduktion -> breitere Auswahl, aber potenziell uninteressanter Zoom
-inline constexpr float ENTROPY_THRESHOLD_LOW = 0.0025f;
-
 // 🔍 Debug-Modi: visuelle Darstellung & Konsolen-Ausgabe aktivieren
 constexpr bool debugLogging  = true;  // Aktiviert Konsolenausgaben für Auto-Zoom, Tile-Entropie etc.
 
