@@ -172,13 +172,6 @@ void renderCudaFrame(
         } else if (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ZOOM] No suitable target");
         }
-
-        // 🦦 Otter-Test: Zoom erzwingen für Debug-Zweck
-        if (!shouldZoom && Settings::debugLogging) {
-            shouldZoom = true;
-            newOffset = offset; // 🐜 keine Bewegung, nur Zoom aktivieren
-            LUCHS_LOG_HOST("[ZOOM] Otter-Test aktiviert: Zoom erzwungen für Debug-Zweck");
-        }
     }
 
     pboResource->unmap();
