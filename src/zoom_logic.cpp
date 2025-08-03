@@ -42,6 +42,20 @@ ZoomResult evaluateZoomTarget(
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int totalTiles = tilesX * tilesY;
 
+    if (Settings::debugLogging) {
+        float minE = 9999.0f, maxE = -9999.0f;
+        float minC = 9999.0f, maxC = -9999.0f;
+        for (int i = 0; i < totalTiles; ++i) {
+            float e = entropy[i];
+            float c = contrast[i];
+            if (e < minE) minE = e;
+            if (e > maxE) maxE = e;
+            if (c < minC) minC = c;
+            if (c > maxC) maxC = c;
+        }
+        LUCHS_LOG_HOST("[ZoomEval] Entropy: min=%.4f max=%.4f | Contrast: min=%.4f max=%.4f", minE, maxE, minC, maxC);
+    }
+
     float bestScore = -1.0f;
 
     // 🐼 Bewertung: score = entropy × (1 + contrast)
@@ -59,8 +73,11 @@ ZoomResult evaluateZoomTarget(
         }
     }
 
-    if (result.bestIndex < 0)
+    if (result.bestIndex < 0) {
+        if (Settings::debugLogging)
+            LUCHS_LOG_HOST("[ZoomEval] No target found – bestScore=%.4f", bestScore);
         return result;
+    }
 
     int bx = result.bestIndex % tilesX;
     int by = result.bestIndex / tilesX;
