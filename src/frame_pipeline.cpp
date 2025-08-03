@@ -183,6 +183,10 @@ void execute(RendererState& state) {
     computeCudaFrame(g_ctx, state);
     applyZoomLogic(g_ctx, g_zoomBus);
 
+    // 🐭 Rückschreiben der neuen Zoom-/Offset-Werte
+    state.zoom = g_ctx.zoom;
+    state.offset = g_ctx.offset;
+
     g_ctx.overlayActive = state.heatmapOverlayEnabled; // 🦦 Otter: explizit
 
     // 🐑 Schneefuchs: HUD-Text aktualisiert sich deterministisch pro Frame, mehrzeilig formatiert
