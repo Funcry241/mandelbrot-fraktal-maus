@@ -59,7 +59,6 @@ double lastTime = 0.0;
 ZoomLogic::ZoomResult zoomResult;
 float lastEntropy  = 0.0f;
 float lastContrast = 0.0f;
-bool justZoomed    = false;
 
 // 🔥 Heatmap-Overlay-Zustand
 bool heatmapOverlayEnabled = false;

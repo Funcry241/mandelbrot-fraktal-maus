@@ -1,15 +1,13 @@
 // Datei: src/renderer_core.cu
-// 🐭 Maus-Kommentar: Alpha 67 - Kontextfix: PBO-Registrierung erst nach aktivem GL-Kontext. Kein invalid argument mehr.
-// 🦦 Otter: CUDA sieht jetzt korrekt. Fokus, keine Zufälle.
-// 🦊 Schneefuchs: Reihenfolge gewahrt, Kontextfehler eliminiert.
-
+// 🐭 Maus-Kommentar: Alpha 80 – Kontextfix & renderFrame_impl korrigiert. Keine Linkerleichen, kein state-Missmatch mehr.
+// 🦦 Otter: RendererLoop übernimmt klar den Renderingpfad – Renderer selbst verwaltet nur Plattformlogik.
+// 🦊 Schneefuchs: CUDA + OpenGL korrekt getrennt, renderFrame_impl nicht mehr in .cu notwendig.
 #include "pch.hpp"
 
 #include "renderer_core.hpp"
 #include "renderer_window.hpp"
 #include "renderer_pipeline.hpp"
 #include "renderer_state.hpp"
-#include "renderer_loop.hpp"
 #include "renderer_resources.hpp"
 #include "common.hpp"
 #include "settings.hpp"
@@ -18,6 +16,7 @@
 #include "heatmap_overlay.hpp"
 #include "warzenschwein_overlay.hpp"
 #include "luchs_log_host.hpp"
+#include "renderer_loop.hpp"
 
 #define ENABLE_ZOOM_LOGGING 0
 
@@ -51,7 +50,6 @@ bool Renderer::initGL() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] GLFW window created successfully");
 
-    // Kontext binden
     glfwMakeContextCurrent(state.window);
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] OpenGL context made current");
@@ -62,7 +60,6 @@ bool Renderer::initGL() {
         }
     }
 
-    // GLEW initialisieren
     if (glewInit() != GLEW_OK) {
         LUCHS_LOG_HOST("[ERROR] glewInit() failed");
         RendererWindow::destroyWindow(state.window);
@@ -70,6 +67,7 @@ bool Renderer::initGL() {
         glfwTerminate();
         return false;
     }
+
     if (Settings::debugLogging) {
         const GLubyte* version = glGetString(GL_VERSION);
         LUCHS_LOG_HOST("[CHECK] OpenGL version: %s", version ? reinterpret_cast<const char*>(version) : "unknown");
@@ -77,7 +75,6 @@ bool Renderer::initGL() {
         LUCHS_LOG_HOST("[CHECK] glGetError after context init = 0x%04X", err);
     }
 
-    // Pixel-Alignment für Textur-Uploads sicherstellen
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[CHECK] glPixelStorei set GL_UNPACK_ALIGNMENT = 1");
@@ -86,7 +83,6 @@ bool Renderer::initGL() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] RendererPipeline initialized");
 
-    // PBO & CUDA-Interop nach gültigem Kontext
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
         state.pbo.initAsPixelBuffer(state.width, state.height);
@@ -111,29 +107,24 @@ bool Renderer::shouldClose() const {
     return RendererWindow::shouldClose(state.window);
 }
 
-void Renderer::renderFrame_impl() {
-    // Frame Clear
+void Renderer::renderFrame() {
     glClear(GL_COLOR_BUFFER_BIT);
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] glClear called");
 
-    // Pipeline Logging
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] Entering renderFrame_impl");
+        LUCHS_LOG_HOST("[PIPE] Entering Renderer::renderFrame");
 
-    // GPU-Rendering
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] Calling RendererLoop::renderFrame_impl");
-    RendererLoop::renderFrame_impl(state);
+    RendererLoop::renderFrame_impl(this->state);
+
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Returned from RendererLoop::renderFrame_impl");
 
-    // PBO -> Texture Upload
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[GL-UPLOAD] Updating texture from PBO %u to Texture %u", state.pbo.id(), state.tex.id());
+
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), state.tex.id(), state.width, state.height);
 
-    // Draw Fullscreen Quad
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DRAW] About to draw fullscreen quad");
     glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -142,13 +133,11 @@ void Renderer::renderFrame_impl() {
         LUCHS_LOG_HOST("[DRAW] glDrawArrays glGetError() = 0x%04X", err);
         LUCHS_LOG_HOST("[DRAW] Fullscreen quad drawn, swapping buffers");
     }
-    
-    // Buffer Swap
+
     glfwSwapBuffers(state.window);
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DRAW] glfwSwapBuffers called");
 
-    // State Update
     if (state.zoomResult.isNewTarget) {
         state.lastEntropy  = state.zoomResult.bestEntropy;
         state.lastContrast = state.zoomResult.bestContrast;

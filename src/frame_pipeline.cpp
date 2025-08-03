@@ -88,6 +88,10 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     if (Settings::debugLogging && !frameCtx.h_entropy.empty()) {
         LUCHS_LOG_HOST("[PIPE] Heatmap sample: Entropy[0]=%.4f Contrast[0]=%.4f", frameCtx.h_entropy[0], frameCtx.h_contrast[0]);
     }
+
+    // 🧠 Otter-FIX: Analysewerte (Entropy & Contrast) nach CUDA-Renderphase übernehmen
+    frameCtx.lastEntropy  = state.zoomResult.bestEntropy;
+    frameCtx.lastContrast = state.zoomResult.bestContrast;
 }
 
 void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {

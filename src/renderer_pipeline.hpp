@@ -1,19 +1,25 @@
 // Datei: src/renderer_pipeline.hpp
-// 🐭 Maus-Kommentar: Die Altlast render() wurde entfernt. Nur noch drawFullscreenQuad(tex)! Schneefuchs: „Weniger ist mehr, wenn das Mehr nur Unsinn war.“
+// 🐭 Maus-Kommentar: Die Altlast render() wurde entfernt. Nur noch drawFullscreenQuad(tex)!
+// 🦦 Otter: Keine Doppelpipeline – drawFullscreenQuad ist die einzige Schnittstelle
+// 🦊 Schneefuchs: „Weniger ist mehr, wenn das Mehr nur Unsinn war.“
+// Struktur klar, Zweck klar, Header synchron zur Source.
 
 #pragma once
 #include "pch.hpp"
 
 namespace RendererPipeline {
 
-// 🧱 Shader & Quad vorbereiten
+// 🧱 Initialisiert Shader, VBO, VAO – Vorbereitung für Fullscreen-Quad
 void init();
+
+// 🧽 Gibt alle OpenGL-Ressourcen wieder frei
 void cleanup();
 
-// 🖼️ CUDA-PBO auf OpenGL-Textur aktualisieren
+// 🔁 Überträgt CUDA-PBO-Daten auf OpenGL-Textur (ohne Zeichnen)
+// Muss vor drawFullscreenQuad aufgerufen werden!
 void updateTexture(GLuint pbo, GLuint tex, int width, int height);
 
-// 🎥 Fullscreen-Quad zeichnen (Textur)
+// 🎥 Zeichnet die im Texturhandle gespeicherte OpenGL-Textur fullscreen auf das Fenster
 void drawFullscreenQuad(GLuint tex);
 
 } // namespace RendererPipeline

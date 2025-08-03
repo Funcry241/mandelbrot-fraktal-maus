@@ -1,5 +1,7 @@
-// Datei: src/zoom_export.cpp
-// 🐭 Maus-Kommentar: Klare Trennung von Host-Logging. Otter: keine impliziten Makros mehr. Schneefuchs: kontrolliertes Outputverhalten.
+// Datei: src/zoom_command.cpp
+// 🐭 Maus-Kommentar: Klare Trennung von Host-Logging
+// 🦦 Otter: keine impliziten Makros mehr – alles durch `LUCHS_LOG_HOST(...)`
+// 🐑 Schneefuchs: kontrolliertes, deterministisches Outputverhalten, auch bei Fehlern
 
 #include "zoom_logic.hpp"
 #include "zoom_command.hpp"

@@ -51,6 +51,8 @@ public:
     double totalTime = 0.0;
     double timeSinceLastZoom = 0.0;
 
+    int frameIndex = 0; // 🦦 Otter: für Kontext-Zeitachsenanalyse – wird pro Frame gesetzt
+
     // Konstruktor initialisiert aus Settings
     FrameContext();
 

@@ -1,7 +1,7 @@
-// Otter
 // Datei: src/renderer_pipeline.cpp
 // 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean - HUD/Heatmap bleiben garantiert sichtbar.
 // 🦦 Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines.
+// 🐑 Schneefuchs: Fehlerquellen mit glGetError sichtbar gemacht, Upload deterministisch.
 
 #include "pch.hpp"
 #include "renderer_pipeline.hpp"
@@ -52,12 +52,14 @@ void updateTexture(GLuint pbo, GLuint tex, int width, int height) {
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[GL-UPLOAD] Binding PBO=%u and Texture=%u for upload", pbo, tex);
     }
+
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBindTexture(GL_TEXTURE_2D, tex);
 
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[GL-UPLOAD] Calling glTexSubImage2D with dimensions %dx%d", width, height);
     }
+
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
     GLenum err = glGetError();
@@ -78,7 +80,7 @@ void drawFullscreenQuad(GLuint tex) {
     glUseProgram(program);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
-    // Blend enabled for HUD/Heatmap
+
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindVertexArray(VAO);
@@ -99,8 +101,9 @@ void drawFullscreenQuad(GLuint tex) {
 void cleanup() {
     if (program) { glDeleteProgram(program); LUCHS_LOG_HOST("[CLEANUP] Deleted program %u", program); }
     if (VAO)    { glDeleteVertexArrays(1, &VAO); LUCHS_LOG_HOST("[CLEANUP] Deleted VAO %u", VAO); }
-    if (VBO)    { glDeleteBuffers(1, &VBO);        LUCHS_LOG_HOST("[CLEANUP] Deleted VBO %u", VBO); }
-    if (EBO)    { glDeleteBuffers(1, &EBO);        LUCHS_LOG_HOST("[CLEANUP] Deleted EBO %u", EBO); }
+    if (VBO)    { glDeleteBuffers(1, &VBO);      LUCHS_LOG_HOST("[CLEANUP] Deleted VBO %u", VBO); }
+    if (EBO)    { glDeleteBuffers(1, &EBO);      LUCHS_LOG_HOST("[CLEANUP] Deleted EBO %u", EBO); }
+
     program = VAO = VBO = EBO = 0;
     LUCHS_LOG_HOST("[CLEANUP] RendererPipeline resources cleaned up");
 }
