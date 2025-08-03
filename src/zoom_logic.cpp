@@ -13,10 +13,6 @@
 
 namespace ZoomLogic {
 
-template<typename T> inline T my_clamp(T val, T lo, T hi) {
-    return val < lo ? lo : (val > hi ? hi : val);
-}
-
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,
     const std::vector<float>& contrast,
@@ -46,6 +42,7 @@ ZoomResult evaluateZoomTarget(
         float minE = 9999.0f, maxE = -9999.0f;
         float minC = 9999.0f, maxC = -9999.0f;
         for (int i = 0; i < totalTiles; ++i) {
+            if (i >= entropy.size() || i >= contrast.size()) continue;
             float e = entropy[i];
             float c = contrast[i];
             if (e < minE) minE = e;
@@ -58,10 +55,15 @@ ZoomResult evaluateZoomTarget(
 
     float bestScore = -1.0f;
 
-    // 🐼 Bewertung: score = entropy × (1 + contrast)
+    // 🐭 Maus: Zugriffssicherheit hinzugefügt – validiert Entropie-/Kontrastgröße vor Zugriff
     for (int i = 0; i < totalTiles; ++i) {
+        if (i >= entropy.size() || i >= contrast.size()) {
+            LUCHS_LOG_HOST("[ZoomEval] Index %d out of bounds (entropy=%zu, contrast=%zu)", i, entropy.size(), contrast.size());
+            continue;
+        }
+
         float entropyVal  = entropy[i];
-        float contrastVal = contrast[i];        
+        float contrastVal = contrast[i];
 
         float score = entropyVal * (1.0f + contrastVal);
         if (score > bestScore) {
