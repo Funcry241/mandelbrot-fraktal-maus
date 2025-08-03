@@ -1,3 +1,8 @@
+# Datei: CMakeLists.txt
+# 🐭 Maus-Kommentar: Alpha 81 – vcpkg triplet nun dynamisch: Windows nutzt x64-windows-static, CI bekommt x64-linux. Plattformsicher.
+# 🦦 Otter: portable durch bedingten VCPKG_TARGET_TRIPLET. Kein harter Windows-Zwang mehr.
+# 🐑 Schneefuchs: volle Kompatibilität mit GitHub Actions unter Ubuntu. Kein Anpassungsbedarf im CI-Workflow nötig.
+
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -7,8 +12,14 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 86 CACHE STRING "Default architecture if none provided")
 endif()
 
-# 🧩 Vcpkg Triplet statisch festlegen
-set(VCPKG_TARGET_TRIPLET "x64-windows-static")
+# 🧩 Vcpkg Triplet – dynamisch nach Plattform
+if(NOT DEFINED VCPKG_TARGET_TRIPLET)
+  if(WIN32)
+    set(VCPKG_TARGET_TRIPLET "x64-windows-static")
+  else()
+    set(VCPKG_TARGET_TRIPLET "x64-linux")
+  endif()
+endif()
 
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 

@@ -1,7 +1,3 @@
-# Datei: .github/workflows/ci.yml
-# Zeilen: 67
-# 🐭 Maus-Kommentar: Vollständig CUDA-kompatibler CI-Build mit expliziter Architekturwahl (80/86/89/90) für RTX-Generation. Schneefuchs: „Wer seine Architektur kennt, kennt seinen Code.“
-
 name: Build Validation
 
 on:
@@ -35,20 +31,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cuda-toolkit-12-9
 
-      - name: Set CUDA compiler environment variable
-        run: echo "CUDACXX=/usr/local/cuda/bin/nvcc" >> $GITHUB_ENV
-
       - name: Clone vcpkg
         run: git clone https://github.com/microsoft/vcpkg.git
 
       - name: Bootstrap vcpkg
         run: ./vcpkg/bootstrap-vcpkg.sh
-        shell: bash
 
-      - name: Install system packages required by GLEW
+      - name: Install GLEW system deps
         run: sudo apt-get install -y libxmu-dev libxi-dev libgl-dev
 
-      - name: Install X11 dependencies for GLFW
+      - name: Install X11 + GLFW deps
         run: sudo apt-get install -y libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev pkg-config
 
       - name: Configure project with vcpkg
@@ -58,6 +50,7 @@ jobs:
             -DCMAKE_CXX_STANDARD=23 \
             -DCMAKE_CUDA_ARCHITECTURES=80\;86\;89\;90 \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
 
       - name: Build project
