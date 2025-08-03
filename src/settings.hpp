@@ -24,7 +24,7 @@ constexpr float zoomFactor = 1.07f;
 //
 // Erhöhung -> stärkerer Filter, langsameres Zoomen  
 // Reduktion -> breitere Auswahl, aber potenziell uninteressanter Zoom
-inline constexpr float ENTROPY_THRESHOLD_LOW = 2.5f;
+inline constexpr float ENTROPY_THRESHOLD_LOW = 0.0025f;
 
 // 🔍 Debug-Modi: visuelle Darstellung & Konsolen-Ausgabe aktivieren
 constexpr bool debugLogging  = true;  // Aktiviert Konsolenausgaben für Auto-Zoom, Tile-Entropie etc.
