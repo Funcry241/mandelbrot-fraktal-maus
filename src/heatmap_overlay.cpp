@@ -173,8 +173,7 @@ void drawOverlay(const std::vector<float>& entropy,
     GLenum errAfter = glGetError();
 
     if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[HM] glDrawArrays issued: %zu vertices", data.size() / 3);
-        LUCHS_LOG_HOST("[HM] glGetError before=0x%x after=0x%x", errBefore, errAfter);
+        LUCHS_LOG_HOST("[HM] drawOverlay: %zu vertices issued | glGetError = 0x%x -> 0x%x", data.size() / 3, errBefore, errAfter);
     }
 
     glDisableVertexAttribArray(0);

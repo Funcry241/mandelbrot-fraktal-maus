@@ -204,8 +204,7 @@ bool verifyCudaGetErrorStringSafe() {
     cudaError_t dummy = cudaErrorInvalidValue;
     const char* msg = cudaGetErrorString(dummy);
     if (msg) {
-        LUCHS_LOG_HOST("[CHECK] cudaGetErrorString(dummy) = \"%s\"", msg);
-        LUCHS_LOG_HOST("[PASS] Host-seitige Fehlerauflösung funktioniert gefahrlos");
+        LUCHS_LOG_HOST("[CHECK] cudaGetErrorString(dummy) = \"%s\" -> Auflösung gefahrlos", msg);
         return true;
     } else {
         LUCHS_LOG_HOST("[FATAL] cudaGetErrorString returned null");
