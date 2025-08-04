@@ -21,7 +21,6 @@
 
 namespace RendererLoop {
 
-static FrameContext ctx;
 static CommandBus zoomBus;
 
 void beginFrame(RendererState& state) {
@@ -38,13 +37,6 @@ void renderFrame_impl(RendererState& state) {
     beginFrame(state);
 
     FramePipeline::execute(state);
-
-    // 🐭 Maus: Analysewerte übernehmen für spätere HUD-/Command-Auswertung
-    ctx.lastEntropy  = state.zoomResult.bestEntropy;
-    ctx.lastContrast = state.zoomResult.bestContrast;
-
-    // 🦦 Otter: Kontext-Frameindex aktualisieren für CommandBus
-    ctx.frameIndex = state.frameCount;
 
     // 🦦 Otter: CUDA-Device-Logs nur bei Fehler oder jede 60 Frames
     if (Settings::debugLogging) {
