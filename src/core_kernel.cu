@@ -219,6 +219,10 @@ void computeCudaEntropyContrast(
 
     int tilesX = (w + tile - 1) / tile;
     int tilesY = (h + tile - 1) / tile;
+
+    // 🧽 Otter: Entropiespeicher vorher nullen, damit leer korrekt leer bleibt
+    cudaMemset(d_e, 0, tilesX * tilesY * sizeof(float));
+
     entropyKernel<<<dim3(tilesX, tilesY), 128>>>(d_it, d_e, w, h, tile, maxIter);
     cudaDeviceSynchronize();
 
@@ -268,4 +272,3 @@ void launch_mandelbrotHybrid(
         LUCHS_LOG_HOST("[TIME] Mandelbrot | Launch %.3f ms | Sync %.3f ms | Total %.3f ms", launchMs, syncMs, totalMs);
     }
 }
-
