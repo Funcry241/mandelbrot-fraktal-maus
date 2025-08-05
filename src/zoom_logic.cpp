@@ -1,9 +1,9 @@
 // Datei: src/zoom_logic.cpp
-// Maus-Kommentar: Alpha 49 "Pinguin" - sanftes, kontinuierliches Zoomen ohne Elefant! Ziel wird immer interpoliert verfolgt, Score fließt in Glaettung ein. Kein Warten, kein Huepfen. Schneefuchs geniesst den Flug, Otter testet Stabilitaet.
-// Panda: Bewertet Entropie x (1 + Kontrast) als Zielscore.
-// Kolibri: Weiche Bewegung via LERP (Zoom ist Gleitflug).
-// Flugente: float2 bleibt fuer Performance aktiv.
-// Blaupause: Laufzeitmessung mit std::chrono - erkennt Zoomlogik-Overhead.
+// 🐭 Maus-Kommentar: Alpha 49 "Pinguin" - sanftes, kontinuierliches Zoomen ohne Elefant! Ziel wird immer interpoliert verfolgt, Score fließt in Glättung ein. Kein Warten, kein Hüpfen. Schneefuchs genießt den Flug, Otter testet Stabilität.
+// 🐼 Panda: Bewertet Entropie x (1 + Kontrast) als Zielscore.
+// 🐦 Kolibri: Weiche Bewegung via LERP (Zoom ist Gleitflug).
+// 🐍 Flugente: float2 bleibt für Performance aktiv.
+// 🔬 Blaupause: Laufzeitmessung mit std::chrono – erkennt Zoomlogik-Overhead.
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -12,6 +12,36 @@
 #include <chrono>
 
 namespace ZoomLogic {
+
+// 🐭 Maus: Lokale Konfigurationsparameter für Zoomverhalten – einstellbar zum Testen.
+// 🦦 Otter: Jeder Parameter hat klaren Effektbereich, direkt in der Datei testbar.
+// 🐑 Schneefuchs: Später über settings.hpp externalisierbar.
+
+constexpr float ZOOM_STRENGTH     = 1.5f;
+// Verstärkt die Rohverschiebung des Ziels. 
+// 1.0 = normale Verschiebung, 1.5 = aggressiv, 2.0+ = stark springend
+// Empfehlung: 1.2 – 1.8
+
+constexpr float CONTRAST_WEIGHT  = 1.5f;
+// Gewichtung des Kontrasts im Score.
+// 1.0 = gleichwertig zu Entropie, 1.5 = Kontrast wichtiger, 2.0+ = Fokus auf harte Unterschiede
+// Empfehlung: 1.0 – 2.0
+
+constexpr float ALPHA_LERP_MIN   = 0.08f;
+constexpr float ALPHA_LERP_MAX   = 0.30f;
+// Steuert das minimale/maximale LERP-Gewicht für Offset-Übernahme.
+// MIN: bei kleinen Sprüngen (sanft), MAX: bei großen Gewinnen/Distanzen (schnell).
+// Empfehlung: MIN 0.05 – 0.10, MAX 0.25 – 0.40
+
+constexpr float DIST_NORM        = 0.05f;
+// Normierung der Distanz in "Screen-Units" für Alpha-Berechnung.
+// 0.05 = mittlere Bewegung → Alpha ≈ MAX
+// Empfehlung: 0.03 – 0.10
+
+constexpr float GAIN_NORM        = 0.20f;
+// Normierung des relativen Score-Gewinns.
+// 0.20 = ~20% mehr Score → Alpha ≈ MAX
+// Empfehlung: 0.15 – 0.40
 
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,
@@ -26,7 +56,7 @@ ZoomResult evaluateZoomTarget(
     float previousEntropy,
     float previousContrast
 ) {
-    auto t0 = std::chrono::high_resolution_clock::now(); // Blaupause: Startzeit
+    auto t0 = std::chrono::high_resolution_clock::now(); // 🔬 Startzeit
 
     ZoomResult result;
     result.bestIndex = -1;
@@ -55,7 +85,7 @@ ZoomResult evaluateZoomTarget(
 
     float bestScore = -1.0f;
 
-    // Maus: Zugriffssicherheit hinzugefuegt - validiert Entropie-/Kontrastgroesse vor Zugriff
+    // 🐭 Zugriffssicherheit – validiert Entropie-/Kontrastgröße vor Zugriff
     for (std::size_t i = 0; i < totalTiles; ++i) {
         if (i >= entropy.size() || i >= contrast.size()) {
             LUCHS_LOG_HOST("[ZoomEval] Index %zu out of bounds (entropy=%zu, contrast=%zu)", i, entropy.size(), contrast.size());
@@ -65,7 +95,7 @@ ZoomResult evaluateZoomTarget(
         float entropyVal  = entropy[i];
         float contrastVal = contrast[i];
 
-        float score = entropyVal * (1.0f + contrastVal);
+        float score = entropyVal * (1.0f + contrastVal * CONTRAST_WEIGHT);  // 🐼 Otter: Kontrast betont
         if (score > bestScore) {
             bestScore = score;
             result.bestIndex    = static_cast<int>(i);
@@ -90,8 +120,8 @@ ZoomResult evaluateZoomTarget(
     tileCenter.y = (tileCenter.y / height - 0.5f) * 2.0f;
 
     float2 proposedOffset = make_float2(
-        currentOffset.x + tileCenter.x / zoom,
-        currentOffset.y + tileCenter.y / zoom
+        currentOffset.x + (tileCenter.x / zoom) * ZOOM_STRENGTH,
+        currentOffset.y + (tileCenter.y / zoom) * ZOOM_STRENGTH
     );
 
     float dx = proposedOffset.x - previousOffset.x;
@@ -104,7 +134,12 @@ ZoomResult evaluateZoomTarget(
     result.isNewTarget  = true;
     result.shouldZoom   = true;
 
-    float alpha = Settings::ALPHA_LERP_MAX; // Kolibri: Pinguin-Gleitflug - aggressiver LERP
+    // 🐦 Kolibri: Dynamisches Alpha – reagiert auf Distanz und Score-Gewinn
+    const float distNorm = std::min(dist / DIST_NORM, 1.0f);
+    const float gainNorm = std::min(std::max(scoreGain, 0.0f) / GAIN_NORM, 1.0f);
+    const float drive    = std::clamp(0.5f * distNorm + 0.5f * gainNorm, 0.0f, 1.0f);
+    const float alpha    = ALPHA_LERP_MIN + (ALPHA_LERP_MAX - ALPHA_LERP_MIN) * drive;
+
     result.newOffset = make_float2(
         previousOffset.x * (1.0f - alpha) + proposedOffset.x * alpha,
         previousOffset.y * (1.0f - alpha) + proposedOffset.y * alpha
@@ -119,7 +154,7 @@ ZoomResult evaluateZoomTarget(
                              ? (result.bestContrast - previousContrast) / previousContrast
                              : 1.0f;
 
-    auto t1 = std::chrono::high_resolution_clock::now(); // Blaupause: Endzeit
+    auto t1 = std::chrono::high_resolution_clock::now(); // 🔬 Endzeit
     auto ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
     if (Settings::debugLogging) {
