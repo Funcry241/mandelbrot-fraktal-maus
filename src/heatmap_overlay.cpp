@@ -42,6 +42,79 @@ void main() {
 }
 )GLSL";
 
+// --- Minimaler Selbsttest für Heatmap-Koordinaten (gleiche Transform wie Overlay) ---
+static void DrawHeatmapSelfCheck(int tilesX, int tilesY, float scaleX, float scaleY, float offsetX, float offsetY)
+{
+    struct P { float x,y; float r,g,b; };
+    const P pts[3] = {
+        { 0.5f,             0.5f,              0.0f, 0.5f, 1.0f }, // blau links-unten
+        { tilesX - 0.5f,    tilesY - 0.5f,     0.0f, 0.5f, 1.0f }, // blau rechts-oben
+        { tilesX * 0.5f,    tilesY * 0.5f,     1.0f, 0.0f, 0.0f }, // rot Mitte
+    };
+
+    static const char* vs = R"GLSL(
+        #version 430 core
+        layout(location=0) in vec2 aPos;
+        layout(location=1) in vec3 aColor;
+        uniform vec2 uScale;
+        uniform vec2 uOffset;
+        uniform float uPointSize;
+        out vec3 vColor;
+        void main(){
+            vec2 pos = aPos * uScale + uOffset;
+            gl_Position = vec4(pos, 0.0, 1.0);
+            gl_PointSize = uPointSize;
+            vColor = aColor;
+        }
+    )GLSL";
+    static const char* fs = R"GLSL(
+        #version 430 core
+        in vec3 vColor;
+        out vec4 FragColor;
+        void main(){ FragColor = vec4(vColor, 1.0); }
+    )GLSL";
+
+    static GLuint prog = 0, vao = 0, vbo = 0;
+    if (!prog) {
+        auto compile = [](GLenum type, const char* src){
+            GLuint s = glCreateShader(type); glShaderSource(s,1,&src,nullptr); glCompileShader(s);
+            GLint ok=0; glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+            if(!ok){ char log[1024]; glGetShaderInfoLog(s,1024,nullptr,log); LUCHS_LOG_HOST("[HM-SelfCheck] shader compile: %s", log); }
+            return s;
+        };
+        GLuint v = compile(GL_VERTEX_SHADER,   vs);
+        GLuint f = compile(GL_FRAGMENT_SHADER, fs);
+        prog = glCreateProgram(); glAttachShader(prog,v); glAttachShader(prog,f); glLinkProgram(prog);
+        GLint ok=0; glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+        if(!ok){ char log[1024]; glGetProgramInfoLog(prog,1024,nullptr,log); LUCHS_LOG_HOST("[HM-SelfCheck] link: %s", log); }
+        glDeleteShader(v); glDeleteShader(f);
+        glGenVertexArrays(1, &vao);
+        glGenBuffers(1, &vbo);
+    }
+
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(pts), pts, GL_DYNAMIC_DRAW);
+
+    glUseProgram(prog);
+    glUniform2f(glGetUniformLocation(prog,"uScale"),  scaleX, scaleY);
+    glUniform2f(glGetUniformLocation(prog,"uOffset"), offsetX, offsetY);
+    glUniform1f(glGetUniformLocation(prog,"uPointSize"), 12.0f);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(P), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(P), (void*)(2*sizeof(float)));
+
+    glEnable(GL_PROGRAM_POINT_SIZE);
+    glDrawArrays(GL_POINTS, 0, 3);
+
+    glDisableVertexAttribArray(0);
+    glDisableVertexAttribArray(1);
+    glBindVertexArray(0);
+    glUseProgram(0);
+}
+
 static GLuint compile(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, nullptr);
@@ -94,7 +167,7 @@ void drawOverlay(const std::vector<float>& entropy,
                  RendererState& ctx) {
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[HM] drawOverlay called: entropy=%zu contrast=%zu enabled=%d",
-                       entropy.size(), contrast.size(), ctx.heatmapOverlayEnabled ? 1 : 0);
+                       entropy.size(), contrast.size(), ctx.heatmapOverlayEnabled ? 1 : 0);    
     }
 
     if (!ctx.heatmapOverlayEnabled) return;
@@ -174,8 +247,11 @@ void drawOverlay(const std::vector<float>& entropy,
 
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[HM] drawOverlay: %zu vertices issued | glGetError = 0x%x -> 0x%x", data.size() / 3, errBefore, errAfter);
-    }
 
+        // Self‑Check: gleiche Transform, gleiche Ecke
+        DrawHeatmapSelfCheck(tilesX, tilesY, scaleX, scaleY, offsetX, offsetY);
+    }
+    
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
     glBindVertexArray(0);
