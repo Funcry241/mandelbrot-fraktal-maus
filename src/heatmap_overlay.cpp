@@ -1,5 +1,7 @@
 // Datei: src/heatmap_overlay.cpp
-// 🐭 Maus-Kommentar: Overlay-Zustand wird nicht mehr intern gespeichert. drawOverlay(ctx) steht jetzt global bereit, prüft ctx.overlayActive und ruft intern HeatmapOverlay::drawOverlay(...) auf. Damit ist die Integration in renderer_loop.cpp direkt möglich. Schneefuchs: Sichtbarkeit mit System.
+// 🐭 Maus-Kommentar: Overlay-Zustand wird nicht mehr intern gespeichert. drawOverlay(ctx) steht jetzt global bereit,
+// prüft ctx.overlayActive und ruft intern HeatmapOverlay::drawOverlay(...) auf. Damit ist die Integration in
+// renderer_loop.cpp direkt möglich. Schneefuchs: Sichtbarkeit mit System.
 
 #include "pch.hpp"
 #include "heatmap_overlay.hpp"
@@ -8,6 +10,7 @@
 #include "luchs_log_host.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace HeatmapOverlay {
 
@@ -188,15 +191,38 @@ void drawOverlay(const std::vector<float>& entropy,
     std::vector<float> data;
     data.reserve(quadCount * 6 * 3);
 
+    // --- Zusatz-Log 2: Daten-Extrema sammeln ---
     float maxVal = 1e-6f;
+    float minVal = std::numeric_limits<float>::max();
     for (int i = 0; i < quadCount; ++i) {
-        maxVal = std::max(maxVal, entropy[i] + contrast[i]);
+        float s = entropy[i] + contrast[i];
+        maxVal = std::max(maxVal, s);
+        minVal = std::min(minVal, s);
+    }
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[HM-Data] Value range: min=%.6f max=%.6f", minVal, maxVal);
     }
 
     for (int y = 0; y < tilesY; ++y) {
         for (int x = 0; x < tilesX; ++x) {
             int idx = y * tilesX + x;
-            float v = (entropy[idx] + contrast[idx]) / maxVal;
+            float s = entropy[idx] + contrast[idx];
+
+            // --- Zusatz-Log 3: Warnung bei NaN/negativen Werten (vor und nach Normierung) ---
+            if (!std::isfinite(s) || s < 0.0f) {
+                if (Settings::debugLogging) {
+                    LUCHS_LOG_HOST("[HM-WARN] Unusual raw value at tile (%d,%d) idx=%d: s=%.6f", x, y, idx, s);
+                }
+            }
+
+            float v = s / maxVal;
+            if (!std::isfinite(v) || v < 0.0f) {
+                if (Settings::debugLogging) {
+                    LUCHS_LOG_HOST("[HM-WARN] Unusual normalized value at tile (%d,%d) idx=%d: v=%.6f (s=%.6f, max=%.6f)",
+                                   x, y, idx, v, s, maxVal);
+                }
+            }
+
             float px = static_cast<float>(x);
             float py = static_cast<float>(y);
             float quad[6][3] = {
@@ -223,14 +249,27 @@ void drawOverlay(const std::vector<float>& entropy,
 
     glUseProgram(overlayShader);
 
+    // Transform für Einblendung unten rechts (kleines Overlay)
     constexpr int overlayPixelsX = 160, overlayPixelsY = 90, paddingX = 16, paddingY = 16;
     float scaleX = static_cast<float>(overlayPixelsX) / width / tilesX * 2.0f;
     float scaleY = static_cast<float>(overlayPixelsY) / height / tilesY * 2.0f;
     float offsetX = 1.0f - (static_cast<float>(overlayPixelsX + paddingX) / width * 2.0f);
     float offsetY = 1.0f - (static_cast<float>(overlayPixelsY + paddingY) / height * 2.0f);
 
-    glUniform2f(glGetUniformLocation(overlayShader, "uScale"), scaleX, scaleY);
+    glUniform2f(glGetUniformLocation(overlayShader, "uScale"),  scaleX,  scaleY);
     glUniform2f(glGetUniformLocation(overlayShader, "uOffset"), offsetX, offsetY);
+
+    // --- Zusatz-Log 1: NDC der Eck-/Mittel-Punkte (gleiche Transform wie Shader) ---
+    if (Settings::debugLogging) {
+        float blx = 0.5f * scaleX + offsetX;
+        float bly = 0.5f * scaleY + offsetY;
+        float trx = (tilesX - 0.5f) * scaleX + offsetX;
+        float try_ = (tilesY - 0.5f) * scaleY + offsetY;
+        float midx = (tilesX * 0.5f) * scaleX + offsetX;
+        float midy = (tilesY * 0.5f) * scaleY + offsetY;
+        LUCHS_LOG_HOST("[HM-Check] NDC BL=(%.3f, %.3f) TR=(%.3f, %.3f) MID=(%.3f, %.3f)",
+                       blx, bly, trx, try_, midx, midy);
+    }
 
     glBindVertexArray(overlayVAO);
     glBindBuffer(GL_ARRAY_BUFFER, overlayVBO);
@@ -246,12 +285,13 @@ void drawOverlay(const std::vector<float>& entropy,
     GLenum errAfter = glGetError();
 
     if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[HM] drawOverlay: %zu vertices issued | glGetError = 0x%x -> 0x%x", data.size() / 3, errBefore, errAfter);
+        LUCHS_LOG_HOST("[HM] drawOverlay: %zu vertices issued | glGetError = 0x%x -> 0x%x",
+                       data.size() / 3, errBefore, errAfter);
 
-        // Self‑Check: gleiche Transform, gleiche Ecke
+        // Self‑Check: gleiche Transform, gleiche Ecke (blaue Punkte: BL/TR, roter Punkt: Mitte)
         DrawHeatmapSelfCheck(tilesX, tilesY, scaleX, scaleY, offsetX, offsetY);
     }
-    
+
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
     glBindVertexArray(0);
