@@ -22,7 +22,7 @@ constexpr float ZOOM_STRENGTH     = 1.2f;
 // 1.0 = normale Verschiebung, 1.5 = aggressiv, 2.0+ = stark springend
 // Empfehlung: 1.2 – 1.8
 
-constexpr float CONTRAST_WEIGHT  = 2.0f;
+constexpr float CONTRAST_WEIGHT  = 0.5f;
 // Gewichtung des Kontrasts im Score.
 // 1.0 = gleichwertig zu Entropie, 1.5 = Kontrast wichtiger, 2.0+ = Fokus auf harte Unterschiede
 // Empfehlung: 1.0 – 2.0
