@@ -166,6 +166,7 @@ struct AutoTuner {
 static AutoTuner gTuner;
 
 // Historie für „prev“-Werte (lokal in dieser Datei, unabhängig von anderen Modulen)
+// Reihenfolge bewusst gewählt (Ausrichtung vermeiden).
 struct Hist {
     float2 prevOffset  = {0.0f, 0.0f};  // zuerst: 8 Byte (2 × float)
     float  prevZoom    = 1.0f;          // danach: 4 Byte
@@ -215,6 +216,10 @@ ZoomResult evaluateZoomTarget(
             minC = std::min(minC, c); maxC = std::max(maxC, c);
         }
         LUCHS_LOG_HOST("[ZoomEval] Entropy: min=%.4f max=%.4f | Contrast: min=%.4f max=%.4f", minE, maxE, minC, maxC);
+        if (maxE < kBLACK_ENTROPY_THRESH) {
+            LUCHS_LOG_HOST("[Diag] Black‑Verdacht: maxEntropy=%.4f < thresh=%.4f (Frame wirkt dunkel/schwarz)",
+                           maxE, kBLACK_ENTROPY_THRESH);
+        }
     }
 
     // Bestes Tile per Score = E * (1 + C)
@@ -284,7 +289,8 @@ ZoomResult evaluateZoomTarget(
     float alpha = kAUTO_TUNE_ENABLED ? gTuner.currentAlpha()
                                      : kFIXED_ALPHA;
 
-    // Optionale leichte Verstärkung bei gutem Score‑Gain (sicherer Bereich)
+    // Optionale leichte Verstärkung bei gutem Score‑Gain (nur Anzeige/Diag, Verhalten bleibt quasi gleich)
+    float alphaBeforeBoost = alpha;
     if (scoreGain > 0.25f) alpha = std::min(alpha * 1.15f, 0.35f);
 
     // LERP (Kolibri)
@@ -311,6 +317,15 @@ ZoomResult evaluateZoomTarget(
     auto ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
     if (Settings::debugLogging) {
+        // Score-Zerlegung + Geometrie + Zielwechsel
+        LUCHS_LOG_HOST("[Diag] bestScore=%.4f prevScore=%.4f gain=%.3f | targetSwitched=%d switches=%d",
+                       bestScore, prevScore, scoreGain, targetSwitched ? 1 : 0,
+                       kAUTO_TUNE_ENABLED ? gTuner.targetSwitches : -1);
+        LUCHS_LOG_HOST("[Diag] bestTile=(%d,%d) NDC=(%.4f,%.4f) proposedOffset=(%.5f,%.5f)",
+                       bx, by, tileCenter.x, tileCenter.y, proposedOffset.x, proposedOffset.y);
+        LUCHS_LOG_HOST("[Diag] alpha=%.3f (cand=%.3f%s) | dist=%.4f",
+                       alpha, alphaBeforeBoost, (alpha != alphaBeforeBoost ? " +boost" : ""), dist);
+
         LUCHS_LOG_HOST("[ZoomEval] i=%d E=%.2f C=%.2f d=%.4f g=%.2f a=%.3f Z | %.3fms",
             result.bestIndex,
             result.bestEntropy,
