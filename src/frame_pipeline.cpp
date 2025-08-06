@@ -11,6 +11,7 @@
 #include "frame_context.hpp"
 #include "renderer_state.hpp"
 #include "zoom_command.hpp"
+#include "zoom_logic.hpp"
 #include "heatmap_overlay.hpp"
 #include "warzenschwein_overlay.hpp"
 #include "settings.hpp"
@@ -37,7 +38,8 @@ void beginFrame(FrameContext& frameCtx) {
 
 void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] computeCudaFrame: dimensions=%dx%d, zoom=%.2f, tileSize=%d", frameCtx.width, frameCtx.height, frameCtx.zoom, frameCtx.tileSize);
+        LUCHS_LOG_HOST("[PIPE] computeCudaFrame: dimensions=%dx%d, zoom=%.2f, tileSize=%d",
+                       frameCtx.width, frameCtx.height, frameCtx.zoom, frameCtx.tileSize);
 
     float2 gpuOffset     = make_float2((float)frameCtx.offset.x, (float)frameCtx.offset.y);
     float2 gpuNewOffset  = gpuOffset;
@@ -47,7 +49,8 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     const int numTiles = tilesX * tilesY;
 
     if (frameCtx.tileSize <= 0 || numTiles <= 0) {
-        LUCHS_LOG_HOST("[FATAL] computeCudaFrame: Invalid tileSize (%d) or numTiles (%d)", frameCtx.tileSize, numTiles);
+        LUCHS_LOG_HOST("[FATAL] computeCudaFrame: Invalid tileSize (%d) or numTiles (%d)",
+                       frameCtx.tileSize, numTiles);
         return;
     }
 
@@ -55,6 +58,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
 
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Calling CudaInterop::renderCudaFrame");
+
     CudaInterop::renderCudaFrame(
         state.d_iterations,
         state.d_entropy,
@@ -71,8 +75,10 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         frameCtx.tileSize,
         state
     );
+
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Returned from renderCudaFrame");
+
     CUDA_CHECK(cudaDeviceSynchronize());
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -96,7 +102,8 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     cudaError_t err = cudaPeekAtLastError();
     if (err != cudaSuccess || (globalFrameCounter % 30 == 0)) {
         if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIPE] Flushing device logs (err=%d, frame=%d)", static_cast<int>(err), globalFrameCounter);
+            LUCHS_LOG_HOST("[PIPE] Flushing device logs (err=%d, frame=%d)",
+                           static_cast<int>(err), globalFrameCounter);
         }
         LuchsLogger::flushDeviceLogToHost(0);
     }
@@ -106,11 +113,52 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     }
 
     if (Settings::debugLogging && !frameCtx.h_entropy.empty()) {
-        LUCHS_LOG_HOST("[PIPE] Heatmap sample: Entropy[0]=%.4f Contrast[0]=%.4f", frameCtx.h_entropy[0], frameCtx.h_contrast[0]);
+        LUCHS_LOG_HOST("[PIPE] Heatmap sample: Entropy[0]=%.4f Contrast[0]=%.4f",
+                       frameCtx.h_entropy[0], frameCtx.h_contrast[0]);
     }
 
+    // Analysewerte aus dem letzten ZoomResult des CUDA-Renderers übernehmen
     frameCtx.lastEntropy  = state.zoomResult.bestEntropy;
     frameCtx.lastContrast = state.zoomResult.bestContrast;
+
+    // 🐭 Maus: Analysewerte liegen nun vor – jetzt Auto-Zoom-Logik füttern
+    // 🦦 Otter: Verknüpft FrameContext mit Zoomentscheidungs-Logik
+    // 🐑 Schneefuchs: Minimalinvasiver Anschluss Analyse → Steuerung
+    ZoomLogic::ZoomResult target = ZoomLogic::evaluateZoomTarget(
+        frameCtx.h_entropy,
+        frameCtx.h_contrast,
+        make_float2((float)frameCtx.offset.x, (float)frameCtx.offset.y), // currentOffset
+        frameCtx.zoom,
+        tilesX,
+        tilesY,
+        frameCtx.tileSize,
+        make_float2((float)frameCtx.offset.x, (float)frameCtx.offset.y), // previousOffset (hier ggf. echten letzten Wert verwenden)
+        -1,                                                               // previousIndex
+        frameCtx.lastEntropy,
+        frameCtx.lastContrast
+    );
+
+    if (target.bestScore > Settings::AUTOZOOM_THRESHOLD) {
+        if (Settings::debugLogging) {
+            LUCHS_LOG_HOST(
+                "[AUTOZOOM] Triggered: bestScore=%.5f (threshold=%.5f) targetOffset=(%.8f, %.8f) entropy=%.5f contrast=%.5f",
+                target.bestScore,
+                Settings::AUTOZOOM_THRESHOLD,
+                target.newOffset.x,
+                target.newOffset.y,
+                frameCtx.lastEntropy,
+                frameCtx.lastContrast
+            );
+        }
+        frameCtx.shouldZoom = true;
+        frameCtx.newOffset  = { target.newOffset.x, target.newOffset.y };
+    } else if (Settings::debugLogging) {
+        LUCHS_LOG_HOST(
+            "[AUTOZOOM] Skipped: bestScore=%.5f (threshold=%.5f)",
+            target.bestScore,
+            Settings::AUTOZOOM_THRESHOLD
+        );
+    }
 }
 
 void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {

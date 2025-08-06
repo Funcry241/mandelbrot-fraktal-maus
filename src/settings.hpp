@@ -53,6 +53,10 @@ constexpr float MIN_VARIANCE_THRESHOLD = 0.001f; // Notbremse für zu starkes Au
 // 🌀 Geschwindigkeit des automatischen Zooms pro Frame
 constexpr float AUTOZOOM_SPEED = 1.005f; // Höher = schnellerer Zoom - empfohlen: 1.002 bis 1.01
 
+// 🌟 Schwelle für Auto-Zoom-Entscheidung (basierend auf bestScore aus ZoomResult)
+// Empfehlung: 0.01 = sehr empfindlich, 0.1 = moderat, 0.5 = nur bei sehr markanten Zielen
+constexpr float AUTOZOOM_THRESHOLD = 0.1f;
+
 // Minimaler Abstand (in Fraktalkoordinaten) für Zielwechsel bei Auto-Zoom
 // Empfehlung: 0.0001 bis 0.01 je nach Zoomstufe - kleiner = empfindlicher, größer = träger
 constexpr float MIN_JUMP_DISTANCE = 0.001f;

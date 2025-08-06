@@ -103,7 +103,8 @@
         "xtree": "cpp",
         "xutility": "cpp",
         "expected": "cpp",
-        "set": "cpp"
+        "set": "cpp",
+        "target": "cpp"
     },
 
     "files.insertFinalNewline": true
