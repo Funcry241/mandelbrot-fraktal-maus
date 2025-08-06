@@ -2,6 +2,7 @@
 // 🐭 Maus-Kommentar: Alpha 49 "Pinguin" – sanftes, kontinuierliches Zoomen ohne Elefant!
 // 🦦 Otter: AutoTune + neue Metrik – bewertet jetzt nicht nur Entropie+Kontrast, sondern straft große homogene Flächen ab und boostet Detailkanten.
 // 🐑 Schneefuchs: deterministisch, wirkt in allen Pfaden (Zoom, AutoTune, Overlay).
+// 🦎 Chamäleon: erkennt TileSize-Änderungen und "sprunghafte" Indexwechsel mit wenig Zugewinn.
 //
 // EINSTELLBARE PARAMETER (in dieser Datei, ohne JSON):
 //   kAUTO_TUNE_ENABLED      [bool]   true/false -> Auto‑Tuner an/aus
@@ -47,6 +48,9 @@ static float kW_BLACK              = 0.80f;
 
 static float kBLACK_ENTROPY_THRESH = 0.04f;
 static float kFIXED_ALPHA          = 0.16f;
+
+// Chamäleon: Schwellwert für "sprunghaften" Indexwechsel mit wenig Zugewinn
+constexpr float kINDEX_JUMP_THRESH = 0.05f;
 
 struct Candidate {
     float alpha;
@@ -148,6 +152,7 @@ struct Hist {
     float2 prevOffset  = {0.0f, 0.0f};
     float  prevZoom    = 1.0f;
     int    prevIndex   = -1;
+    int    prevTileSize = -1;
 } gHist;
 
 } // namespace
@@ -199,10 +204,7 @@ ZoomResult evaluateZoomTarget(
         float e = entropy[i];
         float c = contrast[i];
 
-        // Langeweile-Penalty: wenn Entropie und Kontrast beide niedrig sind
         float boredomPenalty = (e < 0.15f && c < 0.15f) ? 0.5f : 1.0f;
-
-        // Edge-Boost: leichte Bevorzugung, wenn Kontrast hoch ist
         float edgeBoost = (c > 0.6f) ? 1.2f : 1.0f;
 
         float score = e * (1.0f + c) * boredomPenalty * edgeBoost;
@@ -266,6 +268,9 @@ ZoomResult evaluateZoomTarget(
                              ? (result.bestContrast - previousContrast) / previousContrast
                              : 1.0f;
 
+    // Historie aktualisieren
+    bool tileSizeChanged = (tileSize != gHist.prevTileSize);
+    gHist.prevTileSize = tileSize;
     gHist.prevZoom   = zoom;
     gHist.prevOffset = result.newOffset;
     gHist.prevIndex  = result.bestIndex;
@@ -277,10 +282,17 @@ ZoomResult evaluateZoomTarget(
         int bx = result.bestIndex % tilesX;
         int by = result.bestIndex / tilesX;
         LUCHS_LOG_HOST("[ZoomEval] bestScore=%.4f prevScore=%.4f gain=%.3f | tile=(%d,%d) NDC=(%.4f,%.4f) offset=(%.5f,%.5f) alpha=%.3f (cand=%.3f%s) dist=%.4f ms=%.3f",
-                    bestScore, prevScore, scoreGain,
-                    bx, by, tileCenter.x, tileCenter.y,
-                    proposedOffset.x, proposedOffset.y,
-                    alpha, alphaBeforeBoost, (alpha != alphaBeforeBoost ? " +boost" : ""), dist, ms);
+                       bestScore, prevScore, scoreGain,
+                       bx, by, tileCenter.x, tileCenter.y,
+                       proposedOffset.x, proposedOffset.y,
+                       alpha, alphaBeforeBoost, (alpha != alphaBeforeBoost ? " +boost" : ""), dist, ms);
+
+        // Chamäleon-Logzeile
+        bool indexJump = targetSwitched && (std::fabs(scoreGain) < kINDEX_JUMP_THRESH);
+        LUCHS_LOG_HOST("[Chamäleon] tileSizeChange=%d indexJump=%d scoreGain=%.3f",
+                       tileSizeChanged ? 1 : 0,
+                       indexJump ? 1 : 0,
+                       scoreGain);
     }
 
     return result;
