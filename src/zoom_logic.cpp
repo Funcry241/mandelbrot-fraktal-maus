@@ -287,12 +287,19 @@ ZoomResult evaluateZoomTarget(
                        proposedOffset.x, proposedOffset.y,
                        alpha, alphaBeforeBoost, (alpha != alphaBeforeBoost ? " +boost" : ""), dist, ms);
 
-        // Chamäleon-Logzeile
+        // Chamäleon-Logzeile – erweitert um tileSize, bestIndex, zoom und Offset
         bool indexJump = targetSwitched && (std::fabs(scoreGain) < kINDEX_JUMP_THRESH);
-        LUCHS_LOG_HOST("[Chamaeleon] tileSizeChange=%d indexJump=%d scoreGain=%.3f",
-                       tileSizeChanged ? 1 : 0,
-                       indexJump ? 1 : 0,
-                       scoreGain);
+        LUCHS_LOG_HOST(
+            "[Chamaeleon] tileSizeChange=%d indexJump=%d scoreGain=%.3f tileSize=%d bestIdx=%d zoom=%.5f off=(%.5f,%.5f)",
+            tileSizeChanged ? 1 : 0,
+            indexJump ? 1 : 0,
+            scoreGain,
+            tileSize,
+            result.bestIndex,
+            zoom,
+            result.newOffset.x,
+            result.newOffset.y
+        );
     }
 
     return result;
