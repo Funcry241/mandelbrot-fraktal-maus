@@ -11,7 +11,6 @@
 #include "frame_context.hpp"
 #include "renderer_state.hpp"
 #include "zoom_command.hpp"
-#include "zoom_logic.hpp"
 #include "heatmap_overlay.hpp"
 #include "warzenschwein_overlay.hpp"
 #include "settings.hpp"
