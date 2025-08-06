@@ -289,7 +289,7 @@ ZoomResult evaluateZoomTarget(
 
         // Chamäleon-Logzeile
         bool indexJump = targetSwitched && (std::fabs(scoreGain) < kINDEX_JUMP_THRESH);
-        LUCHS_LOG_HOST("[Chamäleon] tileSizeChange=%d indexJump=%d scoreGain=%.3f",
+        LUCHS_LOG_HOST("[Chamaeleon] tileSizeChange=%d indexJump=%d scoreGain=%.3f",
                        tileSizeChanged ? 1 : 0,
                        indexJump ? 1 : 0,
                        scoreGain);
