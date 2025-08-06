@@ -405,3 +405,6 @@ void drawOverlay(const std::vector<float>& entropy,
 }
 
 } // namespace HeatmapOverlay
+
+
+#pragma warning(pop) // ursprüngliche Warnungseinstellungen wiederherstellen
