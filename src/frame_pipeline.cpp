@@ -121,41 +121,25 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     frameCtx.lastEntropy  = state.zoomResult.bestEntropy;
     frameCtx.lastContrast = state.zoomResult.bestContrast;
 
-    // 🐭 Maus: Analysewerte liegen nun vor – jetzt Auto-Zoom-Logik füttern
-    // 🦦 Otter: Verknüpft FrameContext mit Zoomentscheidungs-Logik
-    // 🐑 Schneefuchs: Minimalinvasiver Anschluss Analyse → Steuerung
-    ZoomLogic::ZoomResult target = ZoomLogic::evaluateZoomTarget(
-        frameCtx.h_entropy,
-        frameCtx.h_contrast,
-        make_float2((float)frameCtx.offset.x, (float)frameCtx.offset.y), // currentOffset
-        frameCtx.zoom,
-        tilesX,
-        tilesY,
-        frameCtx.tileSize,
-        make_float2((float)frameCtx.offset.x, (float)frameCtx.offset.y), // previousOffset (hier ggf. echten letzten Wert verwenden)
-        -1,                                                               // previousIndex
-        frameCtx.lastEntropy,
-        frameCtx.lastContrast
-    );
-
-    if (target.bestScore > Settings::AUTOZOOM_THRESHOLD) {
+    // Entscheidung direkt aus CUDA-Ergebnis ableiten – keine zweite CPU-Analyse nötig
+    if (state.zoomResult.bestScore > Settings::AUTOZOOM_THRESHOLD) {
         if (Settings::debugLogging) {
             LUCHS_LOG_HOST(
                 "[AUTOZOOM] Triggered: bestScore=%.5f (threshold=%.5f) targetOffset=(%.8f, %.8f) entropy=%.5f contrast=%.5f",
-                target.bestScore,
+                state.zoomResult.bestScore,
                 Settings::AUTOZOOM_THRESHOLD,
-                target.newOffset.x,
-                target.newOffset.y,
+                state.zoomResult.newOffset.x,
+                state.zoomResult.newOffset.y,
                 frameCtx.lastEntropy,
                 frameCtx.lastContrast
             );
         }
         frameCtx.shouldZoom = true;
-        frameCtx.newOffset  = { target.newOffset.x, target.newOffset.y };
+        frameCtx.newOffset  = { state.zoomResult.newOffset.x, state.zoomResult.newOffset.y };
     } else if (Settings::debugLogging) {
         LUCHS_LOG_HOST(
             "[AUTOZOOM] Skipped: bestScore=%.5f (threshold=%.5f)",
-            target.bestScore,
+            state.zoomResult.bestScore,
             Settings::AUTOZOOM_THRESHOLD
         );
     }
