@@ -23,6 +23,7 @@
 #include "zoom_logic.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
+#include "heatmap_utils.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -246,15 +247,15 @@ ZoomResult evaluateZoomTarget(
         return result;
     }
 
-    // Tile‑Zentrum in NDC
-    int bx = result.bestIndex % tilesX;
-    int by = result.bestIndex / tilesX;
-    float2 tileCenter;
-    tileCenter.x = (bx + 0.5f) * tileSize;
-    tileCenter.y = (by + 0.5f) * tileSize;
-    tileCenter.x = (tileCenter.x / width  - 0.5f) * 2.0f;
-    tileCenter.y = (tileCenter.y / height - 0.5f) * 2.0f;
+    // Pixelzentrum der Best-Tile in Pixelkoordinaten holen (gemeinsame Hilfsfunktion)
+    auto [px, py] = tileIndexToPixelCenter(result.bestIndex, tilesX, tilesY, width, height);
 
+    // Umrechnung Pixel → NDC
+    float2 tileCenter;
+    tileCenter.x = static_cast<float>((px / width)  - 0.5) * 2.0f;
+    tileCenter.y = static_cast<float>((py / height) - 0.5) * 2.0f;
+
+    // Offset-Vorschlag in Weltkoordinaten
     float2 proposedOffset = make_float2(
         currentOffset.x + tileCenter.x / zoom,
         currentOffset.y + tileCenter.y / zoom
@@ -317,7 +318,8 @@ ZoomResult evaluateZoomTarget(
     auto ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
     if (Settings::debugLogging) {
-        // Score-Zerlegung + Geometrie + Zielwechsel
+        int bx = result.bestIndex % tilesX;
+        int by = result.bestIndex / tilesX;
         LUCHS_LOG_HOST("[Diag] bestScore=%.4f prevScore=%.4f gain=%.3f | targetSwitched=%d switches=%d",
                        bestScore, prevScore, scoreGain, targetSwitched ? 1 : 0,
                        kAUTO_TUNE_ENABLED ? gTuner.targetSwitches : -1);

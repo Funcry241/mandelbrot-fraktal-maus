@@ -10,6 +10,7 @@
 #include "settings.hpp"
 #include "renderer_state.hpp"
 #include "luchs_log_host.hpp"
+#include "heatmap_utils.hpp"
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -258,6 +259,8 @@ void cleanup() {
     pointVAO = pointVBO = pointProg = 0;
 }
 
+#include "heatmap_utils.hpp" // neu: für tileIndexToPixelCenter(...)
+
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width, int height,
@@ -367,30 +370,22 @@ void drawOverlay(const std::vector<float>& entropy,
     // 3) Self‑Check‑Punkte im Overlay (gleiche Transform)
     DrawHeatmapSelfCheck_OverlaySpace(tilesX, tilesY, scaleX, scaleY, offsetX, offsetY);
 
-    // 4) Max‑Tile im HAUPTBILD markieren + Koordinaten-Logging
-    const int maxY = maxIdx / tilesX;
-    const int maxX = maxIdx % tilesX;
-
-    // Pixelzentrum der Tile im Hauptbild
-    const float centerPx = (float(maxX) + 0.5f) * float(tileSize);
-    const float centerPy = (float(maxY) + 0.5f) * float(tileSize);
-
-    // Punkt im Hauptbild (giftiges Türkisgrün)
-    DrawPoint_ScreenPixels(centerPx, centerPy, width, height, 0.0f, 1.0f, 0.5f, 10.0f);
-
-    // NDC des Zentrums (nur Info)
-    const double ndcX = ((double(centerPx)+0.5) / double(width))  * 2.0 - 1.0;
-    const double ndcY = ((double(centerPy)+0.5) / double(height)) * 2.0 - 1.0;
-
-    // Komplexe Koordinate – ohne/mit Y‑Flip (benutzt Adapter-Makros)
-    auto [reA, imA] = screenToComplex((int)std::floor(centerPx), (int)std::floor(centerPy),
-                                      width, height, ctx, /*flipY=*/false);
-    auto [reB, imB] = screenToComplex((int)std::floor(centerPx), (int)std::floor(centerPy),
-                                      width, height, ctx, /*flipY=*/true);
+    // 4) Max‑Tile im Hauptbild markieren + Koordinaten-Logging (gemeinsame Hilfsfunktion)
+    auto [centerPx, centerPy] = tileIndexToPixelCenter(maxIdx, tilesX, tilesY, width, height);
+    DrawPoint_ScreenPixels(static_cast<float>(centerPx), static_cast<float>(centerPy),
+                           width, height, 0.0f, 1.0f, 0.5f, 10.0f);
 
     if (Settings::debugLogging) {
+        int bx = maxIdx % tilesX;
+        int by = maxIdx / tilesX;
+        const double ndcX = ((centerPx) / double(width)  - 0.5) * 2.0;
+        const double ndcY = ((centerPy) / double(height) - 0.5) * 2.0;
+        auto [reA, imA] = screenToComplex((int)std::floor(centerPx), (int)std::floor(centerPy),
+                                          width, height, ctx, /*flipY=*/false);
+        auto [reB, imB] = screenToComplex((int)std::floor(centerPx), (int)std::floor(centerPy),
+                                          width, height, ctx, /*flipY=*/true);
         LUCHS_LOG_HOST("[HM] tiles=%dx%d ts=%d  maxIdx=%d -> (x=%d,y=%d)  centerPx=(%.1f,%.1f)  ndc=(%.5f, %.5f)",
-                       tilesX, tilesY, tileSize, maxIdx, maxX, maxY, centerPx, centerPy, ndcX, ndcY);
+                       tilesX, tilesY, tileSize, maxIdx, bx, by, centerPx, centerPy, ndcX, ndcY);
         LUCHS_LOG_HOST("[HM] complex(noFlip)= %.9f + i*%.9f   |   complex(Yflip)= %.9f + i*%.9f",
                        reA, imA, reB, imB);
         LUCHS_LOG_HOST("[HM] camera zoom=%.6f  offset=(%.9f, %.9f)  aspect=%.6f  (offset/zoom via adapter)",
