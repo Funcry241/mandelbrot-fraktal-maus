@@ -375,8 +375,8 @@ void drawOverlay(const std::vector<float>& entropy,
     const float centerPx = (float(maxX) + 0.5f) * float(tileSize);
     const float centerPy = (float(maxY) + 0.5f) * float(tileSize);
 
-    // Punkt im Hauptbild (rot)
-    DrawPoint_ScreenPixels(centerPx, centerPy, width, height, 1.0f, 0.1f, 0.1f, 10.0f);
+    // Punkt im Hauptbild (giftiges Türkisgrün)
+    DrawPoint_ScreenPixels(centerPx, centerPy, width, height, 0.0f, 1.0f, 0.5f, 10.0f);
 
     // NDC des Zentrums (nur Info)
     const double ndcX = ((double(centerPx)+0.5) / double(width))  * 2.0 - 1.0;
