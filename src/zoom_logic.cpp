@@ -1,7 +1,7 @@
 // Datei: src/zoom_logic.cpp
-// Maus-Kommentar: Alpha 49 "Pinguin" - sanftes, kontinuierliches Zoomen ohne Elefant!
-// + AutoTune: misst mehrere alpha‑Kandidaten, wählt den besten und loggt zyklisch.
-// Ziel: Keine Rebuild-Orgie, sinnvolle Werte automatisch finden.
+// 🐭 Maus-Kommentar: Alpha 49 "Pinguin" – sanftes, kontinuierliches Zoomen ohne Elefant!
+// 🦦 Otter: AutoTune + neue Metrik – bewertet jetzt nicht nur Entropie+Kontrast, sondern straft große homogene Flächen ab und boostet Detailkanten.
+// 🐑 Schneefuchs: deterministisch, wirkt in allen Pfaden (Zoom, AutoTune, Overlay).
 //
 // EINSTELLBARE PARAMETER (in dieser Datei, ohne JSON):
 //   kAUTO_TUNE_ENABLED      [bool]   true/false -> Auto‑Tuner an/aus
@@ -37,26 +37,17 @@ namespace {
 //  Auto‑Tune Schalter & Parameter
 // -----------------------------
 static bool  kAUTO_TUNE_ENABLED    = true;   // <— EIN/AUS
-// Kandidatenliste (du kannst hier frei „spielen“)
 static float kCANDIDATE_ALPHAS[]   = { 0.08f, 0.12f, 0.16f, 0.20f, 0.24f, 0.28f };
-// Messdauer pro Kandidat (Frames). 45 ≈ ~2 s bei 20–25 FPS.
 static int   kFRAMES_PER_CANDIDATE = 45;
 
-// Reward‑Gewichte (feintunen, falls nötig)
-static float kW_PROGRESS           = 1.00f;  // höher => schneller reinzoomen wird stärker belohnt
-static float kW_JERK               = 0.60f;  // höher => ruckartige Bewegungen werden stärker bestraft
-static float kW_SWITCH             = 0.40f;  // höher => häufige Zielwechsel werden stärker bestraft
-static float kW_BLACK              = 0.80f;  // höher => „schwarze Frames“ werden stärker bestraft
+static float kW_PROGRESS           = 1.00f;
+static float kW_JERK               = 0.60f;
+static float kW_SWITCH             = 0.40f;
+static float kW_BLACK              = 0.80f;
 
-// „Schwarze Fläche“ (nahe 0 Entropie) -> Penalty
-static float kBLACK_ENTROPY_THRESH = 0.04f;  // 0.02–0.06 ist sinnvoll
+static float kBLACK_ENTROPY_THRESH = 0.04f;
+static float kFIXED_ALPHA          = 0.16f;
 
-// Fallback, wenn Auto‑Tuner aus ist:
-static float kFIXED_ALPHA          = 0.16f;  // 0.10–0.20: gut glatter Gleitflug
-
-// -----------------------------
-//  Auto‑Tuner interner Zustand
-// -----------------------------
 struct Candidate {
     float alpha;
     double reward = 0.0;
@@ -65,14 +56,11 @@ struct Candidate {
 
 struct AutoTuner {
     std::vector<Candidate> pool;
-    int currIdx          = 0;   // aktuell gemessener Kandidat
-    int round            = 0;   // wie oft alle Kandidaten gemessen wurden
+    int currIdx          = 0;
+    int round            = 0;
     int framesPerCand    = 45;
-    // Laufzeit‑Stats
     int targetSwitches   = 0;
     float lastSpeed      = 0.0f;
-
-    // FPS Grobschätzung für Log
     int   frameCount     = 0;
     double tStartMs      = 0.0;
 
@@ -87,10 +75,8 @@ struct AutoTuner {
         return duration<double, std::milli>(high_resolution_clock::now().time_since_epoch()).count();
     }
 
-    // Aufruf wenn bestIndex != previousIndex
     void onTargetSwitch() { targetSwitches++; }
 
-    // pro Frame Messupdate
     void update(float zoom, float prevZoom,
                 float2 offset, float2 prevOffset,
                 float maxEntropy)
@@ -98,7 +84,6 @@ struct AutoTuner {
         if (pool.empty()) return;
         Candidate& c = pool[currIdx];
 
-        // Metriken
         float progress = std::logf(std::max(zoom, 1.0f)) - std::logf(std::max(prevZoom, 1.0f));
         float dx = offset.x - prevOffset.x;
         float dy = offset.y - prevOffset.y;
@@ -107,7 +92,7 @@ struct AutoTuner {
         lastSpeed   = speed;
 
         float blackPenalty = (maxEntropy < kBLACK_ENTROPY_THRESH) ? 1.0f : 0.0f;
-        float switchRate   = static_cast<float>(targetSwitches) * 0.02f; // grob: „Switches pro ~Sekunde“
+        float switchRate   = static_cast<float>(targetSwitches) * 0.02f;
 
         double R =  kW_PROGRESS * progress
                   - kW_JERK     * jerk
@@ -119,29 +104,24 @@ struct AutoTuner {
         frameCount++;
 
         if (c.frames >= framesPerCand) {
-            // nächster Kandidat
             currIdx++;
             targetSwitches = 0;
             lastSpeed = 0.0f;
             if (currIdx >= static_cast<int>(pool.size())) {
-                // Runde abgeschlossen -> besten wählen und behalten
                 std::sort(pool.begin(), pool.end(),
                           [](const Candidate& a, const Candidate& b){ return a.reward > b.reward; });
                 const Candidate& best = pool.front();
 
-                // grobe FPS-Schätzung
                 double elapsed = nowMs() - tStartMs;
                 double fps = (elapsed > 0.0) ? (frameCount * 1000.0 / elapsed) : 0.0;
 
                 LUCHS_LOG_HOST("[AutoTune] round=%d bestAlpha=%.3f avgFPS≈%.1f reward=%+.3f (kept from %zu)",
                                ++round, best.alpha, fps, best.reward, pool.size());
 
-                // Successive‑Halving: obere Hälfte behalten (solide, schnell konvergent)
                 if (pool.size() > 2) {
                     pool.resize(pool.size() / 2);
                 }
 
-                // Reset für nächste Runde
                 for (auto& p : pool) { p.reward = 0.0; p.frames = 0; }
                 currIdx = 0;
                 frameCount = 0;
@@ -152,7 +132,6 @@ struct AutoTuner {
 
     float currentAlpha() const {
         if (pool.empty()) return kFIXED_ALPHA;
-        // Während des Messens: jeweils alpha des aktuellen Kandidaten
         return pool[std::min(currIdx, (int)pool.size()-1)].alpha;
     }
 
@@ -163,22 +142,16 @@ struct AutoTuner {
     }
 };
 
-// Ein globaler Tuner‑State (nur in dieser Übersetzungseinheit sichtbar)
 static AutoTuner gTuner;
 
-// Historie für „prev“-Werte (lokal in dieser Datei, unabhängig von anderen Modulen)
-// Reihenfolge bewusst gewählt (Ausrichtung vermeiden).
 struct Hist {
-    float2 prevOffset  = {0.0f, 0.0f};  // zuerst: 8 Byte (2 × float)
-    float  prevZoom    = 1.0f;          // danach: 4 Byte
-    int    prevIndex   = -1;            // dann: 4 Byte → sauber ausgerichtet
+    float2 prevOffset  = {0.0f, 0.0f};
+    float  prevZoom    = 1.0f;
+    int    prevIndex   = -1;
 } gHist;
 
-} // namespace (anonym)
+} // namespace
 
-// -------------------------------------------------------------------------------------
-// Ab hier: bestehende Zoom‑Logik, minimalinvasiv mit Auto‑Tune verwoben
-// -------------------------------------------------------------------------------------
 namespace ZoomLogic {
 
 ZoomResult evaluateZoomTarget(
@@ -206,7 +179,6 @@ ZoomResult evaluateZoomTarget(
     const int tilesY = (height + tileSize - 1) / tileSize;
     const std::size_t totalTiles = static_cast<std::size_t>(tilesX * tilesY);
 
-    // Debug: Min/Max sammeln
     float minE =  1e9f, maxE = -1e9f;
     float minC =  1e9f, maxC = -1e9f;
     if (Settings::debugLogging) {
@@ -217,22 +189,24 @@ ZoomResult evaluateZoomTarget(
             minC = std::min(minC, c); maxC = std::max(maxC, c);
         }
         LUCHS_LOG_HOST("[ZoomEval] Entropy: min=%.4f max=%.4f | Contrast: min=%.4f max=%.4f", minE, maxE, minC, maxC);
-        if (maxE < kBLACK_ENTROPY_THRESH) {
-            LUCHS_LOG_HOST("[Diag] Black‑Verdacht: maxEntropy=%.4f < thresh=%.4f (Frame wirkt dunkel/schwarz)",
-                           maxE, kBLACK_ENTROPY_THRESH);
-        }
     }
 
-    // Bestes Tile per Score = E * (1 + C)
+    // --- Neue Metrik: vermeidet langweilige Flächen ---
     float bestScore = -1.0f;
     for (std::size_t i = 0; i < totalTiles; ++i) {
-        if (i >= entropy.size() || i >= contrast.size()) {
-            LUCHS_LOG_HOST("[ZoomEval] Index %zu out of bounds (entropy=%zu, contrast=%zu)", i, entropy.size(), contrast.size());
-            continue;
-        }
+        if (i >= entropy.size() || i >= contrast.size()) continue;
+
         float e = entropy[i];
         float c = contrast[i];
-        float score = e * (1.0f + c);
+
+        // Langeweile-Penalty: wenn Entropie und Kontrast beide niedrig sind
+        float boredomPenalty = (e < 0.15f && c < 0.15f) ? 0.5f : 1.0f;
+
+        // Edge-Boost: leichte Bevorzugung, wenn Kontrast hoch ist
+        float edgeBoost = (c > 0.6f) ? 1.2f : 1.0f;
+
+        float score = e * (1.0f + c) * boredomPenalty * edgeBoost;
+
         if (score > bestScore) {
             bestScore = score;
             result.bestIndex    = static_cast<int>(i);
@@ -240,28 +214,23 @@ ZoomResult evaluateZoomTarget(
             result.bestContrast = c;
         }
     }
+    // --------------------------------------------------
 
     if (result.bestIndex < 0) {
-        if (Settings::debugLogging)
-            LUCHS_LOG_HOST("[ZoomEval] No target found - bestScore=%.4f", bestScore);
         return result;
     }
 
-    // Pixelzentrum der Best-Tile in Pixelkoordinaten holen (gemeinsame Hilfsfunktion)
     auto [px, py] = tileIndexToPixelCenter(result.bestIndex, tilesX, tilesY, width, height);
 
-    // Umrechnung Pixel → NDC
     float2 tileCenter;
     tileCenter.x = static_cast<float>((px / width)  - 0.5) * 2.0f;
     tileCenter.y = static_cast<float>((py / height) - 0.5) * 2.0f;
 
-    // Offset-Vorschlag in Weltkoordinaten
     float2 proposedOffset = make_float2(
         currentOffset.x + tileCenter.x / zoom,
         currentOffset.y + tileCenter.y / zoom
     );
 
-    // Distanz nur informativ (für Logs / Telemetrie)
     float dx = proposedOffset.x - previousOffset.x;
     float dy = proposedOffset.y - previousOffset.y;
     float dist = std::sqrt(dx * dx + dy * dy);
@@ -272,36 +241,24 @@ ZoomResult evaluateZoomTarget(
     result.isNewTarget = true;
     result.shouldZoom  = true;
 
-    // -----------------------------
-    //  Auto‑Tuner Hooks
-    // -----------------------------
     bool targetSwitched = (result.bestIndex != gHist.prevIndex);
     if (kAUTO_TUNE_ENABLED) {
         if (targetSwitched) gTuner.onTargetSwitch();
         float maxEntropy = (Settings::debugLogging ? maxE : result.bestEntropy);
-        gTuner.update(/*zoom     */ zoom,
-                      /*prevZoom */ gHist.prevZoom,
-                      /*offset   */ proposedOffset,
-                      /*prevOff  */ gHist.prevOffset,
-                      /*maxE     */ maxEntropy);
+        gTuner.update(zoom, gHist.prevZoom, proposedOffset, gHist.prevOffset, maxEntropy);
     }
 
-    // alpha bestimmen
-    float alpha = kAUTO_TUNE_ENABLED ? gTuner.currentAlpha()
-                                     : kFIXED_ALPHA;
-
-    // Optionale leichte Verstärkung bei gutem Score‑Gain (nur Anzeige/Diag, Verhalten bleibt quasi gleich)
+    float alpha = kAUTO_TUNE_ENABLED ? gTuner.currentAlpha() : kFIXED_ALPHA;
     float alphaBeforeBoost = alpha;
     if (scoreGain > 0.25f) alpha = std::min(alpha * 1.15f, 0.35f);
 
-    // LERP (Kolibri)
     result.newOffset = make_float2(
         previousOffset.x * (1.0f - alpha) + proposedOffset.x * alpha,
         previousOffset.y * (1.0f - alpha) + proposedOffset.y * alpha
     );
 
     result.distance = dist;
-    result.minDistance = 0.02f; // konservativer Default
+    result.minDistance = 0.02f;
     result.relEntropyGain  = (result.bestEntropy > 0.0f && previousEntropy > 0.0f)
                              ? (result.bestEntropy - previousEntropy) / previousEntropy
                              : 1.0f;
@@ -309,7 +266,6 @@ ZoomResult evaluateZoomTarget(
                              ? (result.bestContrast - previousContrast) / previousContrast
                              : 1.0f;
 
-    // Historie fortschreiben
     gHist.prevZoom   = zoom;
     gHist.prevOffset = result.newOffset;
     gHist.prevIndex  = result.bestIndex;
@@ -320,23 +276,11 @@ ZoomResult evaluateZoomTarget(
     if (Settings::debugLogging) {
         int bx = result.bestIndex % tilesX;
         int by = result.bestIndex / tilesX;
-        LUCHS_LOG_HOST("[Diag] bestScore=%.4f prevScore=%.4f gain=%.3f | targetSwitched=%d switches=%d",
-                       bestScore, prevScore, scoreGain, targetSwitched ? 1 : 0,
-                       kAUTO_TUNE_ENABLED ? gTuner.targetSwitches : -1);
-        LUCHS_LOG_HOST("[Diag] bestTile=(%d,%d) NDC=(%.4f,%.4f) proposedOffset=(%.5f,%.5f)",
-                       bx, by, tileCenter.x, tileCenter.y, proposedOffset.x, proposedOffset.y);
-        LUCHS_LOG_HOST("[Diag] alpha=%.3f (cand=%.3f%s) | dist=%.4f",
-                       alpha, alphaBeforeBoost, (alpha != alphaBeforeBoost ? " +boost" : ""), dist);
-
-        LUCHS_LOG_HOST("[ZoomEval] i=%d E=%.2f C=%.2f d=%.4f g=%.2f a=%.3f Z | %.3fms",
-            result.bestIndex,
-            result.bestEntropy,
-            result.bestContrast,
-            dist,
-            scoreGain,
-            alpha,
-            ms
-        );
+        LUCHS_LOG_HOST("[ZoomEval] bestScore=%.4f prevScore=%.4f gain=%.3f | tile=(%d,%d) NDC=(%.4f,%.4f) offset=(%.5f,%.5f) alpha=%.3f (cand=%.3f%s) dist=%.4f ms=%.3f",
+                    bestScore, prevScore, scoreGain,
+                    bx, by, tileCenter.x, tileCenter.y,
+                    proposedOffset.x, proposedOffset.y,
+                    alpha, alphaBeforeBoost, (alpha != alphaBeforeBoost ? " +boost" : ""), dist, ms);
     }
 
     return result;
