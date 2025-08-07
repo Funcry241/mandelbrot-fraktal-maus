@@ -7,11 +7,12 @@
 #pragma once
 #include <utility> // std::pair
 
-// Berechnet den Pixelmittelpunkt einer Heatmap-Tile
-// tilesX, tilesY: Anzahl Tiles in X/Y-Richtung
-// width, height:  gesamte Bildabmessungen in Pixeln
-// tileIndex:      Index der Tile (y * tilesX + x)
-// Rückgabe:       (px, py) als double
+// Liefert den Pixelmittelpunkt einer Heatmap-Tile.
+// 🦉 Projekt Eule: y=0 ist die **unterste** Kachelreihe.
+// Kachelindexierung erfolgt zeilenweise: tileIndex = y * tilesX + x
+// Ergebnis ist in Bildschirmkoordinaten (Pixelmitte), nicht NDC oder Complex.
+// Diese Funktion wird konsistent von Zoom-Logik und Heatmap-Overlay verwendet.
+// 🐑 Schneefuchs: Die Kacheln wachsen von unten nach oben, deterministisch.
 inline std::pair<double,double> tileIndexToPixelCenter(
     int tileIndex,
     int tilesX, int tilesY,

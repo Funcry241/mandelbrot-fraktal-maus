@@ -220,6 +220,7 @@ static void DrawPoint_ScreenPixels(float px, float py, int width, int height, fl
 
 // ---------- Mandelbrot/Fraktal: Bildschirm -> komplexe Ebene ----------
 static inline std::pair<double,double>
+// Hinweis: y=0 entspricht unterstem Bildschirmrand (FlipY = false)
 screenToComplex(int px, int py, int width, int height, const RendererState& ctx, bool flipY)
 {
     // Explicitly use ctx to prevent unused parameter warning
@@ -261,6 +262,7 @@ void cleanup() {
 
 #include "heatmap_utils.hpp" // neu: für tileIndexToPixelCenter(...)
 
+// Hinweis: y=0 entspricht unterstem Bildschirmrand (FlipY = false)
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width, int height,
@@ -373,7 +375,9 @@ void drawOverlay(const std::vector<float>& entropy,
     }
 
     // 3) Self‑Check‑Punkte im Overlay (gleiche Transform)
-    DrawHeatmapSelfCheck_OverlaySpace(tilesX, tilesY, scaleX, scaleY, offsetX, offsetY);
+    if (Settings::debugLogging) {
+        DrawHeatmapSelfCheck_OverlaySpace(tilesX, tilesY, scaleX, scaleY, offsetX, offsetY);
+    }
 
     // 4) Max‑Tile im Hauptbild markieren + Koordinaten-Logging (gemeinsame Hilfsfunktion)
     auto [centerPx, centerPy] = tileIndexToPixelCenter(maxIdx, tilesX, tilesY, width, height);

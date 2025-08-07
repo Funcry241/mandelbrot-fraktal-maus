@@ -16,12 +16,10 @@ void toggle(RendererState& ctx);
 // Gibt GPU-Ressourcen (VAO, VBO, Shader) frei
 void cleanup();
 
-// Zeichnet das Debug-Overlay über dem Fraktalbild.
-// entropy + contrast: Tile-Daten (gleiche Länge)
-// width, height: Bildgröße in Pixel
-// tileSize: Größe eines Tiles in Pixeln
-// textureId: Fraktal-Textur (optional, wird ignoriert)
-// ctx: Zustandsobjekt mit overlayEnabled-Flag
+// 🦉 Projekt Eule: y=0 entspricht unterstem Bildrand.
+// Die Heatmap-Daten (entropy/contrast) werden in Zeilen von unten nach oben interpretiert.
+// drawOverlay() transformiert diese Tiles exakt wie ZoomLogic (kein Y-Flip).
+// 🐑 Schneefuchs: „Kein vertikaler Schatten. Der Boden ist 0.“
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width,

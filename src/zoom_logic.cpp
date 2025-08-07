@@ -3,23 +3,6 @@
 // 🦦 Otter: AutoTune + neue Metrik – bewertet jetzt nicht nur Entropie+Kontrast, sondern straft große homogene Flächen ab und boostet Detailkanten.
 // 🐑 Schneefuchs: deterministisch, wirkt in allen Pfaden (Zoom, AutoTune, Overlay).
 // 🦎 Chamäleon: erkennt TileSize-Änderungen und "sprunghafte" Indexwechsel mit wenig Zugewinn.
-//
-// EINSTELLBARE PARAMETER (in dieser Datei, ohne JSON):
-//   kAUTO_TUNE_ENABLED      [bool]   true/false -> Auto‑Tuner an/aus
-//   kCANDIDATE_ALPHAS       [Liste]  sinnvolle alpha‑Kandidaten (0.05–0.30 üblich)
-//   kFRAMES_PER_CANDIDATE   [int]    Messdauer pro Kandidat (15–90 Frames; Standard 45)
-//   kW_PROGRESS, kW_JERK,
-//   kW_SWITCH, kW_BLACK     [float]  Gewichte des Rewards (0–2 sinnvoll)
-//   kBLACK_ENTROPY_THRESH   [float]  Schwellwert für „schwarze Fläche“ (0.01–0.10)
-//
-// Hinweise zu Ranges:
-//   • alpha:      0.05–0.30 (größer = schnelleres Nachführen, aber potenziell „hektisch“)
-//   • Frames/Kandidat: 30–60 reichen oft; bei stark schwankenden FPS höher gehen
-//   • Entropy-Black-Threshold: 0.02–0.06 passt oft; höher = vorsichtiger beim „Schwarz“
-//
-// Log-Ausgabe (wenn AutoTune aktiv):
-//   [AutoTune] round=3 bestAlpha=0.160 avgFPS≈23.1 reward=+0.123 (kept from 5)
-//   Die Zeile erscheint am Ende jeder Tuning-Runde (alle Kandidaten einmal gemessen).
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -159,6 +142,8 @@ struct Hist {
 
 namespace ZoomLogic {
 
+// y-Achse: y=0 ist unterer Bildrand
+// -> keine Invertierung (flipY = false)    
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,
     const std::vector<float>& contrast,
