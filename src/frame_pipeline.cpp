@@ -112,8 +112,23 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     }
 
     if (Settings::debugLogging && !frameCtx.h_entropy.empty()) {
-        LUCHS_LOG_HOST("[PIPE] Heatmap sample: Entropy[0]=%.4f Contrast[0]=%.4f",
-                       frameCtx.h_entropy[0], frameCtx.h_contrast[0]);
+        float minE =  1e9f, maxE = -1e9f;
+        float minC =  1e9f, maxC = -1e9f;
+        for (std::size_t i = 0; i < frameCtx.h_entropy.size(); ++i) {
+            float e = frameCtx.h_entropy[i];
+            float c = frameCtx.h_contrast[i];
+            minE = std::min(minE, e); maxE = std::max(maxE, e);
+            minC = std::min(minC, c); maxC = std::max(maxC, c);
+        }
+
+        LUCHS_LOG_HOST("[HEAT] zoom=%.5f offset=(%.5f, %.5f) tileSize=%d",
+                    frameCtx.zoom, frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
+        LUCHS_LOG_HOST("[HEAT] Entropy: min=%.5f  max=%.5f | Contrast: min=%.5f  max=%.5f",
+                    minE, maxE, minC, maxC);
+
+        if (frameCtx.h_entropy[0] == 0.0f && maxE == 0.0f) {
+            LUCHS_LOG_HOST("[HEAT] WARN: Entropy appears fully zero – heatmap likely failed");
+        }
     }
 
     // Analysewerte aus dem letzten ZoomResult des CUDA-Renderers übernehmen
