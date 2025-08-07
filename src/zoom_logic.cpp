@@ -216,7 +216,25 @@ ZoomResult evaluateZoomTarget(
             result.bestContrast = c;
         }
     }
-    // --------------------------------------------------
+
+    // 🐭 Maus-Kommentar (ZoomDiag): Analyse starker Kandidaten mit hoher Entropie
+    if (Settings::debugLogging && maxE > 0.0f) {
+        float cutoff = 0.9f * maxE;
+        for (std::size_t i = 0; i < totalTiles; ++i) {
+            if (i >= entropy.size() || i >= contrast.size()) continue;
+
+            float e = entropy[i];
+            float c = contrast[i];
+
+            if (e > cutoff && static_cast<int>(i) != result.bestIndex) {
+                float score = e * (1.0f + c);
+                int tx = static_cast<int>(i % tilesX);
+                int ty = static_cast<int>(i / tilesX);
+                LUCHS_LOG_HOST("[ZoomDiag] strongTile i=%zu tile=(%d,%d) e=%.4f c=%.4f score=%.4f",
+                               i, tx, ty, e, c, score);
+            }
+        }
+    }
 
     if (result.bestIndex < 0) {
         return result;
