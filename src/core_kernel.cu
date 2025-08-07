@@ -9,6 +9,10 @@
 #include "luchs_log_device.hpp"
 #include "luchs_log_host.hpp"
 
+#ifdef __CUDA_ARCH__
+__device__ int sprintf(char* str, const char* format, ...);
+#endif
+
 // 🐭 fract ersetzt – CUDA kennt kein GLSL
 __device__ __forceinline__ float fract(float x) {
     return x - floorf(x); // Schneefuchs: wie GLSL, aber CUDA-eigen
@@ -112,7 +116,7 @@ __global__ void mandelbrotKernel(
     float t = it - log2f(log2f(fmaxf(norm, 1.000001f)));
     float tClamped = fminf(fmaxf(t / maxIter, 0.0f), 1.0f);
 
-    // ---- 🐽 RÜSSELWARZE-FARBREGELUNG ----
+    // 🐽 RÜSSELWARZE-FARBREGELUNG
     float3 rgb;
     if (it == maxIter) {
         rgb = make_float3(0.05f, 0.05f, 0.08f);
@@ -129,12 +133,21 @@ __global__ void mandelbrotKernel(
     out[idx] = make_uchar4(rC, gC, bC, 255);
     iterOut[idx] = it;
 
-    if (doLog && isFirstThread) {
-        LUCHS_LOG_DEVICE("mandelbrotKernel entered | x=? y=? idx=? | c=(?,?) | it=? norm=? | it<=2 norm<1 t<0 tClamped=0");
-    }
-
+    // 🐭 Logging: nur 1 Thread pro Block
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("block processed");
+        char msg[512];
+        int n = 0;
+        n += sprintf(msg + n, "[KERNEL] x=%d y=%d it=%d ", x, y, it);
+        n += sprintf(msg + n, "tClamped=%.4f (max=%d) norm=%.4f ", tClamped, maxIter, norm);
+        n += sprintf(msg + n, "| center=(%.5f, %.5f)", c.x, c.y);
+        LUCHS_LOG_DEVICE(msg);
+
+        if (it == maxIter) {
+            LUCHS_LOG_DEVICE("[KERNEL] Pixel inside Mandelbrot set (maxIter reached)");
+        }
+        if (tClamped == 0.0f) {
+            LUCHS_LOG_DEVICE("[KERNEL] WARNING: tClamped = 0 – possible loss of gradient");
+        }
     }
 }
 
@@ -174,8 +187,18 @@ __global__ void entropyKernel(
         int tileIndex = tY * tilesX + tX;
         eOut[tileIndex] = entropy;
 
+        // 🐭 Logging: gezielt Histogramm prüfen
         if (doLog) {
-            LUCHS_LOG_DEVICE("entropy computed");
+            char msg[256];
+            int n = 0;
+            n += sprintf(msg + n, "[ENTROPY] tile=(%d,%d) ", tX, tY);
+            n += sprintf(msg + n, "entropy=%.5f ", entropy);
+            n += sprintf(msg + n, "| histo[0]=%d histo[255]=%d", histo[0], histo[255]);
+            LUCHS_LOG_DEVICE(msg);
+
+            if (entropy < 0.01f) {
+                LUCHS_LOG_DEVICE("[ENTROPY] WARNING: Entropy ≈ 0 – likely uniform region");
+            }
         }
     }
 }
@@ -193,6 +216,7 @@ __global__ void contrastKernel(
     int idx = ty * tilesX + tx;
     float center = e[idx], sum = 0.0f;
     int cnt = 0;
+
     for (int dy = -1; dy <= 1; ++dy)
         for (int dx = -1; dx <= 1; ++dx) {
             if (dx == 0 && dy == 0) continue;
@@ -202,10 +226,23 @@ __global__ void contrastKernel(
             sum += fabsf(e[nIdx] - center);
             ++cnt;
         }
-    cOut[idx] = (cnt > 0) ? sum / cnt : 0.0f;
 
+    float contrast = (cnt > 0) ? sum / cnt : 0.0f;
+    cOut[idx] = contrast;
+
+    // 🐭 Logging: erster Thread jeder Blockgruppe meldet Kontrastwerte
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
-        LUCHS_LOG_DEVICE("contrast computed");
+        char msg[256];
+        int n = 0;
+        n += sprintf(msg + n, "[CONTRAST] tile=(%d,%d) ", tx, ty);
+        n += sprintf(msg + n, "index=%d ", idx);
+        n += sprintf(msg + n, "| center=%.5f ", center);
+        n += sprintf(msg + n, "| contrast=%.5f", contrast);
+        LUCHS_LOG_DEVICE(msg);
+
+        if (contrast == 0.0f) {
+            LUCHS_LOG_DEVICE("[CONTRAST] WARNING: contrast = 0 → no neighborhood variation");
+        }
     }
 }
 

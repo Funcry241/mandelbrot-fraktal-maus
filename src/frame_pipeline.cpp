@@ -129,6 +129,33 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         if (frameCtx.h_entropy[0] == 0.0f && maxE == 0.0f) {
             LUCHS_LOG_HOST("[HEAT] WARN: Entropy appears fully zero – heatmap likely failed");
         }
+
+        // 🧪 Diagnoselogik bei Heatmap-Ausfall (nur bei DebugLogging)
+    if (Settings::debugLogging) {
+        std::size_t countEmptyE = 0, countEmptyC = 0;
+        for (std::size_t i = 0; i < frameCtx.h_entropy.size(); ++i) {
+            if (frameCtx.h_entropy[i] == 0.0f) ++countEmptyE;
+            if (frameCtx.h_contrast[i] == 0.0f) ++countEmptyC;
+        }
+
+        float ratioE = (float)countEmptyE / frameCtx.h_entropy.size();
+        float ratioC = (float)countEmptyC / frameCtx.h_contrast.size();
+
+        LUCHS_LOG_HOST("[DIAG] Entropy: %zu zero (%.1f%%) | Contrast: %zu zero (%.1f%%)",
+                       countEmptyE, ratioE * 100.0f, countEmptyC, ratioC * 100.0f);
+
+        if (countEmptyE == frameCtx.h_entropy.size()) {
+                LUCHS_LOG_HOST("[DIAG] All entropy tiles are zero. Zoom skipped? Kernel failed?");
+            } else if (countEmptyE > frameCtx.h_entropy.size() * 0.9f) {
+                LUCHS_LOG_HOST("[DIAG] >90%% entropy tiles zero – suspicious drop in signal");
+            }
+
+            if (countEmptyC == frameCtx.h_contrast.size()) {
+                LUCHS_LOG_HOST("[DIAG] All contrast tiles are zero. Heatmap likely invalid.");
+            } else if (countEmptyC > frameCtx.h_contrast.size() * 0.9f) {
+                LUCHS_LOG_HOST("[DIAG] >90%% contrast tiles zero – contrast kernel failure?");
+            }
+        }
     }
 
     // Analysewerte aus dem letzten ZoomResult des CUDA-Renderers übernehmen
