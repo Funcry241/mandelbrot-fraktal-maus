@@ -340,12 +340,17 @@ void drawOverlay(const std::vector<float>& entropy,
 
     glUseProgram(overlayShader);
 
-    // Mini-Overlay Größe/Position (Pixel) -> NDC
-    constexpr int overlayPixelsX = 160, overlayPixelsY = 90, paddingX = 16, paddingY = 16;
-    const float scaleX = (float(overlayPixelsX) / float(width)  / float(tilesX)) * 2.0f;
-    const float scaleY = (float(overlayPixelsY) / float(height) / float(tilesY)) * 2.0f;
-    const float offsetX = 1.0f - (float(overlayPixelsX + paddingX) / float(width)  * 2.0f);
-    const float offsetY = 1.0f - (float(overlayPixelsY + paddingY) / float(height) * 2.0f);
+    // Mini-Overlay Größe/Position (Pixel) -> NDC – jetzt korrekt skaliert
+    constexpr int overlayHeightPx = 100;
+    const float overlayAspect = float(tilesX) / float(tilesY);
+    const int overlayWidthPx = static_cast<int>(overlayHeightPx * overlayAspect);
+    constexpr int paddingX = 16, paddingY = 16;
+
+    const float scaleX = (float(overlayWidthPx)  / float(width)  / float(tilesX)) * 2.0f;
+    const float scaleY = (float(overlayHeightPx) / float(height) / float(tilesY)) * 2.0f;
+    const float offsetX = 1.0f - (float(overlayWidthPx  + paddingX) / float(width)  * 2.0f);
+    const float offsetY = 1.0f - (float(overlayHeightPx + paddingY) / float(height) * 2.0f);
+
 
     glUniform2f(glGetUniformLocation(overlayShader, "uScale"),  scaleX, scaleY);
     glUniform2f(glGetUniformLocation(overlayShader, "uOffset"), offsetX, offsetY);
