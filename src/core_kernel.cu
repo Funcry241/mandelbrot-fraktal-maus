@@ -1,3 +1,4 @@
+// Datei: core_kernel.cu
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
@@ -87,12 +88,9 @@ __device__ float pseudoRandomWarze(float x, float y) {
 // ---- MANDELBROT-KERNEL ----
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut,
-    int w, int h, float zoom, float2 offset, int maxIter, int tileSize)   // PATCH: tileSize übernommen
+    int w, int h, float zoom, float2 offset, int maxIter)
 {
     const bool doLog = Settings::debugLogging;
-    const bool isFirstThread =
-        blockIdx.x == 0 && blockIdx.y == 0 &&
-        threadIdx.x == 0 && threadIdx.y == 0;
 
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -133,13 +131,12 @@ __global__ void mandelbrotKernel(
     out[idx] = make_uchar4(rC, gC, bC, 255);
     iterOut[idx] = it;
 
+    // 🐭 Logging
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
-        char msg[512];
+        char msg[256];
         int n = 0;
         n += sprintf(msg + n, "[KERNEL] x=%d y=%d it=%d ", x, y, it);
-        n += sprintf(msg + n, "tileSize=%d ", tileSize);  // PATCH: tileSize ins Log
-        n += sprintf(msg + n, "tClamped=%.4f (max=%d) norm=%.4f ", tClamped, maxIter, norm);
-        n += sprintf(msg + n, "| center=(%.5f, %.5f)", c.x, c.y);
+        n += sprintf(msg + n, "tClamped=%.4f norm=%.4f ", tClamped, norm);
         LUCHS_LOG_DEVICE(msg);
     }
 }
@@ -180,18 +177,11 @@ __global__ void entropyKernel(
         int tileIndex = tY * tilesX + tX;
         eOut[tileIndex] = entropy;
 
-        // 🐭 Logging: gezielt Histogramm prüfen
         if (doLog) {
-            char msg[256];
+            char msg[128];
             int n = 0;
-            n += sprintf(msg + n, "[ENTROPY] tile=(%d,%d) ", tX, tY);
-            n += sprintf(msg + n, "entropy=%.5f ", entropy);
-            n += sprintf(msg + n, "| histo[0]=%d histo[255]=%d", histo[0], histo[255]);
+            n += sprintf(msg + n, "[ENTROPY] tile=(%d,%d) entropy=%.5f", tX, tY, entropy);
             LUCHS_LOG_DEVICE(msg);
-
-            if (entropy < 0.01f) {
-                LUCHS_LOG_DEVICE("[ENTROPY] WARNING: Entropy ≈ 0 – likely uniform region");
-            }
         }
     }
 }
@@ -223,19 +213,11 @@ __global__ void contrastKernel(
     float contrast = (cnt > 0) ? sum / cnt : 0.0f;
     cOut[idx] = contrast;
 
-    // 🐭 Logging: erster Thread jeder Blockgruppe meldet Kontrastwerte
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
-        char msg[256];
+        char msg[128];
         int n = 0;
-        n += sprintf(msg + n, "[CONTRAST] tile=(%d,%d) ", tx, ty);
-        n += sprintf(msg + n, "index=%d ", idx);
-        n += sprintf(msg + n, "| center=%.5f ", center);
-        n += sprintf(msg + n, "| contrast=%.5f", contrast);
+        n += sprintf(msg + n, "[CONTRAST] tile=(%d,%d) contrast=%.5f", tx, ty, contrast);
         LUCHS_LOG_DEVICE(msg);
-
-        if (contrast == 0.0f) {
-            LUCHS_LOG_DEVICE("[CONTRAST] WARNING: contrast = 0 → no neighborhood variation");
-        }
     }
 }
 
@@ -250,7 +232,6 @@ void computeCudaEntropyContrast(
     int tilesX = (w + tile - 1) / tile;
     int tilesY = (h + tile - 1) / tile;
 
-    // 🧽 Otter: Entropiespeicher vorher nullen, damit leer korrekt leer bleibt
     cudaMemset(d_e, 0, tilesX * tilesY * sizeof(float));
 
     entropyKernel<<<dim3(tilesX, tilesY), 128>>>(d_it, d_e, w, h, tile, maxIter);
@@ -282,16 +263,8 @@ void launch_mandelbrotHybrid(
     dim3 block(16,16);
     dim3 grid((w + 15)/16, (h + 15)/16);
 
-    if (Settings::debugLogging) {
-        LUCHS_LOG_HOST(
-            "[HOST] Mandelbrot launch: w=%d h=%d zoom=%.5f offset=(%.5f,%.5f) maxIter=%d tileSize=%d",
-            w, h, zoom, offset.x, offset.y, maxIter, tile
-        );
-    }
-
-    // Kernel bekommt jetzt tile
     auto t_launchStart = clk::now();
-    mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter, tile);
+    mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter);
     auto t_launchEnd = clk::now();
 
     auto t_syncStart = clk::now();
@@ -304,7 +277,7 @@ void launch_mandelbrotHybrid(
         double launchMs = std::chrono::duration<double, std::milli>(t_launchEnd - t_launchStart).count();
         double syncMs   = std::chrono::duration<double, std::milli>(t_syncEnd - t_syncStart).count();
         double totalMs  = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        LUCHS_LOG_HOST("[TIME] Mandelbrot | Launch %.3f ms | Sync %.3f ms | Total %.3f ms", launchMs, syncMs, totalMs);
+        LUCHS_LOG_HOST("[TIME] Mandelbrot | Launch %.3f ms | Sync %.3f ms | Total %.3f ms",
+                       launchMs, syncMs, totalMs);
     }
 }
-
