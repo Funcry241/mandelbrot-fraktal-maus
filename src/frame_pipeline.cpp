@@ -16,6 +16,7 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
+#include "common.hpp" // für computeTileSizeFromZoom
 
 namespace FramePipeline {
 
@@ -130,21 +131,20 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
             LUCHS_LOG_HOST("[HEAT] WARN: Entropy appears fully zero – heatmap likely failed");
         }
 
-        // 🧪 Diagnoselogik bei Heatmap-Ausfall (nur bei DebugLogging)
-    if (Settings::debugLogging) {
-        std::size_t countEmptyE = 0, countEmptyC = 0;
-        for (std::size_t i = 0; i < frameCtx.h_entropy.size(); ++i) {
-            if (frameCtx.h_entropy[i] == 0.0f) ++countEmptyE;
-            if (frameCtx.h_contrast[i] == 0.0f) ++countEmptyC;
-        }
+        if (Settings::debugLogging) {
+            std::size_t countEmptyE = 0, countEmptyC = 0;
+            for (std::size_t i = 0; i < frameCtx.h_entropy.size(); ++i) {
+                if (frameCtx.h_entropy[i] == 0.0f) ++countEmptyE;
+                if (frameCtx.h_contrast[i] == 0.0f) ++countEmptyC;
+            }
 
-        float ratioE = (float)countEmptyE / frameCtx.h_entropy.size();
-        float ratioC = (float)countEmptyC / frameCtx.h_contrast.size();
+            float ratioE = (float)countEmptyE / frameCtx.h_entropy.size();
+            float ratioC = (float)countEmptyC / frameCtx.h_contrast.size();
 
-        LUCHS_LOG_HOST("[DIAG] Entropy: %zu zero (%.1f%%) | Contrast: %zu zero (%.1f%%)",
-                       countEmptyE, ratioE * 100.0f, countEmptyC, ratioC * 100.0f);
+            LUCHS_LOG_HOST("[DIAG] Entropy: %zu zero (%.1f%%) | Contrast: %zu zero (%.1f%%)",
+                           countEmptyE, ratioE * 100.0f, countEmptyC, ratioC * 100.0f);
 
-        if (countEmptyE == frameCtx.h_entropy.size()) {
+            if (countEmptyE == frameCtx.h_entropy.size()) {
                 LUCHS_LOG_HOST("[DIAG] All entropy tiles are zero. Zoom skipped? Kernel failed?");
             } else if (countEmptyE > frameCtx.h_entropy.size() * 0.9f) {
                 LUCHS_LOG_HOST("[DIAG] >90%% entropy tiles zero – suspicious drop in signal");
@@ -158,11 +158,9 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         }
     }
 
-    // Analysewerte aus dem letzten ZoomResult des CUDA-Renderers übernehmen
     frameCtx.lastEntropy  = state.zoomResult.bestEntropy;
     frameCtx.lastContrast = state.zoomResult.bestContrast;
 
-    // Entscheidung direkt aus CUDA-Ergebnis ableiten – keine zweite CPU-Analyse nötig
     if (state.zoomResult.bestScore > Settings::AUTOZOOM_THRESHOLD) {
         if (Settings::debugLogging) {
             LUCHS_LOG_HOST(
@@ -268,24 +266,21 @@ void execute(RendererState& state) {
 
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
-    g_ctx.tileSize      = state.lastTileSize;
     g_ctx.zoom          = static_cast<float>(state.zoom);
     g_ctx.offset        = state.offset;
     g_ctx.maxIterations = state.maxIterations;
 
+    // Ameisen-Prinzip: tileSize nur hier einmal berechnen und im ganzen Frame beibehalten
+    g_ctx.tileSize      = computeTileSizeFromZoom(g_ctx.zoom);
+
     computeCudaFrame(g_ctx, state);
     applyZoomLogic(g_ctx, g_zoomBus);
-
-    if (g_ctx.shouldZoom) {
-        g_ctx.tileSize = computeTileSizeFromZoom(g_ctx.zoom);
-        LUCHS_LOG_HOST("[ZoomLog] Updated tileSize after zoom: %.5f -> tileSize=%d", g_ctx.zoom, g_ctx.tileSize);
-    }
 
     state.zoom = g_ctx.zoom;
     state.offset = g_ctx.offset;
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
-        std::ostringstream oss;
+    std::ostringstream oss;
     oss << std::fixed << std::setprecision(4);
     oss << "Zoom:    " << g_ctx.zoom << "\n";
     oss << "Offset:  (" << g_ctx.offset.x << ", " << g_ctx.offset.y << ")\n";

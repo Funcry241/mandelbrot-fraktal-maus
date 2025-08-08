@@ -78,7 +78,7 @@ void renderCudaFrame(
     RendererState& state
 ) {
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[ENTER] renderCudaFrame()");
+        LUCHS_LOG_HOST("[ENTER] renderCudaFrame(tileSize=%d)", tileSize);
 
     logCudaDeviceContext("renderCudaFrame ENTER");
 

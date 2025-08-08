@@ -87,7 +87,7 @@ __device__ float pseudoRandomWarze(float x, float y) {
 // ---- MANDELBROT-KERNEL ----
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut,
-    int w, int h, float zoom, float2 offset, int maxIter)
+    int w, int h, float zoom, float2 offset, int maxIter, int tileSize)   // PATCH: tileSize übernommen
 {
     const bool doLog = Settings::debugLogging;
     const bool isFirstThread =
@@ -133,21 +133,14 @@ __global__ void mandelbrotKernel(
     out[idx] = make_uchar4(rC, gC, bC, 255);
     iterOut[idx] = it;
 
-    // 🐭 Logging: nur 1 Thread pro Block
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
         char msg[512];
         int n = 0;
         n += sprintf(msg + n, "[KERNEL] x=%d y=%d it=%d ", x, y, it);
+        n += sprintf(msg + n, "tileSize=%d ", tileSize);  // PATCH: tileSize ins Log
         n += sprintf(msg + n, "tClamped=%.4f (max=%d) norm=%.4f ", tClamped, maxIter, norm);
         n += sprintf(msg + n, "| center=(%.5f, %.5f)", c.x, c.y);
         LUCHS_LOG_DEVICE(msg);
-
-        if (it == maxIter) {
-            LUCHS_LOG_DEVICE("[KERNEL] Pixel inside Mandelbrot set (maxIter reached)");
-        }
-        if (tClamped == 0.0f) {
-            LUCHS_LOG_DEVICE("[KERNEL] WARNING: tClamped = 0 – possible loss of gradient");
-        }
     }
 }
 
@@ -289,17 +282,22 @@ void launch_mandelbrotHybrid(
     dim3 block(16,16);
     dim3 grid((w + 15)/16, (h + 15)/16);
 
-    // 🦦 Otter: Timing für Kernel-Launch
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST(
+            "[HOST] Mandelbrot launch: w=%d h=%d zoom=%.5f offset=(%.5f,%.5f) maxIter=%d tileSize=%d",
+            w, h, zoom, offset.x, offset.y, maxIter, tile
+        );
+    }
+
+    // Kernel bekommt jetzt tile
     auto t_launchStart = clk::now();
-    mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter);
+    mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter, tile);
     auto t_launchEnd = clk::now();
 
-    // 🐑 Schneefuchs: Timing für Device-Synchronisation
     auto t_syncStart = clk::now();
     cudaDeviceSynchronize();
     auto t_syncEnd = clk::now();
 
-    // 🦦 Otter: Gesamtzeit
     auto t1 = clk::now();
 
     if (Settings::debugLogging) {
@@ -309,3 +307,4 @@ void launch_mandelbrotHybrid(
         LUCHS_LOG_HOST("[TIME] Mandelbrot | Launch %.3f ms | Sync %.3f ms | Total %.3f ms", launchMs, syncMs, totalMs);
     }
 }
+
