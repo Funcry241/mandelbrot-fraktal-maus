@@ -15,37 +15,11 @@
 #include <cmath>
 #include <utility>
 
-// ============================================================================
-// Kamera-/View-Adapter (RendererState-Felder projektabhängig, daher Makros)
-// ----------------------------------------------------------------------------
-// Wenn dein RendererState andere Namen hat, definiere beim Build z. B.:
-//   /DRS_HAS_OFFSET /DRS_OFFSET_X_EXPR=ctx.centerX /DRS_OFFSET_Y_EXPR=ctx.centerY
-//   /DRS_HAS_ZOOM   (dann wird RS_ZOOM(ctx) = ctx.zoom genutzt)
-// Ohne diese Defines fallen wir auf 0/0/1 zurück (kompiliert immer, aber nur Diagnose).
-// ============================================================================
-#ifndef RS_OFFSET_X_EXPR
-  #define RS_OFFSET_X_EXPR (0.0)
-#endif
-#ifndef RS_OFFSET_Y_EXPR
-  #define RS_OFFSET_Y_EXPR (0.0)
-#endif
-#ifndef RS_ZOOM_EXPR
-  #define RS_ZOOM_EXPR     (1.0)
-#endif
-
-#ifdef RS_HAS_OFFSET
-  #define RS_OFFSET_X(ctx) (RS_OFFSET_X_EXPR)
-  #define RS_OFFSET_Y(ctx) (RS_OFFSET_Y_EXPR)
-#else
-  #define RS_OFFSET_X(ctx) (0.0)
-  #define RS_OFFSET_Y(ctx) (0.0)
-#endif
-
-#ifdef RS_HAS_ZOOM
-  #define RS_ZOOM(ctx)     (RS_ZOOM_EXPR)
-#else
-  #define RS_ZOOM(ctx)     (1.0)
-#endif
+// Otter: always read from the *actual* context (no hidden fallbacks).
+// Schneefuchs: deterministic – overlay and zoom share the same source of truth.
+#define RS_OFFSET_X(ctx) ((ctx).offset.x)
+#define RS_OFFSET_Y(ctx) ((ctx).offset.y)
+#define RS_ZOOM(ctx)     ((ctx).zoom)
 
 namespace HeatmapOverlay {
 
@@ -260,7 +234,7 @@ void cleanup() {
     pointVAO = pointVBO = pointProg = 0;
 }
 
-#include "heatmap_utils.hpp" // neu: für tileIndexToPixelCenter(...)
+#include "heatmap_utils.hpp"
 
 // Hinweis: y=0 entspricht unterstem Bildschirmrand (FlipY = false)
 void drawOverlay(const std::vector<float>& entropy,
