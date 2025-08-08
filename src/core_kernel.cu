@@ -241,11 +241,6 @@ void computeCudaEntropyContrast(
     int tilesX = (w + tile - 1) / tile;
     int tilesY = (h + tile - 1) / tile;
 
-    if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ENTROPY-START] w=%d h=%d tile=%d maxIter=%d | tilesX=%d tilesY=%d",
-                       w, h, tile, maxIter, tilesX, tilesY);
-    }
-
     cudaMemset(d_e, 0, tilesX * tilesY * sizeof(float));
 
     entropyKernel<<<dim3(tilesX, tilesY), 128>>>(d_it, d_e, w, h, tile, maxIter);
