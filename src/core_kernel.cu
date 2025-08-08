@@ -92,6 +92,16 @@ __global__ void mandelbrotKernel(
 {
     const bool doLog = Settings::debugLogging;
 
+    // 🐭 Kernel-Start-Log – nur einmal pro Launch
+    if (doLog && blockIdx.x == 0 && blockIdx.y == 0 &&
+        threadIdx.x == 0 && threadIdx.y == 0) {
+        char msg[256];
+        int n = 0;
+        n += sprintf(msg + n, "[KERNEL-START] w=%d h=%d zoom=%.6f off=(%.6f,%.6f) maxIter=%d",
+                     w, h, zoom, offset.x, offset.y, maxIter);
+        LUCHS_LOG_DEVICE(msg);
+    }
+
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * w + x;
