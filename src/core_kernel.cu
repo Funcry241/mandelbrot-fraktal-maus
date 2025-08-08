@@ -92,16 +92,6 @@ __global__ void mandelbrotKernel(
 {
     const bool doLog = Settings::debugLogging;
 
-    // 🐭 Kernel-Start-Log – nur einmal pro Launch
-    if (doLog && blockIdx.x == 0 && blockIdx.y == 0 &&
-        threadIdx.x == 0 && threadIdx.y == 0) {
-        char msg[256];
-        int n = 0;
-        n += sprintf(msg + n, "[KERNEL-START] w=%d h=%d zoom=%.6f off=(%.6f,%.6f) maxIter=%d",
-                     w, h, zoom, offset.x, offset.y, maxIter);
-        LUCHS_LOG_DEVICE(msg);
-    }
-
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * w + x;
@@ -160,6 +150,18 @@ __global__ void entropyKernel(
     int tX = blockIdx.x, tY = blockIdx.y;
     int startX = tX * tile, startY = tY * tile;
 
+    int tilesX = (w + tile - 1) / tile;
+    int tilesY = (h + tile - 1) / tile;
+    int tileIndex = tY * tilesX + tX;
+
+    if (doLog && threadIdx.x == 0) {
+        char msg[256];
+        sprintf(msg,
+            "[ENTROPY-DEBUG] tX=%d tY=%d tile=%d w=%d h=%d tilesX=%d tilesY=%d tileIndex=%d",
+            tX, tY, tile, w, h, tilesX, tilesY, tileIndex);
+        LUCHS_LOG_DEVICE(msg);
+    }
+
     __shared__ int histo[256];
     for (int i = threadIdx.x; i < 256; i += blockDim.x)
         histo[i] = 0;
@@ -183,14 +185,11 @@ __global__ void entropyKernel(
             float p = float(histo[i]) / float(total);
             if (p > 0.0f) entropy -= p * log2f(p);
         }
-        int tilesX = (w + tile - 1) / tile;
-        int tileIndex = tY * tilesX + tX;
         eOut[tileIndex] = entropy;
 
         if (doLog) {
             char msg[128];
-            int n = 0;
-            n += sprintf(msg + n, "[ENTROPY] tile=(%d,%d) entropy=%.5f", tX, tY, entropy);
+            sprintf(msg, "[ENTROPY] tile=(%d,%d) entropy=%.5f", tX, tY, entropy);
             LUCHS_LOG_DEVICE(msg);
         }
     }
