@@ -1,11 +1,11 @@
 // Datei: src/frame_pipeline.cpp
-// 🐭 Maus-Kommentar: Alpha 80 – Device-Log jetzt fehlertolerant: sofort bei Fehlern, sonst modulo-basiert. Klarer Datenfluss bleibt erhalten.
-// 🦦 Otter: flushDeviceLogToHost abhängig von cudaPeekAtLastError – keine redundanten Fluten mehr. CPU-Zeitmessung nun pro CUDA-Frame aktiv.
-// 🐑 Schneefuchs: performante Logik, deterministisch, ohne Nebeneffekte.
+// 🐭 Maus: Eine Quelle für Tiles pro Frame. Vor jedem Render: Buffer-Sync via setupCudaBuffers(...).
+// 🦦 Otter: Explizite Sanity-Logs vor dem Render-Call (ASCII-only) – keine stillen Driftzustände. (Bezug zu Otter)
+// 🐑 Schneefuchs: Kein doppeltes Sizing. Header/Source synchron. Fehler werden früh sichtbar. (Bezug zu Schneefuchs)
 
 #include "pch.hpp"
 #include <vector_types.h>
-#include <chrono>  // für Zeitmessung
+#include <chrono>  // Zeitmessung
 #include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
 #include "frame_context.hpp"
@@ -16,7 +16,7 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
-#include "common.hpp" // für computeTileSizeFromZoom
+#include "common.hpp" // computeTileSizeFromZoom
 
 namespace FramePipeline {
 
@@ -38,20 +38,37 @@ void beginFrame(FrameContext& frameCtx) {
 
 void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] computeCudaFrame: dimensions=%dx%d, zoom=%.2f, tileSize=%d",
+        LUCHS_LOG_HOST("[PIPE] computeCudaFrame: dimensions=%dx%d, zoom=%.5f, tileSize=%d",
                        frameCtx.width, frameCtx.height, frameCtx.zoom, frameCtx.tileSize);
 
     float2 gpuOffset     = make_float2((float)frameCtx.offset.x, (float)frameCtx.offset.y);
     float2 gpuNewOffset  = gpuOffset;
 
-    const int tilesX = (frameCtx.width + frameCtx.tileSize - 1) / frameCtx.tileSize;
-    const int tilesY = (frameCtx.height + frameCtx.tileSize - 1) / frameCtx.tileSize;
+    // Lokale Tile-Geometrie (nur Laufzeit-Indexing / Sanity)
+    const int tilesX   = (frameCtx.width  + frameCtx.tileSize - 1) / frameCtx.tileSize;
+    const int tilesY   = (frameCtx.height + frameCtx.tileSize - 1) / frameCtx.tileSize;
     const int numTiles = tilesX * tilesY;
 
     if (frameCtx.tileSize <= 0 || numTiles <= 0) {
-        LUCHS_LOG_HOST("[FATAL] computeCudaFrame: Invalid tileSize (%d) or numTiles (%d)",
+        LUCHS_LOG_HOST("[FATAL] computeCudaFrame: invalid tileSize=%d or numTiles=%d",
                        frameCtx.tileSize, numTiles);
         return;
+    }
+
+    // *** Zentrale Stelle: Device-Buffer-Sync für aktuelles Tile-Layout ***
+    // Idempotent: allocate() in RendererState vergrößert nur bei Bedarf
+    state.setupCudaBuffers(frameCtx.tileSize);
+
+    // Sanity-Log: erwartete vs. allozierte Größen (ASCII)
+    if (Settings::debugLogging) {
+        const int totalPixels = frameCtx.width * frameCtx.height;
+        const size_t need_it_bytes       = static_cast<size_t>(totalPixels) * sizeof(int);
+        const size_t need_entropy_bytes  = static_cast<size_t>(numTiles)    * sizeof(float);
+        const size_t need_contrast_bytes = static_cast<size_t>(numTiles)    * sizeof(float);
+        LUCHS_LOG_HOST("[SANITY] tiles=%d (%d x %d) pixels=%d need(it=%zu entropy=%zu contrast=%zu) alloc(it=%zu entropy=%zu contrast=%zu)",
+                       numTiles, tilesX, tilesY, totalPixels,
+                       need_it_bytes, need_entropy_bytes, need_contrast_bytes,
+                       state.d_iterations.size(), state.d_entropy.size(), state.d_contrast.size());
     }
 
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -123,12 +140,12 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         }
 
         LUCHS_LOG_HOST("[HEAT] zoom=%.5f offset=(%.5f, %.5f) tileSize=%d",
-                    frameCtx.zoom, frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
+                       frameCtx.zoom, frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
         LUCHS_LOG_HOST("[HEAT] Entropy: min=%.5f  max=%.5f | Contrast: min=%.5f  max=%.5f",
-                    minE, maxE, minC, maxC);
+                       minE, maxE, minC, maxC);
 
         if (frameCtx.h_entropy[0] == 0.0f && maxE == 0.0f) {
-            LUCHS_LOG_HOST("[HEAT] WARN: Entropy appears fully zero – heatmap likely failed");
+            LUCHS_LOG_HOST("[HEAT] WARN: entropy appears fully zero");
         }
 
         if (Settings::debugLogging) {
@@ -138,26 +155,27 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
                 if (frameCtx.h_contrast[i] == 0.0f) ++countEmptyC;
             }
 
-            float ratioE = (float)countEmptyE / frameCtx.h_entropy.size();
-            float ratioC = (float)countEmptyC / frameCtx.h_contrast.size();
+            float ratioE = (float)countEmptyE / (float)frameCtx.h_entropy.size();
+            float ratioC = (float)countEmptyC / (float)frameCtx.h_contrast.size();
 
             LUCHS_LOG_HOST("[DIAG] Entropy: %zu zero (%.1f%%) | Contrast: %zu zero (%.1f%%)",
                            countEmptyE, ratioE * 100.0f, countEmptyC, ratioC * 100.0f);
 
             if (countEmptyE == frameCtx.h_entropy.size()) {
-                LUCHS_LOG_HOST("[DIAG] All entropy tiles are zero. Zoom skipped? Kernel failed?");
+                LUCHS_LOG_HOST("[DIAG] All entropy tiles are zero.");
             } else if (countEmptyE > frameCtx.h_entropy.size() * 0.9f) {
-                LUCHS_LOG_HOST("[DIAG] >90%% entropy tiles zero – suspicious drop in signal");
+                LUCHS_LOG_HOST("[DIAG] >90%% entropy tiles zero");
             }
 
             if (countEmptyC == frameCtx.h_contrast.size()) {
-                LUCHS_LOG_HOST("[DIAG] All contrast tiles are zero. Heatmap likely invalid.");
+                LUCHS_LOG_HOST("[DIAG] All contrast tiles are zero.");
             } else if (countEmptyC > frameCtx.h_contrast.size() * 0.9f) {
-                LUCHS_LOG_HOST("[DIAG] >90%% contrast tiles zero – contrast kernel failure?");
+                LUCHS_LOG_HOST("[DIAG] >90%% contrast tiles zero");
             }
         }
     }
 
+    // Update Analysewerte für Auto-Zoom / HUD
     frameCtx.lastEntropy  = state.zoomResult.bestEntropy;
     frameCtx.lastContrast = state.zoomResult.bestContrast;
 
@@ -192,7 +210,7 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
     double dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
 
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[Logic] Start | shouldZoom=%d | Zoom=%.2f | dO=%.4e", frameCtx.shouldZoom ? 1 : 0, frameCtx.zoom, dist);
+        LUCHS_LOG_HOST("[Logic] Start | shouldZoom=%d | Zoom=%.5f | dO=%.4e", frameCtx.shouldZoom ? 1 : 0, frameCtx.zoom, dist);
     if (!frameCtx.shouldZoom) return;
     if (dist < Settings::DEADZONE) {
         if (Settings::debugLogging)
@@ -262,6 +280,7 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
 void execute(RendererState& state) {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] execute start");
+
     beginFrame(g_ctx);
 
     g_ctx.width         = state.width;
@@ -270,16 +289,20 @@ void execute(RendererState& state) {
     g_ctx.offset        = state.offset;
     g_ctx.maxIterations = state.maxIterations;
 
-    // Ameisen-Prinzip: tileSize nur hier einmal berechnen und im ganzen Frame beibehalten
+    // Ameise: tileSize genau einmal pro Frame bestimmen
     g_ctx.tileSize      = computeTileSizeFromZoom(g_ctx.zoom);
 
+    // Der eigentliche CUDA-Frame (inkl. Buffer-Sync & Sanity-Logs)
     computeCudaFrame(g_ctx, state);
+
+    // Zoom-Entscheidung und Zustandsfortschreibung
     applyZoomLogic(g_ctx, g_zoomBus);
 
-    state.zoom = g_ctx.zoom;
+    state.zoom   = g_ctx.zoom;
     state.offset = g_ctx.offset;
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
+    // HUD-Text
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(4);
     oss << "Zoom:    " << g_ctx.zoom << "\n";
