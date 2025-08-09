@@ -18,28 +18,32 @@
 static constexpr float kALPHA_E = 1.00f; // Gewicht Entropie
 static constexpr float kBETA_C  = 0.50f; // Gewicht Kontrast
 // Annahmeschwellen
-static constexpr float kHYSTERESIS      = 0.08f; // 8% besser als zuletzt akzeptiertes Ziel
-static constexpr float kACCEPT_THRESHOLD= 0.40f; // Mindestscore zum Akzeptieren (nach Norm.)
-static constexpr int   kCOOLDOWN_FRAMES = 14;    // Frames Sperre nach Zielwechsel
+static constexpr float kHYSTERESIS       = 0.08f; // 8% besser als zuletzt akzeptiertes Ziel
+static constexpr float kACCEPT_THRESHOLD = 0.40f; // Mindestscore zum Akzeptieren (nach Norm.)
+// Cooldown
+static constexpr int   kCOOLDOWN_FRAMES  = 14;    // Frames Sperre nach Zielwechsel
 // Bewegung / Glättung
-static constexpr float kEMA_ALPHA_BASE  = 0.16f; // Grund-Glättung Richtung Ziel
-static constexpr float kEMA_ALPHA_MAX   = 0.30f; // Kappung je Frame
+static constexpr float kEMA_ALPHA_BASE   = 0.16f; // Grund-Glättung Richtung Ziel
+static constexpr float kEMA_ALPHA_MAX    = 0.30f; // Kappung je Frame
 // Signaldetektion
-static constexpr float kMIN_SIGNAL_SCORE= 0.15f; // darunter: Pause (kein Zoom)
+static constexpr float kMIN_SIGNAL_SCORE = 0.15f; // darunter: Pause (kein Zoom)
 // Deadzone (nur Dokumentation – Ausgabe in out.minDistance)
-static constexpr float kMIN_DISTANCE    = 0.02f; // ~NDC/Zoom-Skala
+static constexpr float kMIN_DISTANCE     = 0.02f; // ~NDC/Zoom-Skala
+// 🦦 Otter: sanfter Drift auch ohne "accept", wenn AlwaysZoom aktiv ist
+static constexpr float kFORCE_MIN_DRIFT_ALPHA = 0.05f;
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
     if (v.empty()) return 0.0f;
-    const size_t n = v.size();
+    const size_t n   = v.size();
     const size_t mid = n / 2;
     std::nth_element(v.begin(), v.begin() + mid, v.end());
     float m = v[mid];
     if ((n & 1) == 0) {
-        // Für gerade N: beide mittleren Werte mitteln
-        auto it_low = std::max_element(v.begin(), v.begin() + mid);
-        m = (*it_low + m) * 0.5f;
+        // Schneefuchs: korrektes Even-N-Handling via zweitem nth_element
+        std::nth_element(v.begin(), v.begin() + (mid - 1), v.begin() + mid);
+        const float m2 = v[mid - 1];
+        m = 0.5f * (m + m2);
     }
     return m;
 }
@@ -157,9 +161,9 @@ ZoomResult evaluateZoomTarget(
         if (s > bestScore) { bestScore = s; bestIdx = i; }
     }
 
-    out.bestScore   = bestScore;
-    out.bestEntropy = (bestIdx >= 0) ? entropy[bestIdx]  : 0.0f;
-    out.bestContrast= (bestIdx >= 0) ? contrast[bestIdx] : 0.0f;
+    out.bestScore    = bestScore;
+    out.bestEntropy  = (bestIdx >= 0) ? entropy[bestIdx]  : 0.0f;
+    out.bestContrast = (bestIdx >= 0) ? contrast[bestIdx] : 0.0f;
 
     // Signalerkennung: zu schwach? -> Pause (außer ForceAlwaysZoom)
     if (bestScore < kMIN_SIGNAL_SCORE && !Settings::ForceAlwaysZoom) {
@@ -202,6 +206,11 @@ ZoomResult evaluateZoomTarget(
     if (dist > 0.2f)  emaAlpha = std::min(kEMA_ALPHA_MAX, emaAlpha * 1.5f);
     if (dist < 0.02f) emaAlpha = std::min(emaAlpha, 0.10f);
 
+    // 🦦 Otter: wenn AlwaysZoom aktiv ist und wir nicht akzeptieren, erlaube einen sanften Drift
+    if (Settings::ForceAlwaysZoom && !accept) {
+        emaAlpha = std::max(emaAlpha, kFORCE_MIN_DRIFT_ALPHA);
+    }
+
     float2 smoothed = make_float2(
         previousOffset.x * (1.0f - emaAlpha) + proposedOffset.x * emaAlpha,
         previousOffset.y * (1.0f - emaAlpha) + proposedOffset.y * emaAlpha
@@ -218,16 +227,19 @@ ZoomResult evaluateZoomTarget(
 
         // Zustand aktualisieren
         if (indexChanged) state.cooldownLeft = kCOOLDOWN_FRAMES;
+        // 🦊 Schneefuchs: "klebrige" Schwelle vermeiden → leicht gewichtete EMA
+        const bool first = (state.lastAcceptedIndex < 0);
         state.lastAcceptedIndex = bestIdx;
-        state.lastAcceptedScore = std::max(bestScore, state.lastAcceptedScore);
+        state.lastAcceptedScore = first ? bestScore
+                                        : (0.98f * state.lastAcceptedScore + 0.02f * bestScore);
         state.lastOffset        = out.newOffset;
         state.lastTilesX        = tilesX;
         state.lastTilesY        = tilesY;
     } else {
-        // Kein Wechsel angenommen – Position halten
+        // Kein Wechsel angenommen – Position halten (Offset ggf. sanft gedriftet s.o.)
         out.isNewTarget = false;
         out.shouldZoom  = false;
-        out.newOffset   = previousOffset;
+        out.newOffset   = Settings::ForceAlwaysZoom ? smoothed : previousOffset;
         // Zustand bewusst NICHT überschreiben (Hysterese beibehalten)
     }
 
@@ -241,9 +253,7 @@ ZoomResult evaluateZoomTarget(
                 bestScore, accept ? 1 : 0, state.cooldownLeft
             );
         }
-        // Hinweis: out.newOffset bleibt wie oben entschieden. So bleibt die
-        // Re-Zentrierung heuristisch stabil, während der Zoomfaktor **immer**
-        // fortschreitet. (Schneefuchs)
+        // Hinweis: out.newOffset wurde oben bereits ggf. sanft gedriftet.
     }
 
     // Logging (ASCII only)
