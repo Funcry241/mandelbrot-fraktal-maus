@@ -96,7 +96,6 @@ void renderCudaFrame(
     const int numTiles = tilesX * tilesY;
 
     // --- Size sanity & allocation guards (Ameise) ---
-    // Otter: make expectations explicit; Schneefuchs: no implicit assumptions.
     const size_t it_bytes       = static_cast<size_t>(totalPixels) * sizeof(int);
     const size_t entropy_bytes  = static_cast<size_t>(numTiles)    * sizeof(float);
     const size_t contrast_bytes = static_cast<size_t>(numTiles)    * sizeof(float);
@@ -126,13 +125,11 @@ void renderCudaFrame(
         alloc_ok = false;
     }
     if (!alloc_ok) {
-        // Do not continue into CUDA calls that would produce invalid-argument.
         throw std::runtime_error("CudaInterop::renderCudaFrame: device buffers undersized for current tile layout");
     }
 
     CUDA_CHECK(cudaSetDevice(0));
 
-    // These memsets operate on the actual allocated sizes; safe even after tile changes
     CUDA_CHECK(cudaMemset(d_iterations.get(), 0, d_iterations.size()));
     LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels -> %zu bytes", totalPixels, d_iterations.size());
     CUDA_CHECK(cudaMemset(d_entropy.get(),   0, d_entropy.size()));
@@ -149,6 +146,14 @@ void renderCudaFrame(
     if (!devPtr) {
         LUCHS_LOG_HOST("[FATAL] Kernel skipped: surface pointer is null");
         return;
+    }
+
+    // Sanity-Check auf PBO-Größe
+    const size_t expected = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uchar4);
+    if (sizeBytes < expected) {
+        LUCHS_LOG_HOST("[FATAL] PBO size too small: got=%zu need=%zu (w=%d h=%d)", sizeBytes, expected, width, height);
+        pboResource->unmap();
+        throw std::runtime_error("PBO byte size mismatch");
     }
 
     if (!luchsBabyInitDone) {
@@ -183,7 +188,6 @@ void renderCudaFrame(
         width, height, tileSize, maxIterations
     );
 
-    // Host resize and safe copy with explicit byte counts
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
 
@@ -197,8 +201,6 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),   entropy_bytes,  cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(),  contrast_bytes, cudaMemcpyDeviceToHost));
 
-    // ---- NEU: Keine Zoom-Entscheidung mehr hier! ----
-    // Entscheidung (bestes Tile, Glättung, Hysterese) erfolgt in FramePipeline nach dem Render.
     shouldZoom = false;
     newOffset  = offset;
 
