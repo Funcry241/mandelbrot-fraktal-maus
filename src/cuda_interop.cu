@@ -1,7 +1,7 @@
 // Datei: src/cuda_interop.cu
 // 🐜 Schwarze Ameise: Klare Parametrisierung, deterministisches Logging, robustes Ressourcenhandling.
-// 🦦 Otter: Explizite und einheitliche Übergabe aller Parameter. Fehler- und Kontextlogging überall.
-// 🦊 Schneefuchs: Keine impliziten Zugriffe, transparente Speicher- und Fehlerprüfung.
+// 🦦 Otter: Explizite und einheitliche Übergabe aller Parameter. Fehler- und Kontextlogging überall. (Bezug zu Otter)
+// 🦊 Schneefuchs: Keine impliziten Zugriffe, transparente Speicher- und Fehlerprüfung. (Bezug zu Schneefuchs)
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
@@ -16,6 +16,7 @@
 #include "bear_CudaPBOResource.hpp"
 #include <cuda_gl_interop.h>
 #include <vector>
+#include <stdexcept> // Schneefuchs: explicit for std::runtime_error (no reliance on pch)
 
 #ifndef CUDA_ARCH
 #include <chrono>
@@ -94,14 +95,51 @@ void renderCudaFrame(
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int numTiles = tilesX * tilesY;
 
+    // --- Size sanity & allocation guards (Ameise) ---
+    // Otter: make expectations explicit; Schneefuchs: no implicit assumptions.
+    const size_t it_bytes       = static_cast<size_t>(totalPixels) * sizeof(int);
+    const size_t entropy_bytes  = static_cast<size_t>(numTiles)    * sizeof(float);
+    const size_t contrast_bytes = static_cast<size_t>(numTiles)    * sizeof(float);
+
+    const size_t d_it_size       = d_iterations.size();
+    const size_t d_entropy_size  = d_entropy.size();
+    const size_t d_contrast_size = d_contrast.size();
+
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[SANITY] w=%d h=%d pixels=%d tileSize=%d tiles=%d (%d x %d)",
+                       width, height, totalPixels, tileSize, numTiles, tilesX, tilesY);
+        LUCHS_LOG_HOST("[SANITY] alloc(it=%zu, entropy=%zu, contrast=%zu) need(it=%zu, entropy=%zu, contrast=%zu)",
+                       d_it_size, d_entropy_size, d_contrast_size, it_bytes, entropy_bytes, contrast_bytes);
+    }
+
+    bool alloc_ok = true;
+    if (d_it_size < it_bytes) {
+        LUCHS_LOG_HOST("[FATAL] iterations buffer too small: have=%zu need=%zu", d_it_size, it_bytes);
+        alloc_ok = false;
+    }
+    if (d_entropy_size < entropy_bytes) {
+        LUCHS_LOG_HOST("[FATAL] entropy buffer too small: have=%zu need=%zu (tiles=%d)", d_entropy_size, entropy_bytes, numTiles);
+        alloc_ok = false;
+    }
+    if (d_contrast_size < contrast_bytes) {
+        LUCHS_LOG_HOST("[FATAL] contrast buffer too small: have=%zu need=%zu (tiles=%d)", d_contrast_size, contrast_bytes, numTiles);
+        alloc_ok = false;
+    }
+    if (!alloc_ok) {
+        // Do not continue into CUDA calls that would produce invalid-argument.
+        throw std::runtime_error("CudaInterop::renderCudaFrame: device buffers undersized for current tile layout");
+    }
+
     CUDA_CHECK(cudaSetDevice(0));
+
+    // These memsets operate on the actual allocated sizes; safe even after tile changes
     CUDA_CHECK(cudaMemset(d_iterations.get(), 0, d_iterations.size()));
     LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels -> %zu bytes", totalPixels, d_iterations.size());
     CUDA_CHECK(cudaMemset(d_entropy.get(),   0, d_entropy.size()));
     CUDA_CHECK(cudaMemset(d_contrast.get(),  0, d_contrast.size()));
 
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[MAP] Using Bär to map CUDA-GL resource");
+        LUCHS_LOG_HOST("[MAP] Using Baer to map CUDA-GL resource");
 
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -145,10 +183,19 @@ void renderCudaFrame(
         width, height, tileSize, maxIterations
     );
 
+    // Host resize and safe copy with explicit byte counts
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
-    CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),   numTiles * sizeof(float), cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(),  numTiles * sizeof(float), cudaMemcpyDeviceToHost));
+
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[COPY] entropy D->H: dst=%p src=%p bytes=%zu",
+                       (void*)h_entropy.data(), d_entropy.get(), entropy_bytes);
+        LUCHS_LOG_HOST("[COPY] contrast D->H: dst=%p src=%p bytes=%zu",
+                       (void*)h_contrast.data(), d_contrast.get(), contrast_bytes);
+    }
+
+    CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),   entropy_bytes,  cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(),  contrast_bytes, cudaMemcpyDeviceToHost));
 
     shouldZoom = false;
     if (!pauseZoom) {
@@ -204,7 +251,7 @@ bool verifyCudaGetErrorStringSafe() {
     cudaError_t dummy = cudaErrorInvalidValue;
     const char* msg = cudaGetErrorString(dummy);
     if (msg) {
-        LUCHS_LOG_HOST("[CHECK] cudaGetErrorString(dummy) = \"%s\" -> Auflösung gefahrlos", msg);
+        LUCHS_LOG_HOST("[CHECK] cudaGetErrorString(dummy) = \"%s\" -> Aufloesung gefahrlos", msg);
         return true;
     } else {
         LUCHS_LOG_HOST("[FATAL] cudaGetErrorString returned null");
