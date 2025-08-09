@@ -6,36 +6,42 @@
 
 namespace Settings {
 
-// 🔍 Debug-Modus: aktiviert Konsolenausgaben (z. B. für CUDA/Overlay-Diagnose)
-constexpr bool debugLogging  = true;
+    // Erzwingt kontinuierliches Zoomen, unabhängig von Entropie/Kontrast.
+    inline constexpr bool   ForceAlwaysZoom = true;   // 🦦 Otter: „always zoom“
 
-// 🔥 Sichtbarkeit des Heatmap-Overlays beim Programmstart
-constexpr bool heatmapOverlayEnabled = true; 
+    // Basisschritt für erzwungenes Zoomen und als Blendziel.
+    inline constexpr double ForcedZoomStep  = 0.97;   // 🦦 Otter: smooth & steady
 
-// 🐷 Sichtbarkeit des WarzenschweinOverlays (HUD) beim Programmstart
-constexpr bool warzenschweinOverlayEnabled = true; 
+    // 🔍 Debug-Modus: aktiviert Konsolenausgaben (z. B. für CUDA/Overlay-Diagnose)
+    constexpr bool debugLogging  = true;
 
-// HUD-Textgröße (in NDC-Einheiten pro Pixelquadrat)
-inline constexpr float hudPixelSize = 0.0025f;
+    // 🔥 Sichtbarkeit des Heatmap-Overlays beim Programmstart
+    constexpr bool heatmapOverlayEnabled = true; 
 
-// 💥 Fensterkonfiguration
-constexpr int width       = 1024;
-constexpr int height      = 768;
-constexpr int windowPosX  = 100;
-constexpr int windowPosY  = 100;
+    // 🐷 Sichtbarkeit des WarzenschweinOverlays (HUD) beim Programmstart
+    constexpr bool warzenschweinOverlayEnabled = true; 
 
-// 🔭 Initialer Fraktal-Ausschnitt
-constexpr float initialZoom    = 1.5f;
-constexpr float initialOffsetX = -0.5f;
-constexpr float initialOffsetY = 0.0f;
+    // HUD-Textgröße (in NDC-Einheiten pro Pixelquadrat)
+    inline constexpr float hudPixelSize = 0.0025f;
 
-// ♻️ Iterationssteuerung
-constexpr int INITIAL_ITERATIONS = 100;
-constexpr int MAX_ITERATIONS_CAP = 50000;
+    // 💥 Fensterkonfiguration
+    constexpr int width       = 1024;
+    constexpr int height      = 768;
+    constexpr int windowPosX  = 100;
+    constexpr int windowPosY  = 100;
 
-// 💚 CUDA Tile-Größen
-constexpr int BASE_TILE_SIZE = 32;
-constexpr int MIN_TILE_SIZE  = 8;
-constexpr int MAX_TILE_SIZE  = 64;
+    // 🔭 Initialer Fraktal-Ausschnitt
+    constexpr float initialZoom    = 1.5f;
+    constexpr float initialOffsetX = -0.5f;
+    constexpr float initialOffsetY = 0.0f;
+
+    // ♻️ Iterationssteuerung
+    constexpr int INITIAL_ITERATIONS = 100;
+    constexpr int MAX_ITERATIONS_CAP = 50000;
+
+    // 💚 CUDA Tile-Größen
+    constexpr int BASE_TILE_SIZE = 32;
+    constexpr int MIN_TILE_SIZE  = 8;
+    constexpr int MAX_TILE_SIZE  = 64;
 
 } // namespace Settings
