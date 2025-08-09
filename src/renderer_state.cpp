@@ -26,37 +26,36 @@ RendererState::RendererState(int w, int h)
 }
 
 void RendererState::reset() {
-    zoom = static_cast<double>(Settings::initialZoom);
+    // Camera
+    zoom   = static_cast<double>(Settings::initialZoom);
     offset = { static_cast<float>(Settings::initialOffsetX), static_cast<float>(Settings::initialOffsetY) };
 
+    // Iterations
     baseIterations = Settings::INITIAL_ITERATIONS;
     maxIterations  = Settings::MAX_ITERATIONS_CAP;
 
-    targetOffset         = offset;
-    filteredTargetOffset = offset;
-
+    // Timers / Counters
     fps        = 0.0f;
     deltaTime  = 0.0f;
     frameCount = 0;
     lastTime   = glfwGetTime();
 
+    // Tiles
     lastTileSize = Settings::BASE_TILE_SIZE;
 
+    // Overlays
     heatmapOverlayEnabled       = Settings::heatmapOverlayEnabled;
     warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
 
-    zoomResult.bestIndex       = -1;
-    zoomResult.bestEntropy     = 0.0f;
-    zoomResult.bestContrast    = 0.0f;
-    zoomResult.bestScore       = 0.0f;
-    zoomResult.distance        = 0.0f;
-    zoomResult.minDistance     = 0.0f;
-    zoomResult.relEntropyGain  = 0.0f;
-    zoomResult.relContrastGain = 0.0f;
-    zoomResult.isNewTarget     = false;
-    zoomResult.shouldZoom      = false;
-    zoomResult.newOffset       = offset;
-    zoomResult.perTileContrast.clear();
+    // Host analysis buffers
+    h_entropy.clear();
+    h_contrast.clear();
+
+    // Zoom V2 state (explicit reset – no globals)
+    zoomV2State = ZoomLogic::ZoomState{};
+
+    // CUDA timings reset
+    lastTimings = CudaPhaseTimings{};
 }
 
 void RendererState::setupCudaBuffers(int tileSize) {

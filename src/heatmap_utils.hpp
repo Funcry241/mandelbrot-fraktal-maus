@@ -1,31 +1,30 @@
 // Datei: src/heatmap_utils.hpp
-// Zweck: Gemeinsame Hilfsfunktionen für Heatmap-Overlay und Zoom-Logik
-// 🦦 Otter: verhindert Drift, weil Overlay und Zoom dieselbe Umrechnung nutzen
-// 🐭 Maus: zentrale Quelle für die ideale Spot-Berechnung
-// 🐑 Schneefuchs: deterministisch, keine Seiteneffekte
-
+// (Patch: noexcept + Guards – ASCII logs optional entfernen/aktivieren)
 #pragma once
 #include <utility> // std::pair
+#include <cassert>
 
-// Liefert den Pixelmittelpunkt einer Heatmap-Tile.
-// 🦉 Projekt Eule: y=0 ist die **unterste** Kachelreihe.
-// Kachelindexierung erfolgt zeilenweise: tileIndex = y * tilesX + x
-// Ergebnis ist in Bildschirmkoordinaten (Pixelmitte), nicht NDC oder Complex.
-// Diese Funktion wird konsistent von Zoom-Logik und Heatmap-Overlay verwendet.
-// 🐑 Schneefuchs: Die Kacheln wachsen von unten nach oben, deterministisch.
 inline std::pair<double,double> tileIndexToPixelCenter(
     int tileIndex,
     int tilesX, int tilesY,
-    int width, int height)
+    int width, int height) noexcept
 {
-    int tileX = tileIndex % tilesX;
-    int tileY = tileIndex / tilesX;
+    assert(tilesX > 0 && tilesY > 0 && "tiles must be > 0");
+    assert(width  > 0 && height > 0    && "image size must be > 0");
 
-    double actualTileSizeX = static_cast<double>(width)  / static_cast<double>(tilesX);
-    double actualTileSizeY = static_cast<double>(height) / static_cast<double>(tilesY);
+    // optional: clamp tileIndex in Release, damit wir nie UB riskieren
+    const int total = tilesX * tilesY;
+    if (tileIndex < 0)       tileIndex = 0;
+    if (tileIndex >= total)  tileIndex = total - 1;
 
-    double px = (static_cast<double>(tileX) + 0.5) * actualTileSizeX;
-    double py = (static_cast<double>(tileY) + 0.5) * actualTileSizeY;
+    const int tileX = tileIndex % tilesX;
+    const int tileY = tileIndex / tilesX;
+
+    const double tileW = static_cast<double>(width)  / static_cast<double>(tilesX);
+    const double tileH = static_cast<double>(height) / static_cast<double>(tilesY);
+
+    const double px = (static_cast<double>(tileX) + 0.5) * tileW;
+    const double py = (static_cast<double>(tileY) + 0.5) * tileH;
 
     return {px, py};
 }

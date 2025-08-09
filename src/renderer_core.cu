@@ -1,7 +1,7 @@
 // Datei: src/renderer_core.cu
-// 🐭 Maus-Kommentar: Alpha 80 – Kontextfix & renderFrame_impl korrigiert. Keine Linkerleichen, kein state-Missmatch mehr.
-// 🦦 Otter: RendererLoop übernimmt klar den Renderingpfad – Renderer selbst verwaltet nur Plattformlogik.
-// 🦊 Schneefuchs: CUDA + OpenGL korrekt getrennt, renderFrame_impl nicht mehr in .cu notwendig.
+// 🐭 Maus-Kommentar: Alpha 80 – Kontextfix & klare Zuständigkeiten. Keine Zoom-Logik mehr hier.
+// 🦦 Otter: Renderer steuert nur Fenster/GL; Zoom/Analyse liegen in der Pipeline/Loop. (Bezug zu Otter)
+// 🦊 Schneefuchs: CUDA und OpenGL sauber getrennt, keine verwaisten Referenzen. (Bezug zu Schneefuchs)
 #include "pch.hpp"
 
 #include "renderer_core.hpp"
@@ -12,7 +12,7 @@
 #include "common.hpp"
 #include "settings.hpp"
 #include "cuda_interop.hpp"
-#include "zoom_logic.hpp"
+// #include "zoom_logic.hpp"      // Schneefuchs: Zoom-Entscheidung liegt nicht mehr hier
 #include "heatmap_overlay.hpp"
 #include "warzenschwein_overlay.hpp"
 #include "luchs_log_host.hpp"
@@ -115,6 +115,7 @@ void Renderer::renderFrame() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Entering Renderer::renderFrame");
 
+    // Ab hier übernimmt die Loop die komplette Frame-Pipeline (inkl. Zoom V2 Entscheidung)
     RendererLoop::renderFrame_impl(this->state);
 
     if (Settings::debugLogging)
@@ -138,37 +139,15 @@ void Renderer::renderFrame() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DRAW] glfwSwapBuffers called");
 
-    if (state.zoomResult.isNewTarget) {
-        state.lastEntropy  = state.zoomResult.bestEntropy;
-        state.lastContrast = state.zoomResult.bestContrast;
-    }
-    state.offset = state.zoomResult.newOffset;
-    if (state.zoomResult.shouldZoom)
-        state.zoom *= Settings::zoomFactor;
-
+    // ⚠️ Alte Zoom-Logik entfernt:
+    // - Kein Zugriff mehr auf state.zoomResult
+    // - Keine Verwendung von Settings::zoomFactor
+    // Zoom/Offset werden in RendererLoop/FramePipeline aktualisiert.
 #if ENABLE_ZOOM_LOGGING
     {
-        const auto& zr = state.zoomResult;
-        const auto& off = state.offset;
-        const auto& tgt = zr.newOffset;
-        float dx = tgt.x - off.x;
-        float dy = tgt.y - off.y;
-        float dist = std::sqrt(dx*dx + dy*dy);
-        LUCHS_LOG_HOST(
-            "[ZOOM] Z=%.5e | Idx=%3d | E=%.4f | C=%.4f | dE=%.4f | dC=%.4f | Dist=%.6f | Thresh=%.6f | RelE=%.3f | RelC=%.3f | New=%d | Zoom=%d",
-            state.zoom,
-            zr.bestIndex,
-            zr.bestEntropy,
-            zr.bestContrast,
-            zr.bestEntropy - state.lastEntropy,
-            zr.bestContrast - state.lastContrast,
-            dist,
-            zr.minDistance,
-            zr.relEntropyGain,
-            zr.relContrastGain,
-            zr.isNewTarget ? 1 : 0,
-            zr.shouldZoom ? 1 : 0
-        );
+        // Optional: hier könnten HUD/Debug-Infos über state.warzenschweinText geloggt werden.
+        LUCHS_LOG_HOST("[ZOOM] post-frame: zoom=%.6f offset=(%.6f,%.6f)",
+                       state.zoom, state.offset.x, state.offset.y);
     }
 #endif
 }

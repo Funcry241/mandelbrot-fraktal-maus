@@ -10,7 +10,7 @@
 #include "settings.hpp"
 #include "common.hpp"
 #include "renderer_state.hpp"
-#include "zoom_logic.hpp"
+// #include "zoom_logic.hpp" // Schneefuchs: Zoom-Entscheidung liegt jetzt in frame_pipeline, hier nicht mehr nötig.
 #include "luchs_cuda_log_buffer.hpp"
 #include "hermelin_buffer.hpp"
 #include "bear_CudaPBOResource.hpp"
@@ -197,29 +197,10 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),   entropy_bytes,  cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(),  contrast_bytes, cudaMemcpyDeviceToHost));
 
+    // ---- NEU: Keine Zoom-Entscheidung mehr hier! ----
+    // Entscheidung (bestes Tile, Glättung, Hysterese) erfolgt in FramePipeline nach dem Render.
     shouldZoom = false;
-    if (!pauseZoom) {
-        auto result = ZoomLogic::evaluateZoomTarget(
-            h_entropy, h_contrast, offset, zoom, width, height, tileSize,
-            state.offset, state.zoomResult.bestIndex,
-            state.zoomResult.bestEntropy, state.zoomResult.bestContrast
-        );
-        if (result.bestIndex >= 0) {
-            newOffset = result.newOffset;
-            shouldZoom = result.shouldZoom;
-            state.zoomResult = result;
-            if (Settings::debugLogging) {
-                LUCHS_LOG_HOST(
-                    "[ZOOM] idx=%d entropy=%.3f contrast=%.3f -> (%.5f,%.5f) new=%d zoom=%d",
-                    result.bestIndex, result.bestEntropy, result.bestContrast,
-                    result.newOffset.x, result.newOffset.y,
-                    result.isNewTarget ? 1 : 0, result.shouldZoom ? 1 : 0
-                );
-            }
-        } else if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOM] No suitable target");
-        }
-    }
+    newOffset  = offset;
 
     pboResource->unmap();
 

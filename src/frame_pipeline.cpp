@@ -1,7 +1,7 @@
 // Datei: src/frame_pipeline.cpp
-// 🐭 Maus: Eine Quelle für Tiles pro Frame. Vor jedem Render: Buffer-Sync via setupCudaBuffers(...).
-// 🦦 Otter: Explizite Sanity-Logs vor dem Render-Call (ASCII-only) – keine stillen Driftzustände. (Bezug zu Otter)
-// 🐑 Schneefuchs: Kein doppeltes Sizing. Header/Source synchron. Fehler werden früh sichtbar. (Bezug zu Schneefuchs)
+// 🐭 Maus: Eine Quelle für Tiles pro Frame. Vor Render: Buffer-Sync via setupCudaBuffers(...).
+// 🦦 Otter: Sanity-Logs, deterministische Reihenfolge; Zoom V2 außerhalb der CUDA-Interop. (Bezug zu Otter)
+// 🐑 Schneefuchs: Kein doppeltes Sizing, keine Alt-Settings. (Bezug zu Schneefuchs)
 
 #include "pch.hpp"
 #include <vector_types.h>
@@ -16,13 +16,17 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
-#include "common.hpp" // computeTileSizeFromZoom
+#include "common.hpp"         // computeTileSizeFromZoom
+#include "zoom_logic.hpp"     // Zoom V2 API
 
 namespace FramePipeline {
 
 static FrameContext g_ctx;
 static CommandBus g_zoomBus;
 static int globalFrameCounter = 0;
+
+// Kleiner, lokaler Zoom-Gain (pro akzeptiertem Schritt). Bewusst NICHT in settings.hpp.
+static constexpr float kZOOM_GAIN = 1.006f;
 
 void beginFrame(FrameContext& frameCtx) {
     if (Settings::debugLogging)
@@ -87,8 +91,8 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         frameCtx.maxIterations,
         frameCtx.h_entropy,
         frameCtx.h_contrast,
-        gpuNewOffset,
-        frameCtx.shouldZoom,
+        gpuNewOffset,            // wird von Interop nicht mehr gesetzt – wir setzen danach selbst
+        frameCtx.shouldZoom,     // wird von Interop nicht mehr gesetzt – wir setzen danach selbst
         frameCtx.tileSize,
         state
     );
@@ -125,10 +129,33 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         LuchsLogger::flushDeviceLogToHost(0);
     }
 
-    if (frameCtx.shouldZoom) {
-        frameCtx.newOffset = { gpuNewOffset.x, gpuNewOffset.y };
+    // --- Zoom V2 Entscheidung NACH dem Render-Frame treffen ---
+    // Tiles bereits oben berechnet (eine Quelle).
+    const float2 currOff = make_float2((float)frameCtx.offset.x, (float)frameCtx.offset.y);
+    const float2 prevOff = currOff; // alternativ: separaten historischen Offset führen
+
+    auto zr = ZoomLogic::evaluateZoomTarget(
+        frameCtx.h_entropy,
+        frameCtx.h_contrast,
+        tilesX, tilesY,
+        frameCtx.width, frameCtx.height,
+        currOff, frameCtx.zoom,
+        prevOff,
+        state.zoomV2State
+    );
+
+    frameCtx.shouldZoom = zr.shouldZoom;
+    if (zr.shouldZoom) {
+        frameCtx.newOffset = { zr.newOffset.x, zr.newOffset.y };
     }
 
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[PIPE] ZOOMV2: best=%d score=%.3f accept=%d newOff=(%.6f,%.6f)",
+                       zr.bestIndex, zr.bestScore, zr.shouldZoom ? 1 : 0,
+                       zr.newOffset.x, zr.newOffset.y);
+    }
+
+    // Für HUD/Diagnose einfache Statistiken
     if (Settings::debugLogging && !frameCtx.h_entropy.empty()) {
         float minE =  1e9f, maxE = -1e9f;
         float minC =  1e9f, maxC = -1e9f;
@@ -138,108 +165,48 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
             minE = std::min(minE, e); maxE = std::max(maxE, e);
             minC = std::min(minC, c); maxC = std::max(maxC, c);
         }
-
         LUCHS_LOG_HOST("[HEAT] zoom=%.5f offset=(%.5f, %.5f) tileSize=%d",
                        frameCtx.zoom, frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
         LUCHS_LOG_HOST("[HEAT] Entropy: min=%.5f  max=%.5f | Contrast: min=%.5f  max=%.5f",
                        minE, maxE, minC, maxC);
-
-        if (frameCtx.h_entropy[0] == 0.0f && maxE == 0.0f) {
-            LUCHS_LOG_HOST("[HEAT] WARN: entropy appears fully zero");
-        }
-
-        if (Settings::debugLogging) {
-            std::size_t countEmptyE = 0, countEmptyC = 0;
-            for (std::size_t i = 0; i < frameCtx.h_entropy.size(); ++i) {
-                if (frameCtx.h_entropy[i] == 0.0f) ++countEmptyE;
-                if (frameCtx.h_contrast[i] == 0.0f) ++countEmptyC;
-            }
-
-            float ratioE = (float)countEmptyE / (float)frameCtx.h_entropy.size();
-            float ratioC = (float)countEmptyC / (float)frameCtx.h_contrast.size();
-
-            LUCHS_LOG_HOST("[DIAG] Entropy: %zu zero (%.1f%%) | Contrast: %zu zero (%.1f%%)",
-                           countEmptyE, ratioE * 100.0f, countEmptyC, ratioC * 100.0f);
-
-            if (countEmptyE == frameCtx.h_entropy.size()) {
-                LUCHS_LOG_HOST("[DIAG] All entropy tiles are zero.");
-            } else if (countEmptyE > frameCtx.h_entropy.size() * 0.9f) {
-                LUCHS_LOG_HOST("[DIAG] >90%% entropy tiles zero");
-            }
-
-            if (countEmptyC == frameCtx.h_contrast.size()) {
-                LUCHS_LOG_HOST("[DIAG] All contrast tiles are zero.");
-            } else if (countEmptyC > frameCtx.h_contrast.size() * 0.9f) {
-                LUCHS_LOG_HOST("[DIAG] >90%% contrast tiles zero");
-            }
-        }
-    }
-
-    // Update Analysewerte für Auto-Zoom / HUD
-    frameCtx.lastEntropy  = state.zoomResult.bestEntropy;
-    frameCtx.lastContrast = state.zoomResult.bestContrast;
-
-    if (state.zoomResult.bestScore > Settings::AUTOZOOM_THRESHOLD) {
-        if (Settings::debugLogging) {
-            LUCHS_LOG_HOST(
-                "[AUTOZOOM] Triggered: bestScore=%.5f (threshold=%.5f) targetOffset=(%.8f, %.8f) entropy=%.5f contrast=%.5f",
-                state.zoomResult.bestScore,
-                Settings::AUTOZOOM_THRESHOLD,
-                state.zoomResult.newOffset.x,
-                state.zoomResult.newOffset.y,
-                frameCtx.lastEntropy,
-                frameCtx.lastContrast
-            );
-        }
-        frameCtx.shouldZoom = true;
-        frameCtx.newOffset  = { state.zoomResult.newOffset.x, state.zoomResult.newOffset.y };
-    } else if (Settings::debugLogging) {
-        LUCHS_LOG_HOST(
-            "[AUTOZOOM] Skipped: bestScore=%.5f (threshold=%.5f)",
-            state.zoomResult.bestScore,
-            Settings::AUTOZOOM_THRESHOLD
-        );
     }
 }
 
-void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus) {
+void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus, RendererState& state) {
+    // Neue Logik: newOffset wurde bereits durch Zoom V2 geglättet.
+    (void)state; // ASCII: suppress unused-parameter warning (MSVC /WX)
+    if (Settings::debugLogging)
+        LUCHS_LOG_HOST("[Logic] Start | shouldZoom=%d | Zoom=%.5f",
+                       frameCtx.shouldZoom ? 1 : 0, frameCtx.zoom);
+
+    if (!frameCtx.shouldZoom) return;
+
     double2 diff = {
         frameCtx.newOffset.x - frameCtx.offset.x,
         frameCtx.newOffset.y - frameCtx.offset.y
     };
     double dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
 
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[Logic] Start | shouldZoom=%d | Zoom=%.5f | dO=%.4e", frameCtx.shouldZoom ? 1 : 0, frameCtx.zoom, dist);
-    if (!frameCtx.shouldZoom) return;
-    if (dist < Settings::DEADZONE) {
-        if (Settings::debugLogging)
-            LUCHS_LOG_HOST("[Logic] Offset in DEADZONE (%.4e) -> no movement", dist);
-        return;
-    }
+    // Offset direkt übernehmen (V2 liefert bereits smoothed target)
+    frameCtx.offset = frameCtx.newOffset;
 
-    double stepScale = std::tanh(Settings::OFFSET_TANH_SCALE * dist);
-    double2 step = {
-        diff.x * stepScale * Settings::MAX_OFFSET_FRACTION,
-        diff.y * stepScale * Settings::MAX_OFFSET_FRACTION
-    };
+    // Zoom leicht anheben, um „Reinzoomen“ zu signalisieren
+    frameCtx.zoom *= kZOOM_GAIN;
 
     if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[Logic] Step len=%.4e | Zoom += %.5f", std::sqrt(step.x * step.x + step.y * step.y), Settings::AUTOZOOM_SPEED);
+        LUCHS_LOG_HOST("[Logic] Applied | dist=%.4e | newZoom=%.5f | newOffset=(%.6f,%.6f)",
+                       dist, frameCtx.zoom, frameCtx.offset.x, frameCtx.offset.y);
 
+    // Command protokollieren
     ZoomCommand cmd;
     cmd.frameIndex = globalFrameCounter;
-    cmd.oldOffset  = make_float2((float)frameCtx.offset.x, (float)frameCtx.offset.y);
-    cmd.zoomBefore = (float)frameCtx.zoom;
-
-    frameCtx.offset.x += static_cast<float>(step.x);
-    frameCtx.offset.y += static_cast<float>(step.y);
-    frameCtx.zoom *= Settings::AUTOZOOM_SPEED;
-
+    cmd.oldOffset  = make_float2((float)(frameCtx.offset.x - diff.x), (float)(frameCtx.offset.y - diff.y));
+    cmd.zoomBefore = (float)(frameCtx.zoom / kZOOM_GAIN);
     cmd.newOffset  = make_float2((float)frameCtx.newOffset.x, (float)frameCtx.newOffset.y);
     cmd.zoomAfter  = (float)frameCtx.zoom;
-    cmd.entropy    = frameCtx.lastEntropy;
-    cmd.contrast   = frameCtx.lastContrast;
+    // Für HUD: einfache Werte; falls detailliert gewünscht, aus evaluateZoomTarget herausreichen
+    cmd.entropy    = 0.0f;
+    cmd.contrast   = 0.0f;
 
     bus.push(cmd);
     frameCtx.timeSinceLastZoom = 0.0f;
@@ -295,9 +262,10 @@ void execute(RendererState& state) {
     // Der eigentliche CUDA-Frame (inkl. Buffer-Sync & Sanity-Logs)
     computeCudaFrame(g_ctx, state);
 
-    // Zoom-Entscheidung und Zustandsfortschreibung
-    applyZoomLogic(g_ctx, g_zoomBus);
+    // Zoom-Entscheidung anwenden
+    applyZoomLogic(g_ctx, g_zoomBus, state);
 
+    // Zustand zurückspiegeln
     state.zoom   = g_ctx.zoom;
     state.offset = g_ctx.offset;
     g_ctx.overlayActive = state.heatmapOverlayEnabled;

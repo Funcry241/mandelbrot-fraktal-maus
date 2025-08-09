@@ -1,7 +1,7 @@
 // Datei: src/zoom_logic.hpp
-// 🦦 Otter: Architekturklar, SIMD-kompatibel. Pragma jetzt lokal. Kein globales alignas nötig.
-// 🐅 Schneefuchs: Layout stabil, Verhalten eindeutig. Kein Fehlalarm mehr unter /WX. 
-// 🐼 Panda: Entscheidungsstruktur für Auto-Zoom-Logik klar abgegrenzt und kommentiert.
+// 🦦 Otter: Radikal vereinfacht – eine klare API, ein Zustand, eine Entscheidung. (Bezug zu Otter)
+// 🦊 Schneefuchs: Explizite Tiles (tilesX/tilesY) werden vom Aufrufer geliefert; keine versteckte Geometrie. (Bezug zu Schneefuchs)
+// 🐭 Maus: Keine Altlasten, keine Globals – deterministisch und instanzierbar.
 
 #pragma once
 #include "common.hpp"
@@ -13,63 +13,77 @@ namespace ZoomLogic {
 // 🛡️ Fallback für make_float2() – nur wenn CUDA-seitig nicht vorhanden
 #ifndef __CUDACC__
 [[nodiscard]] static inline float2 make_float2(float x, float y) {
-    float2 f;
-    f.x = x;
-    f.y = y;
-    return f;
+    float2 f; f.x = x; f.y = y; return f;
 }
 #endif
 
+static_assert(sizeof(float2) == 8, "float2 must be 8 bytes");
+
 #ifdef _MSC_VER
-    #pragma warning(push)
-    #pragma warning(disable: 4324) // Strukturende mit float2 kann Padding erzeugen – kein Problem
+  #pragma warning(push)
+  #pragma warning(disable: 4324) // Padding durch float2-Ausrichtung – unkritisch
 #endif
 
 /// 🎯 Ergebnisstruktur für das Auto-Zoom-Ziel.
 /// Wird pro Frame neu berechnet. Speichert Zielkoordinaten, Score und Analysewerte.
 class ZoomResult {
 public:
-    int bestIndex = -1;                // Index des besten Tiles (Rasterindex)
-    float bestEntropy = 0.0f;          // Entropie dieses Tiles
-    float bestContrast = 0.0f;         // Kontrastwert
-    float bestScore = 0.0f;            // Gesamtscore (kombiniert Entropie/Distanz/Bias)
+    int   bestIndex      = -1;     // Index des besten Tiles (Rasterindex)
+    float bestEntropy    = 0.0f;   // Entropie dieses Tiles
+    float bestContrast   = 0.0f;   // Kontrastwert
+    float bestScore      = 0.0f;   // Gesamtscore (normalisiert, V2)
 
-    float distance = 0.0f;             // Entfernung zum aktuellen Offset
-    float minDistance = 0.0f;          // Mindestabstand zur Zieländerung
+    float distance       = 0.0f;   // Entfernung des neuen Zielvorschlags zu previousOffset
+    float minDistance    = 0.0f;   // Mindestabstand zur Zieländerung (Deadzone)
 
-    float relEntropyGain  = 0.0f;      // Entropiezuwachs gegenüber vorherigem Ziel
-    float relContrastGain = 0.0f;      // Kontrastzuwachs gegenüber vorherigem Ziel
+    float relEntropyGain  = 0.0f;
+    float relContrastGain = 0.0f;
 
-    bool isNewTarget = false;          // Wechselt das Ziel im Vergleich zum Vorframe?
-    bool shouldZoom   = false;         // Sollte gezoomt werden?
+    bool  isNewTarget    = false;  // Zielwechsel akzeptiert (Hysterese/Cooldown bestanden)?
+    bool  shouldZoom     = false;  // Soll in diesem Frame gezoomt werden?
 
-    float2 newOffset = make_float2(0.0f, 0.0f); // Zielkoordinaten im Fraktalraum
-    std::vector<float> perTileContrast;        // Optionale Visualisierung der Kontraste
+    float2 newOffset     = make_float2(0.0f, 0.0f); // Zielkoordinaten im Fraktalraum
+    std::vector<float> perTileContrast;            // optional (Overlay)
+};
+
+/// 🧭 Persistenter, minimaler Zustand des Zoomers (instanzierbar, kein Global).
+struct ZoomState {
+    int   lastAcceptedIndex = -1;
+    float lastAcceptedScore = 0.0f;
+    int   cooldownLeft      = 0;
+    float2 lastOffset       = make_float2(0.0f, 0.0f);
+
+    // Geometrie-Bookkeeping (hilft beim Debuggen / Wechsel der Tile-Geometrie)
+    int   lastTilesX        = -1;
+    int   lastTilesY        = -1;
 };
 
 #ifdef _MSC_VER
-    #pragma warning(pop)
+  #pragma warning(pop)
 #endif
 
-/// 🐼 Kontrastanalyse über direkte Nachbarn (oben/unten/links/rechts) pro Tile.
-/// Liefert Kontrastwert zwischen Zentrum und Umgebung.
-/// Liefert 0.0 wenn Breite oder Höhe < tileSize
+/// 🐼 (Optional) Kontrastanalyse über Tile-Nachbarn.
+/// Rückgabe 0.0 bei unplausibler Geometrie.
 [[nodiscard]]
 float computeEntropyContrast(
     const std::vector<float>& entropy,
-    int width, int height, int tileSize);
+    int width, int height, int tileSize) noexcept;
 
-/// 🐘 Hauptentscheidung für Auto-Zoom.
-/// Bewertet alle Tiles nach Score, Zielentfernung, Bias und Analysewerten.
-/// Gibt vollständige ZoomResult-Struktur zurück.
+/// 🐘 Zoom V2 – eine API:
+/// – Aufrufer liefert explizit tilesX/tilesY (eine Quelle für Tiles im System)
+/// – normalisiert Entropie/Kontrast pro Frame (median/MAD)
+/// – Score = α*E' + β*C'
+/// – Hysterese & Cooldown stabilisieren Zielwahl
+/// – glättet Offset-Bewegung (EMA) und setzt shouldZoom
+/// – aktualisiert ZoomState in-place (kein Global)
 [[nodiscard]]
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,
     const std::vector<float>& contrast,
+    int tilesX, int tilesY,
+    int width, int height,
     float2 currentOffset, float zoom,
-    int width, int height, int tileSize,
-    float2 previousOffset, int previousIndex,
-    float previousEntropy, float previousContrast
-);
+    float2 previousOffset,
+    ZoomState& state) noexcept;
 
 } // namespace ZoomLogic

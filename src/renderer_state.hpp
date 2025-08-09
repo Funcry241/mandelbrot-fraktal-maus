@@ -1,15 +1,14 @@
 // Datei: src/renderer_state.hpp
-// 🦦 Otter: Einheitlich in allen Forward-Deklarationen. Keine strukturelle Überraschung. (Bezug zu Otter)
-// 🦊 Schneefuchs: Speicher & Buffer exakt definiert, feingliedrig und logisch. (Bezug zu Schneefuchs)
-// 🐜 Rote Ameise: tileSize explizit übergeben, deterministisch & sichtbar, keine impliziten Berechnungen mehr.
-// 🐜 Hermelin: RAII-Wrapper für CUDA- und OpenGL-Buffer integriert.
+// 🦦 Otter: Einheitliche, klare Struktur – nur aktive Zustände. (Bezug zu Otter)
+// 🦊 Schneefuchs: Speicher & Buffer exakt definiert, keine verwaisten Zoom-Felder mehr. (Bezug zu Schneefuchs)
+// 🐜 Rote Ameise: tileSize explizit in Pipelines, hier nur Zustand & Ressourcen.
 
 #pragma once
 
 #include "pch.hpp"
-#include "zoom_logic.hpp"        // ZoomResult für Auto-Zoom
+#include "zoom_logic.hpp"        // Zoom V2: ZoomState
 #include <vector>
-#include <string>                // 🐑 Schneefuchs: für warzenschweinText notwendig
+#include <string>                // HUD-Text
 #include "hermelin_buffer.hpp"   // RAII-Wrapper
 
 class RendererState {
@@ -19,19 +18,13 @@ public:
     int height;
     GLFWwindow* window = nullptr;
 
-    // 🔍 Zoomfaktor & aktueller Fraktal-Ausschnitt (in Weltkoordinaten)
+    // 🔍 Kamera (Fraktalraum)
     double zoom = 1.0;
     float2 offset = { 0.0f, 0.0f };
 
     // 🧮 Iterationsparameter
     int baseIterations = 100;   // Ausgangswert
     int maxIterations  = 1000;  // aktuell verwendeter Maximalwert
-
-    // 🎯 Auto-Zoom Zielkoordinaten
-    float2 targetOffset         = { 0.0f, 0.0f };   // analysiertes Ziel
-    float2 filteredTargetOffset = { 0.0f, 0.0f };   // geglättetes Ziel
-    float2 smoothedTargetOffset = { 0.0f, 0.0f };   // LERP-Interpoliertes Ziel
-    float  smoothedTargetScore  = -1.0f;            // Entropie-Score des Zieltiles (wird geglättet)
 
     // 📈 Anzeige-Feedback
     float fps = 0.0f;
@@ -55,21 +48,17 @@ public:
     int frameCount = 0;
     double lastTime = 0.0;
 
-    // 🧠 Letztes Ergebnis der Zielanalyse (persistenter Zustand)
-    ZoomLogic::ZoomResult zoomResult;
-    float lastEntropy  = 0.0f;
-    float lastContrast = 0.0f;
+    // 🌀 Zoom V2: Persistenter Zustand (keine Globals)
+    ZoomLogic::ZoomState zoomV2State;
 
-    // 🔥 Heatmap-Overlay-Zustand
+    // 🔥 Heatmap-/HUD-Overlay-Zustand
     bool heatmapOverlayEnabled = false;
-
-    // HUD-Overlay-Zustand
     bool warzenschweinOverlayEnabled = false;
 
-    // 🐑 Schneefuchs: HUD-Text für Overlay – pro Frame gesetzt, sichtbar.
+    // 📝 HUD-Text
     std::string warzenschweinText;
 
-    // 🧮 CUDA-Laufzeit-Timings für Analysezwecke – gesetzt von renderCudaFrame
+    // ⏱️ CUDA-Laufzeit-Timings – gesetzt von renderCudaFrame
     struct CudaPhaseTimings {
         bool valid = false;
         double mandelbrotTotal = 0.0;
@@ -80,7 +69,7 @@ public:
         double deviceLogFlush = 0.0;
         double pboMap = 0.0;
     };
-    CudaPhaseTimings lastTimings; // 🐑 Schneefuchs: für [FRAME]-Log
+    CudaPhaseTimings lastTimings;
 
     // 🧽 Setup & Verwaltung
     RendererState(int w, int h);

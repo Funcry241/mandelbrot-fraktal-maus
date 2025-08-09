@@ -1,8 +1,7 @@
 // Datei: src/zoom_logic.cpp
-// 🐭 Maus-Kommentar: Alpha 49 "Pinguin" – sanftes, kontinuierliches Zoomen ohne Elefant!
-// 🦦 Otter: AutoTune + neue Metrik – bewertet jetzt nicht nur Entropie+Kontrast, sondern straft große homogene Flächen ab und boostet Detailkanten.
-// 🐑 Schneefuchs: deterministisch, wirkt in allen Pfaden (Zoom, AutoTune, Overlay).
-// 🦎 Chamäleon: erkennt TileSize-Änderungen und "sprunghafte" Indexwechsel mit wenig Zugewinn.
+// 🐭 Maus: Zoom V2 – simpel, deterministisch, ruhig. Alte Zöpfe abgeschnitten.
+// 🦦 Otter: Hysterese + Cooldown + EMA‑Glättung, alle Entscheidungen geloggt. (Bezug zu Otter)
+// 🦊 Schneefuchs: Tiles kommen explizit vom Aufrufer; kein implizites Rechnen hier. (Bezug zu Schneefuchs)
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -10,302 +9,231 @@
 #include "heatmap_utils.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cmath>
-#include <vector>
+#include <numeric>
 
-namespace {
+// ------- V2-Parameter (Defaults). Hinweis: bei Bedarf in settings.hpp verschieben. -------
+// Scoring-Gewichte
+static constexpr float kALPHA_E = 1.00f;   // Gewicht Entropie
+static constexpr float kBETA_C  = 0.50f;   // Gewicht Kontrast
+// Annahmeschwellen
+static constexpr float kHYSTERESIS       = 0.08f; // 8% besser als zuletzt akzeptiertes Ziel
+static constexpr float kACCEPT_THRESHOLD = 0.40f; // Mindestscore zum Akzeptieren (nach Norm.)
+static constexpr int   kCOOLDOWN_FRAMES  = 14;    // Frames Sperre nach Zielwechsel
+// Bewegung / Glättung
+static constexpr float kEMA_ALPHA_BASE   = 0.16f; // Grund-Glättung Richtung Ziel
+static constexpr float kEMA_ALPHA_MAX    = 0.30f; // Kappung je Frame
+// Signaldetektion
+static constexpr float kMIN_SIGNAL_SCORE = 0.15f; // darunter: Pause (kein Zoom)
+// Deadzone
+static constexpr float kMIN_DISTANCE     = 0.02f; // ~NDC/Zoom-Skala (wie bisher)
 
-// -----------------------------
-//  Auto‑Tune Schalter & Parameter
-// -----------------------------
-static bool  kAUTO_TUNE_ENABLED    = true;   // <— EIN/AUS
-static float kCANDIDATE_ALPHAS[]   = { 0.08f, 0.12f, 0.16f, 0.20f, 0.24f, 0.28f };
-static int   kFRAMES_PER_CANDIDATE = 45;
-
-static float kW_PROGRESS           = 1.00f;
-static float kW_JERK               = 0.60f;
-static float kW_SWITCH             = 0.40f;
-static float kW_BLACK              = 0.80f;
-
-static float kBLACK_ENTROPY_THRESH = 0.04f;
-static float kFIXED_ALPHA          = 0.16f;
-
-// Chamäleon: Schwellwert für "sprunghaften" Indexwechsel mit wenig Zugewinn
-constexpr float kINDEX_JUMP_THRESH = 0.05f;
-
-struct Candidate {
-    float alpha;
-    double reward = 0.0;
-    int frames    = 0;
-};
-
-struct AutoTuner {
-    std::vector<Candidate> pool;
-    int currIdx          = 0;
-    int round            = 0;
-    int framesPerCand    = 45;
-    int targetSwitches   = 0;
-    float lastSpeed      = 0.0f;
-    int   frameCount     = 0;
-    double tStartMs      = 0.0;
-
-    AutoTuner() {
-        framesPerCand = kFRAMES_PER_CANDIDATE;
-        for (float a : kCANDIDATE_ALPHAS) pool.push_back({a, 0.0, 0});
-        tStartMs = nowMs();
+// --- robuste Statistik (Median/MAD) ---
+static inline float median_inplace(std::vector<float>& v) {
+    if (v.empty()) return 0.0f;
+    const size_t n = v.size();
+    std::nth_element(v.begin(), v.begin() + n/2, v.end());
+    float m = v[n/2];
+    if (!(n & 1)) {
+        auto it = std::max_element(v.begin(), v.begin() + n/2);
+        m = (*it + m) * 0.5f;
     }
+    return m;
+}
 
-    static double nowMs() {
-        using namespace std::chrono;
-        return duration<double, std::milli>(high_resolution_clock::now().time_since_epoch()).count();
-    }
-
-    void onTargetSwitch() { targetSwitches++; }
-
-    void update(float zoom, float prevZoom,
-                float2 offset, float2 prevOffset,
-                float maxEntropy)
-    {
-        if (pool.empty()) return;
-        Candidate& c = pool[currIdx];
-
-        float progress = std::logf(std::max(zoom, 1.0f)) - std::logf(std::max(prevZoom, 1.0f));
-        float dx = offset.x - prevOffset.x;
-        float dy = offset.y - prevOffset.y;
-        float speed = std::sqrt(dx*dx + dy*dy);
-        float jerk  = std::fabs(speed - lastSpeed);
-        lastSpeed   = speed;
-
-        float blackPenalty = (maxEntropy < kBLACK_ENTROPY_THRESH) ? 1.0f : 0.0f;
-        float switchRate   = static_cast<float>(targetSwitches) * 0.02f;
-
-        double R =  kW_PROGRESS * progress
-                  - kW_JERK     * jerk
-                  - kW_SWITCH   * switchRate
-                  - kW_BLACK    * blackPenalty;
-
-        c.reward += R;
-        c.frames += 1;
-        frameCount++;
-
-        if (c.frames >= framesPerCand) {
-            currIdx++;
-            targetSwitches = 0;
-            lastSpeed = 0.0f;
-            if (currIdx >= static_cast<int>(pool.size())) {
-                std::sort(pool.begin(), pool.end(),
-                          [](const Candidate& a, const Candidate& b){ return a.reward > b.reward; });
-                const Candidate& best = pool.front();
-
-                double elapsed = nowMs() - tStartMs;
-                double fps = (elapsed > 0.0) ? (frameCount * 1000.0 / elapsed) : 0.0;
-
-                LUCHS_LOG_HOST("[AutoTune] round=%d bestAlpha=%.3f avgFPS≈%.1f reward=%+.3f (kept from %zu)",
-                               ++round, best.alpha, fps, best.reward, pool.size());
-
-                if (pool.size() > 2) {
-                    pool.resize(pool.size() / 2);
-                }
-
-                for (auto& p : pool) { p.reward = 0.0; p.frames = 0; }
-                currIdx = 0;
-                frameCount = 0;
-                tStartMs   = nowMs();
-            }
-        }
-    }
-
-    float currentAlpha() const {
-        if (pool.empty()) return kFIXED_ALPHA;
-        return pool[std::min(currIdx, (int)pool.size()-1)].alpha;
-    }
-
-    float bestAlpha() const {
-        if (pool.empty()) return kFIXED_ALPHA;
-        return std::max_element(pool.begin(), pool.end(),
-               [](const Candidate& a, const Candidate& b){ return a.reward < b.reward; })->alpha;
-    }
-};
-
-static AutoTuner gTuner;
-
-struct Hist {
-    float2 prevOffset  = {0.0f, 0.0f};
-    float  prevZoom    = 1.0f;
-    int    prevIndex   = -1;
-    int    prevTileSize = -1;
-} gHist;
-
-} // namespace
+static inline float mad_from(const std::vector<float>& v, float med) {
+    if (v.empty()) return 1.0f;
+    std::vector<float> dev; dev.reserve(v.size());
+    for (float x : v) dev.push_back(std::fabs(x - med));
+    std::vector<float> tmp = dev; // copy für nth_element
+    float m = median_inplace(tmp);
+    return (m > 1e-6f) ? m : 1.0f;
+}
 
 namespace ZoomLogic {
 
-// y-Achse: y=0 ist unterer Bildrand
-// -> keine Invertierung (flipY = false)    
+float computeEntropyContrast(
+    const std::vector<float>& entropy,
+    int width, int height, int tileSize) noexcept
+{
+    if (width <= 0 || height <= 0 || tileSize <= 0) return 0.0f;
+    const int tilesX = (width + tileSize - 1) / tileSize;
+    const int tilesY = (height + tileSize - 1) / tileSize;
+    const int total  = tilesX * tilesY;
+    if (total <= 0 || (int)entropy.size() < total) return 0.0f;
+
+    // Mittelwert der lokalen Kontraste (4-Nachbarn)
+    double acc = 0.0;
+    int cnt = 0;
+    for (int ty = 0; ty < tilesY; ++ty) {
+        for (int tx = 0; tx < tilesX; ++tx) {
+            int i = ty * tilesX + tx;
+            float center = entropy[i];
+            float sum = 0.0f; int n = 0;
+            const int nx[4] = { tx-1, tx+1, tx,   tx };
+            const int ny[4] = { ty,   ty,   ty-1, ty+1 };
+            for (int k = 0; k < 4; ++k) {
+                if (nx[k] < 0 || ny[k] < 0 || nx[k] >= tilesX || ny[k] >= tilesY) continue;
+                int j = ny[k] * tilesX + nx[k];
+                sum += std::fabs(entropy[j] - center);
+                ++n;
+            }
+            if (n > 0) { acc += (sum / n); ++cnt; }
+        }
+    }
+    return (cnt > 0) ? static_cast<float>(acc / cnt) : 0.0f;
+}
+
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,
     const std::vector<float>& contrast,
-    float2 currentOffset,
-    float zoom,
-    int width,
-    int height,
-    int tileSize,
+    int tilesX, int tilesY,
+    int width, int height,
+    float2 currentOffset, float zoom,
     float2 previousOffset,
-    [[maybe_unused]] int previousIndex,
-    float previousEntropy,
-    float previousContrast
-) {
+    ZoomState& state) noexcept
+{
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    ZoomResult result;
-    result.bestIndex   = -1;
-    result.shouldZoom  = false;
-    result.isNewTarget = false;
-    result.newOffset   = currentOffset;
+    ZoomResult out;
+    out.bestIndex   = -1;
+    out.shouldZoom  = false;
+    out.isNewTarget = false;
+    out.newOffset   = previousOffset; // default: keine Änderung
+    out.minDistance = kMIN_DISTANCE;
 
-    const int tilesX = (width + tileSize - 1) / tileSize;
-    const int tilesY = (height + tileSize - 1) / tileSize;
-    const std::size_t totalTiles = static_cast<std::size_t>(tilesX * tilesY);
-
-    float minE =  1e9f, maxE = -1e9f;
-    float minC =  1e9f, maxC = -1e9f;
-    if (Settings::debugLogging) {
-        for (std::size_t i = 0; i < totalTiles; ++i) {
-            if (i >= entropy.size() || i >= contrast.size()) continue;
-            float e = entropy[i], c = contrast[i];
-            minE = std::min(minE, e); maxE = std::max(maxE, e);
-            minC = std::min(minC, c); maxC = std::max(maxC, c);
+    // Geometrie prüfen
+    const int totalTiles = tilesX * tilesY;
+    if (tilesX <= 0 || tilesY <= 0 || totalTiles <= 0) {
+        if (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOMV2] invalid tiles: tilesX=%d tilesY=%d", tilesX, tilesY);
         }
-        LUCHS_LOG_HOST("[ZoomEval] Entropy: min=%.4f max=%.4f | Contrast: min=%.4f max=%.4f", minE, maxE, minC, maxC);
+        return out;
+    }
+    const int N = std::min<int>(totalTiles, std::min<int>((int)entropy.size(), (int)contrast.size()));
+    if (N <= 0) {
+        if (Settings::debugLogging) LUCHS_LOG_HOST("[ZOOMV2] empty metrics -> no zoom");
+        return out;
     }
 
-    // --- Neue Metrik: vermeidet langweilige Flächen ---
-    float bestScore = -1.0f;
-    for (std::size_t i = 0; i < totalTiles; ++i) {
-        if (i >= entropy.size() || i >= contrast.size()) continue;
+    // Kopien für robuste Statistik
+    std::vector<float> e(entropy.begin(),  entropy.begin()  + N);
+    std::vector<float> c(contrast.begin(), contrast.begin() + N);
 
-        float e = entropy[i];
-        float c = contrast[i];
+    // Median & MAD
+    float e_med = median_inplace(e);
+    float c_med = median_inplace(c);
+    float e_mad = mad_from(entropy, e_med);
+    float c_mad = mad_from(contrast, c_med);
+    if (e_mad <= 1e-6f) e_mad = 1.0f;
+    if (c_mad <= 1e-6f) c_mad = 1.0f;
 
-        float boredomPenalty = (e < 0.15f && c < 0.15f) ? 0.5f : 1.0f;
-        float edgeBoost = (c > 0.6f) ? 1.2f : 1.0f;
+    // Scoring (α*E' + β*C')
+    float bestScore = -1e9f;
+    int   bestIdx   = -1;
+    for (int i = 0; i < N; ++i) {
+        float ez = (entropy[i]  - e_med) / e_mad;
+        float cz = (contrast[i] - c_med) / c_mad;
+        float s  = kALPHA_E * ez + kBETA_C * cz;
+        if (s > bestScore) { bestScore = s; bestIdx = i; }
+    }
 
-        float score = e * (1.0f + c) * boredomPenalty * edgeBoost;
-
-        if (score > bestScore) {
-            bestScore = score;
-            result.bestIndex    = static_cast<int>(i);
-            result.bestEntropy  = e;
-            result.bestContrast = c;
+    // Signalerkennung: zu schwach? -> Pause
+    if (bestScore < kMIN_SIGNAL_SCORE) {
+        if (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOMV2] paused: low signal (bestScore=%.3f < %.3f)", bestScore, kMIN_SIGNAL_SCORE);
         }
+        out.bestScore = bestScore;
+        return out;
     }
 
-    // 🐭 Maus-Kommentar (ZoomDiag): Analyse starker Kandidaten mit hoher Entropie
-    if (Settings::debugLogging && maxE > 0.0f) {
-        float cutoff = 0.9f * maxE;
-        for (std::size_t i = 0; i < totalTiles; ++i) {
-            if (i >= entropy.size() || i >= contrast.size()) continue;
-
-            float e = entropy[i];
-            float c = contrast[i];
-
-            if (e > cutoff && static_cast<int>(i) != result.bestIndex) {
-                float score = e * (1.0f + c);
-                int tx = static_cast<int>(i % tilesX);
-                int ty = static_cast<int>(i / tilesX);
-                LUCHS_LOG_HOST("[ZoomDiag] strongTile i=%zu tile=(%d,%d) e=%.4f c=%.4f score=%.4f",
-                               i, tx, ty, e, c, score);
-            }
-        }
+    // Hysterese/Cooldown gegen Springen
+    const bool indexChanged = (bestIdx != state.lastAcceptedIndex);
+    bool accept = false;
+    if (state.cooldownLeft > 0) {
+        // im Cooldown nur akzeptieren, wenn signifikant besser
+        accept = (bestScore >= state.lastAcceptedScore * (1.0f + kHYSTERESIS * 2.0f));
+        state.cooldownLeft -= 1;
+    } else {
+        // normaler Modus: Hysterese oder absolute Schwelle
+        accept = (bestScore >= state.lastAcceptedScore * (1.0f + kHYSTERESIS)) || (bestScore >= kACCEPT_THRESHOLD);
     }
 
-    if (result.bestIndex < 0) {
-        return result;
-    }
-
-    auto [px, py] = tileIndexToPixelCenter(result.bestIndex, tilesX, tilesY, width, height);
-
-    float2 tileCenter;
-    tileCenter.x = static_cast<float>((px / width)  - 0.5) * 2.0f;
-    tileCenter.y = static_cast<float>((py / height) - 0.5) * 2.0f;
+    // Tilezentrum -> NDC-Vektor -> Offset-Vorschlag
+    auto center = tileIndexToPixelCenter(bestIdx, tilesX, tilesY, width, height);
+    float2 ndc;
+    ndc.x = static_cast<float>((center.first  / width)  - 0.5) * 2.0f;
+    ndc.y = static_cast<float>((center.second / height) - 0.5) * 2.0f;
 
     float2 proposedOffset = make_float2(
-        currentOffset.x + tileCenter.x / zoom,
-        currentOffset.y + tileCenter.y / zoom
+        currentOffset.x + ndc.x / zoom,
+        currentOffset.y + ndc.y / zoom
     );
 
-    float dx = proposedOffset.x - previousOffset.x;
-    float dy = proposedOffset.y - previousOffset.y;
-    float dist = std::sqrt(dx * dx + dy * dy);
+    const float dx = proposedOffset.x - previousOffset.x;
+    const float dy = proposedOffset.y - previousOffset.y;
+    const float dist = std::sqrt(dx*dx + dy*dy);
 
-    float prevScore = previousEntropy * (1.0f + previousContrast);
-    float scoreGain = (prevScore > 0.0f) ? ((bestScore - prevScore) / prevScore) : 1.0f;
+    // Bewegung glätten (EMA)
+    float emaAlpha = kEMA_ALPHA_BASE;
+    if (dist > 0.2f) emaAlpha = std::min(kEMA_ALPHA_MAX, emaAlpha * 1.5f);
+    if (dist < 0.02f) emaAlpha = std::min(emaAlpha, 0.10f);
 
-    result.isNewTarget = true;
-    result.shouldZoom  = true;
+    float2 smoothed = make_float2(
+        previousOffset.x * (1.0f - emaAlpha) + proposedOffset.x * emaAlpha,
+        previousOffset.y * (1.0f - emaAlpha) + proposedOffset.y * emaAlpha
+    );
 
-    bool targetSwitched = (result.bestIndex != gHist.prevIndex);
-    if (kAUTO_TUNE_ENABLED) {
-        if (targetSwitched) gTuner.onTargetSwitch();
-        float maxEntropy = (Settings::debugLogging ? maxE : result.bestEntropy);
-        gTuner.update(zoom, gHist.prevZoom, proposedOffset, gHist.prevOffset, maxEntropy);
+    // Ausgabe füllen
+    out.bestIndex      = bestIdx;
+    out.bestEntropy    = entropy[bestIdx];
+    out.bestContrast   = contrast[bestIdx];
+    out.bestScore      = bestScore;
+    out.distance       = dist;
+    out.relEntropyGain = 0.0f; // Legacy-Metriken aktuell nicht genutzt
+    out.relContrastGain= 0.0f;
+
+    if (accept) {
+        out.isNewTarget = indexChanged;
+        out.shouldZoom  = true;
+        out.newOffset   = smoothed;
+
+        // Zustand aktualisieren
+        if (indexChanged) state.cooldownLeft = kCOOLDOWN_FRAMES;
+        state.lastAcceptedIndex = bestIdx;
+        state.lastAcceptedScore = std::max(bestScore, state.lastAcceptedScore);
+        state.lastOffset        = out.newOffset;
+        state.lastTilesX        = tilesX;
+        state.lastTilesY        = tilesY;
+    } else {
+        // Kein Wechsel angenommen – konservativ: Position halten
+        out.isNewTarget = false;
+        out.shouldZoom  = false;
+        out.newOffset   = previousOffset;
     }
 
-    float alpha = kAUTO_TUNE_ENABLED ? gTuner.currentAlpha() : kFIXED_ALPHA;
-    float alphaBeforeBoost = alpha;
-    if (scoreGain > 0.25f) alpha = std::min(alpha * 1.15f, 0.35f);
-
-    result.newOffset = make_float2(
-        previousOffset.x * (1.0f - alpha) + proposedOffset.x * alpha,
-        previousOffset.y * (1.0f - alpha) + proposedOffset.y * alpha
-    );
-
-    result.distance = dist;
-    result.minDistance = 0.02f;
-    result.relEntropyGain  = (result.bestEntropy > 0.0f && previousEntropy > 0.0f)
-                             ? (result.bestEntropy - previousEntropy) / previousEntropy
-                             : 1.0f;
-    result.relContrastGain = (result.bestContrast > 0.0f && previousContrast > 0.0f)
-                             ? (result.bestContrast - previousContrast) / previousContrast
-                             : 1.0f;
-
-    // Historie aktualisieren
-    bool tileSizeChanged = (tileSize != gHist.prevTileSize);
-    gHist.prevTileSize = tileSize;
-    gHist.prevZoom   = zoom;
-    gHist.prevOffset = result.newOffset;
-    gHist.prevIndex  = result.bestIndex;
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-    auto ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
-
+    // Logging
     if (Settings::debugLogging) {
-        int bx = result.bestIndex % tilesX;
-        int by = result.bestIndex / tilesX;
-        LUCHS_LOG_HOST("[ZoomEval] bestScore=%.4f prevScore=%.4f gain=%.3f | tile=(%d,%d) NDC=(%.4f,%.4f) offset=(%.5f,%.5f) alpha=%.3f (cand=%.3f%s) dist=%.4f ms=%.3f",
-                       bestScore, prevScore, scoreGain,
-                       bx, by, tileCenter.x, tileCenter.y,
-                       proposedOffset.x, proposedOffset.y,
-                       alpha, alphaBeforeBoost, (alpha != alphaBeforeBoost ? " +boost" : ""), dist, ms);
+        int bx = bestIdx % tilesX, by = bestIdx / tilesX;
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-        // Chamäleon-Logzeile – erweitert um tileSize, bestIndex, zoom und Offset
-        bool indexJump = targetSwitched && (std::fabs(scoreGain) < kINDEX_JUMP_THRESH);
         LUCHS_LOG_HOST(
-            "[Chamaeleon] tileSizeChange=%d indexJump=%d scoreGain=%.3f tileSize=%d bestIdx=%d zoom=%.5f off=(%.5f,%.5f)",
-            tileSizeChanged ? 1 : 0,
-            indexJump ? 1 : 0,
-            scoreGain,
-            tileSize,
-            result.bestIndex,
-            zoom,
-            result.newOffset.x,
-            result.newOffset.y
+            "[ZOOMV2] best=%d tile=(%d,%d) e=%.4f c=%.4f score=%.3f | lastScore=%.3f idxChanged=%d accept=%d cooldown=%d",
+            bestIdx, bx, by, out.bestEntropy, out.bestContrast, bestScore,
+            state.lastAcceptedScore, indexChanged ? 1 : 0, accept ? 1 : 0, state.cooldownLeft
+        );
+        LUCHS_LOG_HOST(
+            "[ZOOMV2] move: dist=%.4f emaAlpha=%.3f ndc=(%.4f,%.4f) propOff=(%.5f,%.5f) newOff=(%.5f,%.5f) tiles=(%d,%d) ms=%.3f",
+            dist, emaAlpha, ndc.x, ndc.y,
+            proposedOffset.x, proposedOffset.y,
+            out.newOffset.x, out.newOffset.y,
+            tilesX, tilesY, ms
         );
     }
 
-    return result;
+    return out;
 }
 
 } // namespace ZoomLogic
