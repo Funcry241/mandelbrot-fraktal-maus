@@ -26,7 +26,7 @@ static constexpr float kEMA_ALPHA_BASE = 0.16f; // Grund-Glättung Richtung Ziel
 static constexpr float kEMA_ALPHA_MAX = 0.30f; // Kappung je Frame
 // Signaldetektion
 static constexpr float kMIN_SIGNAL_SCORE = 0.15f; // darunter: Pause (kein Zoom)
-// Deadzone (nur Dokumentationszweck – Ausgabe in out.minDistance)
+// Deadzone (nur Dokumentation – Ausgabe in out.minDistance)
 static constexpr float kMIN_DISTANCE = 0.02f; // ~NDC/Zoom-Skala
 
 // --- robuste Statistik (Median/MAD) ---
@@ -122,15 +122,15 @@ if (N <= 0) {
     return out;
 }
 
-// Kopien für robuste Statistik
+// Kopien für robuste Statistik (auf N beschnitten)
 std::vector<float> e(entropy.begin(),  entropy.begin()  + N);
 std::vector<float> c(contrast.begin(), contrast.begin() + N);
 
-// Median & MAD (robuste Normierung)
+// Median & MAD (robuste Normierung) – MAD auf denselben beschnittenen Daten
 float e_med = median_inplace(e);
 float c_med = median_inplace(c);
-float e_mad = mad_from(entropy, e_med);
-float c_mad = mad_from(contrast, c_med);
+float e_mad = mad_from(e, e_med);
+float c_mad = mad_from(c, c_med);
 if (e_mad <= 1e-6f) e_mad = 1.0f;
 if (c_mad <= 1e-6f) c_mad = 1.0f;
 
@@ -169,8 +169,8 @@ if (state.cooldownLeft > 0) {
 // Tilezentrum -> NDC‑Vektor -> Offset‑Vorschlag
 auto center = tileIndexToPixelCenter(bestIdx, tilesX, tilesY, width, height);
 float2 ndc;
-ndc.x = static_cast<float>((center.first  / width)  - 0.5) * 2.0f;
-ndc.y = static_cast<float>((center.second / height) - 0.5) * 2.0f;
+ndc.x = static_cast<float>((center.first  / width)  - 0.5f) * 2.0f;
+ndc.y = static_cast<float>((center.second / height) - 0.5f) * 2.0f;
 
 float2 proposedOffset = make_float2(
     currentOffset.x + ndc.x / zoom,
