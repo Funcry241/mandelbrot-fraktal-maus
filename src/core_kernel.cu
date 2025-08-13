@@ -1,4 +1,7 @@
-// Datei: core_kernel.cu
+// 🐭 Maus: Farb-Upgrade – Continuous Escape Time + feine „Stripe“-Details.
+// 🦦 Otter: Nur diese Datei geändert, keine Signaturen angerührt. Sanft, detailreich, deterministisch. (Bezug zu Otter)
+// 🦊 Schneefuchs: Keine externen Abhängigkeiten, nur lokale Helfer. Logs ASCII, unverändert. (Bezug zu Schneefuchs)
+
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
@@ -85,6 +88,50 @@ __device__ float pseudoRandomWarze(float x, float y) {
     return 0.5f + 0.5f * __sinf(r * 6.0f + angle * 4.0f);
 }
 
+// ── NEU: Continuous Escape‑Time (CEC) + „Stripe“-Details ────────────────────
+// Maus: liefert einen glatten Iterationswert (nu) und eine feine Bandstruktur (stripe)
+// aus der Bruchteilkomponente von mu. Das erzeugt sichtbar mehr Detail an den Rändern.
+__device__ __forceinline__
+void computeCEC(float zx, float zy, int it, int maxIt, float& nu, float& stripe)
+{
+    // Schneefuchs: numerisch stabil – norm >= 1.000001f schützt log(log(.))
+    float norm = zx * zx + zy * zy;
+    if (it >= maxIt) {
+        nu = 1.0f;
+        stripe = 0.0f;
+        return;
+    }
+    float mu = (float)it + 1.0f - log2f(log2f(fmaxf(norm, 1.000001f)));
+    nu = fminf(fmaxf(mu / (float)maxIt, 0.0f), 1.0f);
+    // Otter: „Stripe Average“ – betont feine Bänder entlang der Flucht.
+    float frac = fract(mu);
+    // konzentriere Bänder leicht (Gamma)
+    stripe = powf(0.5f + 0.5f * __sinf(6.2831853f * frac), 0.75f);
+}
+
+// Maus: hübschere Farbmischung – Hue aus nu (+ leichter Winkel‑Touch),
+// Value aus Rüsselwarze‑Value * (Stripe‑Kontrast) * (sanfte Gamma)
+__device__ __forceinline__
+float3 colorFractalDetailed(float2 c, float zx, float zy, int it, int maxIt)
+{
+    // Innenmenge bleibt dunkel – visuell „ruhig“
+    if (it >= maxIt) {
+        return make_float3(0.05f, 0.05f, 0.08f);
+    }
+
+    float nu, stripe;
+    computeCEC(zx, zy, it, maxIt, nu, stripe);
+
+    float angle = atan2f(c.y, c.x);          // stabiler, ruhiger Hue‑Offset
+    float hue   = fract(nu * 0.18f + angle * 0.04f * 0.15915494f); // 1/(2π)=0.15915494
+    float baseV = 0.30f + 0.50f * pseudoRandomWarze(c.x, c.y);     // Rüssel‑Grundwert
+    float vGain = 0.70f + 0.30f * stripe;                           // Stripe‑Kontrast (sanft)
+    float val   = fminf(1.0f, powf(baseV * vGain, 0.94f));          // leichte Gamma‑Anhebung
+    float sat   = 0.86f;                                            // kräftig, aber nicht grell
+
+    return hsvToRgb(hue, sat, val);
+}
+
 // ---- MANDELBROT-KERNEL ----
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut,
@@ -110,21 +157,10 @@ __global__ void mandelbrotKernel(
     float zx, zy;
     int it = mandelbrotIterations(c.x, c.y, maxIter, zx, zy);
 
-    float norm = zx * zx + zy * zy;
-    float t = it - log2f(log2f(fmaxf(norm, 1.000001f)));
-    float tClamped = fminf(fmaxf(t / maxIter, 0.0f), 1.0f);
+    // ── NEU: schönere, detailreichere Farbgebung ───────────────────────────
+    // Statt starrem HSV‑Noise jetzt CEC + Stripe‑Details (siehe Helfer oben).
+    float3 rgb = colorFractalDetailed(c, zx, zy, it, maxIter);
 
-    // 🐽 RÜSSELWARZE-FARBREGELUNG
-    float3 rgb;
-    if (it == maxIter) {
-        rgb = make_float3(0.05f, 0.05f, 0.08f);
-    } else {
-        float r = sqrtf(c.x * c.x + c.y * c.y);
-        float angle = atan2f(c.y, c.x);
-        float h = fract(angle / (2.0f * CUDART_PI_F));
-        float v = 0.3f + 0.5f * pseudoRandomWarze(c.x, c.y);
-        rgb = hsvToRgb(h, 0.85f, v);
-    }
     unsigned char rC = static_cast<unsigned char>(rgb.x * 255.0f);
     unsigned char gC = static_cast<unsigned char>(rgb.y * 255.0f);
     unsigned char bC = static_cast<unsigned char>(rgb.z * 255.0f);
@@ -133,6 +169,11 @@ __global__ void mandelbrotKernel(
 
     // 🐭 Logging
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
+        // Log wie bisher – norm/tClamped grob nützlich; neu: keinen Bruch der Ausgabe
+        float norm = zx * zx + zy * zy;
+        float t = (it < maxIter) ? ( ( (float)it + 1.0f - log2f(log2f(fmaxf(norm, 1.000001f))) ) / (float)maxIter )
+                                 : 1.0f;
+        float tClamped = fminf(fmaxf(t, 0.0f), 1.0f);
         char msg[256];
         int n = 0;
         n += sprintf(msg + n, "[KERNEL] x=%d y=%d it=%d ", x, y, it);
