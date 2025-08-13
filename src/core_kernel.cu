@@ -109,33 +109,30 @@ void computeCEC(float zx, float zy, int it, int maxIt, float& nu, float& stripe)
     stripe = powf(0.5f + 0.5f * __sinf(6.2831853f * frac), 0.75f);
 }
 
-// 🐭 Maus: Frühlingsmodus – heller, mehr Grün/Cyan, softer Kontrast.
-// 🦦 Otter: Hue-Shift + erhöhte Value-Basis, Stripe dezent als Detailverstärker. (Bezug zu Otter)
-// 🦊 Schneefuchs: Signatur unverändert, reine Farblogik; deterministisch. (Bezug zu Schneefuchs)
+// 🐭 Maus: Schwarz im Kern, Farbexplosion bei Verästelung
+// 🦦 Otter: Hue-Shift + Detail-Driven-Value
+// 🦊 Schneefuchs: deterministisch, keine Zufallskomponenten außer pseudoRandomWarze
 __device__ __forceinline__
 float3 colorFractalDetailed(float2 c, float zx, float zy, int it, int maxIt)
 {
-    // Innenmenge: statt fast Schwarz ein zartes Pastellgrün (ruhiger Übergang)
+    // Schwarz für die Innenmenge
     if (it >= maxIt) {
-        return make_float3(0.30f, 0.35f, 0.28f);
+        return make_float3(0.0f, 0.0f, 0.0f);
     }
 
-    // Continuous Escape-Time + Stripe-Details (liefert nu∈[0,1] und feine Bänder)
+    // Escape-Time + Stripe für feine Detailstruktur
     float nu, stripe;
     computeCEC(zx, zy, it, maxIt, nu, stripe);
 
-    // Hue: Frühling → +120° Shift (≈ +0.33 im [0,1]-Hue-Kreis)
-    // Zusätzlich leichter Winkel-Einfluss, um natürliche Varianz zu behalten
+    // Hue: Mischung aus Escape-Zeit und Winkel → klare Trennung der Äste
     float angle = atan2f(c.y, c.x);
-    float hue   = fract(0.33f + nu * 0.18f + angle * 0.04f * 0.15915494f); // 1/(2π)=0.15915494
+    float hue   = fract(nu * 0.25f + angle * 0.08f * 0.15915494f);
 
-    // Value: höhere Basishelligkeit + sanfter Stripe-Gain, leichtes Gamma
-    float baseV = 0.45f + 0.45f * pseudoRandomWarze(c.x, c.y);
-    float vGain = 0.75f + 0.25f * stripe;         // dezenter Kontrast, kein Flackern
-    float val   = fminf(1.0f, powf(baseV * vGain, 0.96f));
+    // Value: abhängig vom Stripe → bei Verästelung heller
+    float val = 0.3f + 0.7f * stripe;  // reicht von dunkel zu sehr hell
 
-    // Sättigung etwas reduziert für weiche, „frühlingshafte“ Töne
-    float sat = 0.65f;
+    // Sättigung hoch, damit Übergänge intensiv wirken
+    float sat = 0.9f;
 
     return hsvToRgb(hue, sat, val);
 }
