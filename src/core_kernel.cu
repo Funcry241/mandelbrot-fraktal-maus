@@ -109,25 +109,33 @@ void computeCEC(float zx, float zy, int it, int maxIt, float& nu, float& stripe)
     stripe = powf(0.5f + 0.5f * __sinf(6.2831853f * frac), 0.75f);
 }
 
-// Maus: hübschere Farbmischung – Hue aus nu (+ leichter Winkel‑Touch),
-// Value aus Rüsselwarze‑Value * (Stripe‑Kontrast) * (sanfte Gamma)
+// 🐭 Maus: Frühlingsmodus – heller, mehr Grün/Cyan, softer Kontrast.
+// 🦦 Otter: Hue-Shift + erhöhte Value-Basis, Stripe dezent als Detailverstärker. (Bezug zu Otter)
+// 🦊 Schneefuchs: Signatur unverändert, reine Farblogik; deterministisch. (Bezug zu Schneefuchs)
 __device__ __forceinline__
 float3 colorFractalDetailed(float2 c, float zx, float zy, int it, int maxIt)
 {
-    // Innenmenge bleibt dunkel – visuell „ruhig“
+    // Innenmenge: statt fast Schwarz ein zartes Pastellgrün (ruhiger Übergang)
     if (it >= maxIt) {
-        return make_float3(0.05f, 0.05f, 0.08f);
+        return make_float3(0.30f, 0.35f, 0.28f);
     }
 
+    // Continuous Escape-Time + Stripe-Details (liefert nu∈[0,1] und feine Bänder)
     float nu, stripe;
     computeCEC(zx, zy, it, maxIt, nu, stripe);
 
-    float angle = atan2f(c.y, c.x);          // stabiler, ruhiger Hue‑Offset
-    float hue   = fract(nu * 0.18f + angle * 0.04f * 0.15915494f); // 1/(2π)=0.15915494
-    float baseV = 0.30f + 0.50f * pseudoRandomWarze(c.x, c.y);     // Rüssel‑Grundwert
-    float vGain = 0.70f + 0.30f * stripe;                           // Stripe‑Kontrast (sanft)
-    float val   = fminf(1.0f, powf(baseV * vGain, 0.94f));          // leichte Gamma‑Anhebung
-    float sat   = 0.86f;                                            // kräftig, aber nicht grell
+    // Hue: Frühling → +120° Shift (≈ +0.33 im [0,1]-Hue-Kreis)
+    // Zusätzlich leichter Winkel-Einfluss, um natürliche Varianz zu behalten
+    float angle = atan2f(c.y, c.x);
+    float hue   = fract(0.33f + nu * 0.18f + angle * 0.04f * 0.15915494f); // 1/(2π)=0.15915494
+
+    // Value: höhere Basishelligkeit + sanfter Stripe-Gain, leichtes Gamma
+    float baseV = 0.45f + 0.45f * pseudoRandomWarze(c.x, c.y);
+    float vGain = 0.75f + 0.25f * stripe;         // dezenter Kontrast, kein Flackern
+    float val   = fminf(1.0f, powf(baseV * vGain, 0.96f));
+
+    // Sättigung etwas reduziert für weiche, „frühlingshafte“ Töne
+    float sat = 0.65f;
 
     return hsvToRgb(hue, sat, val);
 }
