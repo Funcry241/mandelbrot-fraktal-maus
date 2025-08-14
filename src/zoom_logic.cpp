@@ -1,6 +1,6 @@
 // 🐭 Maus: Zoom V3 – kontinuierlicher Schwerpunkt, glatter Drift, deterministisch.
-// 🦦 Otter: Softmax-Schwerpunkt statt Zielspringen; EMA-Glättung, ForceAlwaysZoom als sanfter Drift. (Bezug zu Otter)
-// 🦊 Schneefuchs: Tiles/Geometrie kommen vom Aufrufer; keine impliziten Annahmen. (Bezug zu Schneefuchs)
+// 🦦 Otter: Warm‑up ohne Richtungswechsel: erst zoomen, dann lenken. (Bezug zu Otter)
+// 🦊 Schneefuchs: Minimalinvasiv, keine Header‑/API‑Änderung. ASCII‑Logs. (Bezug zu Schneefuchs)
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -28,6 +28,11 @@ static constexpr float kMIN_SIGNAL_Z  = 0.15f; // minimale Z‑Score‑Stärke f
 static constexpr float kMIN_DISTANCE  = 0.02f; // ~NDC/Zoom-Skala
 // 🦦 Otter: sanfter Drift auch ohne starkes Signal, wenn AlwaysZoom aktiv ist
 static constexpr float kFORCE_MIN_DRIFT_ALPHA = 0.05f;
+
+// 🟢 NEU: Warm‑up‑Zeit (Sekunden), in der KEIN Richtungswechsel erfolgt.
+//        Zoom läuft weiter, aber Offset bleibt unverändert.
+//        Anpassbar hier in dieser Datei.
+static constexpr double kNO_TURN_WARMUP_SEC = 3.0; // ← Wunschwert hier ändern
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
@@ -104,6 +109,13 @@ ZoomResult evaluateZoomTarget(
     ZoomState& state) noexcept
 {
     auto t0 = std::chrono::high_resolution_clock::now();
+
+    // ── Warm‑up‑Timer: ab erstem Aufruf läuft die Uhr. ───────────────────────
+    static bool warmupInit = false;
+    static std::chrono::high_resolution_clock::time_point warmupStart;
+    if (!warmupInit) { warmupStart = t0; warmupInit = true; }
+    const double warmupSec = std::chrono::duration<double>(t0 - warmupStart).count();
+    const bool freezeDirection = (warmupSec < kNO_TURN_WARMUP_SEC);
 
     ZoomResult out;
     out.bestIndex   = -1;
@@ -236,7 +248,20 @@ ZoomResult evaluateZoomTarget(
         previousOffset.y * (1.0f - emaAlpha) + proposedOffset.y * emaAlpha
     );
 
-    // Ausgabe
+    // ── WARM‑UP: KEIN Richtungswechsel, aber weiter zoomen ──────────────────
+    if (freezeDirection) {
+        out.distance   = 0.0f;
+        out.newOffset  = previousOffset;   // Richtung/Offset eingefroren
+        out.shouldZoom = true;             // Zoom bleibt aktiv (extern gesteuert)
+        // Wichtig: während Warm‑up keinen neuen Ziel‑State „akzeptieren“
+        if (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOMV3][WARMUP] freeze-direction t=%.2fs (limit=%.2fs)",
+                           warmupSec, kNO_TURN_WARMUP_SEC);
+        }
+        return out; // früher Exit: kein Richtungs‑State‑Update
+    }
+
+    // ── Normale Ausgabe nach Warm‑up ────────────────────────────────────────
     out.distance   = dist;
     out.newOffset  = (hasSignal || Settings::ForceAlwaysZoom) ? smoothed : previousOffset;
     out.shouldZoom = (hasSignal || Settings::ForceAlwaysZoom);
@@ -274,11 +299,8 @@ ZoomResult evaluateZoomTarget(
             out.newOffset.x, out.newOffset.y,
             tilesX, tilesY, ms
         );
-        if (Settings::ForceAlwaysZoom) {
-            LUCHS_LOG_HOST(
-                "[ZOOMV3] forceAlwaysZoom=1 -> shouldZoom=%d (signal=%d)",
-                out.shouldZoom ? 1 : 0, hasSignal ? 1 : 0
-            );
+        if (freezeDirection) {
+            LUCHS_LOG_HOST("[ZOOMV3] warmup active; direction frozen");
         }
     }
 
