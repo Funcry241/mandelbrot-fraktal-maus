@@ -231,7 +231,8 @@ void execute(RendererState& state) {
 
     {
         std::ostringstream v;
-        v.setf(std::ios::fixed); v << std::setprecision(4) << g_ctx.zoom;
+        v.setf(std::ios::scientific);
+        v << std::setprecision(6) << g_ctx.zoom;
         appendKV("zoom", v.str());
     }
     {
