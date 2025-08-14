@@ -16,8 +16,8 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
-#include "common.hpp"         // computeTileSizeFromZoom
-#include "zoom_logic.hpp"     // Zoom V2 API
+#include "common.hpp"
+#include "zoom_logic.hpp"
 
 namespace FramePipeline {
 
@@ -215,18 +215,47 @@ void execute(RendererState& state) {
     state.offset = g_ctx.offset;
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
+    // HUD-String mit fester Spaltenbreite/Präzision (monospaced)
     std::ostringstream oss;
-    oss << std::fixed << std::setprecision(4);
-    oss << "Zoom:    " << g_ctx.zoom << "\n";
-    oss << "Offset:  (" << g_ctx.offset.x << ", " << g_ctx.offset.y << ")\n";
+    oss.setf(std::ios::fixed, std::ios::floatfield);
 
-    oss << std::setprecision(3);
-    oss << "Entropy: "  << g_ctx.lastEntropy  << "\n";
-    oss << "Contrast: " << g_ctx.lastContrast << "\n";
+    auto appendKV = [&](std::string_view label, std::string_view value) {
+        constexpr int LABEL_W = 10;
+        constexpr int GAP_W   = 2;
+        constexpr int VALUE_W = 18;
+        oss << std::setw(LABEL_W) << std::right << label
+            << std::setw(GAP_W)   << "  "
+            << std::left  << std::setw(VALUE_W) << value
+            << '\n';
+    };
 
-    float fps = static_cast<float>(1.0 / g_ctx.frameTime);
-    oss << std::setprecision(1);
-    oss << "FPS:     " << fps << "\n";
+    {
+        std::ostringstream v;
+        v.setf(std::ios::fixed); v << std::setprecision(4) << g_ctx.zoom;
+        appendKV("zoom", v.str());
+    }
+    {
+        std::ostringstream v;
+        v.setf(std::ios::fixed);
+        v << std::setprecision(4) << g_ctx.offset.x << ", " << std::setprecision(4) << g_ctx.offset.y;
+        appendKV("offset", v.str());
+    }
+    {
+        std::ostringstream v;
+        v.setf(std::ios::fixed); v << std::setprecision(3) << g_ctx.lastEntropy;
+        appendKV("entropy", v.str());
+    }
+    {
+        std::ostringstream v;
+        v.setf(std::ios::fixed); v << std::setprecision(3) << g_ctx.lastContrast;
+        appendKV("contrast", v.str());
+    }
+    {
+        float fps = static_cast<float>(1.0 / g_ctx.frameTime);
+        std::ostringstream v;
+        v.setf(std::ios::fixed); v << std::setprecision(1) << fps;
+        appendKV("fps", v.str());
+    }
 
     state.warzenschweinText = oss.str();
     WarzenschweinOverlay::setText(state.warzenschweinText);
