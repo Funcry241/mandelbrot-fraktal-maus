@@ -112,45 +112,81 @@ static void buildBackground(float x0, float y0, float x1, float y1) {
     background.insert(background.end(), &quad[0][0], &quad[0][0] + 6 * 5);
 }
 
-void generateOverlayQuads(const std::string& text, std::vector<float>& vertexOut, std::vector<float>& backgroundOut, const RendererState& ctx) {
+// Otter: symmetric padding for top/bottom; clean, deterministic math. (Bezug zu Otter)
+// Schneefuchs: keep glyph advance stable; only shift start Y by deltaTop. (Bezug zu Schneefuchs)
+void generateOverlayQuads(const std::string& text,
+                          std::vector<float>& vertexOut,
+                          std::vector<float>& backgroundOut,
+                          const RendererState& ctx)
+{
     vertexOut.clear();
     backgroundOut.clear();
 
-    const float px = Settings::hudPixelSize;
+    // --- Screen pixel to NDC scale ---
+    const float px  = Settings::hudPixelSize;   // 1 HUD pixel in screen pixels
     const float pxX = 2.0f / ctx.width;
     const float pxY = 2.0f / ctx.height;
+
+    // --- Anchor (outer top-left of content area, before padding) ---
     const float x0 = -1.0f + 16.0f * pxX;
     const float y0 =  1.0f - 16.0f * pxY;
 
+    // --- Split text into lines ---
     std::vector<std::string> lines;
-    std::string cur;
-    for (char c : text) {
-        if (c == '\n') { lines.push_back(cur); cur.clear(); }
-        else cur += c;
+    {
+        std::string cur;
+        for (char c : text) {
+            if (c == '\n') { lines.push_back(cur); cur.clear(); }
+            else           { cur += c; }
+        }
+        if (!cur.empty()) lines.push_back(cur);
     }
-    if (!cur.empty()) lines.push_back(cur);
 
-    size_t maxW = 0;
+    // --- Compute content box (in HUD pixels) ---
+    std::size_t maxW = 0;
     for (const auto& l : lines) maxW = std::max(maxW, l.size());
-    float boxW = (maxW * (glyphW + 1) + 2) * px;
-    float boxH = (lines.size() * (glyphH + 2) + 2) * px;
-    buildBackground(x0 - px, y0 + px, x0 + boxW, y0 - boxH);
 
-    float r = 1.0f, g = 0.8f, b = 0.3f;
+    // Letter/line spacing are baked like before: +1 horiz, +2 vert; +2 overall border fudge.
+    const float boxW = (maxW * (glyphW + 1) + 2) * px;
+    const float boxH = (static_cast<float>(lines.size()) * (glyphH + 2) + 2) * px;
 
-    for (size_t row = 0; row < lines.size(); ++row) {
+    // --- NEW: symmetric inner padding (top == bottom), left/right as before ---
+    // We liked the *bottom* margin visually; mirror it to the top.
+    // Choose 4 px HUD-padding for top/bottom, 1 px left/right (keeps previous look).
+    const float padL = 1.0f * px;
+    const float padR = 1.0f * px;
+    const float padT = 4.0f * px;
+    const float padB = 4.0f * px;
+
+    // Background quad with symmetric padding
+    const float bgX0 = x0 - padL;
+    const float bgY0 = y0 + padT;
+    const float bgX1 = x0 + boxW + padR;
+    const float bgY1 = y0 - boxH - padB;
+    buildBackground(bgX0, bgY0, bgX1, bgY1);
+
+    // Shift first text baseline down by the *additional* top padding delta.
+    // Previously top padding was 1*px; now it is padT. Keep advance/grid identical.
+    const float deltaTop = (padT - 1.0f * px);
+
+    // --- Draw glyph quads (unchanged advance, only baseline shift) ---
+    const float r = 1.0f, g = 0.8f, b = 0.3f;
+
+    for (std::size_t row = 0; row < lines.size(); ++row) {
         const std::string& line = lines[row];
-        float yBase = y0 - row * (glyphH + 2) * px;
-        for (size_t col = 0; col < line.size(); ++col) {
+        const float yBase = (y0 - deltaTop) - static_cast<float>(row) * (glyphH + 2) * px;
+
+        for (std::size_t col = 0; col < line.size(); ++col) {
             const auto& glyph = WarzenschweinFont::get(line[col]);
-            float xBase = x0 + col * (glyphW + 1) * px;
+            const float xBase = x0 + static_cast<float>(col) * (glyphW + 1) * px;
+
             for (int gy = 0; gy < glyphH; ++gy) {
-                uint8_t bits = glyph[gy];
+                const uint8_t bits = glyph[gy];
                 for (int gx = 0; gx < glyphW; ++gx) {
                     if ((bits >> (7 - gx)) & 1) {
-                        float x = xBase + gx * px;
-                        float y = yBase - gy * px;
-                        float quad[6][5] = {
+                        const float x = xBase + gx * px;
+                        const float y = yBase - gy * px;
+                        const float quad[6][5] = {
                             {x,       y,       r, g, b},
                             {x + px,  y,       r, g, b},
                             {x + px,  y - px,  r, g, b},
