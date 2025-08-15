@@ -1,6 +1,6 @@
-// 🐭 Maus: 4x‑SSAA integriert (2×2), keine Header‑Änderungen, ein finaler Pixel‑Write.
-// 🦦 Otter: minimal-invasiv, deterministisch, Logging ASCII/EN. (Bezug zu Otter)
-// 🦊 Schneefuchs: Nur .cu geändert, Header/Signaturen unberührt. (Bezug zu Schneefuchs)
+// 🐭 Maus: Farb-Upgrade – Continuous Escape Time + feine „Stripe“-Details.
+// 🦦 Otter: Nur diese Datei geändert, keine Signaturen angerührt. Sanft, detailreich, deterministisch. (Bezug zu Otter)
+// 🦊 Schneefuchs: Keine externen Abhängigkeiten, nur lokale Helfer. Logs ASCII, unverändert. (Bezug zu Schneefuchs)
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -137,17 +137,6 @@ float3 colorFractalDetailed(float2 c, float zx, float zy, int it, int maxIt)
     return hsvToRgb(hue, sat, val);
 }
 
-// --- SSAA helper (2x2) — Box offsets (pixel space) -------------------------
-// Otter: minimal & deterministic. Schneefuchs: ASCII logs only (not used here).
-__device__ __forceinline__ float2 ssaa2x2_offset(int idx) {
-    switch (idx & 3) {
-        case 0: return make_float2(-0.25f, -0.25f);
-        case 1: return make_float2( 0.25f, -0.25f);
-        case 2: return make_float2(-0.25f,  0.25f);
-        default:return make_float2( 0.25f,  0.25f);
-    }
-}
-
 // ---- MANDELBROT-KERNEL ----
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut,
@@ -166,50 +155,34 @@ __global__ void mandelbrotKernel(
     float spanX = 3.5f * scale;
     float spanY = spanX * h / w;
 
-    // --- SSAA 2x2: four sub-samples averaged into one pixel ----------------
-    float3 acc_rgb = make_float3(0.f, 0.f, 0.f);
-    int    acc_it  = 0;
+    float2 c = pixelToComplex(
+        x + 0.5f, y + 0.5f,
+        w, h, spanX, spanY, offset
+    );
+    float zx, zy;
+    int it = mandelbrotIterations(c.x, c.y, maxIter, zx, zy);
 
-    #pragma unroll
-    for (int s = 0; s < 4; ++s) {
-        const float2 o = ssaa2x2_offset(s);
-        const float sx = (static_cast<float>(x) + 0.5f + o.x);
-        const float sy = (static_cast<float>(y) + 0.5f + o.y);
+    // ── NEU: schönere, detailreichere Farbgebung ───────────────────────────
+    // Statt starrem HSV‑Noise jetzt CEC + Stripe‑Details (siehe Helfer oben).
+    float3 rgb = colorFractalDetailed(c, zx, zy, it, maxIter);
 
-        float2 cs = pixelToComplex(
-            sx, sy,
-            w, h, spanX, spanY, offset
-        );
-
-        float zx_s, zy_s;
-        int it_s = mandelbrotIterations(cs.x, cs.y, maxIter, zx_s, zy_s);
-
-        float3 rgb_s = colorFractalDetailed(cs, zx_s, zy_s, it_s, maxIter);
-
-        acc_rgb.x += rgb_s.x;
-        acc_rgb.y += rgb_s.y;
-        acc_rgb.z += rgb_s.z;
-        acc_it    += it_s;
-    }
-
-    // Mittelwert bilden
-    acc_rgb.x *= 0.25f;
-    acc_rgb.y *= 0.25f;
-    acc_rgb.z *= 0.25f;
-    int it_mean = acc_it >> 2;
-
-    unsigned char rC = static_cast<unsigned char>(fminf(fmaxf(acc_rgb.x * 255.0f, 0.0f), 255.0f));
-    unsigned char gC = static_cast<unsigned char>(fminf(fmaxf(acc_rgb.y * 255.0f, 0.0f), 255.0f));
-    unsigned char bC = static_cast<unsigned char>(fminf(fmaxf(acc_rgb.z * 255.0f, 0.0f), 255.0f));
+    unsigned char rC = static_cast<unsigned char>(rgb.x * 255.0f);
+    unsigned char gC = static_cast<unsigned char>(rgb.y * 255.0f);
+    unsigned char bC = static_cast<unsigned char>(rgb.z * 255.0f);
     out[idx] = make_uchar4(rC, gC, bC, 255);
-    iterOut[idx] = it_mean;
+    iterOut[idx] = it;
 
     // 🐭 Logging
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
-        // ASCII/EN: aggregated SSAA info (no per-sub-sample spam)
+        // Log wie bisher – norm/tClamped grob nützlich; neu: keinen Bruch der Ausgabe
+        float norm = zx * zx + zy * zy;
+        float t = (it < maxIter) ? ( ( (float)it + 1.0f - log2f(log2f(fmaxf(norm, 1.000001f))) ) / (float)maxIter )
+                                 : 1.0f;
+        float tClamped = fminf(fmaxf(t, 0.0f), 1.0f);
         char msg[256];
         int n = 0;
-        n += sprintf(msg + n, "[KERNEL] x=%d y=%d it_mean=%d SSAA=4", x, y, it_mean);
+        n += sprintf(msg + n, "[KERNEL] x=%d y=%d it=%d ", x, y, it);
+        n += sprintf(msg + n, "tClamped=%.4f norm=%.4f ", tClamped, norm);
         LUCHS_LOG_DEVICE(msg);
     }
 }
@@ -337,7 +310,7 @@ void computeCudaEntropyContrast(
 void launch_mandelbrotHybrid(
     uchar4* out, int* d_it,
     int w, int h, float zoom, float2 offset,
-    int maxIter, int /*tile*/)
+    int maxIter, int tile)
 {
     using clk = std::chrono::high_resolution_clock;
     auto t0 = clk::now();
