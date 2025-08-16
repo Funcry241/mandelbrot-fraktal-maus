@@ -68,40 +68,48 @@ void RendererState::setupCudaBuffers(int tileSize) {
     const size_t entropy_bytes  = static_cast<size_t>(numTiles)    * sizeof(float);
     const size_t contrast_bytes = static_cast<size_t>(numTiles)    * sizeof(float);
 
-    if (Settings::debugLogging) {
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] setupCudaBuffers: w=%d h=%d zoom=%.5f tileSize=%d tiles=%d (%d x %d) pixels=%d",
                        width, height, zoom, tileSize, numTiles, tilesX, tilesY, totalPixels);
     }
 
     CUDA_CHECK(cudaSetDevice(0));
-    CudaInterop::logCudaDeviceContext("setupCudaBuffers");
+    if constexpr (Settings::debugLogging) {
+        CudaInterop::logCudaDeviceContext("setupCudaBuffers");
+    }
 
     // --- iterations buffer ---
     const size_t have_it = d_iterations.size();
     if (have_it < it_bytes) {
-        if (Settings::debugLogging)
+        if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_iterations grow: have=%zu -> need=%zu", have_it, it_bytes);
+        }
         d_iterations.allocate(it_bytes);
     } else {
-        if (Settings::debugLogging)
+        if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_iterations ok: have=%zu need=%zu (no realloc)", have_it, it_bytes);
+        }
     }
     CUDA_CHECK(cudaMemset(d_iterations.get(), 0, it_bytes));
-    LUCHS_LOG_HOST("[CHECK] cudaMemset d_iterations ok (bytes=%zu)", it_bytes);
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CHECK] cudaMemset d_iterations ok (bytes=%zu)", it_bytes);
+    }
 
     // --- entropy buffer ---
     const size_t have_entropy = d_entropy.size();
     if (have_entropy < entropy_bytes) {
-        if (Settings::debugLogging)
+        if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_entropy grow: have=%zu -> need=%zu (tiles %d)", have_entropy, entropy_bytes, numTiles);
+        }
         d_entropy.allocate(entropy_bytes);
     } else {
-        if (Settings::debugLogging)
+        if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_entropy ok: have=%zu need=%zu (tiles %d, no realloc)", have_entropy, entropy_bytes, numTiles);
+        }
     }
 
     // Diagnostics: pointer attributes (ASCII only)
-    {
+    if constexpr (Settings::debugLogging) {
         cudaPointerAttributes attr = {};
         cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_entropy.get());
         LUCHS_LOG_HOST("[CHECK] d_entropy attr: err=%d type=%d device=%d hostPtr=%p devicePtr=%p",
@@ -110,12 +118,16 @@ void RendererState::setupCudaBuffers(int tileSize) {
     }
 
     CUDA_CHECK(cudaMemset(d_entropy.get(), 0, entropy_bytes));
-    LUCHS_LOG_HOST("[CHECK] cudaMemset d_entropy ok (bytes=%zu)", entropy_bytes);
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CHECK] cudaMemset d_entropy ok (bytes=%zu)", entropy_bytes);
+    }
 
     CUDA_CHECK(cudaDeviceSynchronize());
     {
         cudaError_t syncErr = cudaGetLastError();
-        LUCHS_LOG_HOST("[CHECK] post-entropy sync: err=%d", (int)syncErr);
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[CHECK] post-entropy sync: err=%d", (int)syncErr);
+        }
         if (syncErr != cudaSuccess)
             throw std::runtime_error("cudaMemset d_entropy failed (post-sync)");
     }
@@ -123,26 +135,32 @@ void RendererState::setupCudaBuffers(int tileSize) {
     // --- contrast buffer ---
     const size_t have_contrast = d_contrast.size();
     if (have_contrast < contrast_bytes) {
-        if (Settings::debugLogging)
+        if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_contrast grow: have=%zu -> need=%zu (tiles %d)", have_contrast, contrast_bytes, numTiles);
+        }
         d_contrast.allocate(contrast_bytes);
     } else {
-        if (Settings::debugLogging)
+        if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_contrast ok: have=%zu need=%zu (tiles %d, no realloc)", have_contrast, contrast_bytes, numTiles);
+        }
     }
     CUDA_CHECK(cudaMemset(d_contrast.get(), 0, contrast_bytes));
-    LUCHS_LOG_HOST("[CHECK] cudaMemset d_contrast ok (bytes=%zu)", contrast_bytes);
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CHECK] cudaMemset d_contrast ok (bytes=%zu)", contrast_bytes);
+    }
 
     // --- host mirror sizes ---
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
 
     // --- summary ---
-    LUCHS_LOG_HOST("[ALLOC] buffers ready: it=%p(%zu) entropy=%p(%zu) contrast=%p(%zu) | %dx%d px, tileSize=%d -> tiles=%d",
-                   d_iterations.get(), d_iterations.size(),
-                   d_entropy.get(),    d_entropy.size(),
-                   d_contrast.get(),   d_contrast.size(),
-                   width, height, tileSize, numTiles);
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[ALLOC] buffers ready: it=%p(%zu) entropy=%p(%zu) contrast=%p(%zu) | %dx%d px, tileSize=%d -> tiles=%d",
+                       d_iterations.get(), d_iterations.size(),
+                       d_entropy.get(),    d_entropy.size(),
+                       d_contrast.get(),   d_contrast.size(),
+                       width, height, tileSize, numTiles);
+    }
 
     lastTileSize = tileSize;
 }
@@ -174,11 +192,13 @@ void RendererState::resize(int newWidth, int newHeight) {
 
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
 
-    if (Settings::debugLogging)
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] resize: zoom=%.5f -> tileSize=%d", zoom, lastTileSize);
+    }
 
     setupCudaBuffers(lastTileSize);
 
-    if (Settings::debugLogging)
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[Resize] %d x %d buffers reallocated", width, height);
+    }
 }

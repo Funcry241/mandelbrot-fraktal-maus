@@ -1,10 +1,11 @@
 // Datei: src/luchs_cuda_log_buffer.cu
 // 🐭 Maus-Kommentar: Rückbau auf klare Nicht-Formatierung – robust, simpel, sicher.
-// 🦦 Otter: Keine varargs mehr – Klartext-only im device-Code, kompatibel & portabel.
-// 🦊 Schneefuchs: cudaMemcpyFromSymbolAsync statt ungültiger Symbol-Zeiger – deterministisch, korrekt.
+// 🦦 Otter: Keine varargs mehr – Klartext-only im device-Code, kompatibel & portabel. (Bezug zu Otter)
+// 🦊 Schneefuchs: cudaMemcpyFromSymbolAsync statt ungültiger Symbol-Zeiger – deterministisch, korrekt. (Bezug zu Schneefuchs)
 
 #include "luchs_cuda_log_buffer.hpp"
 #include "luchs_log_host.hpp"
+#include "settings.hpp"
 #include <cstring>
 
 namespace LuchsLogger {
@@ -82,7 +83,9 @@ namespace LuchsLogger {
 
     void resetDeviceLog() {
         if (!s_isInitialized) {
-            LUCHS_LOG_HOST("[LuchsBaby ERROR] resetDeviceLog called before init!");
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[LuchsBaby ERROR] resetDeviceLog called before init!");
+            }
             return;
         }
         resetLogKernel<<<1,1>>>();
@@ -95,24 +98,32 @@ namespace LuchsLogger {
 
     void initCudaLogBuffer(cudaStream_t stream) {
         if (s_isInitialized) {
-            LUCHS_LOG_HOST("[LuchsBaby INFO] initCudaLogBuffer already called.");
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[LuchsBaby INFO] initCudaLogBuffer already called.");
+            }
             return;
         }
         s_logStream = stream;
         resetLogKernel<<<1,1>>>();
         CUDA_CHECK(cudaStreamSynchronize(s_logStream));
         s_isInitialized = true;
-        LUCHS_LOG_HOST("[LuchsBaby] LogBuffer initialized on stream %p", (void*)stream);
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[LuchsBaby] LogBuffer initialized on stream %p", (void*)stream);
+        }
     }
 
     void freeCudaLogBuffer() {
         if (!s_isInitialized) {
-            LUCHS_LOG_HOST("[LuchsBaby INFO] freeCudaLogBuffer called but not initialized.");
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[LuchsBaby INFO] freeCudaLogBuffer called but not initialized.");
+            }
             return;
         }
         s_isInitialized = false;
         s_logStream = nullptr;
-        LUCHS_LOG_HOST("[LuchsBaby] LogBuffer freed");
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[LuchsBaby] LogBuffer freed");
+        }
     }
 
     bool isCudaLogBufferInitialized() {
@@ -125,21 +136,29 @@ namespace LuchsLogger {
 
     void flushDeviceLogToHost(cudaStream_t stream) {
         if (!s_isInitialized) {
-            LUCHS_LOG_HOST("[LuchsBaby ERROR] flushDeviceLogToHost called before init!");
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[LuchsBaby ERROR] flushDeviceLogToHost called before init!");
+            }
             return;
         }
 
         if (!h_logBuffer) {
-            LUCHS_LOG_HOST("[LuchsBaby ERROR] flushDeviceLogToHost: h_logBuffer null!");
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[LuchsBaby ERROR] flushDeviceLogToHost: h_logBuffer null!");
+            }
             return;
         }
 
         if (stream == nullptr) {
-            LUCHS_LOG_HOST("[LuchsBaby] stream==nullptr, using default stream 0");
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[LuchsBaby] stream==nullptr, using default stream 0");
+            }
             stream = 0;
         }
 
-        LUCHS_LOG_HOST("[DEBUG] flushDeviceLogToHost: using cudaMemcpyFromSymbolAsync (size=%zu)", LOG_BUFFER_SIZE);
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[DEBUG] flushDeviceLogToHost: using cudaMemcpyFromSymbolAsync (size=%zu)", LOG_BUFFER_SIZE);
+        }
 
         cudaError_t copyErr = cudaMemcpyFromSymbolAsync(
             h_logBuffer,
@@ -150,23 +169,29 @@ namespace LuchsLogger {
             stream
         );
         if (copyErr != cudaSuccess) {
-            LUCHS_LOG_HOST("[CUDA ERROR] cudaMemcpyFromSymbolAsync failed: %s", cudaGetErrorString(copyErr));
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[CUDA ERROR] cudaMemcpyFromSymbolAsync failed: %s", cudaGetErrorString(copyErr));
+            }
             return;
         }
 
         cudaError_t syncErr = cudaStreamSynchronize(stream);
         if (syncErr != cudaSuccess) {
-            LUCHS_LOG_HOST("[CUDA ERROR] cudaStreamSynchronize failed: %s", cudaGetErrorString(syncErr));
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[CUDA ERROR] cudaStreamSynchronize failed: %s", cudaGetErrorString(syncErr));
+            }
             return;
         }
 
-        char* ptr = h_logBuffer;
-        while (*ptr) {
-            char* lineEnd = strchr(ptr, '\n');
-            if (!lineEnd) break;
-            *lineEnd = 0;
-            LUCHS_LOG_HOST("[CUDA] %s", ptr);
-            ptr = lineEnd + 1;
+        if constexpr (Settings::debugLogging) {
+            char* ptr = h_logBuffer;
+            while (*ptr) {
+                char* lineEnd = strchr(ptr, '\n');
+                if (!lineEnd) break;
+                *lineEnd = 0;
+                LUCHS_LOG_HOST("[CUDA] %s", ptr);
+                ptr = lineEnd + 1;
+            }
         }
     }
 
