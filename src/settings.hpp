@@ -72,7 +72,7 @@ namespace Settings {
     //   Nur aktivieren, wenn du reproduzierbare Fragen klären willst; sonst aus.
     //   Deterministische, sparsame Device‑Logs bevorzugen. (Bezug zu Schneefuchs)
     // ------------------------------------------------------------------------
-    constexpr bool debugLogging  = true;
+    constexpr bool debugLogging  = false;
 
     // ------------------------------------------------------------------------
     // heatmapOverlayEnabled

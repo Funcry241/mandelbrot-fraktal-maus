@@ -257,11 +257,11 @@ void drawOverlay(const std::vector<float>& entropy,
     if (!ctx.heatmapOverlayEnabled) return;
 
     static bool warned = false;
-    if (entropy.empty() || contrast.empty()) {
-        if (Settings::debugLogging && !warned) {
-            LUCHS_LOG_HOST("[HM] WARN: entropy/contrast leer.");
-            warned = true;
+    if (entropy.empty() || contrast.empty()) {        
+        if constexpr (Settings::debugLogging) {
+            if (!warned) { LUCHS_LOG_HOST("[HM] WARN: entropy/contrast leer."); }
         }
+        warned = true;
         return;
     }
 

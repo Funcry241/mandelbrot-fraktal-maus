@@ -47,8 +47,11 @@ void renderFrame_impl(RendererState& state) {
         }
     }
 
-    if (Settings::debugLogging && state.frameCount % 60 == 0) {
-        LUCHS_LOG_HOST("[Loop] Frame %d, Δt = %.3f", state.frameCount, state.deltaTime);
+    if constexpr (Settings::debugLogging) {        // Compile-time gate
+        if (state.frameCount % 60 == 0) {          // Runtime gate
+            LUCHS_LOG_HOST("[Loop] Frame %d, Δt = %.3f",
+                        state.frameCount, state.deltaTime);
+        }
     }
 }
 

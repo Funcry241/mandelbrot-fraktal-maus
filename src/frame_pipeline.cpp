@@ -95,19 +95,21 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     auto t1 = std::chrono::high_resolution_clock::now();
     double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-    if (Settings::debugLogging && state.lastTimings.valid) {
-        LUCHS_LOG_HOST(
-            "[FRAME] Mandelbrot=%.3f | Launch=%.3f | Sync=%.3f | Entropy=%.3f | Contrast=%.3f | LogFlush=%.3f | PBOMap=%.3f",
-            state.lastTimings.mandelbrotTotal,
-            state.lastTimings.mandelbrotLaunch,
-            state.lastTimings.mandelbrotSync,
-            state.lastTimings.entropy,
-            state.lastTimings.contrast,
-            state.lastTimings.deviceLogFlush,
-            state.lastTimings.pboMap
-        );
-    } else if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[TIME] CUDA kernel + sync: %.3f ms", ms);
+    if constexpr (Settings::debugLogging) {
+        if (state.lastTimings.valid) {
+            LUCHS_LOG_HOST(
+                "[FRAME] Mandelbrot=%.3f | Launch=%.3f | Sync=%.3f | Entropy=%.3f | Contrast=%.3f | LogFlush=%.3f | PBOMap=%.3f",
+                state.lastTimings.mandelbrotTotal,
+                state.lastTimings.mandelbrotLaunch,
+                state.lastTimings.mandelbrotSync,
+                state.lastTimings.entropy,
+                state.lastTimings.contrast,
+                state.lastTimings.deviceLogFlush,
+                state.lastTimings.pboMap
+            );
+        } else {
+            LUCHS_LOG_HOST("[TIME] CUDA kernel + sync: %.3f ms", ms);
+        }
     }
 
     cudaError_t err = cudaPeekAtLastError();
@@ -145,23 +147,27 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         frameCtx.newOffset = { zr.newOffset.x, zr.newOffset.y };
     }
 
-    if (Settings::debugLogging) {
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] ZOOMV2: best=%d score=%.3f accept=%d newOff=(%.6f,%.6f)",
-                       zr.bestIndex, zr.bestScore, zr.shouldZoom ? 1 : 0,
-                       zr.newOffset.x, zr.newOffset.y);
+                    zr.bestIndex, zr.bestScore, zr.shouldZoom ? 1 : 0,
+                    zr.newOffset.x, zr.newOffset.y);
     }
 
-    if (Settings::debugLogging && !frameCtx.h_entropy.empty()) {
-        float minE =  1e9f, maxE = -1e9f;
-        float minC =  1e9f, maxC = -1e9f;
-        for (std::size_t i = 0; i < frameCtx.h_entropy.size(); ++i) {
-            minE = std::min(minE, frameCtx.h_entropy[i]);
-            maxE = std::max(maxE, frameCtx.h_entropy[i]);
-            minC = std::min(minC, frameCtx.h_contrast[i]);
-            maxC = std::max(maxC, frameCtx.h_contrast[i]);
+    if constexpr (Settings::debugLogging) {
+        if (!frameCtx.h_entropy.empty()) {
+            float minE =  1e9f, maxE = -1e9f;
+            float minC =  1e9f, maxC = -1e9f;
+            for (std::size_t i = 0; i < frameCtx.h_entropy.size(); ++i) {
+                minE = std::min(minE, frameCtx.h_entropy[i]);
+                maxE = std::max(maxE, frameCtx.h_entropy[i]);
+                minC = std::min(minC, frameCtx.h_contrast[i]);
+                maxC = std::max(maxC, frameCtx.h_contrast[i]);
+            }
+            LUCHS_LOG_HOST("[HEAT] zoom=%.5f offset=(%.5f, %.5f) tileSize=%d",
+                        frameCtx.zoom, frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
+            LUCHS_LOG_HOST("[HEAT] Entropy: min=%.5f  max=%.5f | Contrast: min=%.5f  max=%.5f",
+                        minE, maxE, minC, maxC);
         }
-        LUCHS_LOG_HOST("[HEAT] zoom=%.5f offset=(%.5f, %.5f) tileSize=%d", frameCtx.zoom, frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
-        LUCHS_LOG_HOST("[HEAT] Entropy: min=%.5f  max=%.5f | Contrast: min=%.5f  max=%.5f", minE, maxE, minC, maxC);
     }
 }
 
