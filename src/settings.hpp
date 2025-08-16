@@ -30,7 +30,7 @@ namespace Settings {
     //     Analysewerten; kann „ehrlicher“, aber auch stoppanfälliger sein.
     //
     // Hinweis:
-    //   Aktiv lassen, wenn „Silk‑Lite“ stets flüssig wirken soll; deaktivieren,
+    //   Aktiv lassen, wenn „Silk-Lite“ stets flüssig wirken soll; deaktivieren,
     //   um die Treffgüte der Zielsuche zu verifizieren. (Bezug zu Schneefuchs)
     // ------------------------------------------------------------------------
     inline constexpr bool   ForceAlwaysZoom = true;   // 🦦 Otter: „always zoom“
@@ -51,28 +51,28 @@ namespace Settings {
     //     potenziell unruhig und iterationsintensiver. (Bezug zu Otter)
     //
     // Hinweis:
-    //   PD‑Motion‑Planner kann die visuelle Geschwindigkeit zusätzlich glätten.
+    //   PD-Motion-Planner kann die visuelle Geschwindigkeit zusätzlich glätten.
     // ------------------------------------------------------------------------
     inline constexpr double ForcedZoomStep  = 0.97;   // 🦦 Otter: smooth & steady
 
     // ------------------------------------------------------------------------
     // debugLogging
     // Wirkung:
-    //   Schaltet gezielte Debug-/Diagnose-Ausgaben im Host/Device‑Pfad frei
-    //   (Timing, Kernel‑Phasen, Indizes, etc.). Laufzeitlogs sind stets EN/ASCII.
+    //   Schaltet gezielte Debug-/Diagnose-Ausgaben im Host/Device-Pfad frei
+    //   (Timing, Kernel-Phasen, Indizes, etc.). Laufzeitlogs sind stets EN/ASCII.
     //
     // Empfehlung (Min..Max):
     //   false .. true  (bool)
     //
     // Erhöhung/Reduzierung:
-    //   • true (Erhöhung auf aktiv): Mehr Einblick, evtl. leichte FPS‑Kosten.
+    //   • true (Erhöhung auf aktiv): Mehr Einblick, evtl. leichte FPS-Kosten.
     //   • false (Reduzierung auf aus): Ruhiger Lauf, ideal für Captures/Bench.
     //
     // Hinweis:
     //   Nur aktivieren, wenn du reproduzierbare Fragen klären willst; sonst aus.
-    //   Deterministische, sparsame Device‑Logs bevorzugen. (Bezug zu Schneefuchs)
+    //   Deterministische, sparsame Device-Logs bevorzugen. (Bezug zu Schneefuchs)
     // ------------------------------------------------------------------------
-    constexpr bool debugLogging  = false;
+    inline constexpr bool debugLogging  = false;
 
     // ------------------------------------------------------------------------
     // performanceLogging
@@ -95,12 +95,12 @@ namespace Settings {
     //   deterministisch, CSV-freundlich. Flush-Intervall zentral konfigurierbar.
     //   Schneefuchs-Prinzip: Messen, dann abschalten. (Bezug zu Schneefuchs)
     // ------------------------------------------------------------------------
-    constexpr bool performanceLogging = true;
+    inline constexpr bool performanceLogging = true;
 
     // ------------------------------------------------------------------------
     // heatmapOverlayEnabled
     // Wirkung:
-    //   Bestimmt, ob das Heatmap‑Overlay beim Programmstart sichtbar ist.
+    //   Bestimmt, ob das Heatmap-Overlay beim Programmstart sichtbar ist.
     //
     // Empfehlung (Min..Max):
     //   false .. true  (bool)
@@ -110,14 +110,14 @@ namespace Settings {
     //   • false: Aufgeräumteres Bild; Overlay bei Bedarf zuschalten.
     //
     // Hinweis:
-    //   Für „Pfote/Eule“‑Diagnosen sinnvoll zunächst aktiv. (Bezug zu Otter)
+    //   Für „Pfote/Eule“-Diagnosen sinnvoll zunächst aktiv. (Bezug zu Otter)
     // ------------------------------------------------------------------------
-    constexpr bool heatmapOverlayEnabled = true; 
+    inline constexpr bool heatmapOverlayEnabled = true; 
 
     // ------------------------------------------------------------------------
     // warzenschweinOverlayEnabled
     // Wirkung:
-    //   Schaltet das Warzenschwein‑HUD (FPS/Stats/Text) an/aus zum Start.
+    //   Schaltet das Warzenschwein-HUD (FPS/Stats/Text) an/aus zum Start.
     //
     // Empfehlung (Min..Max):
     //   false .. true  (bool)
@@ -127,14 +127,14 @@ namespace Settings {
     //   • false: Clean Look; HUD nur auf Anfrage.
     //
     // Hinweis:
-    //   Für „WOW‑Effekt“‑Style‑Checks zu Beginn aktiv lassen. (Bezug zu Otter)
+    //   Für „WOW-Effekt“-Style-Checks zu Beginn aktiv lassen. (Bezug zu Otter)
     // ------------------------------------------------------------------------
-    constexpr bool warzenschweinOverlayEnabled = true; 
+    inline constexpr bool warzenschweinOverlayEnabled = true; 
 
     // ------------------------------------------------------------------------
     // hudPixelSize
     // Wirkung:
-    //   Skalierung der HUD‑Glyphen in NDC‑Einheiten pro Pixelquadrat.
+    //   Skalierung der HUD-Glyphen in NDC-Einheiten pro Pixelquadrat.
     //   Steuert die wahrgenommene Textgröße.
     //
     // Empfehlung (Min..Max):
@@ -157,24 +157,24 @@ namespace Settings {
     // Empfehlung (Min..Max):
     //   width :  800 .. 3840
     //   height:  600 .. 2160
-    //   Pos   : frei (je nach Multi‑Monitor‑Setup)
+    //   Pos   : frei (je nach Multi-Monitor-Setup)
     //
     // Erhöhung/Reduzierung:
-    //   • Größere Fenster: Mehr Pixel → höhere GPU‑Last, klareres Bild.
+    //   • Größere Fenster: Mehr Pixel → höhere GPU-Last, klareres Bild.
     //   • Kleinere Fenster: Höhere FPS, geringere Renderlast.
     //
     // Hinweis:
     //   Für reproduzierbare Benchmarks feste Startwerte beibehalten. (Schneefuchs)
     // ------------------------------------------------------------------------
-    constexpr int width       = 1024;
-    constexpr int height      = 768;
-    constexpr int windowPosX  = 100;
-    constexpr int windowPosY  = 100;
+    inline constexpr int width       = 1024;
+    inline constexpr int height      = 768;
+    inline constexpr int windowPosX  = 100;
+    inline constexpr int windowPosY  = 100;
 
     // ------------------------------------------------------------------------
-    // Initialer Fraktal‑Ausschnitt (initialZoom, initialOffsetX/Y)
+    // Initialer Fraktal-Ausschnitt (initialZoom, initialOffsetX/Y)
     // Wirkung:
-    //   Start‑Zoom und ‑Offset im Komplexraum. Bestimmt den Erst‑Eindruck.
+    //   Start-Zoom und -Offset im Komplexraum. Bestimmt den Erst-Eindruck.
     //
     // Empfehlung (Min..Max):
     //   initialZoom   : 0.5f .. 10.0f
@@ -186,11 +186,11 @@ namespace Settings {
     //   • Niedrigerer initialZoom: Weiterer Blick, schneller, weniger Details.
     //
     // Hinweis:
-    //   Aktuelle Defaults liefern einen klassischen Mandelbrot‑Frame. (Otter)
+    //   Aktuelle Defaults liefern einen klassischen Mandelbrot-Frame. (Otter)
     // ------------------------------------------------------------------------
-    constexpr float initialZoom    = 1.5f;
-    constexpr float initialOffsetX = -0.5f;
-    constexpr float initialOffsetY = 0.0f;
+    inline constexpr float initialZoom    = 1.5f;
+    inline constexpr float initialOffsetX = -0.5f;
+    inline constexpr float initialOffsetY = 0.0f;
 
     // ------------------------------------------------------------------------
     // Iterationssteuerung (INITIAL_ITERATIONS, MAX_ITERATIONS_CAP)
@@ -203,22 +203,22 @@ namespace Settings {
     //   MAX_ITERATIONS_CAP: 4096 .. 200000 (GPU/Anspruch abhängig)
     //
     // Erhöhung/Reduzierung:
-    //   • INITIAL_ITERATIONS ↑: Sauberere Kanten, mehr Kosten/FPS‑Verlust möglich.
-    //   • MAX_ITERATIONS_CAP ↑: Tiefere Zoomschärfe; Risiko von Frame‑Spikes.
+    //   • INITIAL_ITERATIONS ↑: Sauberere Kanten, mehr Kosten/FPS-Verlust möglich.
+    //   • MAX_ITERATIONS_CAP ↑: Tiefere Zoomschärfe; Risiko von Frame-Spikes.
     //   • ↓ jeweils entsprechend entlastend, aber gröber.
     //
     // Hinweis:
     //   Bei aggressivem Zoom (ForcedZoomStep klein) Obergrenzen im Blick behalten.
-    //   Dokumentationspflicht: Warnung vor Perf‑Cliffs. (Bezug zu Schneefuchs)
+    //   Dokumentationspflicht: Warnung vor Perf-Cliffs. (Bezug zu Schneefuchs)
     // ------------------------------------------------------------------------
-    constexpr int INITIAL_ITERATIONS = 100;
-    constexpr int MAX_ITERATIONS_CAP = 50000;
+    inline constexpr int INITIAL_ITERATIONS = 100;
+    inline constexpr int MAX_ITERATIONS_CAP = 50000;
 
     // ------------------------------------------------------------------------
-    // CUDA Tile‑Größen (BASE/MIN/MAX_TILE_SIZE)
+    // CUDA Tile-Größen (BASE/MIN/MAX_TILE_SIZE)
     // Wirkung:
-    //   Steuern die Arbeitsaufteilung in Kacheln für CUDA‑Kernels.
-    //   Kachelkanten sollten i. d. R. vielfache von 8 sein (Warp‑freundlich).
+    //   Steuern die Arbeitsaufteilung in Kacheln für CUDA-Kernels.
+    //   Kachelkanten sollten i. d. R. vielfache von 8 sein (Warp-freundlich).
     //
     // Empfehlung (Min..Max):
     //   BASE_TILE_SIZE: 16 .. 64
@@ -226,15 +226,15 @@ namespace Settings {
     //   MAX_TILE_SIZE : BASE_TILE_SIZE .. 128
     //
     // Erhöhung/Reduzierung:
-    //   • Größere Tiles: Weniger Launches, potenziell bessere Coalescing‑Effekte,
+    //   • Größere Tiles: Weniger Launches, potenziell bessere Coalescing-Effekte,
     //     aber ungleichmäßige Lastverteilung bei komplexen Regionen möglich.
-    //   • Kleinere Tiles: Feinere Verteilung, mehr Launch‑Overhead/Synchronisation.
+    //   • Kleinere Tiles: Feinere Verteilung, mehr Launch-Overhead/Synchronisation.
     //
     // Hinweis:
-    //   In Einklang mit Zoom‑Geschwindigkeit und FPS‑Zielen tunen. (Bezug zu Otter)
+    //   In Einklang mit Zoom-Geschwindigkeit und FPS-Zielen tunen. (Bezug zu Otter)
     // ------------------------------------------------------------------------
-    constexpr int BASE_TILE_SIZE = 32;
-    constexpr int MIN_TILE_SIZE  = 8;
-    constexpr int MAX_TILE_SIZE  = 64;
+    inline constexpr int BASE_TILE_SIZE = 32;
+    inline constexpr int MIN_TILE_SIZE  = 8;
+    inline constexpr int MAX_TILE_SIZE  = 64;
 
 } // namespace Settings
