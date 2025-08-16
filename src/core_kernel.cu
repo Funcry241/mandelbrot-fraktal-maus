@@ -1,6 +1,7 @@
-// 🐭 Maus: Performance-Pass ohne Optikverlust – schnellere Math, besseres Launch-Layout.
-// 🦦 Otter: __log2f statt log2f, mandelbrotIterations __forceinline, 32x8 Block wenn performanceLogging. (Bezug zu Otter)
-// 🦊 Schneefuchs: Keine API-Änderungen, nur interne Helfer/Launch; deterministisch, ASCII-Logs. (Bezug zu Schneefuchs)
+// MOUSE
+// 🐭 Maus: Feature „Schwarze Schnauze“ – Early-Out für Innenpunkte (Cardioid/Bulb).
+// 🦦 Otter: Spart Iterationen in schwarzen Bereichen, ohne Bildänderung. (Bezug zu Otter)
+// 🦊 Schneefuchs: Mathematisch exakt; nur Workload-Reduktion, Logs ASCII. (Bezug zu Schneefuchs)
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -19,12 +20,10 @@ __device__ int sprintf(char* str, const char* format, ...);
 
 // --- Helpers ----------------------------------------------------------------
 
-// GLSL-ähnliche fract
 __device__ __forceinline__ float fract(float x) {
     return x - floorf(x);
 }
 
-// Farb-Mapping (legacy, belassen)
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     t = sqrtf(fminf(fmaxf(t, 0.0f), 1.0f));
     float rf = 0.5f + 0.5f * __sinf(6.2831f * (t + 0.0f));
@@ -48,21 +47,19 @@ __device__ __forceinline__ float2 pixelToComplex(
 
 // --- Mandelbrot --------------------------------------------------------------
 
-// Otter: __forceinline__ vermeidet Call-Overhead, hilft dem Compiler beim Unrollen/RA.
 __device__ __forceinline__ int mandelbrotIterations(
     float x0, float y0, int maxIter,
     float& fx, float& fy)
 {
     float x = 0.0f, y = 0.0f;
     int i = 0;
-    // Hot loop – so wenig wie möglich drumherum
 #pragma unroll 1
     while (x * x + y * y <= 4.0f && i < maxIter) {
         float xx = x * x;
         float yy = y * y;
         float xy = x * y;
         float xt = xx - yy + x0;
-        y = 2.0f * xy + y0; // FMA-Kandidat, aber Compiler macht das oft selbst
+        y = 2.0f * xy + y0;
         x = xt;
         ++i;
     }
@@ -71,7 +68,7 @@ __device__ __forceinline__ int mandelbrotIterations(
     return i;
 }
 
-// --- Rüsselwarze / Farbe -----------------------------------------------------
+// --- Farbe / Mapping ---------------------------------------------------------
 
 __device__ __forceinline__ float3 hsvToRgb(float h, float s, float v) {
     float r, g, b;
@@ -107,7 +104,7 @@ void computeCEC(float zx, float zy, int it, int maxIt, float& nu, float& stripe)
         stripe = 0.0f;
         return;
     }
-    // Schneefuchs: __log2f ist schnelle Approx.; fmaxf schützt den Bereich.
+    // Schneefuchs: __log2f ist schnelle Approx.; fmaxf schützt Bereich.
     float mu = (float)it + 1.0f - __log2f(__log2f(fmaxf(norm, 1.000001f)));
     nu = fminf(fmaxf(mu / (float)maxIt, 0.0f), 1.0f);
     float frac = fract(mu);
@@ -131,6 +128,22 @@ float3 colorFractalDetailed(float2 c, float zx, float zy, int it, int maxIt)
     return hsvToRgb(hue, sat, val);
 }
 
+// --- „Schwarze Schnauze“: Innenraum-Shortcut --------------------------------
+// Otter: Early-Out für Punkte sicher in der Menge – spart komplette Iteration.
+// Schneefuchs: Zwei exakte Tests (Hauptcardioide, period-2 Bulb).
+__device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
+    // Hauptcardioide
+    float xm = x - 0.25f;
+    float q  = xm * xm + y * y;
+    if (q * (q + xm) <= 0.25f * y * y) return true;
+
+    // period-2 Bulb um (-1,0) mit r=0.25
+    float xp = x + 1.0f;
+    if (xp * xp + y * y <= 0.0625f) return true;
+
+    return false;
+}
+
 // --- Kernel ------------------------------------------------------------------
 
 __global__ void mandelbrotKernel(
@@ -152,26 +165,35 @@ __global__ void mandelbrotKernel(
 
     float2 c = pixelToComplex(x + 0.5f, y + 0.5f, w, h, spanX, spanY, offset);
 
+    // 🐽 Schwarze Schnauze: Early-Out für Innenpunkte (schwarz, it=maxIter)
+    if (insideMainCardioidOrBulb(c.x, c.y)) {
+        out[idx]     = make_uchar4(0, 0, 0, 255);
+        iterOut[idx] = maxIter;
+        if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
+            char msg[96]; int n = 0;
+            n += sprintf(msg + n, "[NOSE] early_inside x=%d y=%d", x, y);
+            LUCHS_LOG_DEVICE(msg);
+        }
+        return;
+    }
+
     float zx, zy;
     int it = mandelbrotIterations(c.x, c.y, maxIter, zx, zy);
 
     float3 rgb = colorFractalDetailed(c, zx, zy, it, maxIter);
-
-    unsigned char rC = static_cast<unsigned char>(rgb.x * 255.0f);
-    unsigned char gC = static_cast<unsigned char>(rgb.y * 255.0f);
-    unsigned char bC = static_cast<unsigned char>(rgb.z * 255.0f);
-    out[idx] = make_uchar4(rC, gC, bC, 255);
+    out[idx]     = make_uchar4((unsigned char)(rgb.x * 255.0f),
+                               (unsigned char)(rgb.y * 255.0f),
+                               (unsigned char)(rgb.z * 255.0f), 255);
     iterOut[idx] = it;
 
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
         float norm = zx * zx + zy * zy;
-        float t = (it < maxIter) ? (((float)it + 1.0f - __log2f(__log2f(fmaxf(norm, 1.000001f)))) / (float)maxIter)
-                                 : 1.0f;
+        float t = (it < maxIter)
+                    ? (((float)it + 1.0f - __log2f(__log2f(fmaxf(norm, 1.000001f)))) / (float)maxIter)
+                    : 1.0f;
         float tClamped = fminf(fmaxf(t, 0.0f), 1.0f);
-        char msg[256];
-        int n = 0;
-        n += sprintf(msg + n, "[KERNEL] x=%d y=%d it=%d ", x, y, it);
-        n += sprintf(msg + n, "tClamped=%.4f norm=%.4f ", tClamped, norm);
+        char msg[192]; int n = 0;
+        n += sprintf(msg + n, "[KERNEL] x=%d y=%d it=%d tClamped=%.4f norm=%.4f ", x, y, it, tClamped, norm);
         LUCHS_LOG_DEVICE(msg);
     }
 }
@@ -307,7 +329,7 @@ void launch_mandelbrotHybrid(
     using clk = std::chrono::high_resolution_clock;
     auto t0 = clk::now();
 
-    // 🦦 Otter: 32x8 bringt oft bessere Occupancy/Coalescing. Fallback: 16x16.
+    // Otter: 32x8 bei performanceLogging – gute Occupancy/Coalescing.
     dim3 block = Settings::performanceLogging ? dim3(32, 8) : dim3(16, 16);
     dim3 grid((w + block.x - 1)/block.x, (h + block.y - 1)/block.y);
 
