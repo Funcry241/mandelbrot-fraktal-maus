@@ -1,12 +1,18 @@
+// MAUS:
 // Datei: src/warzenschwein_overlay.cpp
-// 🐭 Maus-Kommentar: Vollständig gekapselt wie HeatmapOverlay - Textzustand lokal. drawOverlay prüft `visible` und `currentText`, Shader/VAO/VBO intern verwaltet. Kein Zugriff auf ctx außer Zoom. Otter: saubere Trennung, Schneefuchs: klares Datenmodell.
+// 🐭 Maus-Kommentar: Vollständig gekapselt wie HeatmapOverlay – keine GL-State-Leaks.
+// 🦦 Otter: Orphaning + SubData, deterministischer Draw, ASCII-Logs nur bei Bedarf. (Bezug zu Otter)
+// 🐑 Schneefuchs: if constexpr statt konstanter ifs (C4127-frei), Shader-Fehler geben 0 zurück. (Bezug zu Schneefuchs)
 
+#pragma warning(push)
+#pragma warning(disable: 4100)
+
+#include "pch.hpp"
 #include "warzenschwein_overlay.hpp"
 #include "warzenschwein_fontdata.hpp"
 #include "settings.hpp"
 #include "renderer_state.hpp"
 #include "luchs_log_host.hpp"
-#include <GL/glew.h>
 #include <vector>
 #include <string>
 
@@ -40,56 +46,74 @@ void main() {
 }
 )GLSL";
 
+// ---- Shader Utils -----------------------------------------------------------
 static GLuint compile(GLenum type, const char* src) {
     GLuint s = glCreateShader(type);
+    if (!s) {
+        if constexpr (Settings::debugLogging)
+            LUCHS_LOG_HOST("[WS-SHADER] glCreateShader failed (type=%u)", (unsigned)type);
+        return 0;
+    }
     glShaderSource(s, 1, &src, nullptr);
     glCompileShader(s);
 
-    GLint ok;
+    GLint ok = GL_FALSE;
     glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
     if (!ok) {
-        char buf[512];
-        glGetShaderInfoLog(s, 512, nullptr, buf);
-        LUCHS_LOG_HOST("[ShaderError] Warzenschwein %s: %s",
-                       type == GL_VERTEX_SHADER ? "Vertex" : "Fragment", buf);
+        char buf[2048] = {0};
+        glGetShaderInfoLog(s, (GLsizei)sizeof(buf), nullptr, buf);
+        if constexpr (Settings::debugLogging)
+            LUCHS_LOG_HOST("[WS-SHADER] Compilation failed (%s): %s",
+                           type == GL_VERTEX_SHADER ? "Vertex" : "Fragment", buf);
         glDeleteShader(s);
         return 0;
     }
-
     return s;
 }
 
+static GLuint link(GLuint vs, GLuint fs) {
+    if (vs == 0 || fs == 0) return 0;
+    GLuint prog = glCreateProgram();
+    if (!prog) {
+        if constexpr (Settings::debugLogging)
+            LUCHS_LOG_HOST("[WS-SHADER] glCreateProgram failed");
+        return 0;
+    }
+    glAttachShader(prog, vs);
+    glAttachShader(prog, fs);
+    glLinkProgram(prog);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    GLint linked = GL_FALSE;
+    glGetProgramiv(prog, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char buf[2048] = {0};
+        glGetProgramInfoLog(prog, (GLsizei)sizeof(buf), nullptr, buf);
+        if constexpr (Settings::debugLogging)
+            LUCHS_LOG_HOST("[WS-SHADER] Link failed: %s", buf);
+        glDeleteProgram(prog);
+        prog = 0;
+    }
+    return prog;
+}
+
+// ---- Init -------------------------------------------------------------------
 static void initGL() {
     if (vao != 0) return;
 
     GLuint vs = compile(GL_VERTEX_SHADER, vsSrc);
     GLuint fs = compile(GL_FRAGMENT_SHADER, fsSrc);
-
-    if (!vs || !fs) {
-        LUCHS_LOG_HOST("[FATAL] WarzenschweinOverlay: Shader-Kompilierung fehlgeschlagen");
-        return;
-    }
-
-    shader = glCreateProgram();
-    glAttachShader(shader, vs);
-    glAttachShader(shader, fs);
-    glLinkProgram(shader);
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-
-    GLint linked = GL_FALSE;
-    glGetProgramiv(shader, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        char buf[512];
-        glGetProgramInfoLog(shader, 512, nullptr, buf);
-        LUCHS_LOG_HOST("[ShaderError] Warzenschwein Link: %s", buf);
-        glDeleteProgram(shader);
-        shader = 0;
+    shader = link(vs, fs);
+    if (shader == 0) {
+        if constexpr (Settings::debugLogging)
+            LUCHS_LOG_HOST("[WS] initGL failed (shader=0) – overlay disabled");
         return;
     }
 
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
+
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
@@ -97,23 +121,26 @@ static void initGL() {
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
     glBindVertexArray(0);
+
+    if constexpr (Settings::debugLogging)
+        LUCHS_LOG_HOST("[WS] initGL ok: VAO=%u VBO=%u Program=%u", vao, vbo, shader);
 }
 
+// ---- Background Quad --------------------------------------------------------
 static void buildBackground(float x0, float y0, float x1, float y1) {
-    float bgColor[3] = {0.10f, 0.10f, 0.10f};
-    float quad[6][5] = {
-        {x0, y0, bgColor[0], bgColor[1], bgColor[2]},
-        {x1, y0, bgColor[0], bgColor[1], bgColor[2]},
-        {x1, y1, bgColor[0], bgColor[1], bgColor[2]},
-        {x0, y0, bgColor[0], bgColor[1], bgColor[2]},
-        {x1, y1, bgColor[0], bgColor[1], bgColor[2]},
-        {x0, y1, bgColor[0], bgColor[1], bgColor[2]},
+    const float bg[3] = {0.10f, 0.10f, 0.10f};
+    const float quad[6][5] = {
+        {x0, y0, bg[0], bg[1], bg[2]},
+        {x1, y0, bg[0], bg[1], bg[2]},
+        {x1, y1, bg[0], bg[1], bg[2]},
+        {x0, y0, bg[0], bg[1], bg[2]},
+        {x1, y1, bg[0], bg[1], bg[2]},
+        {x0, y1, bg[0], bg[1], bg[2]},
     };
     background.insert(background.end(), &quad[0][0], &quad[0][0] + 6 * 5);
 }
 
-// Otter: symmetric padding for top/bottom; clean, deterministic math. (Bezug zu Otter)
-// Schneefuchs: keep glyph advance stable; only shift start Y by deltaTop. (Bezug zu Schneefuchs)
+// Otter: symmetric padding; Schneefuchs: Advance stabil halten.
 void generateOverlayQuads(const std::string& text,
                           std::vector<float>& vertexOut,
                           std::vector<float>& backgroundOut,
@@ -122,19 +149,20 @@ void generateOverlayQuads(const std::string& text,
     vertexOut.clear();
     backgroundOut.clear();
 
-    // --- Screen pixel to NDC scale ---
-    const float px  = Settings::hudPixelSize;   // 1 HUD pixel in screen pixels
+    // Screen-Pixel → NDC
+    const float px  = Settings::hudPixelSize;  // NDC pro HUD-"Pixel"
     const float pxX = 2.0f / ctx.width;
     const float pxY = 2.0f / ctx.height;
 
-    // --- Anchor (outer top-left of content area, before padding) ---
+    // Anker (oben links, mit Außenpadding in echten Screen-Pixeln)
     const float x0 = -1.0f + 16.0f * pxX;
     const float y0 =  1.0f - 16.0f * pxY;
 
-    // --- Split text into lines ---
+    // Zeilen splitten
     std::vector<std::string> lines;
     {
         std::string cur;
+        cur.reserve(64);
         for (char c : text) {
             if (c == '\n') { lines.push_back(cur); cur.clear(); }
             else           { cur += c; }
@@ -142,36 +170,28 @@ void generateOverlayQuads(const std::string& text,
         if (!cur.empty()) lines.push_back(cur);
     }
 
-    // --- Compute content box (in HUD pixels) ---
+    // Content-Box (in HUD-Pixeln)
     std::size_t maxW = 0;
     for (const auto& l : lines) maxW = std::max(maxW, l.size());
-
-    // Letter/line spacing are baked like before: +1 horiz, +2 vert; +2 overall border fudge.
     const float boxW = (maxW * (glyphW + 1) + 2) * px;
     const float boxH = (static_cast<float>(lines.size()) * (glyphH + 2) + 2) * px;
 
-    // --- NEW: symmetric inner padding (top == bottom), left/right as before ---
-    // We liked the *bottom* margin visually; mirror it to the top.
-    // Choose 4 px HUD-padding for top/bottom, 1 px left/right (keeps previous look).
-    const float padL = 1.0f * px;
-    const float padR = 1.0f * px;
-    const float padT = 4.0f * px;
-    const float padB = 4.0f * px;
+    // Symmetrisches Innenpadding
+    const float padL = 1.0f * px, padR = 1.0f * px;
+    const float padT = 4.0f * px, padB = 4.0f * px;
 
-    // Background quad with symmetric padding
+    // Hintergrund
     const float bgX0 = x0 - padL;
     const float bgY0 = y0 + padT;
     const float bgX1 = x0 + boxW + padR;
     const float bgY1 = y0 - boxH - padB;
     buildBackground(bgX0, bgY0, bgX1, bgY1);
 
-    // Shift first text baseline down by the *additional* top padding delta.
-    // Previously top padding was 1*px; now it is padT. Keep advance/grid identical.
+    // Erste Baseline um Top-Delta verschieben (Advance unverändert)
     const float deltaTop = (padT - 1.0f * px);
 
-    // --- Draw glyph quads (unchanged advance, only baseline shift) ---
+    // Glyphen
     const float r = 1.0f, g = 0.8f, b = 0.3f;
-
     for (std::size_t row = 0; row < lines.size(); ++row) {
         const std::string& line = lines[row];
         const float yBase = (y0 - deltaTop) - static_cast<float>(row) * (glyphH + 2) * px;
@@ -202,46 +222,70 @@ void generateOverlayQuads(const std::string& text,
     }
 }
 
+// ---- Draw -------------------------------------------------------------------
 void drawOverlay(RendererState& ctx) {
-    if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[WZ] drawOverlay called, visible=%d, currentText.empty=%d",
-                       visible ? 1 : 0,
-                       currentText.empty() ? 1 : 0);
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[WS] drawOverlay: visible=%d empty=%d",
+                       visible ? 1 : 0, currentText.empty() ? 1 : 0);
     }
-
     if (!Settings::warzenschweinOverlayEnabled || !visible || currentText.empty())
         return;
 
     initGL();
-    if (!shader) return;
+    if (shader == 0) return;
 
     generateOverlayQuads(currentText, vertices, background, ctx);
 
+    // GL-State sichern
+    GLint  prevVAO = 0, prevArray = 0, prevProg = 0;
+    GLboolean wasDepth = GL_FALSE, wasBlend = GL_FALSE;
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArray);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
+    glGetBooleanv(GL_DEPTH_TEST, &wasDepth);
+    glGetBooleanv(GL_BLEND, &wasBlend);
+
+    // HUD-State setzen
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     glUseProgram(shader);
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
 
-    glBufferData(GL_ARRAY_BUFFER, background.size() * sizeof(float), background.data(), GL_DYNAMIC_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(background.size() / 5));
+    // Background upload (Orphaning + SubData)
+    if (!background.empty()) {
+        const GLsizeiptr bytes = (GLsizeiptr)(background.size() * sizeof(float));
+        glBufferData(GL_ARRAY_BUFFER, bytes, nullptr, GL_DYNAMIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, background.data());
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(background.size() / 5));
+    }
 
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 5));
+    // Glyph upload (Orphaning + SubData)
+    if (!vertices.empty()) {
+        const GLsizeiptr bytes = (GLsizeiptr)(vertices.size() * sizeof(float));
+        glBufferData(GL_ARRAY_BUFFER, bytes, nullptr, GL_DYNAMIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, vertices.data());
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 5));
+    }
 
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
-    glUseProgram(0);
+    // GL-State restaurieren
+    if (!wasBlend) glDisable(GL_BLEND);
+    if (wasDepth)  glEnable(GL_DEPTH_TEST);
+    glBindBuffer(GL_ARRAY_BUFFER, prevArray);
+    glBindVertexArray((GLuint)prevVAO);
+    glUseProgram((GLuint)prevProg);
 
-    if (Settings::debugLogging) {
-        GLenum err = glGetError();
+    if constexpr (Settings::debugLogging) {
+        const GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
-            LUCHS_LOG_HOST("[WS-GL] glGetError = 0x%04X", err);
+            LUCHS_LOG_HOST("[WS-GL] glGetError=0x%04X", err);
         }
     }
 }
 
+// ---- API --------------------------------------------------------------------
 void toggle(RendererState&) {
     visible = !visible;
 }
@@ -262,3 +306,5 @@ void cleanup() {
 }
 
 } // namespace WarzenschweinOverlay
+
+#pragma warning(pop)
