@@ -1,9 +1,8 @@
+// MAUS:
 // Datei: src/renderer_state.cpp
-// 🐭 Maus: Tile size & buffer sanity visible. No malloc into the void.
-// 🦦 Otter: Deterministic, explicit reallocation policy. (Bezug zu Otter)
-// 🐜 Schwarze Ameise: setupCudaBuffers nimmt tileSize explizit entgegen – Datenfluss 100% klar.
-// 🐑 Hirte: cudaPointerGetAttributes für Diagnose – ASCII-only logs.
-// 🦊 Schneefuchs: Header/Source synchron, keine impliziten Seitenwirkungen. (Bezug zu Schneefuchs)
+// 🐭 Maus: Sichtbare Tile-/Buffer-Sanity, kein „malloc into the void“, deterministische Logs.
+// 🦦 Otter: Explizite Realloc-Policy (only-grow) und klare Lebenszyklen von CUDA/GL-Ressourcen. (Bezug zu Otter)
+// 🦊 Schneefuchs: Keine impliziten Seiteneffekte, Header/Source konsistent, ASCII-only Logs. (Bezug zu Schneefuchs)
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -11,6 +10,8 @@
 #include "cuda_interop.hpp"
 #include "common.hpp"
 #include "renderer_resources.hpp"
+#include "opengl_utils.hpp" // Schneefuchs: explizit, da setGLResourceContext / PBO/Texture genutzt
+#include <algorithm>        // std::clamp
 
 // Helper: compute tile layout for given tileSize
 static inline void computeTiles(int width, int height, int tileSize,
@@ -55,10 +56,20 @@ void RendererState::reset() {
     zoomV2State = ZoomLogic::ZoomState{};
 
     // CUDA timings reset
-    lastTimings = CudaPhaseTimings{};
+    lastTimings = CudaPhaseTimings{}; // valid=false by default
 }
 
 void RendererState::setupCudaBuffers(int tileSize) {
+    // --- sanitize input ---
+    if (width <= 0 || height <= 0) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ERROR] setupCudaBuffers: invalid size %dx%d", width, height);
+        }
+        return;
+    }
+    // Clamp tile size to configured bounds
+    tileSize = std::clamp(tileSize, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
+
     // --- derive sizes ---
     const int totalPixels = width * height;
     int tilesX = 0, tilesY = 0, numTiles = 0;
@@ -78,34 +89,30 @@ void RendererState::setupCudaBuffers(int tileSize) {
         CudaInterop::logCudaDeviceContext("setupCudaBuffers");
     }
 
-    // --- iterations buffer ---
+    // --- iterations buffer (only-grow policy) ---
     const size_t have_it = d_iterations.size();
     if (have_it < it_bytes) {
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_iterations grow: have=%zu -> need=%zu", have_it, it_bytes);
         }
         d_iterations.allocate(it_bytes);
-    } else {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_iterations ok: have=%zu need=%zu (no realloc)", have_it, it_bytes);
-        }
+    } else if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[ALLOC] d_iterations ok: have=%zu need=%zu (no realloc)", have_it, it_bytes);
     }
     CUDA_CHECK(cudaMemset(d_iterations.get(), 0, it_bytes));
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[CHECK] cudaMemset d_iterations ok (bytes=%zu)", it_bytes);
     }
 
-    // --- entropy buffer ---
+    // --- entropy buffer (only-grow policy) ---
     const size_t have_entropy = d_entropy.size();
     if (have_entropy < entropy_bytes) {
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_entropy grow: have=%zu -> need=%zu (tiles %d)", have_entropy, entropy_bytes, numTiles);
         }
         d_entropy.allocate(entropy_bytes);
-    } else {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_entropy ok: have=%zu need=%zu (tiles %d, no realloc)", have_entropy, entropy_bytes, numTiles);
-        }
+    } else if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[ALLOC] d_entropy ok: have=%zu need=%zu (tiles %d, no realloc)", have_entropy, entropy_bytes, numTiles);
     }
 
     // Diagnostics: pointer attributes (ASCII only)
@@ -132,17 +139,15 @@ void RendererState::setupCudaBuffers(int tileSize) {
             throw std::runtime_error("cudaMemset d_entropy failed (post-sync)");
     }
 
-    // --- contrast buffer ---
+    // --- contrast buffer (only-grow policy) ---
     const size_t have_contrast = d_contrast.size();
     if (have_contrast < contrast_bytes) {
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_contrast grow: have=%zu -> need=%zu (tiles %d)", have_contrast, contrast_bytes, numTiles);
         }
         d_contrast.allocate(contrast_bytes);
-    } else {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_contrast ok: have=%zu need=%zu (tiles %d, no realloc)", have_contrast, contrast_bytes, numTiles);
-        }
+    } else if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[ALLOC] d_contrast ok: have=%zu need=%zu (tiles %d, no realloc)", have_contrast, contrast_bytes, numTiles);
     }
     CUDA_CHECK(cudaMemset(d_contrast.get(), 0, contrast_bytes));
     if constexpr (Settings::debugLogging) {
@@ -166,6 +171,13 @@ void RendererState::setupCudaBuffers(int tileSize) {
 }
 
 void RendererState::resize(int newWidth, int newHeight) {
+    if (newWidth <= 0 || newHeight <= 0) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ERROR] resize: invalid target size %d x %d", newWidth, newHeight);
+        }
+        return;
+    }
+
     // Free old CUDA device buffers
     d_iterations.free();
     d_entropy.free();
@@ -191,6 +203,7 @@ void RendererState::resize(int newWidth, int newHeight) {
     CudaInterop::registerPBO(pbo);
 
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
+    lastTileSize = std::clamp(lastTileSize, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] resize: zoom=%.5f -> tileSize=%d", zoom, lastTileSize);
