@@ -1,3 +1,4 @@
+// MAUS:
 // Datei: src/renderer_core.cu
 // 🐭 Maus-Kommentar: Alpha 80 – Kontextfix & klare Zuständigkeiten. Keine Zoom-Logik mehr hier.
 // 🦦 Otter: Renderer steuert nur Fenster/GL; Zoom/Analyse liegen in der Pipeline/Loop. (Bezug zu Otter)
@@ -115,25 +116,14 @@ void Renderer::renderFrame() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Entering Renderer::renderFrame");
 
-    // Ab hier übernimmt die Loop die komplette Frame-Pipeline (inkl. Zoom V2 Entscheidung)
+    // Ab hier übernimmt die Loop die komplette Frame-Pipeline (inkl. Upload & Draw)
     RendererLoop::renderFrame_impl(this->state);
 
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Returned from RendererLoop::renderFrame_impl");
 
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[GL-UPLOAD] Updating texture from PBO %u to Texture %u", state.pbo.id(), state.tex.id());
-
-    OpenGLUtils::updateTextureFromPBO(state.pbo.id(), state.tex.id(), state.width, state.height);
-
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DRAW] About to draw fullscreen quad");
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-    if (Settings::debugLogging) {
-        GLenum err = glGetError();
-        LUCHS_LOG_HOST("[DRAW] glDrawArrays glGetError() = 0x%04X", err);
-        LUCHS_LOG_HOST("[DRAW] Fullscreen quad drawn, swapping buffers");
-    }
+    // 🐑 Schneefuchs: Doppelte Upload/Draw entfernt – die Pipeline zeichnet bereits.
+    // (Früher: OpenGLUtils::updateTextureFromPBO(...) + glDrawArrays(...) -> redundant)
 
     glfwSwapBuffers(state.window);
     if (Settings::debugLogging)
