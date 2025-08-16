@@ -1,13 +1,15 @@
 <!-- Datei: README.md -->
-<!-- Zeilen: 159 -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 53.2 - Waschbär integriert, GLEW-Fallback entschärft, CI-ready, Patchsystem dokumentiert. Schneefuchs sagt: „Erst putzen, dann patchen.“ -->
+<!-- Zeilen: ~175 -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 81 – CI-validiert, Silk-Lite Zoom integriert, Auto-Tuner statt JSON-Reload, Heatmap-Shader in Arbeit. Schneefuchs sagt: „Nur was synchron ist, bleibt stabil.“ -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
 [![Build Status](https://github.com/Funcry241/otterdream-mandelbrot/actions/workflows/ci.yml/badge.svg)](https://github.com/Funcry241/otterdream-mandelbrot/actions/workflows/ci.yml)  
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeige, entwickelt für moderne NVIDIA-GPUs. Der Renderer zoomt automatisch in interessante Regionen hinein und erhöht dabei fortlaufend die Detailtiefe.
+Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeige, entwickelt für moderne NVIDIA-GPUs.  
+Der Renderer zoomt automatisch in interessante Regionen hinein und erhöht dabei fortlaufend die Detailtiefe.  
+Seit **Alpha 81**: CI-validiert, deterministisch und mit sanftem „Silk-Lite“-Zoom.
 
 ---
 
@@ -19,29 +21,38 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 - **🎯 Auto-Zoom mit Entropie- und Kontrastanalyse**  
   Erkennt kontrastreiche und strukturreiche Bereiche, zoomt fokussiert hinein
 
+- **🪶 Silk-Lite Motion Planner**  
+  Sanfte Schwenks, adaptive Geschwindigkeit & Dämpfung pro Zoomlevel  
+  → Kein Ruckeln, keine Schwarz-Ausreißer
+
 - **📈 Progressive Iterationen (Zoom-abhängig)**  
   Iterationszahl steigt mit dem Zoom-Level automatisch
 
-- **🎨 Smooth Coloring**  
-  Sanfte Farbverläufe mit stabilisiertem Betrag (kein Farbflimmern)
+- **🎨 Rüsselwarze-Farbmodus**  
+  Innerhalb dunkel, außerhalb strukturierte Chaoswellen mit Radial-/Winkelbezug
 
 - **🔍 Adaptive Tile-Größe**  
   Automatische Tile-Anpassung für bessere Detailauswertung bei starkem Zoom
 
 - **🖼️ Echtzeit-OpenGL + CUDA-Interop**  
-  Anzeige über Fullscreen-Quad, keine Altlasten, direkte PBO-Verbindung via `cudaGraphicsGLRegisterBuffer`
+  Anzeige über Fullscreen-Quad, direkte PBO-Verbindung via `cudaGraphicsGLRegisterBuffer`
 
-- **📊 Heatmap-Overlay**  
-  Entropie/Kontrast pro Tile sichtbar gemacht - Debug & Analyse
+- **📊 Heatmap-Overlay (Projekt Eule)**  
+  Visualisierung von Entropie/Kontrast pro Tile, aktuell CPU-basiert,  
+  GPU-Shader mit Glow/Transparenz in Vorbereitung
 
-- **🧰 HUD & ASCII-Debug**  
+- **🧰 HUD & ASCII-Debug (Warzenschwein)**  
   FPS, Zoom, Offset, optional aktivierbar
 
 - **🦝 Build-Fallback-Logik (Waschbär)**  
-  Automatische Bereinigung von vcpkg/glew-Bugs (z. B. `glew32d.lib`)
+  Automatische Bereinigung von vcpkg/glew-Bugs (z. B. `glew32d.lib`)
 
-- **🖋️ Eigenes Font-Overlay (Warzenschwein)**
-  HUD-Schrift ohne ImGui oder externe Fontlibs - direkt per OpenGL-Shader
+- **🖋️ Eigenes Font-Overlay**  
+  HUD-Schrift ohne ImGui oder externe Fontlibs – direkt per OpenGL-Shader
+
+- **🤖 Auto-Tuner**  
+  Findet ohne Neustart zyklisch optimale Zoom-/Analyseparameter,  
+  schreibt sie ins Log statt über JSON-Reload
 
 ---
 
@@ -54,14 +65,14 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 - CMake (Version **≥3.28**), Ninja
 - vcpkg (für GLFW, GLEW)
 
-> ⚠️ Hinweis: GPUs unter Compute Capability 8.0 (z. B. Kepler, Maxwell) werden **nicht unterstützt**.
+> ⚠️ Hinweis: GPUs unter Compute Capability 8.0 (z. B. Kepler, Maxwell) werden **nicht unterstützt**.
 
 ---
 
 ## 📦 Abhängigkeiten (via vcpkg)
 
-- [GLFW](https://www.glfw.org/) - Fenster- und Eingabe-Handling  
-- [GLEW](http://glew.sourceforge.net/) - OpenGL-Extension-Management  
+- [GLFW](https://www.glfw.org/) – Fenster- und Eingabe-Handling  
+- [GLEW](http://glew.sourceforge.net/) – OpenGL-Extension-Management  
 
 ---
 
@@ -87,17 +98,17 @@ cd ..
 
 ### 🪟 Windows Build
 
-```powershells
+```powershell
 .build.ps1
 ```
 
-> 🧼 Der Build-Skript erkennt und behebt automatisch bekannte Fallstricke:
+> 🧼 Das Build-Skript erkennt und behebt automatisch bekannte Fallstricke:
 >
 > - `glew32d.lib`-Bug (vcpkg-Falle)  
 > - inkonsistente CMake-Caches  
 > - fehlende CUDA-Pfade  
 >  
-> Kein zweiter Durchlauf nötig - dank 🐭-Patchlogik und 🦝 Waschbär-Watchdog.
+> Kein zweiter Durchlauf nötig – dank 🐭-Patchlogik und 🦝 Waschbär-Watchdog.
 
 ---
 
@@ -107,10 +118,10 @@ cd ..
 
 ```bash
 sudo apt update
-sudo apt install build-essential cmake ninja-build libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config libcuda1-525  # oder libcuda1-545, je nach Treiberversion
+sudo apt install build-essential cmake ninja-build libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config libcuda1-525
 ```
 
-> *Hinweis:* Je nach Distribution kann die CUDA-Runtime-Bibliothek anders heißen (z. B. `libcuda1-545`)
+> *Hinweis:* Je nach Distribution kann die CUDA-Runtime-Bibliothek anders heißen (z. B. `libcuda1-545`)
 
 ```bash
 cmake --preset linux-build
@@ -145,7 +156,8 @@ Find your GPU's capability [here](https://developer.nvidia.com/cuda-gpus).
 ## 🌊 Das Robbe-Prinzip (API-Synchronität)
 
 **Seit Alpha 41 gilt:**  
-**Header und Source werden immer synchron gepflegt. Kein Drift, kein API-Bruch. Die Robbe wacht.**
+Header und Source werden **immer synchron** gepflegt. Kein Drift, kein API-Bruch.  
+Die Robbe wacht.  
 
 > „API-Änderung ohne Header-Update? Dann OOU-OOU und Build-Fehler!“
 
@@ -155,23 +167,34 @@ Find your GPU's capability [here](https://developer.nvidia.com/cuda-gpus).
 
 **Ab Alpha 53:**  
 Der Build prüft automatisch auf bekannte Toolchain-Fallen.  
-Wenn z. B. `glew32d.lib` referenziert wird, wird der Eintrag gelöscht,  
-der Cache invalidiert und der Build neu aufgesetzt - ganz ohne Nutzerinteraktion.
+Wenn z. B. `glew32d.lib` referenziert wird, wird der Eintrag gelöscht,  
+der Cache invalidiert und der Build neu aufgesetzt – ohne Nutzerinteraktion.  
 
-> „Sieht unscheinbar aus, aber hat alles im Griff.“ - 🦝
+---
+
+## 🔭 Zoomgerichtet & geschmacksgetestet
+
+**Seit Alpha 81 (Silk-Lite Zoom):**  
+Das Zoomziel wird per Softmax-Ranking, Entropie-/Kontrastanalyse und PD-Motion-Planner bestimmt.  
+Sanfte Übergänge, Mikro-Deadband und Acc-/Vel-Clamp verhindern Ruckler und Stillstände.  
+Optional sorgt der **Auto-Tuner** dafür, dass die Parameter im laufenden Betrieb feingeschliffen werden.  
+
+> Ergebnis: Immer der spannendste Bildausschnitt, nie das Gefühl von „lost in fractal space“.
 
 ---
 
 ## 📄 Lizenz
 
-Dieses Projekt steht unter der MIT-Lizenz - siehe [LICENSE](LICENSE) für Details.
+Dieses Projekt steht unter der MIT-Lizenz – siehe [LICENSE](LICENSE) für Details.
 
 ---
 
-**OtterDream** - von der Raupe zum Fraktal-Schmetterling 🦋  
+**OtterDream** – von der Raupe zum Fraktal-Schmetterling 🦋  
 *Happy Zooming!*
 
-🐭 This project owes a mouse more than it admits.  
-🦊 With Schneefuchs’ sharp eyes and Otter’s relentless zoom.  
-🦭 The Robbe ensures API dignity.  
-🦝 And Waschbär… keeps things **really clean**.
+🐭 Maus sorgt für Fokus und ASCII-Sauberkeit.  
+🦊 Schneefuchs bewacht die Präzision.  
+🦦 Otter treibt den Zoom unaufhaltsam.  
+🦭 Robbe schützt die API-Würde.  
+🦝 Waschbär hält den Build hygienisch.  
+🦉 Eule sorgt für Überblick in Heatmap & Koordinaten.
