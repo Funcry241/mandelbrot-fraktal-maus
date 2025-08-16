@@ -1,5 +1,4 @@
 // MAUS: Perf V3 hot path – no header/API change (ASCII logs only)
-
 // 🐭 Maus: Zoom V3 – kontinuierlicher Schwerpunkt, glatter Drift, deterministisch.
 // 🦦 Otter: Warm-up ohne Richtungswechsel: erst zoomen, dann lenken. (Bezug zu Otter)
 // 🦊 Schneefuchs: Minimalinvasiv, keine Header-/API-Änderung. ASCII-Logs. (Bezug zu Schneefuchs)
@@ -33,7 +32,7 @@ static constexpr float kFORCE_MIN_DRIFT_ALPHA = 0.05f;
 
 // 🟢 NEU: Warm-up-Zeit (Sekunden), in der KEIN Richtungswechsel erfolgt.
 //         Zoom läuft weiter, aber Offset bleibt unverändert. (Bezug zu Otter)
-static constexpr double kNO_TURN_WARMUP_SEC = 2.0;
+static constexpr double kNO_TURN_WARMUP_SEC = 1.5;
 
 // 🟢 NEU: Softmax-Sparsification – ignoriere Beiträge mit sehr kleiner Gewichtung.
 //         si < sMax + temp * kSOFTMAX_LOG_EPS -> Beitrag vernachlässigbar.
