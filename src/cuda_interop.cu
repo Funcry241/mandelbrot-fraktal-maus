@@ -1,3 +1,4 @@
+// MAUS:
 // Datei: src/cuda_interop.cu
 // 🐜 Schwarze Ameise: Klare Parametrisierung, deterministisches Logging, robustes Ressourcenhandling.
 // 🦦 Otter: Explizite und einheitliche Übergabe aller Parameter. Fehler- und Kontextlogging überall. (Bezug zu Otter)
@@ -13,6 +14,7 @@
 #include "luchs_cuda_log_buffer.hpp"
 #include "hermelin_buffer.hpp"
 #include "bear_CudaPBOResource.hpp"
+
 #include <cuda_gl_interop.h>
 #include <vector>
 #include <stdexcept>
@@ -23,9 +25,47 @@
 
 namespace CudaInterop {
 
-static bear_CudaPBOResource* pboResource = nullptr;
-static bool pauseZoom = false;
-static bool luchsBabyInitDone = false;
+// 🐑 Schneefuchs: TU-lokaler Zustand – kein Header-Touch.
+static bear_CudaPBOResource* pboResource      = nullptr;
+static bool pauseZoom                         = false;
+static bool luchsBabyInitDone                 = false;
+static bool s_deviceInitDone                  = false;
+static int  s_frameCounter                    = 0;
+
+// 🐑 Schneefuchs: Pinned-Host-Registrierung cachen (schnellere D2H).
+static void*  s_hostRegEntropyPtr  = nullptr;
+static size_t s_hostRegEntropyBytes= 0;
+static void*  s_hostRegContrastPtr = nullptr;
+static size_t s_hostRegContrastBytes=0;
+
+// 🐑 Schneefuchs: Einmaliges Device-Set, deterministisch.
+static inline void ensureDeviceOnce() {
+    if (!s_deviceInitDone) {
+        CUDA_CHECK(cudaSetDevice(0));
+        s_deviceInitDone = true;
+    }
+}
+
+// 🐑 Schneefuchs: Hostspeicher (Vector-Backing) page-locken, nur bei Realloc/Capacity-Change.
+static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size_t& regBytes) {
+    const size_t cap = vec.capacity();
+    if (cap == 0) { // Nichts zu pinnen
+        if (regPtr) { CUDA_CHECK(cudaHostUnregister(regPtr)); regPtr = nullptr; regBytes = 0; }
+        return;
+    }
+    void* ptr = static_cast<void*>(vec.data());
+    const size_t bytes = cap * sizeof(float);
+    if (ptr != regPtr || bytes != regBytes) {
+        if (regPtr) CUDA_CHECK(cudaHostUnregister(regPtr));
+        // Portable für GL/CUDA Mischbetrieb
+        CUDA_CHECK(cudaHostRegister(ptr, bytes, cudaHostRegisterPortable));
+        regPtr  = ptr;
+        regBytes= bytes;
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[PIN] host-register ptr=%p bytes=%zu", ptr, bytes);
+        }
+    }
+}
 
 void logCudaDeviceContext(const char* context) {
     int device = -1;
@@ -42,6 +82,8 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
         }
         return;
     }
+
+    ensureDeviceOnce();
 
     GLint boundBefore = 0;
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundBefore);
@@ -88,6 +130,8 @@ void renderCudaFrame(
     int tileSize,
     RendererState& state
 ) {
+    ++s_frameCounter;
+
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[ENTER] renderCudaFrame(tileSize=%d)", tileSize);
         logCudaDeviceContext("renderCudaFrame ENTER");
@@ -98,6 +142,7 @@ void renderCudaFrame(
 
 #ifndef CUDA_ARCH
     const auto t0 = std::chrono::high_resolution_clock::now();
+    double mapMs = 0.0, mandelbrotMs = 0.0, entMs = 0.0, conMs = 0.0, flushMs = 0.0;
 #endif
 
     const int totalPixels = width * height;
@@ -138,8 +183,10 @@ void renderCudaFrame(
         throw std::runtime_error("CudaInterop::renderCudaFrame: device buffers undersized for current tile layout");
     }
 
-    CUDA_CHECK(cudaSetDevice(0));
+    // 🐑 Schneefuchs: Keine globale Synchronisation vor MAP – Reihenfolge genügt.
+    // (Alle bisherigen Ops betreffen keine GL-Ressource.)
 
+    // Device-Seitige Clears (deterministisch), optional loggen
     CUDA_CHECK(cudaMemset(d_iterations.get(), 0, d_iterations.size()));
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels -> %zu bytes", totalPixels, d_iterations.size());
@@ -147,14 +194,16 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemset(d_entropy.get(),   0, d_entropy.size()));
     CUDA_CHECK(cudaMemset(d_contrast.get(),  0, d_contrast.size()));
 
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[MAP] Using Baer to map CUDA-GL resource");
-    }
-
-    CUDA_CHECK(cudaDeviceSynchronize());
-
+    // Map PBO (Host-Zeit messen)
+#ifndef CUDA_ARCH
+    const auto tMap0 = std::chrono::high_resolution_clock::now();
+#endif
     size_t sizeBytes = 0;
     uchar4* devPtr = static_cast<uchar4*>(pboResource->mapAndLog(sizeBytes));
+#ifndef CUDA_ARCH
+    const auto tMap1 = std::chrono::high_resolution_clock::now();
+    mapMs = std::chrono::duration<double, std::milli>(tMap1 - tMap0).count();
+#endif
 
     if (!devPtr) {
         LUCHS_LOG_HOST("[FATAL] Kernel skipped: surface pointer is null");
@@ -180,29 +229,65 @@ void renderCudaFrame(
             (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations, tileSize
         );
     }
+
+    // 🐑 Schneefuchs: Kernel-Zeit via Events (nur wenn Logging aktiv).
+    float mandelbrotMsEv = 0.0f;
+    cudaEvent_t evK0 = nullptr, evK1 = nullptr;
+    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
+        CUDA_CHECK(cudaEventCreate(&evK0));
+        CUDA_CHECK(cudaEventCreate(&evK1));
+        CUDA_CHECK(cudaEventRecord(evK0, 0)); // default stream
+    }
+
+    // Launch
     launch_mandelbrotHybrid(
         devPtr,
         static_cast<int*>(d_iterations.get()),
         width, height, zoom, offset, maxIterations, tileSize
     );
 
-    LuchsLogger::flushDeviceLogToHost();
+    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
+        CUDA_CHECK(cudaEventRecord(evK1, 0));
+        CUDA_CHECK(cudaEventSynchronize(evK1));
+        CUDA_CHECK(cudaEventElapsedTime(&mandelbrotMsEv, evK0, evK1));
+        mandelbrotMs = (double)mandelbrotMsEv;
+        CUDA_CHECK(cudaEventDestroy(evK0));
+        CUDA_CHECK(cudaEventDestroy(evK1));
+    }
 
+    // Optional: kleines It-Sample zum Sanity-Check
     if constexpr (Settings::debugLogging) {
         int dbg_after[3] = {};
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations.get(), sizeof(dbg_after), cudaMemcpyDeviceToHost));
         LUCHS_LOG_HOST("[KERNEL] iters sample: %d %d %d", dbg_after[0], dbg_after[1], dbg_after[2]);
     }
 
+    // Entropy/Contrast (Host-Timing als Approx.)
+#ifndef CUDA_ARCH
+    const auto tEnt0 = std::chrono::high_resolution_clock::now();
+#endif
     ::computeCudaEntropyContrast(
         static_cast<const int*>(d_iterations.get()),
         static_cast<float*>(d_entropy.get()),
         static_cast<float*>(d_contrast.get()),
         width, height, tileSize, maxIterations
     );
+#ifndef CUDA_ARCH
+    const auto tEnt1 = std::chrono::high_resolution_clock::now();
+    const double ecMs = std::chrono::duration<double, std::milli>(tEnt1 - tEnt0).count();
+    // Aufteilen (beste Schätzung, ohne innere Events)
+    entMs = ecMs * 0.5;
+    conMs = ecMs * 0.5;
+#endif
 
-    h_entropy.resize(numTiles);
-    h_contrast.resize(numTiles);
+    // Host-Ziele vorbereiten (keine Reallocs, dann pinnen)
+    if ((size_t)h_entropy.capacity() < (size_t)numTiles) h_entropy.reserve((size_t)numTiles);
+    if ((size_t)h_contrast.capacity() < (size_t)numTiles) h_contrast.reserve((size_t)numTiles);
+    ensureHostPinned(h_entropy,  s_hostRegEntropyPtr,  s_hostRegEntropyBytes);
+    ensureHostPinned(h_contrast, s_hostRegContrastPtr, s_hostRegContrastBytes);
+
+    h_entropy.resize((size_t)numTiles);
+    h_contrast.resize((size_t)numTiles);
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[COPY] entropy D->H: dst=%p src=%p bytes=%zu",
@@ -211,24 +296,66 @@ void renderCudaFrame(
                        (void*)h_contrast.data(), d_contrast.get(), contrast_bytes);
     }
 
-    CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),   entropy_bytes,  cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(),  contrast_bytes, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),  entropy_bytes,  cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(), contrast_bytes, cudaMemcpyDeviceToHost));
 
+    // Zoom-Kommunikation
     shouldZoom = false;
     newOffset  = offset;
 
-    pboResource->unmap();
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[UNMAP] PBO unmapped successfully");
-        LUCHS_LOG_HOST("[KERNEL] renderCudaFrame finished");
+    // Device-Logs nicht immer spülen – nur bei Fehler oder Modulo.
+    cudaError_t lastErr = cudaPeekAtLastError();
+#ifndef CUDA_ARCH
+    const auto tFlush0 = std::chrono::high_resolution_clock::now();
+#endif
+    if (lastErr != cudaSuccess) {
+        LUCHS_LOG_HOST("[CUDA] Error detected: code=%d -> flushing device log", (int)lastErr);
+        LuchsLogger::flushDeviceLogToHost();
+#ifndef CUDA_ARCH
+        const auto tFlush1 = std::chrono::high_resolution_clock::now();
+        flushMs = std::chrono::duration<double, std::milli>(tFlush1 - tFlush0).count();
+#endif
+    } else if ((s_frameCounter % 30) == 0 || (Settings::debugLogging && (s_frameCounter % 5) == 0)) {
+        LuchsLogger::flushDeviceLogToHost();
+#ifndef CUDA_ARCH
+        const auto tFlush1 = std::chrono::high_resolution_clock::now();
+        flushMs = std::chrono::duration<double, std::milli>(tFlush1 - tFlush0).count();
+#endif
     }
+
+    pboResource->unmap();
 
 #ifndef CUDA_ARCH
     const auto t1 = std::chrono::high_resolution_clock::now();
-    float totalMs = std::chrono::duration<float,std::milli>(t1 - t0).count();
+    const double totalMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+#endif
+
+    // 🐑 Schneefuchs: Timings an RendererState zurückgeben, wenn Feld vorhanden
+    state.lastTimings.valid            = true;
+#ifndef CUDA_ARCH
+    state.lastTimings.pboMap           = mapMs;
+    state.lastTimings.mandelbrotTotal  = mandelbrotMs;
+    state.lastTimings.mandelbrotLaunch = 0.0;   // Host-Launch vernachlässigbar; optional später befüllen
+    state.lastTimings.mandelbrotSync   = 0.0;   // durch Events erfasst → 0
+    state.lastTimings.entropy          = entMs;
+    state.lastTimings.contrast         = conMs;
+    state.lastTimings.deviceLogFlush   = flushMs;
+#else
+    state.lastTimings.pboMap           = 0.0;
+    state.lastTimings.mandelbrotTotal  = 0.0;
+    state.lastTimings.mandelbrotLaunch = 0.0;
+    state.lastTimings.mandelbrotSync   = 0.0;
+    state.lastTimings.entropy          = 0.0;
+    state.lastTimings.contrast         = 0.0;
+    state.lastTimings.deviceLogFlush   = 0.0;
+#endif
+
+#ifndef CUDA_ARCH
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PERF] renderCudaFrame() = %.2f ms", totalMs);
+        LUCHS_LOG_HOST(
+            "[PERF] map=%.3f ms | mandel=%.3f ms | ent=%.3f ms | con=%.3f ms | flush=%.3f ms | total=%.3f ms",
+            mapMs, mandelbrotMs, entMs, conMs, flushMs, totalMs
+        );
     }
 #endif
 }
@@ -261,6 +388,10 @@ bool verifyCudaGetErrorStringSafe() {
 }
 
 void unregisterPBO() {
+    // Host-Pins sauber lösen
+    if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr  = nullptr; s_hostRegEntropyBytes  = 0; }
+    if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr = nullptr; s_hostRegContrastBytes = 0; }
+
     delete pboResource;
     pboResource = nullptr;
 }
