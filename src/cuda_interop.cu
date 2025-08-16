@@ -10,13 +10,12 @@
 #include "settings.hpp"
 #include "common.hpp"
 #include "renderer_state.hpp"
-// #include "zoom_logic.hpp" // Schneefuchs: Zoom-Entscheidung liegt jetzt in frame_pipeline, hier nicht mehr nötig.
 #include "luchs_cuda_log_buffer.hpp"
 #include "hermelin_buffer.hpp"
 #include "bear_CudaPBOResource.hpp"
 #include <cuda_gl_interop.h>
 #include <vector>
-#include <stdexcept> // Schneefuchs: explicit for std::runtime_error (no reliance on pch)
+#include <stdexcept>
 
 #ifndef CUDA_ARCH
 #include <chrono>
@@ -31,35 +30,46 @@ static bool luchsBabyInitDone = false;
 void logCudaDeviceContext(const char* context) {
     int device = -1;
     cudaError_t err = cudaGetDevice(&device);
-    LUCHS_LOG_HOST("[CTX] %s: cudaGetDevice() = %d (%s)", context, device, cudaGetErrorString(err));
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CTX] %s: cudaGetDevice() = %d (%s)", context, device, cudaGetErrorString(err));
+    }
 }
 
 void registerPBO(const Hermelin::GLBuffer& pbo) {
     if (pboResource) {
-        LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!");
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!");
+        }
         return;
     }
 
     GLint boundBefore = 0;
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundBefore);
-    LUCHS_LOG_HOST("[CHECK] GL bind state BEFORE bind: %d", boundBefore);
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CHECK] GL bind state BEFORE bind: %d", boundBefore);
+    }
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo.id());
     GLint boundAfter = 0;
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundAfter);
-    LUCHS_LOG_HOST("[CHECK] GL bind state AFTER bind: %d (expected: %u)", boundAfter, pbo.id());
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CHECK] GL bind state AFTER bind: %d (expected: %u)", boundAfter, pbo.id());
+    }
 
     if (boundAfter != static_cast<GLint>(pbo.id())) {
         LUCHS_LOG_HOST("[FATAL] GL bind failed - buffer %u was not bound (GL reports: %d)", pbo.id(), boundAfter);
         throw std::runtime_error("glBindBuffer(GL_PIXEL_UNPACK_BUFFER) failed");
     }
 
-    if (Settings::debugLogging)
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[CU-PBO] Preparing to register PBO ID %u", pbo.id());
+    }
 
     pboResource = new bear_CudaPBOResource(pbo.id());
 
-    logCudaDeviceContext("after registerPBO");
+    if constexpr (Settings::debugLogging) {
+        logCudaDeviceContext("after registerPBO");
+    }
 }
 
 void renderCudaFrame(
@@ -78,10 +88,10 @@ void renderCudaFrame(
     int tileSize,
     RendererState& state
 ) {
-    if (Settings::debugLogging)
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[ENTER] renderCudaFrame(tileSize=%d)", tileSize);
-
-    logCudaDeviceContext("renderCudaFrame ENTER");
+        logCudaDeviceContext("renderCudaFrame ENTER");
+    }
 
     if (!pboResource)
         throw std::runtime_error("[FATAL] CUDA PBO not registered!");
@@ -104,7 +114,7 @@ void renderCudaFrame(
     const size_t d_entropy_size  = d_entropy.size();
     const size_t d_contrast_size = d_contrast.size();
 
-    if (Settings::debugLogging) {
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[SANITY] w=%d h=%d pixels=%d tileSize=%d tiles=%d (%d x %d)",
                        width, height, totalPixels, tileSize, numTiles, tilesX, tilesY);
         LUCHS_LOG_HOST("[SANITY] alloc(it=%zu, entropy=%zu, contrast=%zu) need(it=%zu, entropy=%zu, contrast=%zu)",
@@ -131,12 +141,15 @@ void renderCudaFrame(
     CUDA_CHECK(cudaSetDevice(0));
 
     CUDA_CHECK(cudaMemset(d_iterations.get(), 0, d_iterations.size()));
-    LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels -> %zu bytes", totalPixels, d_iterations.size());
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[MEM] d_iterations memset: %d pixels -> %zu bytes", totalPixels, d_iterations.size());
+    }
     CUDA_CHECK(cudaMemset(d_entropy.get(),   0, d_entropy.size()));
     CUDA_CHECK(cudaMemset(d_contrast.get(),  0, d_contrast.size()));
 
-    if (Settings::debugLogging)
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[MAP] Using Baer to map CUDA-GL resource");
+    }
 
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -161,7 +174,7 @@ void renderCudaFrame(
         luchsBabyInitDone = true;
     }
 
-    if (Settings::debugLogging) {
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST(
             "[KERNEL] launch_mandelbrotHybrid(surface=%p, w=%d, h=%d, zoom=%.5f, offset=(%.5f,%.5f), iter=%d, tile=%d)",
             (void*)devPtr, width, height, zoom, offset.x, offset.y, maxIterations, tileSize
@@ -175,7 +188,7 @@ void renderCudaFrame(
 
     LuchsLogger::flushDeviceLogToHost();
 
-    if (Settings::debugLogging) {
+    if constexpr (Settings::debugLogging) {
         int dbg_after[3] = {};
         CUDA_CHECK(cudaMemcpy(dbg_after, d_iterations.get(), sizeof(dbg_after), cudaMemcpyDeviceToHost));
         LUCHS_LOG_HOST("[KERNEL] iters sample: %d %d %d", dbg_after[0], dbg_after[1], dbg_after[2]);
@@ -191,7 +204,7 @@ void renderCudaFrame(
     h_entropy.resize(numTiles);
     h_contrast.resize(numTiles);
 
-    if (Settings::debugLogging) {
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[COPY] entropy D->H: dst=%p src=%p bytes=%zu",
                        (void*)h_entropy.data(), d_entropy.get(), entropy_bytes);
         LUCHS_LOG_HOST("[COPY] contrast D->H: dst=%p src=%p bytes=%zu",
@@ -206,7 +219,7 @@ void renderCudaFrame(
 
     pboResource->unmap();
 
-    if (Settings::debugLogging) {
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[UNMAP] PBO unmapped successfully");
         LUCHS_LOG_HOST("[KERNEL] renderCudaFrame finished");
     }
@@ -214,8 +227,9 @@ void renderCudaFrame(
 #ifndef CUDA_ARCH
     const auto t1 = std::chrono::high_resolution_clock::now();
     float totalMs = std::chrono::duration<float,std::milli>(t1 - t0).count();
-    if (Settings::debugLogging)
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PERF] renderCudaFrame() = %.2f ms", totalMs);
+    }
 #endif
 }
 
@@ -226,7 +240,9 @@ bool precheckCudaRuntime() {
     int deviceCount = 0;
     cudaError_t e1 = cudaFree(0);
     cudaError_t e2 = cudaGetDeviceCount(&deviceCount);
-    LUCHS_LOG_HOST("[CUDA] precheck err1=%d err2=%d count=%d", (int)e1, (int)e2, deviceCount);
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CUDA] precheck err1=%d err2=%d count=%d", (int)e1, (int)e2, deviceCount);
+    }
     return e1 == cudaSuccess && e2 == cudaSuccess && deviceCount > 0;
 }
 
@@ -234,7 +250,9 @@ bool verifyCudaGetErrorStringSafe() {
     cudaError_t dummy = cudaErrorInvalidValue;
     const char* msg = cudaGetErrorString(dummy);
     if (msg) {
-        LUCHS_LOG_HOST("[CHECK] cudaGetErrorString(dummy) = \"%s\" -> Aufloesung gefahrlos", msg);
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[CHECK] cudaGetErrorString(dummy) = \"%s\" -> Aufloesung gefahrlos", msg);
+        }
         return true;
     } else {
         LUCHS_LOG_HOST("[FATAL] cudaGetErrorString returned null");
