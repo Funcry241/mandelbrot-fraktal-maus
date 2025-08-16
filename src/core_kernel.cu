@@ -1,12 +1,12 @@
-// 🐭 Maus: Farb-Upgrade – Continuous Escape Time + feine „Stripe“-Details.
-// 🦦 Otter: Nur diese Datei geändert, keine Signaturen angerührt. Sanft, detailreich, deterministisch. (Bezug zu Otter)
-// 🦊 Schneefuchs: Keine externen Abhängigkeiten, nur lokale Helfer. Logs ASCII, unverändert. (Bezug zu Schneefuchs)
+// 🐭 Maus: Performance-Pass ohne Optikverlust – schnellere Math, besseres Launch-Layout.
+// 🦦 Otter: __log2f statt log2f, mandelbrotIterations __forceinline, 32x8 Block wenn performanceLogging. (Bezug zu Otter)
+// 🦊 Schneefuchs: Keine API-Änderungen, nur interne Helfer/Launch; deterministisch, ASCII-Logs. (Bezug zu Schneefuchs)
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math_constants.h>
 #include <cmath>
-#include <chrono> // Otter: für Zeitmessung
+#include <chrono> // Otter: Host-Timing
 #include "common.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
@@ -17,12 +17,14 @@
 __device__ int sprintf(char* str, const char* format, ...);
 #endif
 
-// 🐭 fract ersetzt – CUDA kennt kein GLSL
+// --- Helpers ----------------------------------------------------------------
+
+// GLSL-ähnliche fract
 __device__ __forceinline__ float fract(float x) {
-    return x - floorf(x); // Schneefuchs: wie GLSL, aber CUDA-eigen
+    return x - floorf(x);
 }
 
-// ---- FARB-MAPPING (legacy) ----
+// Farb-Mapping (legacy, belassen)
 __device__ __forceinline__ uchar4 elegantColor(float t) {
     t = sqrtf(fminf(fmaxf(t, 0.0f), 1.0f));
     float rf = 0.5f + 0.5f * __sinf(6.2831f * (t + 0.0f));
@@ -34,7 +36,6 @@ __device__ __forceinline__ uchar4 elegantColor(float t) {
     return make_uchar4(r, g, b, 255);
 }
 
-// ---- KOORDINATEN-MAPPING ----
 __device__ __forceinline__ float2 pixelToComplex(
     float px, float py, int w, int h,
     float spanX, float spanY, float2 offset)
@@ -45,16 +46,23 @@ __device__ __forceinline__ float2 pixelToComplex(
     );
 }
 
-// ---- MANDELBROT-ITERATION ----
-__device__ int mandelbrotIterations(
+// --- Mandelbrot --------------------------------------------------------------
+
+// Otter: __forceinline__ vermeidet Call-Overhead, hilft dem Compiler beim Unrollen/RA.
+__device__ __forceinline__ int mandelbrotIterations(
     float x0, float y0, int maxIter,
     float& fx, float& fy)
 {
     float x = 0.0f, y = 0.0f;
     int i = 0;
+    // Hot loop – so wenig wie möglich drumherum
+#pragma unroll 1
     while (x * x + y * y <= 4.0f && i < maxIter) {
-        float xt = x * x - y * y + x0;
-        y = 2.0f * x * y + y0;
+        float xx = x * x;
+        float yy = y * y;
+        float xy = x * y;
+        float xt = xx - yy + x0;
+        y = 2.0f * xy + y0; // FMA-Kandidat, aber Compiler macht das oft selbst
         x = xt;
         ++i;
     }
@@ -63,8 +71,9 @@ __device__ int mandelbrotIterations(
     return i;
 }
 
-// ---- RÜSSELWARZE: HSV-Konvertierung & Strukturchaos ----
-__device__ float3 hsvToRgb(float h, float s, float v) {
+// --- Rüsselwarze / Farbe -----------------------------------------------------
+
+__device__ __forceinline__ float3 hsvToRgb(float h, float s, float v) {
     float r, g, b;
     int i = int(h * 6.0f);
     float f = h * 6.0f - i;
@@ -77,7 +86,7 @@ __device__ float3 hsvToRgb(float h, float s, float v) {
         case 2: r = p, g = v, b = t; break;
         case 3: r = p, g = q, b = v; break;
         case 4: r = t, g = p, b = v; break;
-        case 5: r = v, g = p, b = q; break;
+        default: r = v, g = p, b = q; break;
     }
     return make_float3(r, g, b);
 }
@@ -88,7 +97,7 @@ __device__ float pseudoRandomWarze(float x, float y) {
     return 0.5f + 0.5f * __sinf(r * 6.0f + angle * 4.0f);
 }
 
-// ── NEU: Continuous Escape-Time (CEC) + „Stripe“-Details ────────────────────
+// Continuous Escape-Time (CEC) + Stripe
 __device__ __forceinline__
 void computeCEC(float zx, float zy, int it, int maxIt, float& nu, float& stripe)
 {
@@ -98,7 +107,8 @@ void computeCEC(float zx, float zy, int it, int maxIt, float& nu, float& stripe)
         stripe = 0.0f;
         return;
     }
-    float mu = (float)it + 1.0f - log2f(log2f(fmaxf(norm, 1.000001f)));
+    // Schneefuchs: __log2f ist schnelle Approx.; fmaxf schützt den Bereich.
+    float mu = (float)it + 1.0f - __log2f(__log2f(fmaxf(norm, 1.000001f)));
     nu = fminf(fmaxf(mu / (float)maxIt, 0.0f), 1.0f);
     float frac = fract(mu);
     stripe = powf(0.5f + 0.5f * __sinf(6.2831853f * frac), 0.75f);
@@ -114,13 +124,15 @@ float3 colorFractalDetailed(float2 c, float zx, float zy, int it, int maxIt)
     computeCEC(zx, zy, it, maxIt, nu, stripe);
 
     float angle = atan2f(c.y, c.x);
+    // 0.15915494f = 1/(2*pi)
     float hue   = fract(nu * 0.25f + angle * 0.08f * 0.15915494f);
-    float val = 0.3f + 0.7f * stripe;
-    float sat = 0.9f;
+    float val   = 0.3f + 0.7f * stripe;
+    float sat   = 0.9f;
     return hsvToRgb(hue, sat, val);
 }
 
-// ---- MANDELBROT-KERNEL ----
+// --- Kernel ------------------------------------------------------------------
+
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut,
     int w, int h, float zoom, float2 offset, int maxIter)
@@ -138,10 +150,8 @@ __global__ void mandelbrotKernel(
     float spanX = 3.5f * scale;
     float spanY = spanX * h / w;
 
-    float2 c = pixelToComplex(
-        x + 0.5f, y + 0.5f,
-        w, h, spanX, spanY, offset
-    );
+    float2 c = pixelToComplex(x + 0.5f, y + 0.5f, w, h, spanX, spanY, offset);
+
     float zx, zy;
     int it = mandelbrotIterations(c.x, c.y, maxIter, zx, zy);
 
@@ -155,7 +165,7 @@ __global__ void mandelbrotKernel(
 
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
         float norm = zx * zx + zy * zy;
-        float t = (it < maxIter) ? (((float)it + 1.0f - log2f(log2f(fmaxf(norm, 1.000001f)))) / (float)maxIter)
+        float t = (it < maxIter) ? (((float)it + 1.0f - __log2f(__log2f(fmaxf(norm, 1.000001f)))) / (float)maxIter)
                                  : 1.0f;
         float tClamped = fminf(fmaxf(t, 0.0f), 1.0f);
         char msg[256];
@@ -188,8 +198,7 @@ __global__ void entropyKernel(
     }
 
     __shared__ int histo[256];
-    for (int i = threadIdx.x; i < 256; i += blockDim.x)
-        histo[i] = 0;
+    for (int i = threadIdx.x; i < 256; i += blockDim.x) histo[i] = 0;
     __syncthreads();
 
     int total = tile * tile;
@@ -208,7 +217,7 @@ __global__ void entropyKernel(
         float entropy = 0.0f;
         for (int i = 0; i < 256; ++i) {
             float p = float(histo[i]) / float(total);
-            if (p > 0.0f) entropy -= p * log2f(p);
+            if (p > 0.0f) entropy -= p * __log2f(p);
         }
         eOut[tileIndex] = entropy;
 
@@ -255,7 +264,8 @@ __global__ void contrastKernel(
     }
 }
 
-// ---- HOST-WRAPPER: Entropie & Kontrast ----
+// --- Host-Wrapper ------------------------------------------------------------
+
 void computeCudaEntropyContrast(
     const int* d_it, float* d_e, float* d_c,
     int w, int h, int tile, int maxIter)
@@ -289,17 +299,17 @@ void computeCudaEntropyContrast(
     }
 }
 
-// ---- HOST-WRAPPER: Mandelbrot ----
 void launch_mandelbrotHybrid(
     uchar4* out, int* d_it,
     int w, int h, float zoom, float2 offset,
-    int maxIter, int tile)
+    int maxIter, int /*tile*/)
 {
     using clk = std::chrono::high_resolution_clock;
     auto t0 = clk::now();
 
-    dim3 block(16,16);
-    dim3 grid((w + 15)/16, (h + 15)/16);
+    // 🦦 Otter: 32x8 bringt oft bessere Occupancy/Coalescing. Fallback: 16x16.
+    dim3 block = Settings::performanceLogging ? dim3(32, 8) : dim3(16, 16);
+    dim3 grid((w + block.x - 1)/block.x, (h + block.y - 1)/block.y);
 
     auto t_launchStart = clk::now();
     mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter);
