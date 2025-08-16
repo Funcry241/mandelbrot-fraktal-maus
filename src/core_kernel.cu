@@ -1,7 +1,8 @@
-// MOUSE
+// MAUS:
 // 🐭 Maus: Feature „Schwarze Schnauze“ – Early-Out für Innenpunkte (Cardioid/Bulb).
 // 🦦 Otter: Spart Iterationen in schwarzen Bereichen, ohne Bildänderung. (Bezug zu Otter)
 // 🦊 Schneefuchs: Mathematisch exakt; nur Workload-Reduktion, Logs ASCII. (Bezug zu Schneefuchs)
+// 🐑 Schneefuchs: Warp-synchrones Escape & FMA – weniger Divergenz, weniger Instruktionen. (Bezug zu Schneefuchs)
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -45,9 +46,9 @@ __device__ __forceinline__ float2 pixelToComplex(
     );
 }
 
-// --- Mandelbrot --------------------------------------------------------------
+// --- Mandelbrot (baseline) ---------------------------------------------------
 
-__device__ __forceinline__ int mandelbrotIterations(
+__device__ __forceinline__ int mandelbrotIterations_scalar(
     float x0, float y0, int maxIter,
     float& fx, float& fy)
 {
@@ -66,6 +67,45 @@ __device__ __forceinline__ int mandelbrotIterations(
     fx = x;
     fy = y;
     return i;
+}
+
+// 🐑 Schneefuchs: Warp-synchronisierte Iteration mit Ballot – reduziert Divergenz.
+__device__ __forceinline__ int mandelbrotIterations_warp(
+    float cr, float ci, int maxIter, float& xr, float& xi)
+{
+    float x = 0.0f, y = 0.0f;
+    int it = 0;
+
+    unsigned mask = 0xFFFFFFFFu;
+#if (__CUDA_ARCH__ >= 700)
+    mask = __activemask();
+#endif
+
+    bool active = true;
+
+#pragma unroll 1
+    for (int k = 0; k < maxIter; ++k) {
+        // Check escape radius BEFORE heavy math for escaped threads.
+        float x2 = x * x;
+        float y2 = y * y;
+        if (active && (x2 + y2 <= 4.0f)) {
+            // z = z^2 + c  with FMA to reduce ops and improve precision.
+            // xt = x*x - y*y + cr  == fmaf(x, x, -y2) + cr
+            float xt = fmaf(x, x, -y2) + cr;                  // x^2 - y^2 + cr
+            y = fmaf(2.0f * x, y, ci);                        // 2*x*y + ci
+            x = xt;
+            ++it;
+        } else {
+            active = false;
+        }
+
+        // Warp votes: break when all threads are inactive (escaped or finished).
+        unsigned anyActive = __ballot_sync(mask, active);
+        if (anyActive == 0u) break;
+    }
+
+    xr = x; xi = y;
+    return it;
 }
 
 // --- Farbe / Mapping ---------------------------------------------------------
@@ -146,29 +186,33 @@ __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
 
 // --- Kernel ------------------------------------------------------------------
 
+// 🐑 Schneefuchs: __restrict__-Aliase helfen dem Compiler ohne API-Änderung.
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut,
     int w, int h, float zoom, float2 offset, int maxIter)
 {
     const bool doLog = Settings::debugLogging;
 
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int idx = y * w + x;
+    uchar4* __restrict__ outR   = out;
+    int*    __restrict__ iterR  = iterOut;
+
+    const int x   = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y   = blockIdx.y * blockDim.y + threadIdx.y;
+    const int idx = y * w + x;
 
     if (x >= w || y >= h || idx >= w * h) return;
-    if (!out || !iterOut || w <= 0 || h <= 0) return;
+    if (!outR || !iterR || w <= 0 || h <= 0) return;
 
-    float scale = 1.0f / zoom;
-    float spanX = 3.5f * scale;
-    float spanY = spanX * h / w;
+    const float scale = 1.0f / zoom;
+    const float spanX = 3.5f * scale;
+    const float spanY = spanX * (float)h / (float)w;
 
-    float2 c = pixelToComplex(x + 0.5f, y + 0.5f, w, h, spanX, spanY, offset);
+    const float2 c = pixelToComplex(x + 0.5f, y + 0.5f, w, h, spanX, spanY, offset);
 
     // 🐽 Schwarze Schnauze: Early-Out für Innenpunkte (schwarz, it=maxIter)
     if (insideMainCardioidOrBulb(c.x, c.y)) {
-        out[idx]     = make_uchar4(0, 0, 0, 255);
-        iterOut[idx] = maxIter;
+        outR[idx]   = make_uchar4(0, 0, 0, 255);
+        iterR[idx]  = maxIter;
         if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
             char msg[96]; int n = 0;
             n += sprintf(msg + n, "[NOSE] early_inside x=%d y=%d", x, y);
@@ -178,13 +222,18 @@ __global__ void mandelbrotKernel(
     }
 
     float zx, zy;
-    int it = mandelbrotIterations(c.x, c.y, maxIter, zx, zy);
+    // 🐑 Schneefuchs: Warp-synchronisierte Iterationen (weniger Divergenz).
+    int it = mandelbrotIterations_warp(c.x, c.y, maxIter, zx, zy);
+    // Fallback (optional, deaktiviert): // int it = mandelbrotIterations_scalar(c.x, c.y, maxIter, zx, zy);
 
-    float3 rgb = colorFractalDetailed(c, zx, zy, it, maxIter);
-    out[idx]     = make_uchar4((unsigned char)(rgb.x * 255.0f),
-                               (unsigned char)(rgb.y * 255.0f),
-                               (unsigned char)(rgb.z * 255.0f), 255);
-    iterOut[idx] = it;
+    const float3 rgb = colorFractalDetailed(c, zx, zy, it, maxIter);
+    outR[idx] = make_uchar4(
+        (unsigned char)(rgb.x * 255.0f),
+        (unsigned char)(rgb.y * 255.0f),
+        (unsigned char)(rgb.z * 255.0f),
+        255
+    );
+    iterR[idx] = it;
 
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
         float norm = zx * zx + zy * zy;
@@ -223,7 +272,7 @@ __global__ void entropyKernel(
     for (int i = threadIdx.x; i < 256; i += blockDim.x) histo[i] = 0;
     __syncthreads();
 
-    int total = tile * tile;
+    const int total = tile * tile;
     for (int idx = threadIdx.x; idx < total; idx += blockDim.x) {
         int dx = idx % tile, dy = idx / tile;
         int x = startX + dx, y = startY + dy;
