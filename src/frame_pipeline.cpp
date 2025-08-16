@@ -1,12 +1,14 @@
 // 🐭 Maus: Eine Quelle für Tiles pro Frame. Vor Render: Buffer-Sync via setupCudaBuffers(...).
-// 🦦 Otter: Sanity-Logs, deterministische Reihenfolge; Zoom V2 außerhalb der CUDA-Interop.
-// 🐑 Schneefuchs: Kein doppeltes Sizing, keine Alt-Settings.
+// 🦦 Otter: Sanity-Logs, deterministische Reihenfolge; Zoom V2 außerhalb der CUDA-Interop. (Bezug zu Otter)
+// 🐑 Schneefuchs: Kein doppeltes Sizing, keine Alt-Settings. (Bezug zu Schneefuchs)
+// 🐑 Schneefuchs: Fixes für /WX – keine konstanten ifs; Debug/Perf via if constexpr (ASCII logs only).
 
 #include "pch.hpp"
 #include <vector_types.h>
-#include <chrono>  // Zeitmessung
+#include <chrono>   // Zeitmessung
 #include <sstream>
 #include <iomanip>
+#include <cstdio>   // snprintf (ASCII only)
 #include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
 #include "frame_context.hpp"
@@ -45,18 +47,21 @@ namespace {
     double g_perfFrameTotal  = 0.0;
 
     inline bool perfShouldLog(int frameIdx) {
-        if (!Settings::performanceLogging) return false;
+        // Schneefuchs: compile-time Gate – kein C4127.
+        if constexpr (!Settings::performanceLogging) return false;
         if (frameIdx <= PERF_WARMUP_FRAMES) return false;
         return (frameIdx % PERF_LOG_EVERY) == 0;
     }
 }
 
 void beginFrame(FrameContext& frameCtx) {
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] beginFrame: time=%.4f, totalFrames=%d", glfwGetTime(), globalFrameCounter);
-    float delta = static_cast<float>(glfwGetTime() - frameCtx.totalTime);
+    const double now = glfwGetTime(); // Schneefuchs: eine Zeitabfrage, mehrfach nutzen.
+    if constexpr (Settings::debugLogging)
+        LUCHS_LOG_HOST("[PIPE] beginFrame: time=%.4f, totalFrames=%d", now, globalFrameCounter);
+
+    float delta = static_cast<float>(now - frameCtx.totalTime);
     frameCtx.frameTime = (delta < 0.001f) ? 0.001f : delta;
-    frameCtx.totalTime += delta;
+    frameCtx.totalTime = now;
     frameCtx.timeSinceLastZoom += delta;
     frameCtx.shouldZoom = false;
     frameCtx.newOffset = frameCtx.offset;
@@ -64,7 +69,7 @@ void beginFrame(FrameContext& frameCtx) {
 }
 
 void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
-    if (Settings::debugLogging)
+    if constexpr (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] computeCudaFrame: dimensions=%dx%d, zoom=%.5f, tileSize=%d",
                        frameCtx.width, frameCtx.height, frameCtx.zoom, frameCtx.tileSize);
 
@@ -83,7 +88,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
 
     state.setupCudaBuffers(frameCtx.tileSize);
 
-    if (Settings::debugLogging) {
+    if constexpr (Settings::debugLogging) {
         const int totalPixels = frameCtx.width * frameCtx.height;
         const size_t need_it_bytes       = static_cast<size_t>(totalPixels) * sizeof(int);
         const size_t need_entropy_bytes  = static_cast<size_t>(numTiles)    * sizeof(float);
@@ -94,50 +99,73 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
                        state.d_iterations.size(), state.d_entropy.size(), state.d_contrast.size());
     }
 
-    auto t0 = Clock::now();
+    // Schneefuchs: compile-time Gate für Timing – kein C4127, kein toter Code.
+    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
+        auto t0 = Clock::now();
 
-    CudaInterop::renderCudaFrame(
-        state.d_iterations,
-        state.d_entropy,
-        state.d_contrast,
-        frameCtx.width,
-        frameCtx.height,
-        frameCtx.zoom,
-        gpuOffset,
-        frameCtx.maxIterations,
-        frameCtx.h_entropy,
-        frameCtx.h_contrast,
-        gpuNewOffset,
-        frameCtx.shouldZoom,
-        frameCtx.tileSize,
-        state
-    );
+        CudaInterop::renderCudaFrame(
+            state.d_iterations,
+            state.d_entropy,
+            state.d_contrast,
+            frameCtx.width,
+            frameCtx.height,
+            frameCtx.zoom,
+            gpuOffset,
+            frameCtx.maxIterations,
+            frameCtx.h_entropy,
+            frameCtx.h_contrast,
+            gpuNewOffset,
+            frameCtx.shouldZoom,
+            frameCtx.tileSize,
+            state
+        );
 
-    CUDA_CHECK(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaDeviceSynchronize());
 
-    auto t1 = Clock::now();
-    double ms = std::chrono::duration_cast<msd>(t1 - t0).count();
+        auto t1 = Clock::now();
+        const double ms = std::chrono::duration_cast<msd>(t1 - t0).count();
 
-    if constexpr (Settings::debugLogging) {
-        if (state.lastTimings.valid) {
-            LUCHS_LOG_HOST(
-                "[FRAME] Mandelbrot=%.3f | Launch=%.3f | Sync=%.3f | Entropy=%.3f | Contrast=%.3f | LogFlush=%.3f | PBOMap=%.3f",
-                state.lastTimings.mandelbrotTotal,
-                state.lastTimings.mandelbrotLaunch,
-                state.lastTimings.mandelbrotSync,
-                state.lastTimings.entropy,
-                state.lastTimings.contrast,
-                state.lastTimings.deviceLogFlush,
-                state.lastTimings.pboMap
-            );
-        } else {
-            LUCHS_LOG_HOST("[TIME] CUDA kernel + sync: %.3f ms", ms);
+        if constexpr (Settings::debugLogging) {
+            if (state.lastTimings.valid) {
+                LUCHS_LOG_HOST(
+                    "[FRAME] Mandelbrot=%.3f | Launch=%.3f | Sync=%.3f | Entropy=%.3f | Contrast=%.3f | LogFlush=%.3f | PBOMap=%.3f",
+                    state.lastTimings.mandelbrotTotal,
+                    state.lastTimings.mandelbrotLaunch,
+                    state.lastTimings.mandelbrotSync,
+                    state.lastTimings.entropy,
+                    state.lastTimings.contrast,
+                    state.lastTimings.deviceLogFlush,
+                    state.lastTimings.pboMap
+                );
+            } else {
+                LUCHS_LOG_HOST("[TIME] CUDA kernel + sync: %.3f ms", ms);
+            }
         }
+    } else {
+        // Hot path ohne Host-Timing
+        CudaInterop::renderCudaFrame(
+            state.d_iterations,
+            state.d_entropy,
+            state.d_contrast,
+            frameCtx.width,
+            frameCtx.height,
+            frameCtx.zoom,
+            gpuOffset,
+            frameCtx.maxIterations,
+            frameCtx.h_entropy,
+            frameCtx.h_contrast,
+            gpuNewOffset,
+            frameCtx.shouldZoom,
+            frameCtx.tileSize,
+            state
+        );
+        CUDA_CHECK(cudaDeviceSynchronize());
     }
 
+    // 🐑 Schneefuchs: deterministisches, modulares Flush; Sofort-Flush nur auf Fehler.
     cudaError_t err = cudaPeekAtLastError();
     if (err != cudaSuccess || (globalFrameCounter % 30 == 0)) {
-        if (Settings::debugLogging)
+        if constexpr (Settings::debugLogging)
             LUCHS_LOG_HOST("[PIPE] Flushing device logs (err=%d, frame=%d)",
                            static_cast<int>(err), globalFrameCounter);
         LuchsLogger::flushDeviceLogToHost(0);
@@ -172,24 +200,27 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] ZOOMV2: best=%d score=%.3f accept=%d newOff=(%.6f,%.6f)",
-                    zr.bestIndex, zr.bestScore, zr.shouldZoom ? 1 : 0,
-                    zr.newOffset.x, zr.newOffset.y);
+                       zr.bestIndex, zr.bestScore, zr.shouldZoom ? 1 : 0,
+                       zr.newOffset.x, zr.newOffset.y);
     }
 
     if constexpr (Settings::debugLogging) {
-        if (!frameCtx.h_entropy.empty()) {
+        if (!frameCtx.h_entropy.empty() && !frameCtx.h_contrast.empty()) {
             float minE =  1e9f, maxE = -1e9f;
             float minC =  1e9f, maxC = -1e9f;
-            for (std::size_t i = 0; i < frameCtx.h_entropy.size(); ++i) {
-                minE = std::min(minE, frameCtx.h_entropy[i]);
-                maxE = std::max(maxE, frameCtx.h_contrast[i]);
-                minC = std::min(minC, frameCtx.h_contrast[i]);
-                maxC = std::max(maxC, frameCtx.h_contrast[i]);
+            const size_t N = std::min(frameCtx.h_entropy.size(), frameCtx.h_contrast.size());
+            for (size_t i = 0; i < N; ++i) {
+                const float e = frameCtx.h_entropy[i];
+                const float c = frameCtx.h_contrast[i];
+                minE = std::min(minE, e);
+                maxE = std::max(maxE, e);   // 🐑 Schneefuchs: Fix – vorher fälschlich Contrast für maxE.
+                minC = std::min(minC, c);
+                maxC = std::max(maxC, c);
             }
             LUCHS_LOG_HOST("[HEAT] zoom=%.5f offset=(%.5f, %.5f) tileSize=%d",
-                        frameCtx.zoom, frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
+                           frameCtx.zoom, frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
             LUCHS_LOG_HOST("[HEAT] Entropy: min=%.5f  max=%.5f | Contrast: min=%.5f  max=%.5f",
-                        minE, maxE, minC, maxC);
+                           minE, maxE, minC, maxC);
         }
     }
 }
@@ -258,50 +289,43 @@ void execute(RendererState& state) {
     state.offset = g_ctx.offset;
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
-    // HUD-String mit fester Spaltenbreite/Präzision (monospaced)
-    std::ostringstream oss;
-    oss.setf(std::ios::fixed, std::ios::floatfield);
-
-    auto appendKV = [&](std::string_view label, std::string_view value) {
-        constexpr int LABEL_W = 10;
-        constexpr int GAP_W   = 2;
-        constexpr int VALUE_W = 18;
-        oss << std::setw(LABEL_W) << std::right << label
-            << std::setw(GAP_W)   << "  "
-            << std::left  << std::setw(VALUE_W) << value
-            << '\n';
+    // 🐑 Schneefuchs: HUD-Text ohne iostream-Overhead – eine Reserve, snprintf-Linien (ASCII).
+    std::string hud;
+    hud.reserve(256);
+    auto appendKV = [&](const char* label, const char* value) {
+        char line[96];
+        const int n = std::snprintf(line, sizeof(line), "%10s  %-18s\n", label, value);
+        if (n > 0) hud.append(line, (size_t)std::min(n, (int)sizeof(line)));
     };
 
     {
-        std::ostringstream v;
-        v.setf(std::ios::scientific);
-        v << std::setprecision(6) << g_ctx.zoom;
-        appendKV("zoom", v.str());
+        char v[64];
+        std::snprintf(v, sizeof(v), "%.6e", (double)g_ctx.zoom);
+        appendKV("zoom", v);
     }
     {
-        std::ostringstream v;
-        v.setf(std::ios::fixed);
-        v << std::setprecision(4) << g_ctx.offset.x << ", " << std::setprecision(4) << g_ctx.offset.y;
-        appendKV("offset", v.str());
+        char v[64];
+        std::snprintf(v, sizeof(v), "%.4f, %.4f", (double)g_ctx.offset.x, (double)g_ctx.offset.y);
+        appendKV("offset", v);
     }
     {
-        std::ostringstream v;
-        v.setf(std::ios::fixed); v << std::setprecision(3) << g_ctx.lastEntropy;
-        appendKV("entropy", v.str());
+        char v[64];
+        std::snprintf(v, sizeof(v), "%.3f", (double)g_ctx.lastEntropy);
+        appendKV("entropy", v);
     }
     {
-        std::ostringstream v;
-        v.setf(std::ios::fixed); v << std::setprecision(3) << g_ctx.lastContrast;
-        appendKV("contrast", v.str());
+        char v[64];
+        std::snprintf(v, sizeof(v), "%.3f", (double)g_ctx.lastContrast);
+        appendKV("contrast", v);
     }
     {
-        float fps = static_cast<float>(1.0 / g_ctx.frameTime);
-        std::ostringstream v;
-        v.setf(std::ios::fixed); v << std::setprecision(1) << fps;
-        appendKV("fps", v.str());
+        const double fps = (g_ctx.frameTime > 0.0f) ? (1.0 / g_ctx.frameTime) : 0.0;
+        char v[64];
+        std::snprintf(v, sizeof(v), "%.1f", fps);
+        appendKV("fps", v);
     }
 
-    state.warzenschweinText = oss.str();
+    state.warzenschweinText = hud;
     WarzenschweinOverlay::setText(state.warzenschweinText);
 
     drawFrame(g_ctx, state.tex.id(), state);
@@ -317,7 +341,7 @@ void execute(RendererState& state) {
         const int resX = g_ctx.width;
         const int resY = g_ctx.height;
         const int it   = g_ctx.maxIterations;
-        const double fps = (g_ctx.frameTime > 0.0f) ? (1000.0 / (g_ctx.frameTime * 1000.0)) : 0.0;
+        const double fps = (g_ctx.frameTime > 0.0f) ? (1.0 / g_ctx.frameTime) : 0.0;
 
         // Werte aus state.lastTimings (Interop/CUDA). Falls ungültig, 0.0 verwenden.
         const bool vt = state.lastTimings.valid;
