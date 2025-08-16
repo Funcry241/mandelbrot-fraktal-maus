@@ -5,6 +5,7 @@
 
 #include "hermelin_buffer.hpp"
 #include "luchs_log_host.hpp"
+#include "settings.hpp"
 #include <GL/glew.h>
 #include <stdexcept>
 
@@ -102,7 +103,11 @@ void GLBuffer::allocate(GLsizeiptr sizeBytes, GLenum usage) {
 
     GLint realSize = 0;
     glGetBufferParameteriv(GL_PIXEL_UNPACK_BUFFER, GL_BUFFER_SIZE, &realSize);
-    LUCHS_LOG_HOST("[GLBUF] ID %u: Requested %zd bytes, GL reports %d bytes", id_, (size_t)sizeBytes, realSize);
+
+    if (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[GLBUF] ID %u: Requested %zd bytes, GL reports %d bytes",
+                       id_, static_cast<size_t>(sizeBytes), realSize);
+    }
 
     if (realSize <= 0)
         throw std::runtime_error("Hermelin: glBufferData failed or allocated 0 bytes");
