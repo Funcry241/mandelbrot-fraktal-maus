@@ -88,13 +88,10 @@ __device__ float pseudoRandomWarze(float x, float y) {
     return 0.5f + 0.5f * __sinf(r * 6.0f + angle * 4.0f);
 }
 
-// ── NEU: Continuous Escape‑Time (CEC) + „Stripe“-Details ────────────────────
-// Maus: liefert einen glatten Iterationswert (nu) und eine feine Bandstruktur (stripe)
-// aus der Bruchteilkomponente von mu. Das erzeugt sichtbar mehr Detail an den Rändern.
+// ── NEU: Continuous Escape-Time (CEC) + „Stripe“-Details ────────────────────
 __device__ __forceinline__
 void computeCEC(float zx, float zy, int it, int maxIt, float& nu, float& stripe)
 {
-    // Schneefuchs: numerisch stabil – norm >= 1.000001f schützt log(log(.))
     float norm = zx * zx + zy * zy;
     if (it >= maxIt) {
         nu = 1.0f;
@@ -103,37 +100,23 @@ void computeCEC(float zx, float zy, int it, int maxIt, float& nu, float& stripe)
     }
     float mu = (float)it + 1.0f - log2f(log2f(fmaxf(norm, 1.000001f)));
     nu = fminf(fmaxf(mu / (float)maxIt, 0.0f), 1.0f);
-    // Otter: „Stripe Average“ – betont feine Bänder entlang der Flucht.
     float frac = fract(mu);
-    // konzentriere Bänder leicht (Gamma)
     stripe = powf(0.5f + 0.5f * __sinf(6.2831853f * frac), 0.75f);
 }
 
-// 🐭 Maus: Schwarz im Kern, Farbexplosion bei Verästelung
-// 🦦 Otter: Hue-Shift + Detail-Driven-Value
-// 🦊 Schneefuchs: deterministisch, keine Zufallskomponenten außer pseudoRandomWarze
 __device__ __forceinline__
 float3 colorFractalDetailed(float2 c, float zx, float zy, int it, int maxIt)
 {
-    // Schwarz für die Innenmenge
     if (it >= maxIt) {
         return make_float3(0.0f, 0.0f, 0.0f);
     }
-
-    // Escape-Time + Stripe für feine Detailstruktur
     float nu, stripe;
     computeCEC(zx, zy, it, maxIt, nu, stripe);
 
-    // Hue: Mischung aus Escape-Zeit und Winkel → klare Trennung der Äste
     float angle = atan2f(c.y, c.x);
     float hue   = fract(nu * 0.25f + angle * 0.08f * 0.15915494f);
-
-    // Value: abhängig vom Stripe → bei Verästelung heller
-    float val = 0.3f + 0.7f * stripe;  // reicht von dunkel zu sehr hell
-
-    // Sättigung hoch, damit Übergänge intensiv wirken
+    float val = 0.3f + 0.7f * stripe;
     float sat = 0.9f;
-
     return hsvToRgb(hue, sat, val);
 }
 
@@ -162,8 +145,6 @@ __global__ void mandelbrotKernel(
     float zx, zy;
     int it = mandelbrotIterations(c.x, c.y, maxIter, zx, zy);
 
-    // ── NEU: schönere, detailreichere Farbgebung ───────────────────────────
-    // Statt starrem HSV‑Noise jetzt CEC + Stripe‑Details (siehe Helfer oben).
     float3 rgb = colorFractalDetailed(c, zx, zy, it, maxIter);
 
     unsigned char rC = static_cast<unsigned char>(rgb.x * 255.0f);
@@ -172,11 +153,9 @@ __global__ void mandelbrotKernel(
     out[idx] = make_uchar4(rC, gC, bC, 255);
     iterOut[idx] = it;
 
-    // 🐭 Logging
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
-        // Log wie bisher – norm/tClamped grob nützlich; neu: keinen Bruch der Ausgabe
         float norm = zx * zx + zy * zy;
-        float t = (it < maxIter) ? ( ( (float)it + 1.0f - log2f(log2f(fmaxf(norm, 1.000001f))) ) / (float)maxIter )
+        float t = (it < maxIter) ? (((float)it + 1.0f - log2f(log2f(fmaxf(norm, 1.000001f)))) / (float)maxIter)
                                  : 1.0f;
         float tClamped = fminf(fmaxf(t, 0.0f), 1.0f);
         char msg[256];
@@ -299,7 +278,11 @@ void computeCudaEntropyContrast(
 
     auto end = clk::now();
 
-    if (Settings::debugLogging) {
+    if (Settings::performanceLogging) {
+        double entropyMs = std::chrono::duration<double, std::milli>(mid - start).count();
+        double contrastMs = std::chrono::duration<double, std::milli>(end - mid).count();
+        LUCHS_LOG_HOST("[PERF] entropy=%.3f ms contrast=%.3f ms", entropyMs, contrastMs);
+    } else if (Settings::debugLogging) {
         double entropyMs = std::chrono::duration<double, std::milli>(mid - start).count();
         double contrastMs = std::chrono::duration<double, std::milli>(end - mid).count();
         LUCHS_LOG_HOST("[TIME] Entropy %.3f ms | Contrast %.3f ms", entropyMs, contrastMs);
@@ -328,7 +311,13 @@ void launch_mandelbrotHybrid(
 
     auto t1 = clk::now();
 
-    if (Settings::debugLogging) {
+    if (Settings::performanceLogging) {
+        double launchMs = std::chrono::duration<double, std::milli>(t_launchEnd - t_launchStart).count();
+        double syncMs   = std::chrono::duration<double, std::milli>(t_syncEnd - t_syncStart).count();
+        double totalMs  = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        LUCHS_LOG_HOST("[PERF] mandelbrot: launch=%.3f ms sync=%.3f ms total=%.3f ms",
+                       launchMs, syncMs, totalMs);
+    } else if (Settings::debugLogging) {
         double launchMs = std::chrono::duration<double, std::milli>(t_launchEnd - t_launchStart).count();
         double syncMs   = std::chrono::duration<double, std::milli>(t_syncEnd - t_syncStart).count();
         double totalMs  = std::chrono::duration<double, std::milli>(t1 - t0).count();

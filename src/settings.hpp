@@ -75,6 +75,29 @@ namespace Settings {
     constexpr bool debugLogging  = false;
 
     // ------------------------------------------------------------------------
+    // performanceLogging
+    // Wirkung:
+    //   Aktiviert kompakte, periodische Performance-Logs im Hostpfad:
+    //   • Zeiten pro Frame-Phase (map, kernel, unmap, tex, overlays, total)
+    //   • CUDA-Event-Timings (mandelbrot, entropy, contrast)
+    //   • FPS, Iterationen, Entropy[0], Contrast[0]
+    //
+    // Empfehlung (Min..Max):
+    //   false .. true  (bool)
+    //
+    // Erhöhung/Reduzierung:
+    //   • true (Erhöhung auf aktiv): Präzise Einblicke in Performance-Hotspots,
+    //     minimaler Overhead (~1–2 % FPS). Ideal zum Priorisieren von Optimierungen.
+    //   • false (Reduzierung auf aus): Keine Zeitmessungen, maximal sauberes FPS.
+    //
+    // Hinweis:
+    //   Nur für Messläufe aktivieren. Logs erscheinen als kompakte ASCII-Zeilen,
+    //   deterministisch, CSV-freundlich. Flush-Intervall zentral konfigurierbar.
+    //   Schneefuchs-Prinzip: Messen, dann abschalten. (Bezug zu Schneefuchs)
+    // ------------------------------------------------------------------------
+    constexpr bool performanceLogging = true;
+
+    // ------------------------------------------------------------------------
     // heatmapOverlayEnabled
     // Wirkung:
     //   Bestimmt, ob das Heatmap‑Overlay beim Programmstart sichtbar ist.

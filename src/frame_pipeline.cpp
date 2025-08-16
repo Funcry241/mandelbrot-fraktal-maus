@@ -1,4 +1,3 @@
-// Datei: src/frame_pipeline.cpp
 // 🐭 Maus: Eine Quelle für Tiles pro Frame. Vor Render: Buffer-Sync via setupCudaBuffers(...).
 // 🦦 Otter: Sanity-Logs, deterministische Reihenfolge; Zoom V2 außerhalb der CUDA-Interop.
 // 🐑 Schneefuchs: Kein doppeltes Sizing, keine Alt-Settings.
@@ -6,6 +5,8 @@
 #include "pch.hpp"
 #include <vector_types.h>
 #include <chrono>  // Zeitmessung
+#include <sstream>
+#include <iomanip>
 #include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
 #include "frame_context.hpp"
@@ -27,6 +28,28 @@ static int globalFrameCounter = 0;
 
 // Kleiner, lokaler Zoom-Gain (pro akzeptiertem Schritt)
 static constexpr float kZOOM_GAIN = 1.006f;
+
+// 🦦 Otter: Lokale Performance-Akkumulatoren für diesen TU (ASCII-only).
+namespace {
+    using Clock = std::chrono::high_resolution_clock;
+    using msd   = std::chrono::duration<double, std::milli>;
+
+    // Warmup & Modulo nur aktiv, wenn Settings::performanceLogging = true
+    constexpr int PERF_WARMUP_FRAMES = 30;
+    constexpr int PERF_LOG_EVERY     = 30;
+
+    // Phasenzeiten, die in diesem File gemessen werden (Tex/Overlays/Frame total).
+    // Map/Kernel/Entropy/Contrast kommen aus state.lastTimings (Interop/CUDA).
+    double g_perfTexMs       = 0.0;
+    double g_perfOverlaysMs  = 0.0;
+    double g_perfFrameTotal  = 0.0;
+
+    inline bool perfShouldLog(int frameIdx) {
+        if (!Settings::performanceLogging) return false;
+        if (frameIdx <= PERF_WARMUP_FRAMES) return false;
+        return (frameIdx % PERF_LOG_EVERY) == 0;
+    }
+}
 
 void beginFrame(FrameContext& frameCtx) {
     if (Settings::debugLogging)
@@ -71,7 +94,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
                        state.d_iterations.size(), state.d_entropy.size(), state.d_contrast.size());
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = Clock::now();
 
     CudaInterop::renderCudaFrame(
         state.d_iterations,
@@ -92,8 +115,8 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
 
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    auto t1 = std::chrono::high_resolution_clock::now();
-    double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    auto t1 = Clock::now();
+    double ms = std::chrono::duration_cast<msd>(t1 - t0).count();
 
     if constexpr (Settings::debugLogging) {
         if (state.lastTimings.valid) {
@@ -159,7 +182,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
             float minC =  1e9f, maxC = -1e9f;
             for (std::size_t i = 0; i < frameCtx.h_entropy.size(); ++i) {
                 minE = std::min(minE, frameCtx.h_entropy[i]);
-                maxE = std::max(maxE, frameCtx.h_entropy[i]);
+                maxE = std::max(maxE, frameCtx.h_contrast[i]);
                 minC = std::min(minC, frameCtx.h_contrast[i]);
                 maxC = std::max(maxC, frameCtx.h_contrast[i]);
             }
@@ -193,18 +216,32 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus, RendererState& stat
 }
 
 void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
+    // 🦦 Otter: texMs misst nur das PBO->Texture-Update + FSQ draw, getrennt von Overlays.
+    auto tTex0 = Clock::now();
+
     OpenGLUtils::setGLResourceContext("frame");
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), tex, frameCtx.width, frameCtx.height);
     RendererPipeline::drawFullscreenQuad(tex);
+
+    auto tTex1 = Clock::now();
+    g_perfTexMs = std::chrono::duration_cast<msd>(tTex1 - tTex0).count();
+
+    // 🦦 Otter: overlaysMs misst Heatmap + Warzenschwein zusammen.
+    auto tOv0 = Clock::now();
 
     if (frameCtx.overlayActive)
         HeatmapOverlay::drawOverlay(frameCtx.h_entropy, frameCtx.h_contrast, frameCtx.width, frameCtx.height, frameCtx.tileSize, tex, state);
 
     if (Settings::warzenschweinOverlayEnabled && !state.warzenschweinText.empty())
         WarzenschweinOverlay::drawOverlay(state);
+
+    auto tOv1 = Clock::now();
+    g_perfOverlaysMs = std::chrono::duration_cast<msd>(tOv1 - tOv0).count();
 }
 
 void execute(RendererState& state) {
+    auto tFrame0 = Clock::now();
+
     beginFrame(g_ctx);
 
     g_ctx.width         = state.width;
@@ -268,6 +305,39 @@ void execute(RendererState& state) {
     WarzenschweinOverlay::setText(state.warzenschweinText);
 
     drawFrame(g_ctx, state.tex.id(), state);
+
+    auto tFrame1 = Clock::now();
+    g_perfFrameTotal = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
+
+    // 🐑 Schneefuchs: Kompakte, deterministische PERF-Zeile nur bei aktiviertem performanceLogging.
+    if (perfShouldLog(globalFrameCounter)) {
+        // Device-Log regelmäßig leeren, aber nur im Performance-Modus.
+        LuchsLogger::flushDeviceLogToHost(0);
+
+        const int resX = g_ctx.width;
+        const int resY = g_ctx.height;
+        const int it   = g_ctx.maxIterations;
+        const double fps = (g_ctx.frameTime > 0.0f) ? (1000.0 / (g_ctx.frameTime * 1000.0)) : 0.0;
+
+        // Werte aus state.lastTimings (Interop/CUDA). Falls ungültig, 0.0 verwenden.
+        const bool vt = state.lastTimings.valid;
+        const double mapMs   = vt ? state.lastTimings.pboMap          : 0.0;
+        const double mandMs  = vt ? state.lastTimings.mandelbrotTotal : 0.0;
+        const double entMs   = vt ? state.lastTimings.entropy         : 0.0;
+        const double conMs   = vt ? state.lastTimings.contrast        : 0.0;
+
+        // malloc/free/dflush: aktuell 0 (persistente Puffer, dflush durch uns gesteuert)
+        const int mallocs = 0, frees = 0, dflush = 1;
+
+        LUCHS_LOG_HOST(
+            "[PERF] f=%d res=%dx%d zoom=%.6f it=%d "
+            "map=%.2f mandel=%.2f ent=%.2f con=%.2f tex=%.2f overlays=%.2f total=%.2f "
+            "fps=%.1f malloc=%d free=%d dflush=%d e0=%.4f c0=%.4f",
+            globalFrameCounter, resX, resY, (double)g_ctx.zoom, it,
+            mapMs, mandMs, entMs, conMs, g_perfTexMs, g_perfOverlaysMs, g_perfFrameTotal,
+            fps, mallocs, frees, dflush, (double)g_ctx.lastEntropy, (double)g_ctx.lastContrast
+        );
+    }
 }
 
 } // namespace FramePipeline
