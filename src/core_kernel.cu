@@ -153,7 +153,7 @@ __device__ __forceinline__ int iterate_finish_loopcheck(
 }
 
 // ---------- Survivor-Payload -------------------------------------------------
-struct Survivor {
+struct __align__(16) Survivor {
     float x, y;    // aktuelles z
     float cr, ci;  // konstantes c
     int   it;      // bisherige Iterationen (WARMUP_IT)
@@ -255,7 +255,7 @@ void mandelbrotPass2Finish(
     const int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= survCount) return;
 
-    Survivor s = surv[t];
+    const Survivor s = surv[t];
 
     float zx = s.x, zy = s.y;
     int it = iterate_finish_loopcheck(s.cr, s.ci, s.it, maxIter, zx, zy);
@@ -277,7 +277,7 @@ void mandelbrotPass2Finish(
 
 // ---------- ENTROPY & CONTRAST (unverändert) --------------------------------
 __global__ void entropyKernel(
-    const int* it, float* eOut,
+    const int* __restrict__ it, float* __restrict__ eOut,
     int w, int h, int tile, int maxIter)
 {
     const bool doLog = Settings::debugLogging;
@@ -349,7 +349,7 @@ __global__ void entropyKernel(
 }
 
 __global__ void contrastKernel(
-    const float* e, float* cOut,
+    const float* __restrict__ e, float* __restrict__ cOut,
     int tilesX, int tilesY)
 {
     const bool doLog = Settings::debugLogging;
@@ -454,6 +454,10 @@ void launch_mandelbrotHybrid(
     // Survivor-Buffer (max. w*h)
     ensureSurvivorCapacity(size_t(w) * size_t(h));
 
+    // Cache-Preference (technische Hint, ändert keine Logik)
+    cudaFuncSetCacheConfig(mandelbrotPass1Warmup, cudaFuncCachePreferL1);
+    cudaFuncSetCacheConfig(mandelbrotPass2Finish, cudaFuncCachePreferL1);
+
     // Timing
     auto t0 = clk::now();
     auto t_launchStart = clk::now();
@@ -462,9 +466,15 @@ void launch_mandelbrotHybrid(
     cudaMemset(g_dSurvCount, 0, sizeof(int));
     mandelbrotPass1Warmup<<<grid, block>>>(out, d_it, g_dSurvivors, g_dSurvCount, w, h, zoom, offset, maxIter);
 
-    // Survivor-Zahl holen
+    // Survivor-Zahl holen (nur Diagnose; keine Logikänderung)
     int h_survCount = 0;
     cudaMemcpy(&h_survCount, g_dSurvCount, sizeof(int), cudaMemcpyDeviceToHost);
+    if (Settings::performanceLogging) {
+        LUCHS_LOG_HOST("[PERF] survivors=%d (%.2f%% of %d)",
+                       h_survCount,
+                       100.0 * double(h_survCount) / double(w * h),
+                       w * h);
+    }
 
     // Pass 2 (nur wenn nötig)
     if (h_survCount > 0) {
