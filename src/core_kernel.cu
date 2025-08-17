@@ -1,7 +1,7 @@
-// core_kernel.cu — 2-Pass Mandelbrot (Warmup + Survivor Finish)
+// core_kernel.cu — 2-Pass Mandelbrot (Warmup + Sliced Survivor Finish)
 // 🐭 Maus: Kern schlank; ASCII-Logs bleiben deterministisch.
 // 🦦 Otter: Smooth Coloring + Paletten (otter_color.hpp).
-// 🦊 Schneefuchs: Warp-synchron, CHUNKed, reduzierte Divergenz + kompakte Survivor-Liste.
+// 🦊 Schneefuchs: Warp-synchron, CHUNKed, reduzierte Divergenz + kompakte Survivor-Listen (pro Slice).
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -19,14 +19,19 @@
 // ---------- Tuning -----------------------------------------------------------
 namespace {
     // Größerer CHUNK → weniger Ballots, gleiche Bildqualität.
-    constexpr int   WARP_CHUNK        = 32;
+    constexpr int   WARP_CHUNK        = 64;     // vorher 32
 
-    // Seltene Periodizitätsprobe (für Pass 2)
-    constexpr int   LOOP_CHECK_EVERY  = 32;
-    constexpr float LOOP_EPS2         = 5e-8f;  // konservativ (close_hits>=2 gefordert)
+    // Seltene Periodizitätsprobe (für Finish, jetzt aggressiver)
+    constexpr int   LOOP_CHECK_EVERY  = 16;     // vorher 32
+    constexpr float LOOP_EPS2         = 1e-6f;  // vorher 5e-8
+    constexpr int   LOOP_REQ_HITS     = 1;      // vorher ~2
 
     // 2-Pass: Warmup-Grenze (Escaper werden sofort gefärbt, Survivors kompakt gesammelt)
     constexpr int   WARMUP_IT         = 1024;
+
+    // Slice-Steps in Pass 2 (Finish)
+    constexpr int   FINISH_SLICE_IT   = 1024;
+    constexpr int   MAX_SLICES        = 64;     // Sicherheitskappung
 
     // Otter: Paletten-/Shading-Defaults
     constexpr otter::Palette kPalette   = otter::Palette::Glacier; // Aurora/Glacier/Ember
@@ -95,14 +100,25 @@ __device__ __forceinline__ int iterate_warmup_noLoop(
     return it;
 }
 
-// Pass 2: Finish mit seltener Periodizitätsprobe (robust, konservativ)
-__device__ __forceinline__ int iterate_finish_loopcheck(
-    float cr, float ci, int start_it, int maxIter, float& x, float& y)
+// ---------- Survivor-Payload -------------------------------------------------
+struct Survivor {
+    float x, y;    // aktuelles z
+    float cr, ci;  // konstantes c
+    int   it;      // bisherige Iterationen (WARMUP_IT / Slice-Zwischenstand)
+    int   idx;     // Pixelindex
+};
+
+// ---------- Pass-2 Slice Iteration ------------------------------------------
+struct SliceResult { int it; float x, y; bool escaped; bool interior; };
+
+// bis zu 'sliceSteps' Finish-Schritte inkl. Periodizitätsprobe.
+__device__ __forceinline__ SliceResult iterate_finish_slice(
+    float cr, float ci, int start_it, int maxIter,
+    float x, float y, int sliceSteps)
 {
     int it = start_it;
 
-    // Für seltene Periodizitätsprobe
-    float px = x, py = y;
+    float px = x, py = y;    // Referenz für Loop-Check
     int   pc = 0;
     int   close_hits = 0;
 
@@ -111,54 +127,46 @@ __device__ __forceinline__ int iterate_finish_loopcheck(
     mask = __activemask();
 #endif
     bool active = true;
-
-    const int remain = maxIter - start_it;
+    bool escaped = false;
+    bool interior = false;
 
 #pragma unroll 1
-    for (int k = 0; k < remain; k += WARP_CHUNK) {
+    for (int k = 0; k < sliceSteps; k += WARP_CHUNK) {
 #pragma unroll 1
         for (int s = 0; s < WARP_CHUNK; ++s) {
             if (!active) { ++pc; continue; }
 
             float x2 = x * x;
             float y2 = y * y;
-            if (x2 + y2 > 4.0f) { active = false; ++pc; continue; }
+            if (x2 + y2 > 4.0f) { active = false; escaped = true; ++pc; continue; }
 
             float xt = fmaf(x, x, -y2) + cr;   // x^2 - y^2 + cr
-            y = fmaf(2.0f * x, y, ci);
+            y = fmaf(2.0f * x, y, ci);         // 2*x*y + ci
             x = xt;
             ++it;
             ++pc;
 
             if (pc >= LOOP_CHECK_EVERY) {
                 float dx = x - px, dy = y - py;
-                float d2 = dx * dx + dy * dy;
+                float d2 = dx*dx + dy*dy;
                 if (d2 < LOOP_EPS2) {
-                    if (++close_hits >= 2) {
-                        // sehr stabil → „innen“
-                        active = false;
-                        it = maxIter;
+                    if (++close_hits >= LOOP_REQ_HITS) {
+                        active   = false;
+                        interior = true;
+                        it = maxIter; // „innen“ markieren
                     }
                 } else {
                     close_hits = 0;
                 }
                 px = x; py = y; pc = 0;
             }
-            if (it >= maxIter) break;
+            if (it >= maxIter) { active = false; break; }
         }
         unsigned anyActive = __ballot_sync(mask, active);
         if (anyActive == 0u) break;
     }
-    return it;
+    return { it, x, y, escaped, interior };
 }
-
-// ---------- Survivor-Payload -------------------------------------------------
-struct __align__(16) Survivor {
-    float x, y;    // aktuelles z
-    float cr, ci;  // konstantes c
-    int   it;      // bisherige Iterationen (WARMUP_IT)
-    int   idx;     // Pixelindex
-};
 
 // ---------- Kernel: Pass 1 (Warmup + Kompaktierung) -------------------------
 __global__ __launch_bounds__(256, 2)
@@ -245,39 +253,66 @@ void mandelbrotPass1Warmup(
     // (kein Ausgabeschreiben hier—Pass 2 kümmert sich)
 }
 
-// ---------- Kernel: Pass 2 (Finish der Survivors) ---------------------------
-__global__ __launch_bounds__(256, 2)
-void mandelbrotPass2Finish(
+// ---------- Kernel: Pass 2 (Slice + Re-Kompaktierung) -----------------------
+__global__ __launch_bounds__(128, 2)
+void mandelbrotPass2Slice(
     uchar4* __restrict__ out, int* __restrict__ iterOut,
-    const Survivor* __restrict__ surv, int survCount,
+    const Survivor* __restrict__ survIn, int survInCount,
+    Survivor* __restrict__ survOut, int* __restrict__ survOutCount,
     int maxIter)
 {
     const int t = blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= survCount) return;
+    if (t >= survInCount) return;
 
-    const Survivor s = surv[t];
+    Survivor s = survIn[t];
+    SliceResult r = iterate_finish_slice(s.cr, s.ci, s.it, maxIter, s.x, s.y, FINISH_SLICE_IT);
 
-    float zx = s.x, zy = s.y;
-    int it = iterate_finish_loopcheck(s.cr, s.ci, s.it, maxIter, zx, zy);
-
-    float3 col;
-    if (it >= maxIter) {
-        col = make_float3(0.0f,0.0f,0.0f);
-    } else {
-        col = otter::shade(it, maxIter, zx, zy, kPalette, kStripeF, kStripeAmp, kGamma);
+    if (r.escaped) {
+        float3 col = otter::shade(r.it, maxIter, r.x, r.y, kPalette, kStripeF, kStripeAmp, kGamma);
+        out[s.idx] = make_uchar4(
+            (unsigned char)(255.0f * fminf(fmaxf(col.x, 0.0f), 1.0f)),
+            (unsigned char)(255.0f * fminf(fmaxf(col.y, 0.0f), 1.0f)),
+            (unsigned char)(255.0f * fminf(fmaxf(col.z, 0.0f), 1.0f)),
+            255);
+        iterOut[s.idx] = r.it;
+        return;
     }
 
-    out[s.idx] = make_uchar4(
-        (unsigned char)(255.0f * fminf(fmaxf(col.x, 0.0f), 1.0f)),
-        (unsigned char)(255.0f * fminf(fmaxf(col.y, 0.0f), 1.0f)),
-        (unsigned char)(255.0f * fminf(fmaxf(col.z, 0.0f), 1.0f)),
-        255);
-    iterOut[s.idx] = it;
+    if (r.it >= maxIter || r.interior) {
+        // innen/schwarz
+        out[s.idx]     = make_uchar4(0,0,0,255);
+        iterOut[s.idx] = r.it;
+        return;
+    }
+
+    // lebt weiter → kompakt in 'survOut' pushen (warp-aggregated)
+    unsigned actMask = 0xFFFFFFFFu;
+#if (__CUDA_ARCH__ >= 700)
+    actMask = __activemask();
+#endif
+    const bool isSurvivor = true;
+    const unsigned ballot = __ballot_sync(actMask, isSurvivor);
+    const int      voteCount = __popc(ballot);
+
+    const int lane = threadIdx.x & 31;
+    const unsigned laneMask = ballot & ((1u << lane) - 1u);
+    const int prefix = __popc(laneMask);
+
+    int base = 0;
+    const int leader = __ffs(ballot) - 1;
+    if (lane == leader) {
+        base = atomicAdd(survOutCount, voteCount);
+    }
+    base = __shfl_sync(ballot, base, leader);
+
+    Survivor ns;
+    ns.x = r.x; ns.y = r.y; ns.cr = s.cr; ns.ci = s.ci; ns.it = r.it; ns.idx = s.idx;
+    survOut[base + prefix] = ns;
 }
 
 // ---------- ENTROPY & CONTRAST (unverändert) --------------------------------
 __global__ void entropyKernel(
-    const int* __restrict__ it, float* __restrict__ eOut,
+    const int* it, float* eOut,
     int w, int h, int tile, int maxIter)
 {
     const bool doLog = Settings::debugLogging;
@@ -349,7 +384,7 @@ __global__ void entropyKernel(
 }
 
 __global__ void contrastKernel(
-    const float* __restrict__ e, float* __restrict__ cOut,
+    const float* e, float* cOut,
     int tilesX, int tilesY)
 {
     const bool doLog = Settings::debugLogging;
@@ -421,19 +456,25 @@ void computeCudaEntropyContrast(
     }
 }
 
-// ---------- Host: Mandelbrot 2-Pass Wrapper ---------------------------------
+// ---------- Host: Mandelbrot 2-Pass Wrapper (Sliced Finish) -----------------
 namespace {
-    // persistente temporäre Buffer (werden bei Bedarf vergrößert)
-    Survivor* g_dSurvivors = nullptr;
-    int*      g_dSurvCount = nullptr;
+    // zwei Survivor-Puffer + Zähler (Ping-Pong), persistent & resizable
+    Survivor* g_dSurvivorsA = nullptr;
+    Survivor* g_dSurvivorsB = nullptr;
+    int*      g_dSurvCountA = nullptr;
+    int*      g_dSurvCountB = nullptr;
     size_t    g_survivorCap = 0;
 
     void ensureSurvivorCapacity(size_t need) {
         if (need <= g_survivorCap) return;
-        if (g_dSurvivors) cudaFree(g_dSurvivors);
-        if (g_dSurvCount) cudaFree(g_dSurvCount);
-        cudaMalloc(&g_dSurvivors, need * sizeof(Survivor));
-        cudaMalloc(&g_dSurvCount, sizeof(int));
+        if (g_dSurvivorsA) cudaFree(g_dSurvivorsA);
+        if (g_dSurvivorsB) cudaFree(g_dSurvivorsB);
+        if (g_dSurvCountA) cudaFree(g_dSurvCountA);
+        if (g_dSurvCountB) cudaFree(g_dSurvCountB);
+        cudaMalloc(&g_dSurvivorsA, need * sizeof(Survivor));
+        cudaMalloc(&g_dSurvivorsB, need * sizeof(Survivor));
+        cudaMalloc(&g_dSurvCountA, sizeof(int));
+        cudaMalloc(&g_dSurvCountB, sizeof(int));
         g_survivorCap = need;
     }
 }
@@ -454,55 +495,65 @@ void launch_mandelbrotHybrid(
     // Survivor-Buffer (max. w*h)
     ensureSurvivorCapacity(size_t(w) * size_t(h));
 
-    // Cache-Preference (technische Hint, ändert keine Logik)
-    cudaFuncSetCacheConfig(mandelbrotPass1Warmup, cudaFuncCachePreferL1);
-    cudaFuncSetCacheConfig(mandelbrotPass2Finish, cudaFuncCachePreferL1);
-
-    // Timing
     auto t0 = clk::now();
-    auto t_launchStart = clk::now();
 
     // Pass 1
-    cudaMemset(g_dSurvCount, 0, sizeof(int));
-    mandelbrotPass1Warmup<<<grid, block>>>(out, d_it, g_dSurvivors, g_dSurvCount, w, h, zoom, offset, maxIter);
+    cudaMemset(g_dSurvCountA, 0, sizeof(int));
+    mandelbrotPass1Warmup<<<grid, block>>>(out, d_it, g_dSurvivorsA, g_dSurvCountA, w, h, zoom, offset, maxIter);
 
-    // Survivor-Zahl holen (nur Diagnose; keine Logikänderung)
-    int h_survCount = 0;
-    cudaMemcpy(&h_survCount, g_dSurvCount, sizeof(int), cudaMemcpyDeviceToHost);
+    // Survivor-Zahl holen + Log wie gehabt
+    int h_survA = 0;
+    cudaMemcpy(&h_survA, g_dSurvCountA, sizeof(int), cudaMemcpyDeviceToHost);
     if (Settings::performanceLogging) {
-        LUCHS_LOG_HOST("[PERF] survivors=%d (%.2f%% of %d)",
-                       h_survCount,
-                       100.0 * double(h_survCount) / double(w * h),
-                       w * h);
+        const double pct = 100.0 * double(h_survA) / double(w) / double(h);
+        LUCHS_LOG_HOST("[PERF] survivors=%d (%.2f%% of %d)", h_survA, pct, w*h);
     }
 
-    // Pass 2 (nur wenn nötig)
-    if (h_survCount > 0) {
-        int threads = 256;
-        int blocks  = (h_survCount + threads - 1) / threads;
-        mandelbrotPass2Finish<<<blocks, threads>>>(out, d_it, g_dSurvivors, h_survCount, maxIter);
+    // Pass 2: Slices mit Re-Kompaktierung
+    if (h_survA > 0) {
+        // L1 bevorzugen (passt gut zu Survivor-Listen)
+        cudaFuncSetCacheConfig(mandelbrotPass2Slice, cudaFuncCachePreferL1);
+
+        int threads = 128;
+        int slice   = 0;
+
+        Survivor* curBuf = g_dSurvivorsA;
+        Survivor* nxtBuf = g_dSurvivorsB;
+        int*      curCnt = g_dSurvCountA;
+        int*      nxtCnt = g_dSurvCountB;
+        int       h_cur  = h_survA;
+
+        while (h_cur > 0 && slice < MAX_SLICES) {
+            cudaMemset(nxtCnt, 0, sizeof(int));
+            int blocks  = (h_cur + threads - 1) / threads;
+
+            mandelbrotPass2Slice<<<blocks, threads>>>(
+                out, d_it, curBuf, h_cur, nxtBuf, nxtCnt, maxIter);
+
+            int h_next = 0;
+            cudaMemcpy(&h_next, nxtCnt, sizeof(int), cudaMemcpyDeviceToHost);
+
+            if (Settings::performanceLogging) {
+                LUCHS_LOG_HOST("[PERF] slice=%d survivors_in=%d survivors_out=%d", slice, h_cur, h_next);
+            }
+
+            // Ping-Pong
+            std::swap(curBuf, nxtBuf);
+            std::swap(curCnt, nxtCnt);
+            h_cur = h_next;
+            ++slice;
+        }
     }
 
-    auto t_launchEnd = clk::now();
-
-    // Sync
-    auto t_syncStart = clk::now();
+    // Sync & Zeit
     cudaDeviceSynchronize();
-    auto t_syncEnd = clk::now();
     auto t1 = clk::now();
 
-    // Logs im alten Format
     if (Settings::performanceLogging) {
-        double launchMs = std::chrono::duration<double, std::milli>(t_launchEnd - t_launchStart).count();
-        double syncMs   = std::chrono::duration<double, std::milli>(t_syncEnd - t_syncStart).count();
         double totalMs  = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        LUCHS_LOG_HOST("[PERF] mandelbrot: launch=%.3f ms sync=%.3f ms total=%.3f ms",
-                       launchMs, syncMs, totalMs);
+        LUCHS_LOG_HOST("[PERF] mandelbrot (hybrid-sliced): total=%.3f ms", totalMs);
     } else if (Settings::debugLogging) {
-        double launchMs = std::chrono::duration<double, std::milli>(t_launchEnd - t_launchStart).count();
-        double syncMs   = std::chrono::duration<double, std::milli>(t_syncEnd - t_syncStart).count();
         double totalMs  = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        LUCHS_LOG_HOST("[TIME] Mandelbrot | Launch %.3f ms | Sync %.3f ms | Total %.3f ms",
-                       launchMs, syncMs, totalMs);
+        LUCHS_LOG_HOST("[TIME] Mandelbrot Sliced | Total %.3f ms", totalMs);
     }
 }
