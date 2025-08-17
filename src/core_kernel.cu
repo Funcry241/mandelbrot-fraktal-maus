@@ -1,7 +1,7 @@
 // MAUS: core kernel with tiny device formatter (no CRT redeclare; bounded; ASCII)
-// 🐭 Maus: Feature „Schwarze Schnauze“ – Early-Out für Innenpunkte (Cardioid/Bulb) + erweiterter Attraktor-Check p=3..8.
-// 🦦 Otter: Spart Iterationen in schwarzen Bereichen, ohne Bildänderung. (Bezug zu Otter)
-// 🦊 Schneefuchs: Mathematisch konservativ; nur Workload-Reduktion, Logs ASCII. (Bezug zu Schneefuchs)
+// 🐭 Maus: „Schwarze Schnauze“ erweitert – analytisch (Cardioid/p=2) + selektiver Attraktor-Check p=3..8.
+// 🦦 Otter: Läuft nur bei Innen-Kandidaten (billiger Vorfilter) → spart Iterationen ohne Bildänderung. (Bezug zu Otter)
+// 🦊 Schneefuchs: Konservativ & numerisch stabil; zusätzlich seltener Periodizitätsprobe im Hauptloop. (Bezug zu Schneefuchs)
 // 🐑 Schneefuchs: Warp-synchrones Escape & FMA – weniger Divergenz, weniger Instruktionen. (Bezug zu Schneefuchs)
 
 #include <cuda_runtime.h>
@@ -10,11 +10,25 @@
 #include <cmath>
 #include <chrono>
 #include "common.hpp"
-#include "luchs_device_format.hpp"   // <- new tiny formatter (no snprintf)
+#include "luchs_device_format.hpp"   // <- tiny formatter (no snprintf)
 #include "core_kernel.h"
 #include "settings.hpp"
 #include "luchs_log_device.hpp"
 #include "luchs_log_host.hpp"
+
+// --- Extended Nose Configuration (compile-time, conservative) ----------------
+// (Kein settings.hpp Touch – bildneutral, nur Workload-Reduktion)
+namespace {
+constexpr int   NOSE_PREFILTER_STEPS   = 8;       // mini warmup to detect "likely interior"
+constexpr float NOSE_PREFILTER_THRESH2 = 0.25f;   // r^2 < 0.25  (r < 0.5) after prefilter
+constexpr int   NOSE_P_MAX             = 8;       // check periods 3..8 (p=1,2 handled analytically)
+constexpr int   NOSE_CYCLE_STEPS       = 48;      // steps for cycle detection (after prefilter)
+constexpr float NOSE_ESC2              = 4.0f;    // escape radius^2
+constexpr float NOSE_EPS_CYCLE2        = 1e-10f;  // closeness threshold for z ~ z_{-p}
+constexpr float NOSE_MU_THR            = 0.95f;   // |∏(2 z_k)| < thr ⇒ stable
+constexpr int   LOOP_CHECK_EVERY       = 32;      // periodicity probe cadence in main loop
+constexpr float LOOP_EPS2              = 1e-10f;  // closeness for probe
+} // namespace
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -67,11 +81,15 @@ __device__ __forceinline__ int mandelbrotIterations_scalar(
 }
 
 // 🐑 Schneefuchs: Warp-synchronisierte Iteration mit Ballot – reduziert Divergenz.
+// + seltene Periodizitätsprobe (alle 32 steps) – bildneutraler Early-Out für sichere Innenbahnen.
 __device__ __forceinline__ int mandelbrotIterations_warp(
     float cr, float ci, int maxIter, float& xr, float& xi)
 {
     float x = 0.0f, y = 0.0f;
     int it = 0;
+
+    // rare periodicity probe state
+    float px = 0.0f, py = 0.0f; int pc = 0;
 
     unsigned mask = 0xFFFFFFFFu;
 #if (__CUDA_ARCH__ >= 700)
@@ -91,6 +109,16 @@ __device__ __forceinline__ int mandelbrotIterations_warp(
             y = fmaf(2.0f * x, y, ci);                        // 2*x*y + ci
             x = xt;
             ++it;
+
+            // Rare probe: if orbit is extremely close to a previous sample, treat as interior.
+            ++pc;
+            if (pc == LOOP_CHECK_EVERY) {
+                float dx = x - px, dy = y - py;
+                if (dx*dx + dy*dy < LOOP_EPS2) {
+                    active = false; it = maxIter; // interior (safe)
+                }
+                px = x; py = y; pc = 0;
+            }
         } else {
             active = false;
         }
@@ -143,8 +171,8 @@ void computeCEC(float zx, float zy, int it, int maxIt, float& nu, float& stripe)
     // Schneefuchs: __log2f ist schnelle Approx.; fmaxf schützt Bereich.
     float mu = (float)it + 1.0f - __log2f(__log2f(fmaxf(norm, 1.000001f)));
     nu = fminf(fmaxf(mu / (float)maxIt, 0.0f), 1.0f);
-    float frac = fract(mu);
-    stripe = powf(0.5f + 0.5f * __sinf(6.2831853f * frac), 0.75f);
+    float fracv = fract(mu);
+    stripe = powf(0.5f + 0.5f * __sinf(6.2831853f * fracv), 0.75f);
 }
 
 __device__ __forceinline__
@@ -164,7 +192,7 @@ float3 colorFractalDetailed(float2 c, float zx, float zy, int it, int maxIt)
     return hsvToRgb(hue, sat, val);
 }
 
-// --- „Schwarze Schnauze“: Innenraum-Shortcut --------------------------------
+// --- „Schwarze Schnauze“: Innenraum-Shortcuts -------------------------------
 // Otter: Early-Out für Punkte sicher in der Menge – spart komplette Iteration. (Bezug zu Otter)
 // Schneefuchs: Zwei exakte Tests (Hauptcardioide, period-2 Bulb). (Bezug zu Schneefuchs)
 __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
@@ -180,56 +208,52 @@ __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
     return false;
 }
 
-// 🐑 Schneefuchs: Erweiterte „Schnauze“ – konservativer Attraktor-Check (p=3..8). (Bezug zu Schneefuchs)
-// Idee: Fällt die 0-Bahn in einen stabilen p-Zyklus (|∏ 2z_k| < thr), ist c sicher innen.
-// Konservativ gewählt: bei Unsicherheit → false (kein Early-Out) → keine Bildänderung.
-__device__ __forceinline__ bool insideHigherPeriodConservative(float cr, float ci)
+// 🐭 Maus: Cheap prefilter – aktiviere erweiterten Check nur bei Innen-Kandidat. (Bezug zu Otter/Schneefuchs)
+__device__ __forceinline__
+bool likelyInteriorAfterFewSteps(float cr, float ci, float& x, float& y)
 {
-    // Parameter konservativ; Overhead << 50k Iterationen.
-    const int   WARMUP      = 16;      // frühe Flucht schnell erkennen
-    const int   STEPS       = 64;      // maximale Zusatzschritte
-    const int   P_MAX       = 8;       // Prüfe Perioden 3..8
-    const float ESC2        = 4.0f;    // Escape-Radius^2
-    const float EPS_CYCLE2  = 1e-10f;  // Nähe-Schwelle z ~ z_{-p}
-    const float MU_THR      = 0.95f;   // |Multiplier| < 0.95 ⇒ stabil (konservativ)
-
-    float x = 0.0f, y = 0.0f;
-
+    x = 0.0f; y = 0.0f;
 #pragma unroll 1
-    for (int i = 0; i < WARMUP; ++i) {
+    for (int i = 0; i < NOSE_PREFILTER_STEPS; ++i) {
         float x2 = x * x, y2 = y * y;
-        if (x2 + y2 > ESC2) return false;
+        if (x2 + y2 > NOSE_ESC2) return false; // sicher außen → teuren Check sparen
         float xt = fmaf(x, x, -y2) + cr;
         y = fmaf(2.0f * x, y, ci);
         x = xt;
     }
+    // sehr konservative Schwelle: "klar klein" nach wenigen Schritten
+    return (x * x + y * y) < NOSE_PREFILTER_THRESH2;
+}
 
-    float2 ring[P_MAX];
+// 🐑 Schneefuchs: Konservativer Attraktor-Check p=3..8, Start im vorgefilterten Zustand. (Bezug zu Schneefuchs)
+__device__ __forceinline__
+bool insideHigherPeriodFromState(float x, float y, float cr, float ci)
+{
+    float2 ring[NOSE_P_MAX];
     int rp = 0;
 
 #pragma unroll 1
-    for (int t = 0; t < STEPS; ++t) {
+    for (int t = 0; t < NOSE_CYCLE_STEPS; ++t) {
         float x2 = x * x, y2 = y * y;
-        if (x2 + y2 > ESC2) return false;
+        if (x2 + y2 > NOSE_ESC2) return false; // außen
 
         ring[rp] = make_float2(x, y);
 
+        // einen Schritt vorwärts
         float xt = fmaf(x, x, -y2) + cr;
         y = fmaf(2.0f * x, y, ci);
         x = xt;
 
-        rp = (rp + 1) % P_MAX;
+        rp = (rp + 1) % NOSE_P_MAX;
 
-        if (t >= P_MAX) {
-            // Perioden p=3..P_MAX prüfen (p=1,2 bereits analytisch abgedeckt)
-            for (int p = 3; p <= P_MAX; ++p) {
+        if (t >= NOSE_P_MAX) {
+            // Perioden p=3..P_MAX prüfen (p=1,2 analytisch abgedeckt)
+            for (int p = 3; p <= NOSE_P_MAX; ++p) {
                 int idx_prev = rp - p;
-                if (idx_prev < 0) idx_prev += P_MAX * ((-idx_prev + P_MAX - 1) / P_MAX);
-                idx_prev %= P_MAX;
-
+                if (idx_prev < 0) idx_prev += NOSE_P_MAX; // reicht, da p<=NOSE_P_MAX
                 float dx = x - ring[idx_prev].x;
                 float dy = y - ring[idx_prev].y;
-                if (dx * dx + dy * dy < EPS_CYCLE2) {
+                if (dx * dx + dy * dy < NOSE_EPS_CYCLE2) {
                     // Multiplier μ = ∏(2 z_k) über p Zustände
                     float mx = 1.0f, my = 0.0f;
                     int idx = idx_prev;
@@ -239,36 +263,22 @@ __device__ __forceinline__ bool insideHigherPeriodConservative(float cr, float c
                         float bx = 2.0f * ring[idx].x, by = 2.0f * ring[idx].y;
                         mx = fmaf(ax, bx, -ay * by);
                         my = fmaf(ax, by,  ay * bx);
-                        idx = (idx + 1) % P_MAX;
+                        idx = (idx + 1) % NOSE_P_MAX;
                     }
                     float mu2 = mx * mx + my * my;
-                    if (mu2 < MU_THR * MU_THR) {
-                        // Zusätzliche Mini-Verifikation: noch p Schritte und erneut nahe?
-                        float vx = x, vy = y;
-                        bool ok = true;
-#pragma unroll 1
-                        for (int j = 0; j < p; ++j) {
-                            float vx2 = vx * vx, vy2 = vy * vy;
-                            if (vx2 + vy2 > ESC2) { ok = false; break; }
-                            float nxt = fmaf(vx, vx, -vy2) + cr;
-                            vy = fmaf(2.0f * vx, vy, ci);
-                            vx = nxt;
-                        }
-                        float ddx = vx - x, ddy = vy - y;
-                        if (ok && (ddx * ddx + ddy * ddy < EPS_CYCLE2)) {
-                            return true; // stabiler Attraktor sicher → Innenpunkt
-                        }
+                    if (mu2 < NOSE_MU_THR * NOSE_MU_THR) {
+                        return true; // stabiler Attraktor sicher → Innenpunkt
                     }
                 }
             }
         }
     }
-    return false; // keine sichere Aussage → normal iterieren
+    return false; // unentschieden → normal iterieren
 }
 
 // --- Kernel ------------------------------------------------------------------
 
-// 🐑 Schneefuchs: __restrict__-Aliase helfen dem Compiler ohne API-Änderung.
+// 🐑 Schneefuchs: __restrict__-Aliase helfen dem Compiler ohne API-Änderung. (Bezug zu Schneefuchs)
 __global__ void mandelbrotKernel(
     uchar4* out, int* iterOut,
     int w, int h, float zoom, float2 offset, int maxIter)
@@ -291,15 +301,13 @@ __global__ void mandelbrotKernel(
 
     const float2 c = pixelToComplex(x + 0.5f, y + 0.5f, w, h, spanX, spanY, offset);
 
-    // 🐽 Schwarze Schnauze (erweitert): Early-Out für Innenpunkte (schwarz, it=maxIter)
-    if (insideMainCardioidOrBulb(c.x, c.y) ||
-        insideHigherPeriodConservative(c.x, c.y))
-    {
+    // --- Early-Out: analytisch + selektiv erweiterte „Schnauze“
+    if (insideMainCardioidOrBulb(c.x, c.y)) {
         outR[idx]   = make_uchar4(0, 0, 0, 255);
         iterR[idx]  = maxIter;
         if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
             char msg[96]; int n = 0;
-            n = luchs::d_append_str(msg, sizeof(msg), n, "[NOSE] early_inside x=");
+            n = luchs::d_append_str(msg, sizeof(msg), n, "[NOSE] early_inside (cardioid/p2) x=");
             n = luchs::d_append_int(msg, sizeof(msg), n, x);
             n = luchs::d_append_str(msg, sizeof(msg), n, " y=");
             n = luchs::d_append_int(msg, sizeof(msg), n, y);
@@ -307,10 +315,28 @@ __global__ void mandelbrotKernel(
             LUCHS_LOG_DEVICE(msg);
         }
         return;
+    } else {
+        float sx, sy;
+        if (likelyInteriorAfterFewSteps(c.x, c.y, sx, sy) &&
+            insideHigherPeriodFromState(sx, sy, c.x, c.y))
+        {
+            outR[idx]   = make_uchar4(0, 0, 0, 255);
+            iterR[idx]  = maxIter;
+            if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
+                char msg[96]; int n = 0;
+                n = luchs::d_append_str(msg, sizeof(msg), n, "[NOSE] early_inside (p>=3) x=");
+                n = luchs::d_append_int(msg, sizeof(msg), n, x);
+                n = luchs::d_append_str(msg, sizeof(msg), n, " y=");
+                n = luchs::d_append_int(msg, sizeof(msg), n, y);
+                luchs::d_terminate(msg, sizeof(msg), n);
+                LUCHS_LOG_DEVICE(msg);
+            }
+            return;
+        }
     }
 
     float zx, zy;
-    // 🐑 Schneefuchs: Warp-synchronisierte Iterationen (weniger Divergenz).
+    // 🐑 Schneefuchs: Warp-synchronisierte Iterationen (weniger Divergenz). (Bezug zu Schneefuchs)
     int it = mandelbrotIterations_warp(c.x, c.y, maxIter, zx, zy);
 
     const float3 rgb = colorFractalDetailed(c, zx, zy, it, maxIter);
