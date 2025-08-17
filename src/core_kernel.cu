@@ -1,7 +1,7 @@
 // MAUS: core kernel with tiny device formatter (no CRT redeclare; bounded; ASCII)
-// 🐭 Maus: Feature „Schwarze Schnauze“ – Early-Out für Innenpunkte (Cardioid/Bulb).
+// 🐭 Maus: Feature „Schwarze Schnauze“ – Early-Out für Innenpunkte (Cardioid/Bulb) + erweiterter Attraktor-Check p=3..8.
 // 🦦 Otter: Spart Iterationen in schwarzen Bereichen, ohne Bildänderung. (Bezug zu Otter)
-// 🦊 Schneefuchs: Mathematisch exakt; nur Workload-Reduktion, Logs ASCII. (Bezug zu Schneefuchs)
+// 🦊 Schneefuchs: Mathematisch konservativ; nur Workload-Reduktion, Logs ASCII. (Bezug zu Schneefuchs)
 // 🐑 Schneefuchs: Warp-synchrones Escape & FMA – weniger Divergenz, weniger Instruktionen. (Bezug zu Schneefuchs)
 
 #include <cuda_runtime.h>
@@ -165,8 +165,8 @@ float3 colorFractalDetailed(float2 c, float zx, float zy, int it, int maxIt)
 }
 
 // --- „Schwarze Schnauze“: Innenraum-Shortcut --------------------------------
-// Otter: Early-Out für Punkte sicher in der Menge – spart komplette Iteration.
-// Schneefuchs: Zwei exakte Tests (Hauptcardioide, period-2 Bulb).
+// Otter: Early-Out für Punkte sicher in der Menge – spart komplette Iteration. (Bezug zu Otter)
+// Schneefuchs: Zwei exakte Tests (Hauptcardioide, period-2 Bulb). (Bezug zu Schneefuchs)
 __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
     // Hauptcardioide
     float xm = x - 0.25f;
@@ -178,6 +178,92 @@ __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
     if (xp * xp + y * y <= 0.0625f) return true;
 
     return false;
+}
+
+// 🐑 Schneefuchs: Erweiterte „Schnauze“ – konservativer Attraktor-Check (p=3..8). (Bezug zu Schneefuchs)
+// Idee: Fällt die 0-Bahn in einen stabilen p-Zyklus (|∏ 2z_k| < thr), ist c sicher innen.
+// Konservativ gewählt: bei Unsicherheit → false (kein Early-Out) → keine Bildänderung.
+__device__ __forceinline__ bool insideHigherPeriodConservative(float cr, float ci)
+{
+    // Parameter konservativ; Overhead << 50k Iterationen.
+    const int   WARMUP      = 16;      // frühe Flucht schnell erkennen
+    const int   STEPS       = 64;      // maximale Zusatzschritte
+    const int   P_MAX       = 8;       // Prüfe Perioden 3..8
+    const float ESC2        = 4.0f;    // Escape-Radius^2
+    const float EPS_CYCLE2  = 1e-10f;  // Nähe-Schwelle z ~ z_{-p}
+    const float MU_THR      = 0.95f;   // |Multiplier| < 0.95 ⇒ stabil (konservativ)
+
+    float x = 0.0f, y = 0.0f;
+
+#pragma unroll 1
+    for (int i = 0; i < WARMUP; ++i) {
+        float x2 = x * x, y2 = y * y;
+        if (x2 + y2 > ESC2) return false;
+        float xt = fmaf(x, x, -y2) + cr;
+        y = fmaf(2.0f * x, y, ci);
+        x = xt;
+    }
+
+    float2 ring[P_MAX];
+    int rp = 0;
+
+#pragma unroll 1
+    for (int t = 0; t < STEPS; ++t) {
+        float x2 = x * x, y2 = y * y;
+        if (x2 + y2 > ESC2) return false;
+
+        ring[rp] = make_float2(x, y);
+
+        float xt = fmaf(x, x, -y2) + cr;
+        y = fmaf(2.0f * x, y, ci);
+        x = xt;
+
+        rp = (rp + 1) % P_MAX;
+
+        if (t >= P_MAX) {
+            // Perioden p=3..P_MAX prüfen (p=1,2 bereits analytisch abgedeckt)
+            for (int p = 3; p <= P_MAX; ++p) {
+                int idx_prev = rp - p;
+                if (idx_prev < 0) idx_prev += P_MAX * ((-idx_prev + P_MAX - 1) / P_MAX);
+                idx_prev %= P_MAX;
+
+                float dx = x - ring[idx_prev].x;
+                float dy = y - ring[idx_prev].y;
+                if (dx * dx + dy * dy < EPS_CYCLE2) {
+                    // Multiplier μ = ∏(2 z_k) über p Zustände
+                    float mx = 1.0f, my = 0.0f;
+                    int idx = idx_prev;
+#pragma unroll 1
+                    for (int j = 0; j < p; ++j) {
+                        float ax = mx, ay = my;
+                        float bx = 2.0f * ring[idx].x, by = 2.0f * ring[idx].y;
+                        mx = fmaf(ax, bx, -ay * by);
+                        my = fmaf(ax, by,  ay * bx);
+                        idx = (idx + 1) % P_MAX;
+                    }
+                    float mu2 = mx * mx + my * my;
+                    if (mu2 < MU_THR * MU_THR) {
+                        // Zusätzliche Mini-Verifikation: noch p Schritte und erneut nahe?
+                        float vx = x, vy = y;
+                        bool ok = true;
+#pragma unroll 1
+                        for (int j = 0; j < p; ++j) {
+                            float vx2 = vx * vx, vy2 = vy * vy;
+                            if (vx2 + vy2 > ESC2) { ok = false; break; }
+                            float nxt = fmaf(vx, vx, -vy2) + cr;
+                            vy = fmaf(2.0f * vx, vy, ci);
+                            vx = nxt;
+                        }
+                        float ddx = vx - x, ddy = vy - y;
+                        if (ok && (ddx * ddx + ddy * ddy < EPS_CYCLE2)) {
+                            return true; // stabiler Attraktor sicher → Innenpunkt
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return false; // keine sichere Aussage → normal iterieren
 }
 
 // --- Kernel ------------------------------------------------------------------
@@ -205,8 +291,10 @@ __global__ void mandelbrotKernel(
 
     const float2 c = pixelToComplex(x + 0.5f, y + 0.5f, w, h, spanX, spanY, offset);
 
-    // 🐽 Schwarze Schnauze: Early-Out für Innenpunkte (schwarz, it=maxIter)
-    if (insideMainCardioidOrBulb(c.x, c.y)) {
+    // 🐽 Schwarze Schnauze (erweitert): Early-Out für Innenpunkte (schwarz, it=maxIter)
+    if (insideMainCardioidOrBulb(c.x, c.y) ||
+        insideHigherPeriodConservative(c.x, c.y))
+    {
         outR[idx]   = make_uchar4(0, 0, 0, 255);
         iterR[idx]  = maxIter;
         if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
@@ -413,7 +501,7 @@ void launch_mandelbrotHybrid(
     using clk = std::chrono::high_resolution_clock;
     auto t0 = clk::now();
 
-    // Otter: 32x8 bei performanceLogging – gute Occupancy/Coalescing.
+    // Otter: 32x8 bei performanceLogging – gute Occupancy/Coalescing. (Bezug zu Otter)
     dim3 block = Settings::performanceLogging ? dim3(32, 8) : dim3(16, 16);
     dim3 grid((w + block.x - 1)/block.x, (h + block.y - 1)/block.y);
 
