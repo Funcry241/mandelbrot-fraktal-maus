@@ -1,7 +1,8 @@
+/////
 // MAUS: core kernel with tiny device formatter (no CRT redeclare; bounded; ASCII)
 // 🐭 Maus: Feature „Schwarze Schnauze“ – Early-Out für Innenpunkte (Cardioid/Bulb).
-// 🦦 Otter: Spart Iterationen in schwarzen Bereichen, ohne Bildänderung. (Bezug zu Otter)
-// 🦊 Schneefuchs: Mathematisch exakt; nur Workload-Reduktion, Logs ASCII. (Bezug zu Schneefuchs)
+// 🦦 Otter: Eye-Candy integriert (Smooth Coloring + Paletten via otter_color.hpp). (Bezug zu Otter)
+// 🦊 Schneefuchs: Mathematisch exakt; Workload-Reduktion + deterministische ASCII-Logs. (Bezug zu Schneefuchs)
 // 🐑 Schneefuchs: Warp-synchrones Escape & FMA – weniger Divergenz, weniger Instruktionen. (Bezug zu Schneefuchs)
 
 #include <cuda_runtime.h>
@@ -10,11 +11,12 @@
 #include <cmath>
 #include <chrono>
 #include "common.hpp"
-#include "luchs_device_format.hpp"   // <- new tiny formatter (no snprintf)
+#include "luchs_device_format.hpp"   // <- tiny formatter (no snprintf)
 #include "core_kernel.h"
 #include "settings.hpp"
 #include "luchs_log_device.hpp"
 #include "luchs_log_host.hpp"
+#include "otter_color.hpp"           // 🦦 Otter: Smooth Coloring + geschmackvolle Paletten (Bezug zu Otter)
 
 // --- Tuning-Parameter --------------------------------------------------------
 // Chunked Ballot: reduziert Sync-Overhead ohne Bildänderung.
@@ -28,24 +30,15 @@ namespace {
 
     // Epsilon^2 für „nahezu gleich“ (float, konservativ)
     constexpr float LOOP_EPS2         = 1e-8f;
+
+    // 🦦 Otter: Standard-Look für Eye-Candy (Palette, Stripes, Gamma)
+    constexpr otter::Palette kPalette   = otter::Palette::Glacier; // Aurora / Glacier / Ember
+    constexpr float          kStripeF   = 3.0f;
+    constexpr float          kStripeAmp = 0.10f;
+    constexpr float          kGamma     = 2.2f;
 }
 
 // --- Helpers ----------------------------------------------------------------
-
-__device__ __forceinline__ float fract(float x) {
-    return x - floorf(x);
-}
-
-__device__ __forceinline__ uchar4 elegantColor(float t) {
-    t = sqrtf(fminf(fmaxf(t, 0.0f), 1.0f));
-    float rf = 0.5f + 0.5f * __sinf(6.2831f * (t + 0.0f));
-    float gf = 0.5f + 0.5f * __sinf(6.2831f * (t + 0.33f));
-    float bf = 0.5f + 0.5f * __sinf(6.2831f * (t + 0.66f));
-    unsigned char r = static_cast<unsigned char>(rf * 255.0f);
-    unsigned char g = static_cast<unsigned char>(gf * 255.0f);
-    unsigned char b = static_cast<unsigned char>(bf * 255.0f);
-    return make_uchar4(r, g, b, 255);
-}
 
 __device__ __forceinline__ float2 pixelToComplex(
     float px, float py, int w, int h,
@@ -148,66 +141,6 @@ __device__ __forceinline__ int mandelbrotIterations_warp(
     return it;
 }
 
-// --- Farbe / Mapping ---------------------------------------------------------
-
-__device__ __forceinline__ float3 hsvToRgb(float h, float s, float v) {
-    float r, g, b;
-    int i = int(h * 6.0f);
-    float f = h * 6.0f - i;
-    float p = v * (1.0f - s);
-    float q = v * (1.0f - f * s);
-    float t = v * (1.0f - (1.0f - f) * s);
-    switch (i % 6) {
-        case 0: r = v, g = t, b = p; break;
-        case 1: r = q, g = v, b = p; break;
-        case 2: r = p, g = v, b = t; break;
-        case 3: r = p, g = q, b = v; break;
-        case 4: r = t, g = p, b = v; break;
-        default: r = v, g = p, b = q; break;
-    }
-    return make_float3(r, g, b);
-}
-
-__device__ float pseudoRandomWarze(float x, float y) {
-    float r = sqrtf(x * x + y * y);
-    float angle = atan2f(y, x);
-    return 0.5f + 0.5f * __sinf(r * 6.0f + angle * 4.0f);
-}
-
-// Continuous Escape-Time (CEC) + Stripe
-__device__ __forceinline__
-void computeCEC(float zx, float zy, int it, int maxIt, float& nu, float& stripe)
-{
-    float norm = zx * zx + zy * zy;
-    if (it >= maxIt) {
-        nu = 1.0f;
-        stripe = 0.0f;
-        return;
-    }
-    // Schneefuchs: __log2f ist schnelle Approx.; fmaxf schützt Bereich.
-    float mu = (float)it + 1.0f - __log2f(__log2f(fmaxf(norm, 1.000001f)));
-    nu = fminf(fmaxf(mu / (float)maxIt, 0.0f), 1.0f);
-    float frac = fract(mu);
-    stripe = powf(0.5f + 0.5f * __sinf(6.2831853f * frac), 0.75f);
-}
-
-__device__ __forceinline__
-float3 colorFractalDetailed(float2 c, float zx, float zy, int it, int maxIt)
-{
-    if (it >= maxIt) {
-        return make_float3(0.0f, 0.0f, 0.0f);
-    }
-    float nu, stripe;
-    computeCEC(zx, zy, it, maxIt, nu, stripe);
-
-    float angle = atan2f(c.y, c.x);
-    // 0.15915494f = 1/(2*pi)
-    float hue   = fract(nu * 0.25f + angle * 0.08f * 0.15915494f);
-    float val   = 0.3f + 0.7f * stripe;
-    float sat   = 0.9f;
-    return hsvToRgb(hue, sat, val);
-}
-
 // --- „Schwarze Schnauze“: Innenraum-Shortcut --------------------------------
 // Otter: Early-Out für Punkte sicher in der Menge – spart komplette Iteration.
 // Schneefuchs: Zwei exakte Tests (Hauptcardioide, period-2 Bulb).
@@ -269,11 +202,19 @@ __global__ void mandelbrotKernel(
     // 🐑 Schneefuchs: Warp-Iteration in CHUNKs mit seltener Loop-Probe.
     int it = mandelbrotIterations_warp(c.x, c.y, maxIter, zx, zy);
 
-    const float3 rgb = colorFractalDetailed(c, zx, zy, it, maxIter);
+    // 🦦 Otter Eye-Candy: Smooth Coloring + Paletten (kein Banding)
+    float3 col;
+    if (it >= maxIter) {
+        // Kern bleibt deterministisch dunkel (projektweit so gewünscht)
+        col = make_float3(0.0f, 0.0f, 0.0f);
+    } else {
+        col = otter::shade(it, maxIter, zx, zy, kPalette, kStripeF, kStripeAmp, kGamma);
+    }
+
     outR[idx] = make_uchar4(
-        (unsigned char)(rgb.x * 255.0f),
-        (unsigned char)(rgb.y * 255.0f),
-        (unsigned char)(rgb.z * 255.0f),
+        (unsigned char)(255.0f * fminf(fmaxf(col.x, 0.0f), 1.0f)),
+        (unsigned char)(255.0f * fminf(fmaxf(col.y, 0.0f), 1.0f)),
+        (unsigned char)(255.0f * fminf(fmaxf(col.z, 0.0f), 1.0f)),
         255
     );
     iterR[idx] = it;
@@ -457,7 +398,7 @@ void launch_mandelbrotHybrid(
     using clk = std::chrono::high_resolution_clock;
     auto t0 = clk::now();
 
-    // Otter: 32x8 bei performanceLogging – gute Occupancy/Coalescing.
+    // Otter: 32x8 bei performanceLogging – gute Occupancy/Coalescing. (Bezug zu Otter)
     dim3 block = Settings::performanceLogging ? dim3(32, 8) : dim3(16, 16);
     dim3 grid((w + block.x - 1)/block.x, (h + block.y - 1)/block.y);
 
