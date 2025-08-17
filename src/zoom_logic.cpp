@@ -1,3 +1,4 @@
+// LUCHS
 // Perf V3 hot path – no header/API change (ASCII logs only)
 // Otter: Warm-up ohne Richtungswechsel: erst zoomen, dann lenken. (Bezug zu Otter)
 // Schneefuchs: Minimalinvasiv, keine Header-/API-Änderung. ASCII-Logs. (Bezug zu Schneefuchs)
@@ -190,7 +191,7 @@ ZoomResult evaluateZoomTarget(
     using clock = std::chrono::high_resolution_clock;
     const auto t0 = clock::now();
 
-    // Warm-up: Richtung einfrieren (Otter)
+    // ── Warm-up-Timer: ab erstem Aufruf läuft die Uhr. ───────────────────────
     static bool warmupInit = false;
     static clock::time_point warmupStart;
     if (!warmupInit) { warmupStart = t0; warmupInit = true; }
@@ -263,7 +264,7 @@ ZoomResult evaluateZoomTarget(
     // NDC-Zentren cachen (Schneefuchs)
     g_ndcCache.ensure(tilesX, tilesY, width, height);
 
-    // Statistik: nur alle kStatsEvery Frames oder wenn N wechselt (Schneefuchs)
+    // Robuste Statistik: nur alle kStatsEvery Frames oder wenn N wechselt (Schneefuchs)
     const bool statsNChanged = (g_statsN != N);
     const bool recomputeStats = statsNChanged || ((++g_statsTick % kStatsEvery) == 1);
     if (recomputeStats) {
@@ -285,7 +286,7 @@ ZoomResult evaluateZoomTarget(
     const float c_med = g_cMed;
     const float c_mad = (g_cMad > 1e-6f) ? g_cMad : 1.0f;
 
-    // 1. Pass: Scores & Summen (Schneefuchs) – parallel optional
+    // 1. Pass: Scores & Summen
     g_bufS.resize(N);
     double sumS  = 0.0;
     double sumS2 = 0.0;
@@ -302,7 +303,7 @@ ZoomResult evaluateZoomTarget(
         sumS2 += (double)si * (double)si;
     }
 
-    // bestScore/bestIdx separat (serielle O(N) reicht; ggf. SIMD)
+    // bestScore/bestIdx (seriell – billig)
     float bestScore = -1e9f;
     int   bestIdx   = -1;
     for (int i = 0; i < N; ++i) {
@@ -311,13 +312,13 @@ ZoomResult evaluateZoomTarget(
     }
 
     // Signalstärke via Z-Score-Streuung
-    (void)bestIdx; // may be overwritten by no-black pass
+    (void)bestIdx;
     const double meanS = sumS / std::max(1, N);
     const double varS  = std::max(0.0, (sumS2 / std::max(1, N)) - meanS * meanS);
     const double stdS  = std::sqrt(varS);
     const bool   hasSignal = (stdS >= kMIN_SIGNAL_Z);
 
-    // Early-Exit bei "kein Signal" (wenn nicht AlwaysZoom) (Otter)
+    // Early-Exit bei "kein Signal" (wenn nicht AlwaysZoom)
     if (!hasSignal && !Settings::ForceAlwaysZoom) {
         out.shouldZoom = false;
         if (Settings::debugLogging) {
@@ -328,73 +329,99 @@ ZoomResult evaluateZoomTarget(
 
     // Softmax-Temperatur adaptiv
     float temp = kTEMP_BASE;
-    if (stdS > 1e-6) {
-        temp = static_cast<float>(kTEMP_BASE / (0.5f + (float)stdS)); // 0.5 vermeidet extremes Einfrieren
-    }
+    if (stdS > 1e-6) temp = static_cast<float>(kTEMP_BASE / (0.5f + (float)stdS));
     temp = clampf(temp, 0.2f, 2.5f);
 
-    // Softmax-Sparsification (Schneefuchs)
+    // Softmax-Schwelle & Konstanten
     const float sMax      = bestScore;
     const float sCutScore = sMax + temp * kSOFTMAX_LOG_EPS;
+    const double invZoom  = 1.0 / (double)zoom;
+    const float invTempF  = 1.0f / std::max(1e-6f, temp);
 
-    // Precompute invZoom (Divisionen sparen)
-    const double invZoom = 1.0 / (double)zoom;
-
-    // 2. Pass: Normierter Schwerpunkt (nur signifikante Terme),
-    //          HARTE No-Black-Filterung (Cardioid/2er-Bulb) (Otter/Schneefuchs)
+    // ── 2. Pass (FUSIONIERT): Softmax-Reduktion + bestAdj in EINER Schleife ─────────
     double sumW = 0.0, numX = 0.0, numY = 0.0;
     int    interiorSkipped = 0;
-
-    const float invTempF = 1.0f / std::max(1e-6f, temp);
+    float  bestAdjScore = -1e9f;
+    int    bestAdjIdx   = -1;
 
 #ifdef ZOOMLOGIC_OMP
-#pragma omp parallel for reduction(+:sumW,numX,numY,interiorSkipped) schedule(static)
-#endif
+#pragma omp parallel
+    {
+        double sumW_loc = 0.0, numX_loc = 0.0, numY_loc = 0.0;
+        int    interior_loc = 0;
+        float  bestAdjScore_loc = -1e9f;
+        int    bestAdjIdx_loc   = -1;
+
+#pragma omp for nowait schedule(static)
+        for (int i = 0; i < N; ++i) {
+            const float si = g_bufS[i];
+            if (si < sCutScore) continue;
+
+            // Complex coords des Tile-Zentrums (Offset/Zoom)
+            const double cx = (double)currentOffset.x + (double)g_ndcCache.ndcX[i] * invZoom;
+            const double cy = (double)currentOffset.y + (double)g_ndcCache.ndcY[i] * invZoom;
+
+            if (isInsideCardioidOrBulb(cx, cy)) { ++interior_loc; continue; }
+
+            const float  sShift = (si - sMax) * invTempF;
+            const float  exf    = std::expf(sShift);
+            const double w      = (double)exf;
+            sumW_loc += w;
+            numX_loc += w * (double)g_ndcCache.ndcX[i];
+            numY_loc += w * (double)g_ndcCache.ndcY[i];
+
+            if (si > bestAdjScore_loc) { bestAdjScore_loc = si; bestAdjIdx_loc = i; }
+        }
+
+#pragma omp atomic
+        sumW += sumW_loc;
+#pragma omp atomic
+        numX += numX_loc;
+#pragma omp atomic
+        numY += numY_loc;
+#pragma omp atomic
+        interiorSkipped += interior_loc;
+
+#pragma omp critical
+        {
+            if (bestAdjScore_loc > bestAdjScore) {
+                bestAdjScore = bestAdjScore_loc;
+                bestAdjIdx   = bestAdjIdx_loc;
+            }
+        }
+    }
+#else
     for (int i = 0; i < N; ++i) {
         const float si = g_bufS[i];
         if (si < sCutScore) continue;
 
-        // Komplexe Koordinaten des Kachelzentrums (NDC -> Complex via Offset/Zoom)
         const double cx = (double)currentOffset.x + (double)g_ndcCache.ndcX[i] * invZoom;
         const double cy = (double)currentOffset.y + (double)g_ndcCache.ndcY[i] * invZoom;
+        if (isInsideCardioidOrBulb(cx, cy)) { ++interiorSkipped; continue; }
 
-        if (isInsideCardioidOrBulb(cx, cy)) {
-            ++interiorSkipped;
-            continue; // harter Ausschluss von Innenbereichen
-        }
-
-        // Softmax-Gewicht (float expf für Speed, Summen in double für Stabilität)
-        const float sShift = (si - sMax) * invTempF;
-        const float exf    = std::expf(sShift);
-        const double w     = (double)exf;
+        const float  sShift = (si - sMax) * invTempF;
+        const float  exf    = std::expf(sShift);
+        const double w      = (double)exf;
         sumW += w;
         numX += w * (double)g_ndcCache.ndcX[i];
         numY += w * (double)g_ndcCache.ndcY[i];
-    }
 
-    // Bestes "adj" (ohne Innenkandidaten) seriell bestimmen (klar & stabil)
-    float bestAdjScore = -1e9f;
-    int   bestAdjIdx   = -1;
-    for (int i = 0; i < N; ++i) {
-        const float si = g_bufS[i];
-        if (si < sCutScore) continue;
-        const double cx = (double)currentOffset.x + (double)g_ndcCache.ndcX[i] * invZoom;
-        const double cy = (double)currentOffset.y + (double)g_ndcCache.ndcY[i] * invZoom;
-        if (isInsideCardioidOrBulb(cx, cy)) continue;
         if (si > bestAdjScore) { bestAdjScore = si; bestAdjIdx = i; }
     }
+#endif
 
-    ZoomResult& o = out; // Alias
+    // Ergebnis des fusionierten Passes konsumieren
     if (bestAdjIdx >= 0) {
-        o.bestIndex    = bestAdjIdx;
-        o.bestScore    = bestAdjScore;
-        o.bestEntropy  = entropy[bestAdjIdx];
-        o.bestContrast = contrast[bestAdjIdx];
+        out.bestIndex    = bestAdjIdx;
+        out.bestScore    = bestAdjScore;
+        out.bestEntropy  = entropy[bestAdjIdx];
+        out.bestContrast = contrast[bestAdjIdx];
     } else {
-        // Falls alles rausfiel: fallback auf initiale Auswahl (wird gleich durch Hysterese stabilisiert)
-        o.bestIndex = bestIdx; o.bestScore = bestScore;
-        o.bestEntropy  = (bestIdx >= 0) ? entropy[bestIdx]  : 0.0f;
-        o.bestContrast = (bestIdx >= 0) ? contrast[bestIdx] : 0.0f;
+        // Fallback: alles gefiltert -> initial best
+        out.bestIndex    = bestIdx;
+        out.bestScore    = bestScore;
+        out.bestEntropy  = (bestIdx >= 0) ? entropy[bestIdx]  : 0.0f;
+        out.bestContrast = (bestIdx >= 0) ? contrast[bestIdx] : 0.0f;
     }
 
     double ndcX = 0.0, ndcY = 0.0;
@@ -403,37 +430,35 @@ ZoomResult evaluateZoomTarget(
         ndcX = numX * inv;
         ndcY = numY * inv;
     }
-    // Fallback: (0,0), falls alles unter Schwelle/innen.
 
     // Relative Hysterese + Lock auf Zielwechsel (vor Bewegung)
-    if (state.lastAcceptedIndex >= 0 && o.bestIndex >= 0 && o.bestIndex != state.lastAcceptedIndex) {
+    if (state.lastAcceptedIndex >= 0 && out.bestIndex >= 0 && out.bestIndex != state.lastAcceptedIndex) {
         if (s_lockLeft > 0) {
             --s_lockLeft;
-            o.bestIndex    = state.lastAcceptedIndex;
-            o.bestScore    = state.lastAcceptedScore;
-            o.bestEntropy  = entropy[o.bestIndex];
-            o.bestContrast = contrast[o.bestIndex];
+            out.bestIndex    = state.lastAcceptedIndex;
+            out.bestScore    = state.lastAcceptedScore;
+            out.bestEntropy  = entropy[out.bestIndex];
+            out.bestContrast = contrast[out.bestIndex];
             if (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ZOOMV3] lock_hold last=%d left=%d", o.bestIndex, s_lockLeft);
+                LUCHS_LOG_HOST("[ZOOMV3] lock_hold last=%d left=%d", out.bestIndex, s_lockLeft);
             }
         } else {
             const double rel = (state.lastAcceptedScore > 1e-12f)
-                ? (double(o.bestScore) / double(state.lastAcceptedScore)) : 1e9;
+                ? (double(out.bestScore) / double(state.lastAcceptedScore)) : 1e9;
             if (rel < (1.0 + kHYST_REL)) {
-                // nicht deutlich besser: alten beibehalten
-                o.bestIndex    = state.lastAcceptedIndex;
-                o.bestScore    = state.lastAcceptedScore;
-                o.bestEntropy  = entropy[o.bestIndex];
-                o.bestContrast = contrast[o.bestIndex];
+                out.bestIndex    = state.lastAcceptedIndex;
+                out.bestScore    = state.lastAcceptedScore;
+                out.bestEntropy  = entropy[out.bestIndex];
+                out.bestContrast = contrast[out.bestIndex];
                 if (Settings::debugLogging) {
                     LUCHS_LOG_HOST("[ZOOMV3] hysteresis_keep last=%d rel=%.3f thr=%.3f",
                                    state.lastAcceptedIndex, rel, 1.0 + kHYST_REL);
                 }
             } else {
-                s_lockLeft = kLOCK_FRAMES; // Wechsel akzeptiert -> kurz sperren
+                s_lockLeft = kLOCK_FRAMES;
                 if (Settings::debugLogging) {
                     LUCHS_LOG_HOST("[ZOOMV3] switch_accept old=%d new=%d rel=%.3f lock=%d",
-                                   state.lastAcceptedIndex, o.bestIndex, rel, s_lockLeft);
+                                   state.lastAcceptedIndex, out.bestIndex, rel, s_lockLeft);
                 }
             }
         }
@@ -451,7 +476,6 @@ ZoomResult evaluateZoomTarget(
     // Bewegung glätten (EMA, adaptiv nur nach Distanz)
     float emaAlpha = kEMA_ALPHA_MIN + (kEMA_ALPHA_MAX - kEMA_ALPHA_MIN) * clampf(dist / 0.5f, 0.0f, 1.0f);
     if (Settings::ForceAlwaysZoom && !hasSignal) {
-        // Otter: leichter Drift auch ohne klares Signal
         emaAlpha = std::max(emaAlpha, kFORCE_MIN_DRIFT_ALPHA);
     }
 
@@ -476,7 +500,7 @@ ZoomResult evaluateZoomTarget(
         state.lastOffset        = out.newOffset;
         state.lastTilesX        = tilesX;
         state.lastTilesY        = tilesY;
-        state.cooldownLeft      = 0; // V3: kein Cooldown-Konzept mehr
+        state.cooldownLeft      = 0;
     }
 
     // Logging (ASCII only)
