@@ -1,5 +1,4 @@
 // Perf V3 hot path – no header/API change (ASCII logs only)
-// Maus: Zoom V3 – kontinuierlicher Schwerpunkt, glatter Drift, deterministisch.
 // Otter: Warm-up ohne Richtungswechsel: erst zoomen, dann lenken. (Bezug zu Otter)
 // Schneefuchs: Minimalinvasiv, keine Header-/API-Änderung. ASCII-Logs. (Bezug zu Schneefuchs)
 
@@ -13,6 +12,10 @@
 #include <cmath>
 #include <numeric>
 #include <vector>
+
+#ifdef ZOOMLOGIC_OMP
+  #include <omp.h>
+#endif
 
 // ------- V3-Parameter (lokal, bewusst nicht in settings.hpp, um Hotfixe zu erleichtern) -------
 // Scoring-Gewichte
@@ -47,6 +50,9 @@ static constexpr int   kLOCK_FRAMES = 12;    // nach Wechsel so viele Frames spe
 // NEU: Retarget-Throttling – nur alle N Frames neu auswerten (CPU-schonend, ruhiger)
 //      (Bezug zu Schneefuchs/Otter)
 static constexpr int   kRetargetInterval = 5; // nur alle 5 Frames neu zielen (bei ForceAlwaysZoom)
+
+// NEU: Statistik nur alle M Frames (Kopier-/nth_element-Last reduzieren). (Bezug zu Schneefuchs)
+static constexpr int   kStatsEvery = 3; // alle 3 Frames Median/MAD neu
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
@@ -121,13 +127,18 @@ struct NdcCenterCache {
 // thread_local, um Re-Allokationen und false sharing zu vermeiden. (Bezug zu Schneefuchs)
 thread_local NdcCenterCache g_ndcCache;
 
-// thread_local Buffer für robuste Statistik – Allokationen vermeiden. (Bezug zu Schneefuchs)
+// thread_local Buffer – Allokationen vermeiden. (Bezug zu Schneefuchs)
 thread_local std::vector<float> g_bufE;
 thread_local std::vector<float> g_bufC;
-// NEU: thread_local Score-Puffer, um Doppelberechnung zu sparen. (Bezug zu Schneefuchs)
 thread_local std::vector<float> g_bufS;
 
-// NEU: kleiner, funktion-lokaler Zustand für Hysterese/Lock & Retarget (kein Header-Touch)
+// Stats-Cache & Cadence (alle kStatsEvery Frames neu) (Bezug zu Schneefuchs)
+thread_local int   g_statsTick = 0;
+thread_local int   g_statsN    = -1;
+thread_local float g_eMed = 0.0f, g_eMad = 1.0f;
+thread_local float g_cMed = 0.0f, g_cMad = 1.0f;
+
+// kleiner, funktion-lokaler Zustand für Hysterese/Lock & Retarget (kein Header-Touch)
 static int s_lockLeft = 0;
 static int s_sinceRetarget = 0;
 } // namespace
@@ -179,14 +190,14 @@ ZoomResult evaluateZoomTarget(
     using clock = std::chrono::high_resolution_clock;
     const auto t0 = clock::now();
 
-    // ── Warm-up-Timer: ab erstem Aufruf läuft die Uhr. ───────────────────────
-    static bool warmupInit = false; // Schneefuchs: static, funktional lokal
+    // Warm-up: Richtung einfrieren (Otter)
+    static bool warmupInit = false;
     static clock::time_point warmupStart;
     if (!warmupInit) { warmupStart = t0; warmupInit = true; }
     const double warmupSec = std::chrono::duration<double>(t0 - warmupStart).count();
     const bool freezeDirection = (warmupSec < kNO_TURN_WARMUP_SEC);
 
-    ZoomResult out;
+    ZoomResult out{};
     out.bestIndex   = -1;
     out.shouldZoom  = false;
     out.isNewTarget = false;
@@ -212,7 +223,7 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // NEU: Warm-up vor schwerer Arbeit – sofortiger Early-Exit, Richtung einfrieren. (Otter)
+    // Warm-up Early-Exit (Otter)
     if (freezeDirection) {
         out.shouldZoom = true;
         if (Settings::debugLogging) {
@@ -222,7 +233,7 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // NEU: Retarget nur alle N Frames (CPU sparen & Richtungsruhe) – nur bei AlwaysZoom
+    // Retarget nur alle N Frames (nur bei AlwaysZoom)
     if (Settings::ForceAlwaysZoom) {
         if (++s_sinceRetarget < kRetargetInterval) {
             out.shouldZoom = true;           // Zoom läuft, Richtung bleibt
@@ -249,43 +260,71 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // NDC-Zentren cachen (geometrieabhängig). (Schneefuchs)
+    // NDC-Zentren cachen (Schneefuchs)
     g_ndcCache.ensure(tilesX, tilesY, width, height);
 
-    // Robuste Statistik mit pre-reserve (ruhigere Frametime). (Schneefuchs)
-    g_bufE.reserve(N);
-    g_bufC.reserve(N);
-    g_bufS.reserve(N);
-    g_bufE.assign(entropy.begin(), entropy.begin() + N);
-    g_bufC.assign(contrast.begin(), contrast.begin() + N);
+    // Statistik: nur alle kStatsEvery Frames oder wenn N wechselt (Schneefuchs)
+    const bool statsNChanged = (g_statsN != N);
+    const bool recomputeStats = statsNChanged || ((++g_statsTick % kStatsEvery) == 1);
+    if (recomputeStats) {
+        g_bufE.reserve(N); g_bufC.reserve(N);
+        g_bufE.assign(entropy.begin(),  entropy.begin()  + N);
+        g_bufC.assign(contrast.begin(), contrast.begin() + N);
+        g_eMed = median_inplace(g_bufE);
+        g_eMad = mad_inplace_from_center(g_bufE, g_eMed);
+        g_cMed = median_inplace(g_bufC);
+        g_cMad = mad_inplace_from_center(g_bufC, g_cMed);
+        g_statsN = N;
+        if (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOMV3] stats recompute N=%d eMed=%.4f eMAD=%.4f cMed=%.4f cMAD=%.4f",
+                           N, g_eMed, g_eMad, g_cMed, g_cMad);
+        }
+    }
+    const float e_med = g_eMed;
+    const float e_mad = (g_eMad > 1e-6f) ? g_eMad : 1.0f;
+    const float c_med = g_cMed;
+    const float c_mad = (g_cMad > 1e-6f) ? g_cMad : 1.0f;
+
+    // 1. Pass: Scores & Summen (Schneefuchs) – parallel optional
     g_bufS.resize(N);
-
-    const float e_med = median_inplace(g_bufE);
-    const float e_mad = mad_inplace_from_center(g_bufE, e_med);
-    const float c_med = median_inplace(g_bufC);
-    const float c_mad = mad_inplace_from_center(g_bufC, c_med);
-
-    // Z-Scores + lineare Kombination – 1. Pass: Statistik, Bestes, Varianz (Scores gepuffert)
-    float  bestScore = -1e9f;
-    int    bestIdx   = -1;
     double sumS  = 0.0;
     double sumS2 = 0.0;
 
+#ifdef ZOOMLOGIC_OMP
+#pragma omp parallel for reduction(+:sumS,sumS2) schedule(static)
+#endif
     for (int i = 0; i < N; ++i) {
-        const float ez = (entropy[i]  - e_med) / (e_mad <= 1e-6f ? 1.0f : e_mad);
-        const float cz = (contrast[i] - c_med) / (c_mad <= 1e-6f ? 1.0f : c_mad);
+        const float ez = (entropy[i]  - e_med) / e_mad;
+        const float cz = (contrast[i] - c_med) / c_mad;
         const float si = kALPHA_E * ez + kBETA_C * cz;
-        g_bufS[i] = si; // Schneefuchs: Doppelberechnung vermeiden
-        sumS  += si;
+        g_bufS[i] = si;
+        sumS  += (double)si;
         sumS2 += (double)si * (double)si;
+    }
+
+    // bestScore/bestIdx separat (serielle O(N) reicht; ggf. SIMD)
+    float bestScore = -1e9f;
+    int   bestIdx   = -1;
+    for (int i = 0; i < N; ++i) {
+        const float si = g_bufS[i];
         if (si > bestScore) { bestScore = si; bestIdx = i; }
     }
 
-    // Signalstärke via Z-Score-Spanne
+    // Signalstärke via Z-Score-Streuung
+    (void)bestIdx; // may be overwritten by no-black pass
     const double meanS = sumS / std::max(1, N);
     const double varS  = std::max(0.0, (sumS2 / std::max(1, N)) - meanS * meanS);
     const double stdS  = std::sqrt(varS);
     const bool   hasSignal = (stdS >= kMIN_SIGNAL_Z);
+
+    // Early-Exit bei "kein Signal" (wenn nicht AlwaysZoom) (Otter)
+    if (!hasSignal && !Settings::ForceAlwaysZoom) {
+        out.shouldZoom = false;
+        if (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOMV3] no_signal early-exit stdS=%.3f (thr=%.3f)", (float)stdS, kMIN_SIGNAL_Z);
+        }
+        return out;
+    }
 
     // Softmax-Temperatur adaptiv
     float temp = kTEMP_BASE;
@@ -294,29 +333,26 @@ ZoomResult evaluateZoomTarget(
     }
     temp = clampf(temp, 0.2f, 2.5f);
 
-    // Softmax-Sparsification: nur relevante Beiträge exponentieren. (Schneefuchs)
+    // Softmax-Sparsification (Schneefuchs)
     const float sMax      = bestScore;
     const float sCutScore = sMax + temp * kSOFTMAX_LOG_EPS;
 
     // Precompute invZoom (Divisionen sparen)
     const double invZoom = 1.0 / (double)zoom;
 
-    // 2. Pass: Normierter Schwerpunkt in NDC – nur signifikante Terme,
-    //          zusätzlich HARTE No-Black-Filterung (Cardioid/2er-Bulb) pro Kachelzentrum.
-    double sumW = 0.0;
-    double numX = 0.0;
-    double numY = 0.0;
+    // 2. Pass: Normierter Schwerpunkt (nur signifikante Terme),
+    //          HARTE No-Black-Filterung (Cardioid/2er-Bulb) (Otter/Schneefuchs)
+    double sumW = 0.0, numX = 0.0, numY = 0.0;
     int    interiorSkipped = 0;
-
-    // Optional: angepasstes "best" ohne Innenkandidaten (für Logging/Kohärenz)
-    float bestAdjScore = -1e9f;
-    int   bestAdjIdx   = -1;
 
     const float invTempF = 1.0f / std::max(1e-6f, temp);
 
+#ifdef ZOOMLOGIC_OMP
+#pragma omp parallel for reduction(+:sumW,numX,numY,interiorSkipped) schedule(static)
+#endif
     for (int i = 0; i < N; ++i) {
         const float si = g_bufS[i];
-        if (si < sCutScore) continue; // Otter: cheap skip
+        if (si < sCutScore) continue;
 
         // Komplexe Koordinaten des Kachelzentrums (NDC -> Complex via Offset/Zoom)
         const double cx = (double)currentOffset.x + (double)g_ndcCache.ndcX[i] * invZoom;
@@ -324,42 +360,52 @@ ZoomResult evaluateZoomTarget(
 
         if (isInsideCardioidOrBulb(cx, cy)) {
             ++interiorSkipped;
-            continue; // Schneefuchs: harter Ausschluss von Innenbereichen
+            continue; // harter Ausschluss von Innenbereichen
         }
 
         // Softmax-Gewicht (float expf für Speed, Summen in double für Stabilität)
         const float sShift = (si - sMax) * invTempF;
         const float exf    = std::expf(sShift);
-        sumW += (double)exf;
-        numX += (double)exf * (double)g_ndcCache.ndcX[i];
-        numY += (double)exf * (double)g_ndcCache.ndcY[i];
+        const double w     = (double)exf;
+        sumW += w;
+        numX += w * (double)g_ndcCache.ndcX[i];
+        numY += w * (double)g_ndcCache.ndcY[i];
+    }
 
+    // Bestes "adj" (ohne Innenkandidaten) seriell bestimmen (klar & stabil)
+    float bestAdjScore = -1e9f;
+    int   bestAdjIdx   = -1;
+    for (int i = 0; i < N; ++i) {
+        const float si = g_bufS[i];
+        if (si < sCutScore) continue;
+        const double cx = (double)currentOffset.x + (double)g_ndcCache.ndcX[i] * invZoom;
+        const double cy = (double)currentOffset.y + (double)g_ndcCache.ndcY[i] * invZoom;
+        if (isInsideCardioidOrBulb(cx, cy)) continue;
         if (si > bestAdjScore) { bestAdjScore = si; bestAdjIdx = i; }
     }
 
-    ZoomResult& o = out; // Alias für kompaktere Schreibweise
+    ZoomResult& o = out; // Alias
     if (bestAdjIdx >= 0) {
         o.bestIndex    = bestAdjIdx;
         o.bestScore    = bestAdjScore;
         o.bestEntropy  = entropy[bestAdjIdx];
         o.bestContrast = contrast[bestAdjIdx];
     } else {
-        // Falls alles rausfiel, bleibe bei initialer -1 Auswahl; Hysterese-Block hält ggf. lastTarget.
+        // Falls alles rausfiel: fallback auf initiale Auswahl (wird gleich durch Hysterese stabilisiert)
         o.bestIndex = bestIdx; o.bestScore = bestScore;
         o.bestEntropy  = (bestIdx >= 0) ? entropy[bestIdx]  : 0.0f;
         o.bestContrast = (bestIdx >= 0) ? contrast[bestIdx] : 0.0f;
     }
 
-    double ndcX = 0.0;
-    double ndcY = 0.0;
+    double ndcX = 0.0, ndcY = 0.0;
     if (sumW > 0.0) {
         const double inv = 1.0 / sumW;
         ndcX = numX * inv;
         ndcY = numY * inv;
     }
-    // Otter: fallback bleibt (0,0), falls alle Beiträge unterhalb Schwelle oder innen sind.
+    // Fallback: (0,0), falls alles unter Schwelle/innen.
 
-    // Relative Hysterese + Lock auf Zielwechsel (bevor Bewegung geplant wird)
+    // Relative Hysterese + Lock auf Zielwechsel (vor Bewegung)
     if (state.lastAcceptedIndex >= 0 && o.bestIndex >= 0 && o.bestIndex != state.lastAcceptedIndex) {
         if (s_lockLeft > 0) {
             --s_lockLeft;
@@ -414,7 +460,7 @@ ZoomResult evaluateZoomTarget(
         previousOffset.y * (1.0f - emaAlpha) + proposedOffset.y * emaAlpha
     );
 
-    // ── Normale Ausgabe nach Warm-up ────────────────────────────────────────
+    // Ausgabe
     out.distance   = dist;
     out.newOffset  = (hasSignal || Settings::ForceAlwaysZoom) ? smoothed : previousOffset;
     out.shouldZoom = (hasSignal || Settings::ForceAlwaysZoom);
