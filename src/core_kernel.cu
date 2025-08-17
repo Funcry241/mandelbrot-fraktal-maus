@@ -10,7 +10,7 @@
 #include <cmath>
 #include <chrono>
 #include "common.hpp"
-#include "luchs_device_format.hpp"   // <- tiny formatter (no snprintf)
+#include "luchs_device_format.hpp"   // tiny formatter (no snprintf)
 #include "core_kernel.h"
 #include "settings.hpp"
 #include "luchs_log_device.hpp"
@@ -20,14 +20,14 @@
 // (Kein settings.hpp Touch – bildneutral, nur Workload-Reduktion)
 namespace {
 constexpr int   NOSE_PREFILTER_STEPS   = 8;       // mini warmup to detect "likely interior"
-constexpr float NOSE_PREFILTER_THRESH2 = 0.25f;   // r^2 < 0.25  (r < 0.5) after prefilter
+constexpr float NOSE_PREFILTER_THRESH2 = 0.36f;   // r^2 < 0.36  (r < 0.6) nach Vorfilter
 constexpr int   NOSE_P_MAX             = 8;       // check periods 3..8 (p=1,2 handled analytically)
-constexpr int   NOSE_CYCLE_STEPS       = 48;      // steps for cycle detection (after prefilter)
+constexpr int   NOSE_CYCLE_STEPS       = 32;      // etwas billiger als 48, bleibt konservativ
 constexpr float NOSE_ESC2              = 4.0f;    // escape radius^2
-constexpr float NOSE_EPS_CYCLE2        = 1e-10f;  // closeness threshold for z ~ z_{-p}
-constexpr float NOSE_MU_THR            = 0.95f;   // |∏(2 z_k)| < thr ⇒ stable
-constexpr int   LOOP_CHECK_EVERY       = 32;      // periodicity probe cadence in main loop
-constexpr float LOOP_EPS2              = 1e-10f;  // closeness for probe
+constexpr float NOSE_EPS_CYCLE2        = 1e-10f;  // closeness threshold für z ~ z_{-p}
+constexpr float NOSE_MU_THR            = 0.95f;   // |∏(2 z_k)| < thr ⇒ stabil
+constexpr int   LOOP_CHECK_EVERY       = 16;      // Periodizitätsprobe-Frequenz im Hauptloop
+constexpr float LOOP_EPS2              = 1e-8f;   // Nähe-Schwelle für Probe (etwas großzügiger)
 } // namespace
 
 // --- Helpers ----------------------------------------------------------------
@@ -81,7 +81,7 @@ __device__ __forceinline__ int mandelbrotIterations_scalar(
 }
 
 // 🐑 Schneefuchs: Warp-synchronisierte Iteration mit Ballot – reduziert Divergenz.
-// + seltene Periodizitätsprobe (alle 32 steps) – bildneutraler Early-Out für sichere Innenbahnen.
+// + seltene Periodizitätsprobe (alle LOOP_CHECK_EVERY steps) – bildneutraler Early-Out für sichere Innenbahnen.
 __device__ __forceinline__ int mandelbrotIterations_warp(
     float cr, float ci, int maxIter, float& xr, float& xi)
 {
@@ -90,6 +90,7 @@ __device__ __forceinline__ int mandelbrotIterations_warp(
 
     // rare periodicity probe state
     float px = 0.0f, py = 0.0f; int pc = 0;
+    int close_hits = 0; // zwei Treffer hintereinander → sicher innen
 
     unsigned mask = 0xFFFFFFFFu;
 #if (__CUDA_ARCH__ >= 700)
@@ -110,15 +111,20 @@ __device__ __forceinline__ int mandelbrotIterations_warp(
             x = xt;
             ++it;
 
-            // Rare probe: if orbit is extremely close to a previous sample, treat as interior.
+            // ---- seltene Periodizitätsprobe (robuster, bildneutral) ----
             ++pc;
             if (pc == LOOP_CHECK_EVERY) {
                 float dx = x - px, dy = y - py;
                 if (dx*dx + dy*dy < LOOP_EPS2) {
-                    active = false; it = maxIter; // interior (safe)
+                    if (++close_hits >= 2) { // zwei unabhängige "nahe Wiederholung"
+                        active = false; it = maxIter;     // als Innenpunkt werten
+                    }
+                } else {
+                    close_hits = 0; // Sequenz zurücksetzen
                 }
                 px = x; py = y; pc = 0;
             }
+            // ----------------------------------------------------------------
         } else {
             active = false;
         }
@@ -221,7 +227,7 @@ bool likelyInteriorAfterFewSteps(float cr, float ci, float& x, float& y)
         y = fmaf(2.0f * x, y, ci);
         x = xt;
     }
-    // sehr konservative Schwelle: "klar klein" nach wenigen Schritten
+    // konservative Schwelle: "klar klein" nach wenigen Schritten
     return (x * x + y * y) < NOSE_PREFILTER_THRESH2;
 }
 
@@ -528,6 +534,7 @@ void launch_mandelbrotHybrid(
     auto t0 = clk::now();
 
     // Otter: 32x8 bei performanceLogging – gute Occupancy/Coalescing. (Bezug zu Otter)
+    // Hinweis: Für Tests kannst du 32x16 probieren; bei zu hohem Registerdruck ggf. zurück.
     dim3 block = Settings::performanceLogging ? dim3(32, 8) : dim3(16, 16);
     dim3 grid((w + block.x - 1)/block.x, (h + block.y - 1)/block.y);
 
