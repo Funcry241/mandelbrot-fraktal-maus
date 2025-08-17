@@ -1,7 +1,7 @@
-// MAUS: Perf V3 hot path – no header/API change (ASCII logs only)
-// 🐭 Maus: Zoom V3 – kontinuierlicher Schwerpunkt, glatter Drift, deterministisch.
-// 🦦 Otter: Warm-up ohne Richtungswechsel: erst zoomen, dann lenken. (Bezug zu Otter)
-// 🦊 Schneefuchs: Minimalinvasiv, keine Header-/API-Änderung. ASCII-Logs. (Bezug zu Schneefuchs)
+// Perf V3 hot path – no header/API change (ASCII logs only)
+// Maus: Zoom V3 – kontinuierlicher Schwerpunkt, glatter Drift, deterministisch.
+// Otter: Warm-up ohne Richtungswechsel: erst zoomen, dann lenken. (Bezug zu Otter)
+// Schneefuchs: Minimalinvasiv, keine Header-/API-Änderung. ASCII-Logs. (Bezug zu Schneefuchs)
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -27,17 +27,26 @@ static constexpr float kEMA_ALPHA_MAX = 0.30f; // maximale Glättung
 static constexpr float kMIN_SIGNAL_Z  = 0.15f; // minimale Z-Score-Stärke für "aktives" Signal
 // Deadzone (nur Dokumentation – Ausgabe in out.minDistance)
 static constexpr float kMIN_DISTANCE  = 0.02f; // ~NDC/Zoom-Skala
-// 🦦 Otter: sanfter Drift auch ohne starkes Signal, wenn AlwaysZoom aktiv ist
+// Otter: sanfter Drift auch ohne starkes Signal, wenn AlwaysZoom aktiv ist
 static constexpr float kFORCE_MIN_DRIFT_ALPHA = 0.05f;
 
-// 🟢 NEU: Warm-up-Zeit (Sekunden), in der KEIN Richtungswechsel erfolgt.
-//         Zoom läuft weiter, aber Offset bleibt unverändert. (Bezug zu Otter)
+// NEU: Warm-up-Zeit (Sekunden), in der KEIN Richtungswechsel erfolgt.
+//      Zoom läuft weiter, aber Offset bleibt unverändert. (Bezug zu Otter)
 static constexpr double kNO_TURN_WARMUP_SEC = 1.0;
 
-// 🟢 NEU: Softmax-Sparsification – ignoriere Beiträge mit sehr kleiner Gewichtung.
-//         si < sMax + temp * kSOFTMAX_LOG_EPS -> Beitrag vernachlässigbar.
-//         exp(-7) ≈ 0.0009, ausreichend klein für Schwerpunkt. (Bezug zu Schneefuchs)
+// NEU: Softmax-Sparsification – ignoriere Beiträge mit sehr kleiner Gewichtung.
+//      si < sMax + temp * kSOFTMAX_LOG_EPS -> Beitrag vernachlässigbar.
+//      exp(-7) ≈ 0.0009, ausreichend klein für Schwerpunkt. (Bezug zu Schneefuchs)
 static constexpr float kSOFTMAX_LOG_EPS = -7.0f;
+
+// NEU: Relative Hysterese + kurzer Lock gegen Flip-Flop (massive Richtungswechsel)
+//      (Bezug zu Otter/Schneefuchs)
+static constexpr float kHYST_REL    = 0.12f; // +12% besser nötig für Zielwechsel
+static constexpr int   kLOCK_FRAMES = 12;    // nach Wechsel so viele Frames sperren
+
+// NEU: Retarget-Throttling – nur alle N Frames neu auswerten (CPU-schonend, ruhiger)
+//      (Bezug zu Schneefuchs/Otter)
+static constexpr int   kRetargetInterval = 5; // nur alle 5 Frames neu zielen (bei ForceAlwaysZoom)
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
@@ -55,8 +64,8 @@ static inline float median_inplace(std::vector<float>& v) {
     return m;
 }
 
-// 🟢 NEU: MAD in-place auf wiederverwendetem Buffer; keine zusätzlichen Allokationen.
-//         (Bezug zu Schneefuchs)
+// NEU: MAD in-place auf wiederverwendetem Buffer; keine zusätzlichen Allokationen.
+//      (Bezug zu Schneefuchs)
 static inline float mad_inplace_from_center(std::vector<float>& buf, float med) {
     if (buf.empty()) return 1.0f;
     for (float& x : buf) x = std::fabs(x - med);
@@ -69,8 +78,20 @@ static inline float clampf(float x, float lo, float hi) {
     return x < lo ? lo : (x > hi ? hi : x);
 }
 
-// 🟢 NEU: NDC-Zentren-Cache pro Geometrie (tilesX, tilesY, width, height).
-//         Vermeidet per-Frame tileIndexToPixelCenter-Aufrufe. (Bezug zu Schneefuchs)
+// NEU: Analytischer Innen-Test (Cardioid + 2er-Bulb) – harter Ausschluss.
+//      Minimalinvasiv: wir prüfen die komplexen Koordinaten des Kachelzentrums.
+//      (Bezug zu Otter/Schneefuchs)
+static inline bool isInsideCardioidOrBulb(double x, double y) noexcept {
+    const double xm = x - 0.25;
+    const double q  = xm*xm + y*y;
+    if (q * (q + xm) < 0.25 * y * y) return true; // Hauptkardioide
+    const double dx = x + 1.0;                    // Period-2 Bulb (r=0.25)
+    if (dx*dx + y*y < 0.0625) return true;
+    return false;
+}
+
+// NEU: NDC-Zentren-Cache pro Geometrie (tilesX, tilesY, width, height).
+//      Vermeidet per-Frame tileIndexToPixelCenter-Aufrufe. (Bezug zu Schneefuchs)
 namespace {
 struct NdcCenterCache {
     int tilesX = -1, tilesY = -1, width = -1, height = -1;
@@ -96,12 +117,19 @@ struct NdcCenterCache {
         }
     }
 };
+
 // thread_local, um Re-Allokationen und false sharing zu vermeiden. (Bezug zu Schneefuchs)
 thread_local NdcCenterCache g_ndcCache;
 
 // thread_local Buffer für robuste Statistik – Allokationen vermeiden. (Bezug zu Schneefuchs)
 thread_local std::vector<float> g_bufE;
 thread_local std::vector<float> g_bufC;
+// NEU: thread_local Score-Puffer, um Doppelberechnung zu sparen. (Bezug zu Schneefuchs)
+thread_local std::vector<float> g_bufS;
+
+// NEU: kleiner, funktion-lokaler Zustand für Hysterese/Lock & Retarget (kein Header-Touch)
+static int s_lockLeft = 0;
+static int s_sinceRetarget = 0;
 } // namespace
 
 namespace ZoomLogic {
@@ -138,7 +166,7 @@ float computeEntropyContrast(
     return (cnt > 0) ? static_cast<float>(acc / cnt) : 0.0f;
 }
 
-// V3: Kontinuierlicher Schwerpunkt (Softmax) + EMA-Glättung
+// V3: Kontinuierlicher Schwerpunkt (Softmax) + EMA-Glättung + No-Black + Hysterese/Lock
 ZoomResult evaluateZoomTarget(
     const std::vector<float>& entropy,
     const std::vector<float>& contrast,
@@ -184,8 +212,7 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // 🟢 NEU: Warm-up vor schwerer Arbeit – sofortiger Early-Exit, Richtung einfrieren.
-    //         Zoom bleibt extern aktiv. (Bezug zu Otter)
+    // NEU: Warm-up vor schwerer Arbeit – sofortiger Early-Exit, Richtung einfrieren. (Otter)
     if (freezeDirection) {
         out.shouldZoom = true;
         if (Settings::debugLogging) {
@@ -193,6 +220,20 @@ ZoomResult evaluateZoomTarget(
                            warmupSec, kNO_TURN_WARMUP_SEC);
         }
         return out;
+    }
+
+    // NEU: Retarget nur alle N Frames (CPU sparen & Richtungsruhe) – nur bei AlwaysZoom
+    if (Settings::ForceAlwaysZoom) {
+        if (++s_sinceRetarget < kRetargetInterval) {
+            out.shouldZoom = true;           // Zoom läuft, Richtung bleibt
+            out.newOffset   = previousOffset;
+            if (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ZOOMV3] skip_retarget interval=%d/%d",
+                               s_sinceRetarget, kRetargetInterval);
+            }
+            return out;
+        }
+        s_sinceRetarget = 0; // jetzt neu evaluieren
     }
 
     // Konsistente Länge ableiten
@@ -208,21 +249,25 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // 🟢 NEU: NDC-Zentren cachen (geometrieabhängig). (Bezug zu Schneefuchs)
+    // NDC-Zentren cachen (geometrieabhängig). (Schneefuchs)
     g_ndcCache.ensure(tilesX, tilesY, width, height);
 
-    // 🟢 NEU: Robuste Statistik ohne frische Allokationen. (Bezug zu Schneefuchs)
+    // Robuste Statistik mit pre-reserve (ruhigere Frametime). (Schneefuchs)
+    g_bufE.reserve(N);
+    g_bufC.reserve(N);
+    g_bufS.reserve(N);
     g_bufE.assign(entropy.begin(), entropy.begin() + N);
     g_bufC.assign(contrast.begin(), contrast.begin() + N);
+    g_bufS.resize(N);
 
     const float e_med = median_inplace(g_bufE);
     const float e_mad = mad_inplace_from_center(g_bufE, e_med);
     const float c_med = median_inplace(g_bufC);
     const float c_mad = mad_inplace_from_center(g_bufC, c_med);
 
-    // Z-Scores + lineare Kombination – 1. Pass: Statistik, Bestes, Varianz
-    float bestScore = -1e9f;
-    int   bestIdx   = -1;
+    // Z-Scores + lineare Kombination – 1. Pass: Statistik, Bestes, Varianz (Scores gepuffert)
+    float  bestScore = -1e9f;
+    int    bestIdx   = -1;
     double sumS  = 0.0;
     double sumS2 = 0.0;
 
@@ -230,6 +275,7 @@ ZoomResult evaluateZoomTarget(
         const float ez = (entropy[i]  - e_med) / (e_mad <= 1e-6f ? 1.0f : e_mad);
         const float cz = (contrast[i] - c_med) / (c_mad <= 1e-6f ? 1.0f : c_mad);
         const float si = kALPHA_E * ez + kBETA_C * cz;
+        g_bufS[i] = si; // Schneefuchs: Doppelberechnung vermeiden
         sumS  += si;
         sumS2 += (double)si * (double)si;
         if (si > bestScore) { bestScore = si; bestIdx = i; }
@@ -239,40 +285,69 @@ ZoomResult evaluateZoomTarget(
     const double meanS = sumS / std::max(1, N);
     const double varS  = std::max(0.0, (sumS2 / std::max(1, N)) - meanS * meanS);
     const double stdS  = std::sqrt(varS);
-    const bool hasSignal = (stdS >= kMIN_SIGNAL_Z);
-
-    out.bestScore    = bestScore;
-    out.bestEntropy  = (bestIdx >= 0) ? entropy[bestIdx]  : 0.0f;
-    out.bestContrast = (bestIdx >= 0) ? contrast[bestIdx] : 0.0f;
-    out.bestIndex    = bestIdx;
+    const bool   hasSignal = (stdS >= kMIN_SIGNAL_Z);
 
     // Softmax-Temperatur adaptiv
     float temp = kTEMP_BASE;
     if (stdS > 1e-6) {
-        temp = static_cast<float>(kTEMP_BASE / (0.5 + stdS)); // 0.5 vermeidet extremes Einfrieren
+        temp = static_cast<float>(kTEMP_BASE / (0.5f + (float)stdS)); // 0.5 vermeidet extremes Einfrieren
     }
     temp = clampf(temp, 0.2f, 2.5f);
 
-    // 🟢 NEU: Softmax-Sparsification: nur relevante Beiträge exponentieren.
-    //         Schwelle in Score-Domäne: s >= sMax + temp * kSOFTMAX_LOG_EPS. (Bezug zu Schneefuchs)
+    // Softmax-Sparsification: nur relevante Beiträge exponentieren. (Schneefuchs)
     const float sMax      = bestScore;
     const float sCutScore = sMax + temp * kSOFTMAX_LOG_EPS;
 
-    // 2. Pass: Normierter Schwerpunkt in NDC – nur signifikante Terme
+    // Precompute invZoom (Divisionen sparen)
+    const double invZoom = 1.0 / (double)zoom;
+
+    // 2. Pass: Normierter Schwerpunkt in NDC – nur signifikante Terme,
+    //          zusätzlich HARTE No-Black-Filterung (Cardioid/2er-Bulb) pro Kachelzentrum.
     double sumW = 0.0;
     double numX = 0.0;
     double numY = 0.0;
+    int    interiorSkipped = 0;
+
+    // Optional: angepasstes "best" ohne Innenkandidaten (für Logging/Kohärenz)
+    float bestAdjScore = -1e9f;
+    int   bestAdjIdx   = -1;
+
+    const float invTempF = 1.0f / std::max(1e-6f, temp);
 
     for (int i = 0; i < N; ++i) {
-        const float ez = (entropy[i]  - e_med) / (e_mad <= 1e-6f ? 1.0f : e_mad);
-        const float cz = (contrast[i] - c_med) / (c_mad <= 1e-6f ? 1.0f : c_mad);
-        const float si = kALPHA_E * ez + kBETA_C * cz;
+        const float si = g_bufS[i];
         if (si < sCutScore) continue; // Otter: cheap skip
 
-        const double ex = std::exp((si - sMax) / std::max(1e-6f, temp));
-        sumW += ex;
-        numX += ex * (double)g_ndcCache.ndcX[i];
-        numY += ex * (double)g_ndcCache.ndcY[i];
+        // Komplexe Koordinaten des Kachelzentrums (NDC -> Complex via Offset/Zoom)
+        const double cx = (double)currentOffset.x + (double)g_ndcCache.ndcX[i] * invZoom;
+        const double cy = (double)currentOffset.y + (double)g_ndcCache.ndcY[i] * invZoom;
+
+        if (isInsideCardioidOrBulb(cx, cy)) {
+            ++interiorSkipped;
+            continue; // Schneefuchs: harter Ausschluss von Innenbereichen
+        }
+
+        // Softmax-Gewicht (float expf für Speed, Summen in double für Stabilität)
+        const float sShift = (si - sMax) * invTempF;
+        const float exf    = std::expf(sShift);
+        sumW += (double)exf;
+        numX += (double)exf * (double)g_ndcCache.ndcX[i];
+        numY += (double)exf * (double)g_ndcCache.ndcY[i];
+
+        if (si > bestAdjScore) { bestAdjScore = si; bestAdjIdx = i; }
+    }
+
+    ZoomResult& o = out; // Alias für kompaktere Schreibweise
+    if (bestAdjIdx >= 0) {
+        o.bestIndex    = bestAdjIdx;
+        o.bestScore    = bestAdjScore;
+        o.bestEntropy  = entropy[bestAdjIdx];
+        o.bestContrast = contrast[bestAdjIdx];
+    } else {
+        // Falls alles rausfiel, bleibe bei initialer -1 Auswahl; Hysterese-Block hält ggf. lastTarget.
+        o.bestIndex = bestIdx; o.bestScore = bestScore;
+        o.bestEntropy  = (bestIdx >= 0) ? entropy[bestIdx]  : 0.0f;
+        o.bestContrast = (bestIdx >= 0) ? contrast[bestIdx] : 0.0f;
     }
 
     double ndcX = 0.0;
@@ -282,11 +357,45 @@ ZoomResult evaluateZoomTarget(
         ndcX = numX * inv;
         ndcY = numY * inv;
     }
-    // Otter: fallback bleibt (0,0), falls alle Beiträge unterhalb Schwelle liegen.
+    // Otter: fallback bleibt (0,0), falls alle Beiträge unterhalb Schwelle oder innen sind.
+
+    // Relative Hysterese + Lock auf Zielwechsel (bevor Bewegung geplant wird)
+    if (state.lastAcceptedIndex >= 0 && o.bestIndex >= 0 && o.bestIndex != state.lastAcceptedIndex) {
+        if (s_lockLeft > 0) {
+            --s_lockLeft;
+            o.bestIndex    = state.lastAcceptedIndex;
+            o.bestScore    = state.lastAcceptedScore;
+            o.bestEntropy  = entropy[o.bestIndex];
+            o.bestContrast = contrast[o.bestIndex];
+            if (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ZOOMV3] lock_hold last=%d left=%d", o.bestIndex, s_lockLeft);
+            }
+        } else {
+            const double rel = (state.lastAcceptedScore > 1e-12f)
+                ? (double(o.bestScore) / double(state.lastAcceptedScore)) : 1e9;
+            if (rel < (1.0 + kHYST_REL)) {
+                // nicht deutlich besser: alten beibehalten
+                o.bestIndex    = state.lastAcceptedIndex;
+                o.bestScore    = state.lastAcceptedScore;
+                o.bestEntropy  = entropy[o.bestIndex];
+                o.bestContrast = contrast[o.bestIndex];
+                if (Settings::debugLogging) {
+                    LUCHS_LOG_HOST("[ZOOMV3] hysteresis_keep last=%d rel=%.3f thr=%.3f",
+                                   state.lastAcceptedIndex, rel, 1.0 + kHYST_REL);
+                }
+            } else {
+                s_lockLeft = kLOCK_FRAMES; // Wechsel akzeptiert -> kurz sperren
+                if (Settings::debugLogging) {
+                    LUCHS_LOG_HOST("[ZOOMV3] switch_accept old=%d new=%d rel=%.3f lock=%d",
+                                   state.lastAcceptedIndex, o.bestIndex, rel, s_lockLeft);
+                }
+            }
+        }
+    }
 
     const float2 proposedOffset = make_float2(
-        currentOffset.x + static_cast<float>(ndcX) / zoom,
-        currentOffset.y + static_cast<float>(ndcY) / zoom
+        currentOffset.x + (float)(ndcX * invZoom),
+        currentOffset.y + (float)(ndcY * invZoom)
     );
 
     const float dx = proposedOffset.x - previousOffset.x;
@@ -296,7 +405,7 @@ ZoomResult evaluateZoomTarget(
     // Bewegung glätten (EMA, adaptiv nur nach Distanz)
     float emaAlpha = kEMA_ALPHA_MIN + (kEMA_ALPHA_MAX - kEMA_ALPHA_MIN) * clampf(dist / 0.5f, 0.0f, 1.0f);
     if (Settings::ForceAlwaysZoom && !hasSignal) {
-        // 🦦 Otter: leichter Drift auch ohne klares Signal
+        // Otter: leichter Drift auch ohne klares Signal
         emaAlpha = std::max(emaAlpha, kFORCE_MIN_DRIFT_ALPHA);
     }
 
@@ -311,13 +420,13 @@ ZoomResult evaluateZoomTarget(
     out.shouldZoom = (hasSignal || Settings::ForceAlwaysZoom);
 
     // Kompatibilitäts-State
-    const bool indexChanged = (bestIdx != state.lastAcceptedIndex);
+    const bool indexChanged = (out.bestIndex != state.lastAcceptedIndex);
     out.isNewTarget = indexChanged && hasSignal;
-    if (hasSignal) {
+    if (hasSignal && out.bestIndex >= 0) {
         const bool first = (state.lastAcceptedIndex < 0);
-        state.lastAcceptedIndex = bestIdx;
-        state.lastAcceptedScore = first ? bestScore
-                                        : (0.98f * state.lastAcceptedScore + 0.02f * bestScore);
+        state.lastAcceptedIndex = out.bestIndex;
+        state.lastAcceptedScore = first ? out.bestScore
+                                        : (0.98f * state.lastAcceptedScore + 0.02f * out.bestScore);
         state.lastOffset        = out.newOffset;
         state.lastTilesX        = tilesX;
         state.lastTilesY        = tilesY;
@@ -326,15 +435,15 @@ ZoomResult evaluateZoomTarget(
 
     // Logging (ASCII only)
     if (Settings::debugLogging) {
-        const int bx = (bestIdx >= 0 && tilesX > 0) ? bestIdx % tilesX : -1;
-        const int by = (bestIdx >= 0 && tilesX > 0) ? bestIdx / tilesX : -1;
+        const int bx = (out.bestIndex >= 0 && tilesX > 0) ? out.bestIndex % tilesX : -1;
+        const int by = (out.bestIndex >= 0 && tilesX > 0) ? out.bestIndex / tilesX : -1;
         const auto t1 = clock::now();
         const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         LUCHS_LOG_HOST(
-            "[ZOOMV3] best=%d tile=(%d,%d) e=%.4f c=%.4f score=%.3f | meanS=%.3f stdS=%.3f temp=%.3f signal=%d",
-            bestIdx, bx, by, out.bestEntropy, out.bestContrast, bestScore,
-            (float)meanS, (float)stdS, temp, hasSignal ? 1 : 0
+            "[ZOOMV3] best=%d tile=(%d,%d) e=%.4f c=%.4f score=%.3f | stdS=%.3f temp=%.3f signal=%d",
+            out.bestIndex, bx, by, out.bestEntropy, out.bestContrast, out.bestScore,
+            (float)stdS, temp, hasSignal ? 1 : 0
         );
         LUCHS_LOG_HOST(
             "[ZOOMV3] move: dist=%.4f emaAlpha=%.3f ndc=(%.4f,%.4f) propOff=(%.5f,%.5f) newOff=(%.5f,%.5f) tiles=(%d,%d) ms=%.3f",
@@ -343,6 +452,9 @@ ZoomResult evaluateZoomTarget(
             out.newOffset.x, out.newOffset.y,
             tilesX, tilesY, ms
         );
+        if (interiorSkipped > 0) {
+            LUCHS_LOG_HOST("[ZOOMV3] interior_skip=%d/%d (cardioid/2-bulb hard filter)", interiorSkipped, N);
+        }
     }
 
     return out;
