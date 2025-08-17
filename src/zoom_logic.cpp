@@ -34,26 +34,21 @@ static constexpr float kMIN_DISTANCE  = 0.02f; // ~NDC/Zoom-Skala
 // Otter: sanfter Drift auch ohne starkes Signal, wenn AlwaysZoom aktiv ist
 static constexpr float kFORCE_MIN_DRIFT_ALPHA = 0.05f;
 
-// NEU: Warm-up-Zeit (Sekunden), in der KEIN Richtungswechsel erfolgt.
-//      Zoom läuft weiter, aber Offset bleibt unverändert. (Bezug zu Otter)
+// NEU: Warm-up-Zeit (Sekunden), in der KEIN Richtungswechsel erfolgt. (Bezug zu Otter)
 static constexpr double kNO_TURN_WARMUP_SEC = 1.0;
 
-// NEU: Softmax-Sparsification – ignoriere Beiträge mit sehr kleiner Gewichtung.
-//      si < sMax + temp * kSOFTMAX_LOG_EPS -> Beitrag vernachlässigbar.
-//      exp(-7) ≈ 0.0009, ausreichend klein für Schwerpunkt. (Bezug zu Schneefuchs)
+// NEU: Softmax-Sparsification – ignoriere Beiträge mit sehr kleiner Gewichtung. (Bezug zu Schneefuchs)
 static constexpr float kSOFTMAX_LOG_EPS = -7.0f;
 
-// NEU: Relative Hysterese + kurzer Lock gegen Flip-Flop (massive Richtungswechsel)
-//      (Bezug zu Otter/Schneefuchs)
-static constexpr float kHYST_REL    = 0.12f; // +12% besser nötig für Zielwechsel
-static constexpr int   kLOCK_FRAMES = 12;    // nach Wechsel so viele Frames sperren
+// NEU: Relative Hysterese + kurzer Lock gegen Flip-Flop (massive Richtungswechsel) (Otter/Schneefuchs)
+static constexpr float kHYST_REL    = 0.12f;
+static constexpr int   kLOCK_FRAMES = 12;
 
-// NEU: Retarget-Throttling – nur alle N Frames neu auswerten (CPU-schonend, ruhiger)
-//      (Bezug zu Schneefuchs/Otter)
-static constexpr int   kRetargetInterval = 5; // nur alle 5 Frames neu zielen (bei ForceAlwaysZoom)
+// NEU: Retarget-Throttling – nur alle N Frames neu auswerten (CPU-schonend, ruhiger) (Otter/Schneefuchs)
+static constexpr int   kRetargetInterval = 5;
 
-// NEU: Statistik nur alle M Frames (Kopier-/nth_element-Last reduzieren). (Bezug zu Schneefuchs)
-static constexpr int   kStatsEvery = 3; // alle 3 Frames Median/MAD neu
+// NEU: Statistik nur alle M Frames (Kopier-/nth_element-Last reduzieren). (Schneefuchs)
+static constexpr int   kStatsEvery = 3;
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
@@ -71,8 +66,7 @@ static inline float median_inplace(std::vector<float>& v) {
     return m;
 }
 
-// NEU: MAD in-place auf wiederverwendetem Buffer; keine zusätzlichen Allokationen.
-//      (Bezug zu Schneefuchs)
+// NEU: MAD in-place auf wiederverwendetem Buffer; keine zusätzlichen Allokationen. (Schneefuchs)
 static inline float mad_inplace_from_center(std::vector<float>& buf, float med) {
     if (buf.empty()) return 1.0f;
     for (float& x : buf) x = std::fabs(x - med);
@@ -85,9 +79,7 @@ static inline float clampf(float x, float lo, float hi) {
     return x < lo ? lo : (x > hi ? hi : x);
 }
 
-// NEU: Analytischer Innen-Test (Cardioid + 2er-Bulb) – harter Ausschluss.
-//      Minimalinvasiv: wir prüfen die komplexen Koordinaten des Kachelzentrums.
-//      (Bezug zu Otter/Schneefuchs)
+// NEU: Analytischer Innen-Test (Cardioid + 2er-Bulb) – harter Ausschluss. (Otter/Schneefuchs)
 static inline bool isInsideCardioidOrBulb(double x, double y) noexcept {
     const double xm = x - 0.25;
     const double q  = xm*xm + y*y;
@@ -97,8 +89,7 @@ static inline bool isInsideCardioidOrBulb(double x, double y) noexcept {
     return false;
 }
 
-// NEU: NDC-Zentren-Cache pro Geometrie (tilesX, tilesY, width, height).
-//      Vermeidet per-Frame tileIndexToPixelCenter-Aufrufe. (Bezug zu Schneefuchs)
+// NEU: NDC-Zentren-Cache pro Geometrie (tilesX, tilesY, width, height). (Schneefuchs)
 namespace {
 struct NdcCenterCache {
     int tilesX = -1, tilesY = -1, width = -1, height = -1;
@@ -125,21 +116,21 @@ struct NdcCenterCache {
     }
 };
 
-// thread_local, um Re-Allokationen und false sharing zu vermeiden. (Bezug zu Schneefuchs)
+// thread_local, um Re-Allokationen und false sharing zu vermeiden. (Schneefuchs)
 thread_local NdcCenterCache g_ndcCache;
 
-// thread_local Buffer – Allokationen vermeiden. (Bezug zu Schneefuchs)
+// thread_local Buffer – Allokationen vermeiden. (Schneefuchs)
 thread_local std::vector<float> g_bufE;
 thread_local std::vector<float> g_bufC;
 thread_local std::vector<float> g_bufS;
 
-// Stats-Cache & Cadence (alle kStatsEvery Frames neu) (Bezug zu Schneefuchs)
+// Stats-Cache & Cadence (alle kStatsEvery Frames neu) (Schneefuchs)
 thread_local int   g_statsTick = 0;
 thread_local int   g_statsN    = -1;
 thread_local float g_eMed = 0.0f, g_eMad = 1.0f;
 thread_local float g_cMed = 0.0f, g_cMad = 1.0f;
 
-// kleiner, funktion-lokaler Zustand für Hysterese/Lock & Retarget (kein Header-Touch)
+// Hysterese/Lock & Retarget – funktion-lokaler Zustand (kein Header-Touch)
 static int s_lockLeft = 0;
 static int s_sinceRetarget = 0;
 } // namespace
@@ -333,10 +324,10 @@ ZoomResult evaluateZoomTarget(
     temp = clampf(temp, 0.2f, 2.5f);
 
     // Softmax-Schwelle & Konstanten
-    const float sMax      = bestScore;
-    const float sCutScore = sMax + temp * kSOFTMAX_LOG_EPS;
-    const double invZoom  = 1.0 / (double)zoom;
-    const float invTempF  = 1.0f / std::max(1e-6f, temp);
+    const float  sMax      = bestScore;
+    const float  sCutScore = sMax + temp * kSOFTMAX_LOG_EPS;
+    const double invZoom   = 1.0 / (double)zoom;
+    const float  invTempF  = 1.0f / std::max(1e-6f, temp);
 
     // ── 2. Pass (FUSIONIERT): Softmax-Reduktion + bestAdj in EINER Schleife ─────────
     double sumW = 0.0, numX = 0.0, numY = 0.0;
@@ -347,12 +338,11 @@ ZoomResult evaluateZoomTarget(
 #ifdef ZOOMLOGIC_OMP
 #pragma omp parallel
     {
-        double sumW_loc = 0.0, numX_loc = 0.0, numY_loc = 0.0;
-        int    interior_loc = 0;
-        float  bestAdjScore_loc = -1e9f;
-        int    bestAdjIdx_loc   = -1;
+        float  threadBestScore = -1e9f;
+        int    threadBestIdx   = -1;
 
-#pragma omp for nowait schedule(static)
+        // Reduktionsklauseln für die Summen; bestAdj via thread-lokal + critical
+#pragma omp for reduction(+:sumW,numX,numY,interiorSkipped) schedule(static)
         for (int i = 0; i < N; ++i) {
             const float si = g_bufS[i];
             if (si < sCutScore) continue;
@@ -361,32 +351,22 @@ ZoomResult evaluateZoomTarget(
             const double cx = (double)currentOffset.x + (double)g_ndcCache.ndcX[i] * invZoom;
             const double cy = (double)currentOffset.y + (double)g_ndcCache.ndcY[i] * invZoom;
 
-            if (isInsideCardioidOrBulb(cx, cy)) { ++interior_loc; continue; }
+            if (isInsideCardioidOrBulb(cx, cy)) { ++interiorSkipped; continue; }
 
             const float  sShift = (si - sMax) * invTempF;
-            const float  exf    = std::expf(sShift);
-            const double w      = (double)exf;
-            sumW_loc += w;
-            numX_loc += w * (double)g_ndcCache.ndcX[i];
-            numY_loc += w * (double)g_ndcCache.ndcY[i];
+            const double w      = std::exp(static_cast<double>(sShift));
+            sumW += w;
+            numX += w * (double)g_ndcCache.ndcX[i];
+            numY += w * (double)g_ndcCache.ndcY[i];
 
-            if (si > bestAdjScore_loc) { bestAdjScore_loc = si; bestAdjIdx_loc = i; }
+            if (si > threadBestScore) { threadBestScore = si; threadBestIdx = i; }
         }
-
-#pragma omp atomic
-        sumW += sumW_loc;
-#pragma omp atomic
-        numX += numX_loc;
-#pragma omp atomic
-        numY += numY_loc;
-#pragma omp atomic
-        interiorSkipped += interior_loc;
 
 #pragma omp critical
         {
-            if (bestAdjScore_loc > bestAdjScore) {
-                bestAdjScore = bestAdjScore_loc;
-                bestAdjIdx   = bestAdjIdx_loc;
+            if (threadBestScore > bestAdjScore) {
+                bestAdjScore = threadBestScore;
+                bestAdjIdx   = threadBestIdx;
             }
         }
     }
@@ -400,8 +380,7 @@ ZoomResult evaluateZoomTarget(
         if (isInsideCardioidOrBulb(cx, cy)) { ++interiorSkipped; continue; }
 
         const float  sShift = (si - sMax) * invTempF;
-        const float  exf    = std::expf(sShift);
-        const double w      = (double)exf;
+        const double w      = std::exp(static_cast<double>(sShift));
         sumW += w;
         numX += w * (double)g_ndcCache.ndcX[i];
         numY += w * (double)g_ndcCache.ndcY[i];
