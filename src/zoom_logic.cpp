@@ -1,4 +1,4 @@
-// LUCHS
+// LUCHS1
 // Perf V3 hot path – no header/API change (ASCII logs only)
 // Otter: Warm-up ohne Richtungswechsel: erst zoomen, dann lenken. (Bezug zu Otter)
 // Schneefuchs: Minimalinvasiv, keine Header-/API-Änderung. ASCII-Logs. (Bezug zu Schneefuchs)
@@ -50,6 +50,14 @@ static constexpr int   kRetargetInterval = 5;
 // NEU: Statistik nur alle M Frames (Kopier-/nth_element-Last reduzieren). (Schneefuchs)
 static constexpr int   kStatsEvery = 3;
 
+// ── NEU: Richtungswechsel-Glättung per begrenzter Drehrate (Yaw-Rate-Limiter, 2D). (Otter/Schneefuchs)
+// Idee: Begrenze den maximalen Winkel, um den sich die Bewegungsrichtung pro Frame ändern darf.
+// Dadurch entstehen weiche Kurven anstatt harter "Knicke".
+static constexpr float kTURN_BASE_RAD_MIN = 0.06f; // ~3.4° minimal pro Frame
+static constexpr float kTURN_BASE_RAD_MAX = 0.30f; // ~17° maximal pro Frame
+static constexpr float kTURN_SIG_REF      = 1.00f; // Z-Score-Referenz (stdS) für "volles" Drehen
+static constexpr float kTURN_DIST_REF     = 0.25f; // NDC-Referenzbewegung für "volles" Drehen
+
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
     if (v.empty()) return 0.0f;
@@ -77,6 +85,33 @@ static inline float mad_inplace_from_center(std::vector<float>& buf, float med) 
 // --- kleine Helfer ---
 static inline float clampf(float x, float lo, float hi) {
     return x < lo ? lo : (x > hi ? hi : x);
+}
+
+// NEU: 2D-Normalisierung (robust gegen sehr kleine Beträge). (Schneefuchs)
+static inline bool normalize2D(float& x, float& y) {
+    const float n2 = x*x + y*y;
+    if (n2 <= 1e-20f) return false;
+    const float inv = 1.0f / std::sqrt(n2);
+    x *= inv; y *= inv;
+    return true;
+}
+
+// NEU: limitiere Drehung von (dirX,dirY) in Richtung (tx,ty) auf maxAngle (rad). (Otter)
+// Verwendet 2D-"Drehen um ±maxAngle" basierend auf Vorzeichen der Kreuzprodukt-Z-Komponente.
+static inline void rotateTowardsLimited(float& dirX, float& dirY, float tx, float ty, float maxAngle) {
+    if (!normalize2D(tx, ty)) return;
+    if (!normalize2D(dirX, dirY)) { dirX = tx; dirY = ty; return; }
+
+    const float dot = clampf(dirX*tx + dirY*ty, -1.0f, 1.0f);
+    const float ang = std::acos(dot);
+    if (!(ang > 0.0f) || ang <= maxAngle) { dirX = tx; dirY = ty; return; }
+
+    const float crossZ = dirX*ty - dirY*tx;
+    const float rot    = (crossZ >= 0.0f) ? maxAngle : -maxAngle;
+    const float c = std::cos(rot), s = std::sin(rot);
+    const float nx = c*dirX - s*dirY;
+    const float ny = s*dirX + c*dirY;
+    dirX = nx; dirY = ny;
 }
 
 // NEU: Analytischer Innen-Test (Cardioid + 2er-Bulb) – harter Ausschluss. (Otter/Schneefuchs)
@@ -133,6 +168,11 @@ thread_local float g_cMed = 0.0f, g_cMad = 1.0f;
 // Hysterese/Lock & Retarget – funktion-lokaler Zustand (kein Header-Touch)
 static int s_lockLeft = 0;
 static int s_sinceRetarget = 0;
+
+// NEU: Vorherige Bewegungsrichtung für Turn-Limiter (persistiert pro Thread). (Otter/Schneefuchs)
+thread_local bool  g_dirInit = false;
+thread_local float g_prevDirX = 1.0f;
+thread_local float g_prevDirY = 0.0f;
 } // namespace
 
 namespace ZoomLogic {
@@ -443,9 +483,54 @@ ZoomResult evaluateZoomTarget(
         }
     }
 
-    const float2 proposedOffset = make_float2(
+    // ── Bewegungsvektor berechnen (proposed ohne Glättung) ──────────────────────────
+    const float2 proposedOffset_raw = make_float2(
         currentOffset.x + (float)(ndcX * invZoom),
         currentOffset.y + (float)(ndcY * invZoom)
+    );
+    float mvx = proposedOffset_raw.x - previousOffset.x;
+    float mvy = proposedOffset_raw.y - previousOffset.y;
+    const float rawDist = std::sqrt(mvx*mvx + mvy*mvy);
+
+    // ── NEU: Richtungswechsel "smoother" via Turn-Limiter vor der EMA. (Otter/Schneefuchs)
+    // Drehwinkel-Limit adaptiv in Abhängigkeit von Signalstärke (stdS) und Bewegungsgröße.
+    float sigFactor  = clampf((float)stdS / kTURN_SIG_REF, 0.0f, 1.0f);
+    float distFactor = clampf(rawDist / kTURN_DIST_REF,     0.0f, 1.0f);
+    float turnMaxRad = kTURN_BASE_RAD_MIN +
+                       (kTURN_BASE_RAD_MAX - kTURN_BASE_RAD_MIN) * std::max(sigFactor, distFactor);
+
+    if (!g_dirInit) {
+        // Erste Initialisierung: Richtung aus aktuellem Move ableiten.
+        g_prevDirX = (rawDist > 0.0f) ? (mvx / rawDist) : 1.0f;
+        g_prevDirY = (rawDist > 0.0f) ? (mvy / rawDist) : 0.0f;
+        g_dirInit  = true;
+    }
+
+    // Zielrichtung = Richtung des aktuellen Bewegungsvektors (falls vorhanden)
+    float tgtDirX = mvx, tgtDirY = mvy;
+    const bool hasMove = normalize2D(tgtDirX, tgtDirY);
+
+    // Bei sehr kleinem Bewegungsvektor vermeiden wir Sprünge; halten Richtung.
+    if (hasMove) {
+        float dirX = g_prevDirX, dirY = g_prevDirY;
+        rotateTowardsLimited(dirX, dirY, tgtDirX, tgtDirY, turnMaxRad);
+        // Länge unverändert lassen, nur Richtung glätten.
+        mvx = dirX * rawDist;
+        mvy = dirY * rawDist;
+        g_prevDirX = dirX; g_prevDirY = dirY;
+
+        if (Settings::debugLogging) {
+            // Debug: Winkel zwischen alt und Ziel (nur informativ)
+            const float dot = clampf(g_prevDirX*tgtDirX + g_prevDirY*tgtDirY, -1.0f, 1.0f);
+            const float ang = std::acos(dot);
+            LUCHS_LOG_HOST("[ZOOMV3] turn_limit: ang=%.3f rad max=%.3f rad | dir=(%.3f,%.3f) tgt=(%.3f,%.3f)",
+                           ang, turnMaxRad, g_prevDirX, g_prevDirY, tgtDirX, tgtDirY);
+        }
+    }
+
+    const float2 proposedOffset = make_float2(
+        previousOffset.x + mvx,
+        previousOffset.y + mvy
     );
 
     const float dx = proposedOffset.x - previousOffset.x;
