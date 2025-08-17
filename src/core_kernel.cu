@@ -62,8 +62,7 @@ __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
 __device__ __forceinline__ int iterate_warmup_noLoop(
     float cr, float ci, int maxSteps, float& x, float& y)
 {
-    float xx=0.0f, yy=0.0f, xy=0.0f;
-    x=0.0f; y=0.0f;
+    x = 0.0f; y = 0.0f;
     int it = 0;
 
     unsigned mask = 0xFFFFFFFFu;
@@ -73,16 +72,16 @@ __device__ __forceinline__ int iterate_warmup_noLoop(
     bool active = true;
 
 #pragma unroll 1
-    for (int k=0; k<maxSteps; k+=WARP_CHUNK) {
+    for (int k = 0; k < maxSteps; k += WARP_CHUNK) {
 #pragma unroll 1
-        for (int s=0; s<WARP_CHUNK; ++s) {
+        for (int s = 0; s < WARP_CHUNK; ++s) {
             if (!active) continue;
 
-            xx = x * x;
-            yy = y * y;
+            float xx = x * x;
+            float yy = y * y;
             if (xx + yy > 4.0f) { active = false; continue; }
 
-            xy = x * y;
+            // z = z^2 + c (mit FMA)
             float xt = fmaf(x, x, -yy) + cr;   // x^2 - y^2 + cr
             y = fmaf(2.0f * x, y, ci);         // 2*x*y + ci
             x = xt;
@@ -116,9 +115,9 @@ __device__ __forceinline__ int iterate_finish_loopcheck(
     const int remain = maxIter - start_it;
 
 #pragma unroll 1
-    for (int k=0; k<remain; k+=WARP_CHUNK) {
+    for (int k = 0; k < remain; k += WARP_CHUNK) {
 #pragma unroll 1
-        for (int s=0; s<WARP_CHUNK; ++s) {
+        for (int s = 0; s < WARP_CHUNK; ++s) {
             if (!active) { ++pc; continue; }
 
             float x2 = x * x;
@@ -164,8 +163,8 @@ struct Survivor {
 // ---------- Kernel: Pass 1 (Warmup + Kompaktierung) -------------------------
 __global__ __launch_bounds__(256, 2)
 void mandelbrotPass1Warmup(
-    uchar4* out, int* iterOut,
-    Survivor* surv, int* survCount,
+    uchar4* __restrict__ out, int* __restrict__ iterOut,
+    Survivor* __restrict__ surv, int* __restrict__ survCount,
     int w, int h, float zoom, float2 offset,
     int maxIter)
 {
@@ -217,23 +216,26 @@ void mandelbrotPass1Warmup(
         return;
     }
 
-    // Survivor → warp-aggregated kompakter Push
-    unsigned mask = 0xFFFFFFFFu;
+    // Survivor → warp-aggregated kompakter Push (robust für 2D-Blocks)
+    unsigned actMask = 0xFFFFFFFFu;
 #if (__CUDA_ARCH__ >= 700)
-    mask = __activemask();
+    actMask = __activemask();
 #endif
     const bool isSurvivor = true;
-    const unsigned ballot = __ballot_sync(mask, isSurvivor);
-    const int voteCount   = __popc(ballot);
-    const int lane        = int(threadIdx.x) & 31;
+    const unsigned ballot = __ballot_sync(actMask, isSurvivor);
+    const int      voteCount = __popc(ballot);
+
+    const int linear_tid = threadIdx.y * blockDim.x + threadIdx.x;
+    const int lane       = (linear_tid & 31);
     const unsigned laneMask = ballot & ((1u << lane) - 1u);
-    const int prefix      = __popc(laneMask);
+    const int      prefix   = __popc(laneMask);
 
     int base = 0;
-    if (lane == 0) {
+    const int leader = __ffs(ballot) - 1;                 // erste aktive Lane
+    if (lane == leader) {
         base = atomicAdd(survCount, voteCount);
     }
-    base = __shfl_sync(mask, base, 0);
+    base = __shfl_sync(ballot, base, leader);             // nur über Survivors shufflen
 
     // schreiben
     Survivor s;
@@ -246,8 +248,8 @@ void mandelbrotPass1Warmup(
 // ---------- Kernel: Pass 2 (Finish der Survivors) ---------------------------
 __global__ __launch_bounds__(256, 2)
 void mandelbrotPass2Finish(
-    uchar4* out, int* iterOut,
-    const Survivor* surv, int survCount,
+    uchar4* __restrict__ out, int* __restrict__ iterOut,
+    const Survivor* __restrict__ surv, int survCount,
     int maxIter)
 {
     const int t = blockIdx.x * blockDim.x + threadIdx.x;
