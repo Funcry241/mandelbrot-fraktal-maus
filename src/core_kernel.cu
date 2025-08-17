@@ -21,14 +21,13 @@
 // --- Tuning-Parameter --------------------------------------------------------
 // Chunked Ballot: reduziert Sync-Overhead ohne Bildänderung.
 namespace {
-    // nur noch 1 Ballot pro 8 Iterationen
-    constexpr int   WARP_CHUNK        = 8;
+    // 🐑 Schneefuchs: größere CHUNKs + Mid-Ballot reduziert Sync-Overhead, ohne Bildänderung.
+    // Vorher: 8 → Jetzt: 16. Mid-Ballot halbiert worst-case Slack innerhalb eines CHUNK.
+    constexpr int   WARP_CHUNK        = 16;
 
-    // 🐑 Schneefuchs: Brent-Periodizität (robuster als seltene Punktprobe)
-    // nach Anlaufphase wird ein "slow"-Punkt in verdoppelnden Abständen verglichen.
-    constexpr int   BRENT_WARMUP      = 32;     // Iterationen vor Start der Zyklensuche
-    // Epsilon^2 für „nahezu gleich“ (float, konservativ)
-    constexpr float LOOP_EPS2         = 1e-8f;
+    // Brent-Periodizität: Warmup und Epsilon (konservativ)
+    constexpr int   BRENT_WARMUP      = 32;      // erst danach Zyklusprüfung aktiv (Bezug zu Schneefuchs)
+    constexpr float LOOP_EPS2         = 1e-8f;   // |z_k - z_t|^2 Schwelle
 
     // 🦦 Otter: Standard-Look für Eye-Candy (Palette, Stripes, Gamma)
     constexpr otter::Palette kPalette   = otter::Palette::Glacier; // Aurora / Glacier / Ember
@@ -73,18 +72,18 @@ __device__ __forceinline__ int mandelbrotIterations_scalar(
 }
 
 // 🐑 Schneefuchs (neu): Warp-Iteration mit CHUNKED Ballot + Brent-Periodizität.
-// Bildidentisch, weniger Divergenz. Innenpunkte enden deutlich früher.
+// Bildidentisch, spürbar weniger Iterationen in Innenbereichen.
 __device__ __forceinline__ int mandelbrotIterations_warp(
     float cr, float ci, int maxIter, float& xr, float& xi)
 {
     float x = 0.0f, y = 0.0f;
-    int it = 0;
+    int   it = 0;
 
-    // Brent: vergleiche gegen "slow"-Punkt in verdoppelnden Intervallen (power).
-    float xs = 0.0f, ys = 0.0f; // slow
-    int   power = 1;            // Vergleichsintervall (verdoppelt sich)
-    int   lam   = 0;            // Schritte seit letztem Reset
-    int   brent_hits = 0;       // zwei aufeinanderfolgende Treffer gefordert
+    // Brent cycle detection (tortoise/hare) – aktiviert nach Warmup
+    bool  brent_on   = false;
+    float tx = 0.0f, ty = 0.0f;   // tortoise
+    int   power = 1, lam = 0;     // power-of-two window, cycle length counter
+    int   brent_hits = 0;         // zwei nahe Treffer in Folge nötig (konservativ)
 
     unsigned mask = 0xFFFFFFFFu;
 #if (__CUDA_ARCH__ >= 700)
@@ -95,46 +94,73 @@ __device__ __forceinline__ int mandelbrotIterations_warp(
 #pragma unroll 1
     for (int k = 0; k < maxIter; k += WARP_CHUNK) {
 
-        // Innerer Block ohne Ballot – maximal WARP_CHUNK Schritte
+        // Mid-Ballot: reduziert Slack wenn eine Warp-Hälfte früh fertig ist (ein zusätzlicher Vote je CHUNK).
+        bool chunk_done_early = false;
+
 #pragma unroll
         for (int s = 0; s < WARP_CHUNK; ++s) {
-            if (!active) continue;
-
-            float x2 = x * x;
-            float y2 = y * y;
-            if (x2 + y2 > 4.0f) { // entkommen
-                active = false;
+            if (!active) {
+                // nichts mehr zu tun, aber wir bleiben warp-synchron
+                if (s == (WARP_CHUNK >> 1)) {
+                    unsigned any2 = __ballot_sync(mask, active);
+                    if (any2 == 0u) { chunk_done_early = true; break; }
+                }
                 continue;
             }
 
-            // z = z^2 + c  (mit FMA)
-            float xt = fmaf(x, x, -y2) + cr;     // x^2 - y^2 + cr
-            y = fmaf(2.0f * x, y, ci);           // 2*x*y + ci
+            // |z|^2 prüfen
+            float x2 = x * x;
+            float y2 = y * y;
+            if (x2 + y2 > 4.0f) {
+                active = false;
+                if (s == (WARP_CHUNK >> 1)) {
+                    unsigned any2 = __ballot_sync(mask, active);
+                    if (any2 == 0u) { chunk_done_early = true; }
+                }
+                continue;
+            }
+
+            // z = z^2 + c  (FMA reduziert Instruktionen)
+            float xt = fmaf(x, x, -y2) + cr;   // x^2 - y^2 + cr
+            y = fmaf(2.0f * x, y, ci);         // 2*x*y + ci
             x = xt;
             ++it;
 
-            // Brent-Zyklensuche (nur nach Warmup, sehr günstig)
-            if (it > BRENT_WARMUP) {
-                float dx = x - xs, dy = y - ys;
+            // Brent-Periodizität (nur nach Warmup aktiv; robust, kein Bildrisiko)
+            if (!brent_on) {
+                if (it >= BRENT_WARMUP) {
+                    brent_on = true;
+                    tx = x; ty = y; power = 1; lam = 0; brent_hits = 0;
+                }
+            } else {
+                ++lam;
+                float dx = x - tx, dy = y - ty;
                 float d2 = dx * dx + dy * dy;
                 if (d2 < LOOP_EPS2) {
+                    // Zwei direkt aufeinanderfolgende Nähetreffer → sicher zyklisch → „innen“
                     if (++brent_hits >= 2) {
                         active = false;
-                        it = maxIter;            // exakt "innen"
-                        continue;
+                        it = maxIter;
                     }
                 } else {
                     brent_hits = 0;
                 }
-                if (++lam == power) {
-                    xs = x; ys = y;             // slow nachziehen
-                    power <<= 1;                // Intervall verdoppeln
+                if (lam == power) {
+                    tx = x; ty = y;
+                    power <<= 1;
                     lam = 0;
                 }
             }
-        }
 
-        // Ein Warp-Vote pro CHUNK
+            if (s == (WARP_CHUNK >> 1)) {
+                unsigned any2 = __ballot_sync(mask, active);
+                if (any2 == 0u) { chunk_done_early = true; break; }
+            }
+        } // end inner CHUNK loop
+
+        if (chunk_done_early) break;
+
+        // Ein Warp-Vote pro CHUNK (plus optional Mid-Ballot oben)
         unsigned anyActive = __ballot_sync(mask, active);
         if (anyActive == 0u) break;
     }
@@ -201,7 +227,7 @@ __global__ void mandelbrotKernel(
     }
 
     float zx, zy;
-    // 🐑 Schneefuchs: Warp-Iteration in CHUNKs mit Brent-Periodizität.
+    // 🐑 Schneefuchs: Warp-Iteration in CHUNKs + Brent-Periodizität.
     int it = mandelbrotIterations_warp(c.x, c.y, maxIter, zx, zy);
 
     // 🦦 Otter Eye-Candy: Smooth Coloring + Paletten (kein Banding)
@@ -400,7 +426,7 @@ void launch_mandelbrotHybrid(
     using clk = std::chrono::high_resolution_clock;
     auto t0 = clk::now();
 
-    // Otter: 32x8 bei performanceLogging – gute Occupancy/Coalescing. (Bezug zu Otter)
+    // 🦦 Otter: 32x8 bei performanceLogging – gute Occupancy/Coalescing. (Bezug zu Otter)
     dim3 block = Settings::performanceLogging ? dim3(32, 8) : dim3(16, 16);
     dim3 grid((w + block.x - 1)/block.x, (h + block.y - 1)/block.y);
 
