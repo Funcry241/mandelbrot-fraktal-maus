@@ -1,4 +1,4 @@
-// MAUS:
+// MAUS: core kernel with tiny device formatter (no CRT redeclare; bounded; ASCII)
 // 🐭 Maus: Feature „Schwarze Schnauze“ – Early-Out für Innenpunkte (Cardioid/Bulb).
 // 🦦 Otter: Spart Iterationen in schwarzen Bereichen, ohne Bildänderung. (Bezug zu Otter)
 // 🦊 Schneefuchs: Mathematisch exakt; nur Workload-Reduktion, Logs ASCII. (Bezug zu Schneefuchs)
@@ -8,16 +8,13 @@
 #include <device_launch_parameters.h>
 #include <math_constants.h>
 #include <cmath>
-#include <chrono> // Otter: Host-Timing
+#include <chrono>
 #include "common.hpp"
+#include "luchs_device_format.hpp"   // <- new tiny formatter (no snprintf)
 #include "core_kernel.h"
 #include "settings.hpp"
 #include "luchs_log_device.hpp"
 #include "luchs_log_host.hpp"
-
-#ifdef __CUDA_ARCH__
-__device__ int sprintf(char* str, const char* format, ...);
-#endif
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -90,7 +87,6 @@ __device__ __forceinline__ int mandelbrotIterations_warp(
         float y2 = y * y;
         if (active && (x2 + y2 <= 4.0f)) {
             // z = z^2 + c  with FMA to reduce ops and improve precision.
-            // xt = x*x - y*y + cr  == fmaf(x, x, -y2) + cr
             float xt = fmaf(x, x, -y2) + cr;                  // x^2 - y^2 + cr
             y = fmaf(2.0f * x, y, ci);                        // 2*x*y + ci
             x = xt;
@@ -215,7 +211,11 @@ __global__ void mandelbrotKernel(
         iterR[idx]  = maxIter;
         if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
             char msg[96]; int n = 0;
-            n += sprintf(msg + n, "[NOSE] early_inside x=%d y=%d", x, y);
+            n = luchs::d_append_str(msg, sizeof(msg), n, "[NOSE] early_inside x=");
+            n = luchs::d_append_int(msg, sizeof(msg), n, x);
+            n = luchs::d_append_str(msg, sizeof(msg), n, " y=");
+            n = luchs::d_append_int(msg, sizeof(msg), n, y);
+            luchs::d_terminate(msg, sizeof(msg), n);
             LUCHS_LOG_DEVICE(msg);
         }
         return;
@@ -224,7 +224,6 @@ __global__ void mandelbrotKernel(
     float zx, zy;
     // 🐑 Schneefuchs: Warp-synchronisierte Iterationen (weniger Divergenz).
     int it = mandelbrotIterations_warp(c.x, c.y, maxIter, zx, zy);
-    // Fallback (optional, deaktiviert): // int it = mandelbrotIterations_scalar(c.x, c.y, maxIter, zx, zy);
 
     const float3 rgb = colorFractalDetailed(c, zx, zy, it, maxIter);
     outR[idx] = make_uchar4(
@@ -241,8 +240,19 @@ __global__ void mandelbrotKernel(
                     ? (((float)it + 1.0f - __log2f(__log2f(fmaxf(norm, 1.000001f)))) / (float)maxIter)
                     : 1.0f;
         float tClamped = fminf(fmaxf(t, 0.0f), 1.0f);
+
         char msg[192]; int n = 0;
-        n += sprintf(msg + n, "[KERNEL] x=%d y=%d it=%d tClamped=%.4f norm=%.4f ", x, y, it, tClamped, norm);
+        n = luchs::d_append_str(msg, sizeof(msg), n, "[KERNEL] x=");
+        n = luchs::d_append_int(msg, sizeof(msg), n, x);
+        n = luchs::d_append_str(msg, sizeof(msg), n, " y=");
+        n = luchs::d_append_int(msg, sizeof(msg), n, y);
+        n = luchs::d_append_str(msg, sizeof(msg), n, " it=");
+        n = luchs::d_append_int(msg, sizeof(msg), n, it);
+        n = luchs::d_append_str(msg, sizeof(msg), n, " tClamped=");
+        n = luchs::d_append_float_fixed(msg, sizeof(msg), n, tClamped, 4);
+        n = luchs::d_append_str(msg, sizeof(msg), n, " norm=");
+        n = luchs::d_append_float_fixed(msg, sizeof(msg), n, norm, 4);
+        luchs::d_terminate(msg, sizeof(msg), n);
         LUCHS_LOG_DEVICE(msg);
     }
 }
@@ -261,10 +271,24 @@ __global__ void entropyKernel(
     int tileIndex = tY * tilesX + tX;
 
     if (doLog && threadIdx.x == 0) {
-        char msg[256];
-        sprintf(msg,
-            "[ENTROPY-DEBUG] tX=%d tY=%d tile=%d w=%d h=%d tilesX=%d tilesY=%d tileIndex=%d",
-            tX, tY, tile, w, h, tilesX, tilesY, tileIndex);
+        char msg[256]; int n = 0;
+        n = luchs::d_append_str(msg, sizeof(msg), n, "[ENTROPY-DEBUG] tX=");
+        n = luchs::d_append_int(msg, sizeof(msg), n, tX);
+        n = luchs::d_append_str(msg, sizeof(msg), n, " tY=");
+        n = luchs::d_append_int(msg, sizeof(msg), n, tY);
+        n = luchs::d_append_str(msg, sizeof(msg), n, " tile=");
+        n = luchs::d_append_int(msg, sizeof(msg), n, tile);
+        n = luchs::d_append_str(msg, sizeof(msg), n, " w=");
+        n = luchs::d_append_int(msg, sizeof(msg), n, w);
+        n = luchs::d_append_str(msg, sizeof(msg), n, " h=");
+        n = luchs::d_append_int(msg, sizeof(msg), n, h);
+        n = luchs::d_append_str(msg, sizeof(msg), n, " tilesX=");
+        n = luchs::d_append_int(msg, sizeof(msg), n, tilesX);
+        n = luchs::d_append_str(msg, sizeof(msg), n, " tilesY=");
+        n = luchs::d_append_int(msg, sizeof(msg), n, tilesY);
+        n = luchs::d_append_str(msg, sizeof(msg), n, " tileIndex=");
+        n = luchs::d_append_int(msg, sizeof(msg), n, tileIndex);
+        luchs::d_terminate(msg, sizeof(msg), n);
         LUCHS_LOG_DEVICE(msg);
     }
 
@@ -293,8 +317,14 @@ __global__ void entropyKernel(
         eOut[tileIndex] = entropy;
 
         if (doLog) {
-            char msg[128];
-            sprintf(msg, "[ENTROPY] tile=(%d,%d) entropy=%.5f", tX, tY, entropy);
+            char msg[128]; int n = 0;
+            n = luchs::d_append_str(msg, sizeof(msg), n, "[ENTROPY] tile=(");
+            n = luchs::d_append_int(msg, sizeof(msg), n, tX);
+            n = luchs::d_append_str(msg, sizeof(msg), n, ",");
+            n = luchs::d_append_int(msg, sizeof(msg), n, tY);
+            n = luchs::d_append_str(msg, sizeof(msg), n, ") entropy=");
+            n = luchs::d_append_float_fixed(msg, sizeof(msg), n, entropy, 5);
+            luchs::d_terminate(msg, sizeof(msg), n);
             LUCHS_LOG_DEVICE(msg);
         }
     }
@@ -328,9 +358,14 @@ __global__ void contrastKernel(
     cOut[idx] = contrast;
 
     if (doLog && threadIdx.x == 0 && threadIdx.y == 0) {
-        char msg[128];
-        int n = 0;
-        n += sprintf(msg + n, "[CONTRAST] tile=(%d,%d) contrast=%.5f", tx, ty, contrast);
+        char msg[128]; int n = 0;
+        n = luchs::d_append_str(msg, sizeof(msg), n, "[CONTRAST] tile=(");
+        n = luchs::d_append_int(msg, sizeof(msg), n, tx);
+        n = luchs::d_append_str(msg, sizeof(msg), n, ",");
+        n = luchs::d_append_int(msg, sizeof(msg), n, ty);
+        n = luchs::d_append_str(msg, sizeof(msg), n, ") contrast=");
+        n = luchs::d_append_float_fixed(msg, sizeof(msg), n, contrast, 5);
+        luchs::d_terminate(msg, sizeof(msg), n);
         LUCHS_LOG_DEVICE(msg);
     }
 }
