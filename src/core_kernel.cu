@@ -24,10 +24,9 @@ namespace {
     // nur noch 1 Ballot pro 8 Iterationen
     constexpr int   WARP_CHUNK        = 8;
 
-    // seltene Periodizitätsprobe (konservativ):
-    // vorher: 16 → jetzt: 32 (halbiert Overhead)
-    constexpr int   LOOP_CHECK_EVERY  = 32;
-
+    // 🐑 Schneefuchs: Brent-Periodizität (robuster als seltene Punktprobe)
+    // nach Anlaufphase wird ein "slow"-Punkt in verdoppelnden Abständen verglichen.
+    constexpr int   BRENT_WARMUP      = 32;     // Iterationen vor Start der Zyklensuche
     // Epsilon^2 für „nahezu gleich“ (float, konservativ)
     constexpr float LOOP_EPS2         = 1e-8f;
 
@@ -73,18 +72,19 @@ __device__ __forceinline__ int mandelbrotIterations_scalar(
     return i;
 }
 
-// 🐑 Schneefuchs (neu): Warp-Iteration mit CHUNKED Ballot + seltener Loop-Probe.
-// Bildidentisch, weniger Sync-Overhead und Divergenz.
+// 🐑 Schneefuchs (neu): Warp-Iteration mit CHUNKED Ballot + Brent-Periodizität.
+// Bildidentisch, weniger Divergenz. Innenpunkte enden deutlich früher.
 __device__ __forceinline__ int mandelbrotIterations_warp(
     float cr, float ci, int maxIter, float& xr, float& xi)
 {
     float x = 0.0f, y = 0.0f;
     int it = 0;
 
-    // Für seltene Periodizitätsprobe
-    float px = 0.0f, py = 0.0f; // gemerkter Punkt
-    int   pc = 0;               // Schritte seit letzter Probe
-    int   close_hits = 0;       // aufeinanderfolgende „nahezu gleich“-Treffer
+    // Brent: vergleiche gegen "slow"-Punkt in verdoppelnden Intervallen (power).
+    float xs = 0.0f, ys = 0.0f; // slow
+    int   power = 1;            // Vergleichsintervall (verdoppelt sich)
+    int   lam   = 0;            // Schritte seit letztem Reset
+    int   brent_hits = 0;       // zwei aufeinanderfolgende Treffer gefordert
 
     unsigned mask = 0xFFFFFFFFu;
 #if (__CUDA_ARCH__ >= 700)
@@ -98,13 +98,12 @@ __device__ __forceinline__ int mandelbrotIterations_warp(
         // Innerer Block ohne Ballot – maximal WARP_CHUNK Schritte
 #pragma unroll
         for (int s = 0; s < WARP_CHUNK; ++s) {
-            if (!active) { ++pc; continue; }
+            if (!active) continue;
 
             float x2 = x * x;
             float y2 = y * y;
-            if (x2 + y2 > 4.0f) {
+            if (x2 + y2 > 4.0f) { // entkommen
                 active = false;
-                ++pc;
                 continue;
             }
 
@@ -113,22 +112,25 @@ __device__ __forceinline__ int mandelbrotIterations_warp(
             y = fmaf(2.0f * x, y, ci);           // 2*x*y + ci
             x = xt;
             ++it;
-            ++pc;
 
-            // Seltene Periodizitätsprobe: konservativ, nur Early-Out wenn sicher
-            if (pc >= LOOP_CHECK_EVERY) {
-                float dx = x - px, dy = y - py;
+            // Brent-Zyklensuche (nur nach Warmup, sehr günstig)
+            if (it > BRENT_WARMUP) {
+                float dx = x - xs, dy = y - ys;
                 float d2 = dx * dx + dy * dy;
                 if (d2 < LOOP_EPS2) {
-                    if (++close_hits >= 2) {
-                        // mehrfach stabil nahe → „innen“: it = maxIter
+                    if (++brent_hits >= 2) {
                         active = false;
-                        it = maxIter;
+                        it = maxIter;            // exakt "innen"
+                        continue;
                     }
                 } else {
-                    close_hits = 0;
+                    brent_hits = 0;
                 }
-                px = x; py = y; pc = 0;
+                if (++lam == power) {
+                    xs = x; ys = y;             // slow nachziehen
+                    power <<= 1;                // Intervall verdoppeln
+                    lam = 0;
+                }
             }
         }
 
@@ -199,7 +201,7 @@ __global__ void mandelbrotKernel(
     }
 
     float zx, zy;
-    // 🐑 Schneefuchs: Warp-Iteration in CHUNKs mit seltener Loop-Probe.
+    // 🐑 Schneefuchs: Warp-Iteration in CHUNKs mit Brent-Periodizität.
     int it = mandelbrotIterations_warp(c.x, c.y, maxIter, zx, zy);
 
     // 🦦 Otter Eye-Candy: Smooth Coloring + Paletten (kein Banding)
