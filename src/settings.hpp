@@ -72,7 +72,7 @@ namespace Settings {
     //   Nur aktivieren, wenn du reproduzierbare Fragen klären willst; sonst aus.
     //   Deterministische, sparsame Device-Logs bevorzugen. (Bezug zu Schneefuchs)
     // ------------------------------------------------------------------------
-    inline constexpr bool debugLogging  = false;
+    inline constexpr bool debugLogging  = true;
 
     // ------------------------------------------------------------------------
     // performanceLogging
