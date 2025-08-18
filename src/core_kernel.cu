@@ -1,8 +1,8 @@
-///// MAUS: Sofort-Fix — analytic interior test also in finish-slice (Otter/Schneefuchs)
+///// MAUS: Pass-1 periodicity + adaptive warmup (Otter/Schneefuchs) — ASCII logs only
 // core_kernel.cu — 2-Pass Mandelbrot (Warmup + Sliced Survivor Finish)
-// 🐭 Maus: Kern schlank; ASCII-Logs bleiben deterministisch.
-// 🦦 Otter: Smooth Coloring + Paletten (otter_color.hpp).
-// 🦊 Schneefuchs: Warp-synchron, CHUNKed, reduzierte Divergenz + kompakte Survivor-Listen (pro Slice).
+// 🐭 Maus: Kern schlank; ASCII-Logs deterministisch.
+// 🦦 Otter: Smooth Coloring, adaptive Warmup, weiche Farbübergänge.
+// 🦊 Schneefuchs: Warp-synchron, CHUNKed, Periodizitätsprobe in Pass 1/2, reduzierte Divergenz.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -22,13 +22,18 @@ namespace {
     // Größerer CHUNK → weniger Ballots, gleiche Bildqualität.
     constexpr int   WARP_CHUNK        = 64;     // vorher 32
 
-    // Seltene Periodizitätsprobe (für Finish, jetzt aggressiver)
+    // Periodizitätsprobe (Pass 2 – Finish)
     constexpr int   LOOP_CHECK_EVERY  = 16;     // vorher 32
     constexpr float LOOP_EPS2         = 1e-6f;  // vorher 5e-8
     constexpr int   LOOP_REQ_HITS     = 1;      // vorher ~2
 
-    // 2-Pass: Warmup-Grenze (Escaper werden sofort gefärbt, Survivors kompakt gesammelt)
-    constexpr int   WARMUP_IT         = 1024;
+    // Periodizitätsprobe (Pass 1 – Warmup, leichter als Pass 2)
+    constexpr int   P1_LOOP_EVERY     = 64;
+    constexpr float P1_LOOP_EPS2      = 1e-7f;
+    constexpr int   P1_LOOP_REQ_HITS  = 2;
+
+    // Basis-Warmup; wird adaptiv über device-constant angehoben (kein API-Touch)
+    constexpr int   WARMUP_IT_BASE    = 1024;
 
     // Slice-Steps in Pass 2 (Finish)
     constexpr int   FINISH_SLICE_IT   = 1024;
@@ -40,6 +45,10 @@ namespace {
     constexpr float          kStripeAmp = 0.10f;
     constexpr float          kGamma     = 2.2f;
 }
+
+// ---------- Adaptive Warmup (device constant) --------------------------------
+// Schneefuchs: keine Kernel-Signatur anpassen, via __constant__ injizieren.
+__device__ __constant__ int d_warmup_it = WARMUP_IT_BASE;
 
 // ---------- Helpers ----------------------------------------------------------
 __device__ __forceinline__ float2 pixelToComplex(
@@ -53,7 +62,7 @@ __device__ __forceinline__ float2 pixelToComplex(
 }
 
 __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
-    // Hauptcardioide
+    // Hauptkardioide
     float xm = x - 0.25f;
     float q  = xm * xm + y * y;
     if (q * (q + xm) <= 0.25f * y * y) return true;
@@ -64,12 +73,17 @@ __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
 }
 
 // ---------- Iteration (CHUNKed) ---------------------------------------------
-// Pass 1: Warmup ohne Periodizitätsprobe (nur Escape-Check)
+// Pass 1: Warmup MIT leichter Periodizitätsprobe (escape-only vorher, jetzt erweitert)
 __device__ __forceinline__ int iterate_warmup_noLoop(
-    float cr, float ci, int maxSteps, float& x, float& y)
+    float cr, float ci, int maxSteps, float& x, float& y, bool& interiorFlag)
 {
     x = 0.0f; y = 0.0f;
     int it = 0;
+    interiorFlag = false;
+
+    float px = x, py = y; // Referenz für P1-Loop-Check
+    int   pc = 0;
+    int   close_hits = 0;
 
     unsigned mask = 0xFFFFFFFFu;
 #if (__CUDA_ARCH__ >= 700)
@@ -81,19 +95,36 @@ __device__ __forceinline__ int iterate_warmup_noLoop(
     for (int k = 0; k < maxSteps; k += WARP_CHUNK) {
 #pragma unroll 1
         for (int s = 0; s < WARP_CHUNK; ++s) {
-            if (!active) continue;
+            if (!active) { ++pc; continue; }
 
             float xx = x * x;
             float yy = y * y;
-            if (xx + yy > 4.0f) { active = false; continue; }
+            if (xx + yy > 4.0f) { active = false; ++pc; continue; }
 
             // z = z^2 + c (mit FMA)
             float xt = fmaf(x, x, -yy) + cr;   // x^2 - y^2 + cr
             y = fmaf(2.0f * x, y, ci);         // 2*x*y + ci
             x = xt;
             ++it;
+            ++pc;
 
-            if (it >= maxSteps) break;
+            // leichte Periodizitätsprobe (kostengünstig, reduziert Survivors)
+            if (pc >= P1_LOOP_EVERY) {
+                float dx = x - px, dy = y - py;
+                float d2 = dx*dx + dy*dy;
+                if (d2 < P1_LOOP_EPS2) {
+                    if (++close_hits >= P1_LOOP_REQ_HITS) {
+                        active        = false;
+                        interiorFlag  = true;   // wird im Kernel konsumiert
+                        it            = maxSteps; // markiere "innen"
+                    }
+                } else {
+                    close_hits = 0;
+                }
+                px = x; py = y; pc = 0;
+            }
+
+            if (it >= maxSteps) { active = false; break; }
         }
         unsigned anyActive = __ballot_sync(mask, active);
         if (anyActive == 0u) break;
@@ -117,8 +148,7 @@ __device__ __forceinline__ SliceResult iterate_finish_slice(
     float cr, float ci, int start_it, int maxIter,
     float x, float y, int sliceSteps)
 {
-    // 🦊 Schneefuchs (Sofort-Fix): analytischer Early-Exit auch hier, falls Survivor
-    // aus Pass 1 wider Erwarten ein Innenpunkt war (numerische Ränder etc.).
+    // Schneefuchs (Sofort-Fix): analytischer Early-Exit
     if (insideMainCardioidOrBulb(cr, ci)) {
         return { maxIter, x, y, /*escaped*/false, /*interior*/true };
     }
@@ -196,7 +226,7 @@ void mandelbrotPass1Warmup(
     const float spanY = spanX * (float)h / (float)w;
     const float2 c = pixelToComplex(xPix + 0.5f, yPix + 0.5f, w, h, spanX, spanY, offset);
 
-    // 🐽 Otter (Sofort-Fix): Innenpunkte *ohne* Iterationsschleife behandeln
+    // Otter: Innenpunkte *ohne* Iterationsschleife behandeln
     if (insideMainCardioidOrBulb(c.x, c.y)) {
         out[idx]     = make_uchar4(0,0,0,255);
         iterOut[idx] = maxIter;
@@ -212,12 +242,21 @@ void mandelbrotPass1Warmup(
         return;
     }
 
-    // Warmup bis WARMUP_IT
+    // Warmup bis d_warmup_it (adaptiv vom Host gesetzt)
+    const int warmupSteps = d_warmup_it;
+
     float zx=0.0f, zy=0.0f;
-    int itWarm = iterate_warmup_noLoop(c.x, c.y, WARMUP_IT, zx, zy);
+    bool interior = false;
+    int itWarm = iterate_warmup_noLoop(c.x, c.y, warmupSteps, zx, zy, interior);
+
+    if (interior) {
+        out[idx]     = make_uchar4(0,0,0,255);
+        iterOut[idx] = maxIter;
+        return;
+    }
 
     const float norm = zx*zx + zy*zy;
-    const bool escaped = (itWarm < WARMUP_IT) && (norm > 4.0f);
+    const bool escaped = (itWarm < warmupSteps) && (norm > 4.0f);
 
     if (escaped) {
         // Otter-Färbung
@@ -273,8 +312,7 @@ void mandelbrotPass2Slice(
 
     Survivor s = survIn[t];
 
-    // 🦊 Schneefuchs (Sofort-Fix, Guard): sollte durch Pass 1 nie vorkommen,
-    // aber falls doch (Randfälle), sofort schwarz setzen, keine weitere Arbeit.
+    // Guard: falls Survivor dennoch innen war (Randfälle)
     if (insideMainCardioidOrBulb(s.cr, s.ci)) {
         out[s.idx]     = make_uchar4(0,0,0,255);
         iterOut[s.idx] = maxIter;
@@ -481,6 +519,9 @@ namespace {
     int*      g_dSurvCountB = nullptr;
     size_t    g_survivorCap = 0;
 
+    // Merker für adaptive Warmup-Steuerung
+    double    g_prevSurvivorsPct = -1.0;
+
     void ensureSurvivorCapacity(size_t need) {
         if (need <= g_survivorCap) return;
         if (g_dSurvivorsA) cudaFree(g_dSurvivorsA);
@@ -493,6 +534,25 @@ namespace {
         cudaMalloc(&g_dSurvCountB, sizeof(int));
         g_survivorCap = need;
     }
+
+    inline int chooseWarmupIt(int maxIter) {
+        // Otter: einfache, sichere Heuristik basierend auf letzter Survivors-Quote
+        int warm = WARMUP_IT_BASE;
+        if (g_prevSurvivorsPct >= 90.0) {
+            // sehr viele Innenkandidaten → aggressiver
+            long long target = (long long)WARMUP_IT_BASE * 3LL;
+            warm = (int) (target > maxIter ? maxIter : target);
+        } else if (g_prevSurvivorsPct >= 80.0) {
+            long long target = (long long)WARMUP_IT_BASE * 2LL;
+            warm = (int) (target > maxIter ? maxIter : target);
+        } else if (g_prevSurvivorsPct >= 60.0) {
+            long long target = (long long)WARMUP_IT_BASE * 3LL / 2LL; // x1.5
+            warm = (int) (target > maxIter ? maxIter : target);
+        }
+        // niemals über maxIter
+        if (warm > maxIter) warm = maxIter;
+        return warm;
+    }
 }
 
 void launch_mandelbrotHybrid(
@@ -504,12 +564,17 @@ void launch_mandelbrotHybrid(
 
     // Block/Grids (etwas größer für bessere Occupancy, falls Regcount passt)
     dim3 block = Settings::performanceLogging ? dim3(32, 8) : dim3(16, 16);
-    // Tipp: wenn ptxas Regcount moderat ist, probier 32x12
-    // dim3 block = dim3(32,12);
     dim3 grid((w + block.x - 1)/block.x, (h + block.y - 1)/block.y);
 
     // Survivor-Buffer (max. w*h)
     ensureSurvivorCapacity(size_t(w) * size_t(h));
+
+    // Adaptive Warmup-Schritte in Device-Const schreiben
+    const int warmupIt = chooseWarmupIt(maxIter);
+    cudaMemcpyToSymbol(d_warmup_it, &warmupIt, sizeof(int), 0, cudaMemcpyHostToDevice);
+    if (Settings::performanceLogging) {
+        LUCHS_LOG_HOST("[PERF] warmup_it=%d prev_survivors=%.2f%%", warmupIt, g_prevSurvivorsPct);
+    }
 
     auto t0 = clk::now();
 
@@ -520,10 +585,12 @@ void launch_mandelbrotHybrid(
     // Survivor-Zahl holen + Log wie gehabt
     int h_survA = 0;
     cudaMemcpy(&h_survA, g_dSurvCountA, sizeof(int), cudaMemcpyDeviceToHost);
+    const double survPct = (double)h_survA * 100.0 / (double(w) * double(h));
     if (Settings::performanceLogging) {
-        const double pct = 100.0 * double(h_survA) / double(w) / double(h);
-        LUCHS_LOG_HOST("[PERF] survivors=%d (%.2f%% of %d)", h_survA, pct, w*h);
+        LUCHS_LOG_HOST("[PERF] survivors=%d (%.2f%% of %d)", h_survA, survPct, w*h);
     }
+    // Merken für nächstes Frame
+    g_prevSurvivorsPct = survPct;
 
     // Pass 2: Slices mit Re-Kompaktierung
     if (h_survA > 0) {
