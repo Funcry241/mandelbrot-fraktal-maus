@@ -1,3 +1,4 @@
+///// MAUS: Sofort-Fix — analytic interior test also in finish-slice (Otter/Schneefuchs)
 // core_kernel.cu — 2-Pass Mandelbrot (Warmup + Sliced Survivor Finish)
 // 🐭 Maus: Kern schlank; ASCII-Logs bleiben deterministisch.
 // 🦦 Otter: Smooth Coloring + Paletten (otter_color.hpp).
@@ -116,6 +117,12 @@ __device__ __forceinline__ SliceResult iterate_finish_slice(
     float cr, float ci, int start_it, int maxIter,
     float x, float y, int sliceSteps)
 {
+    // 🦊 Schneefuchs (Sofort-Fix): analytischer Early-Exit auch hier, falls Survivor
+    // aus Pass 1 wider Erwarten ein Innenpunkt war (numerische Ränder etc.).
+    if (insideMainCardioidOrBulb(cr, ci)) {
+        return { maxIter, x, y, /*escaped*/false, /*interior*/true };
+    }
+
     int it = start_it;
 
     float px = x, py = y;    // Referenz für Loop-Check
@@ -189,9 +196,9 @@ void mandelbrotPass1Warmup(
     const float spanY = spanX * (float)h / (float)w;
     const float2 c = pixelToComplex(xPix + 0.5f, yPix + 0.5f, w, h, spanX, spanY, offset);
 
-    // 🐽 Schwarze Schnauze (Innenpunkte sofort)
+    // 🐽 Otter (Sofort-Fix): Innenpunkte *ohne* Iterationsschleife behandeln
     if (insideMainCardioidOrBulb(c.x, c.y)) {
-        out[idx]   = make_uchar4(0,0,0,255);
+        out[idx]     = make_uchar4(0,0,0,255);
         iterOut[idx] = maxIter;
         if (doLog && threadIdx.x==0 && threadIdx.y==0) {
             char msg[96]; int n=0;
@@ -265,6 +272,15 @@ void mandelbrotPass2Slice(
     if (t >= survInCount) return;
 
     Survivor s = survIn[t];
+
+    // 🦊 Schneefuchs (Sofort-Fix, Guard): sollte durch Pass 1 nie vorkommen,
+    // aber falls doch (Randfälle), sofort schwarz setzen, keine weitere Arbeit.
+    if (insideMainCardioidOrBulb(s.cr, s.ci)) {
+        out[s.idx]     = make_uchar4(0,0,0,255);
+        iterOut[s.idx] = maxIter;
+        return;
+    }
+
     SliceResult r = iterate_finish_slice(s.cr, s.ci, s.it, maxIter, s.x, s.y, FINISH_SLICE_IT);
 
     if (r.escaped) {

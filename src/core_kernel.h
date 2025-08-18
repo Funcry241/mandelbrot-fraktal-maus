@@ -1,3 +1,4 @@
+///// MAUS: header sync — interior test now documented (no API change)
 // Datei: src/core_kernel.h
 // 🐭 Maus: Header minimal, eindeutig und stabil – keine heimlichen ABI-Änderungen.
 // 🦦 Otter: Klare Param-Doku, exakt die Signaturen wie in .cu verwendet. (Bezug zu Otter)
@@ -35,6 +36,8 @@ extern "C" {
 // Hinweise:
 //  - Keine Exceptions; Fehler werden im Hostpfad geloggt.
 //  - Der Kernel schreibt ausschließlich in devPtr und d_iterations.
+//  - 🦊 Schneefuchs: **Analytischer Innen-Test (Cardioid + 2er-Bulb) bereits im Kernel**;
+//    Innenpunkte werden ohne Iterationsschleife als „innen“ markiert (it=maxIterations).
 //
 void launch_mandelbrotHybrid(
     uchar4* devPtr,
