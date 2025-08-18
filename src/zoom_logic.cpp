@@ -1,7 +1,7 @@
-// LUCHS1
-// Perf V3 hot path – no header/API change (ASCII logs only)
-// Otter: Warm-up ohne Richtungswechsel: erst zoomen, dann lenken. (Bezug zu Otter)
-// Schneefuchs: Minimalinvasiv, keine Header-/API-Änderung. ASCII-Logs. (Bezug zu Schneefuchs)
+// LUCHS
+// Perf V3 hot path – time-based smoothing, no header/API change (ASCII logs only)
+// Otter: Warm-up ohne Richtungswechsel + zeitbasierter Turn-Limiter. (Bezug zu Otter)
+// Schneefuchs: Robustere Softmax/Stats und Sticky-Anker; minimalinvasiv. (Bezug zu Schneefuchs)
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -50,13 +50,28 @@ static constexpr int   kRetargetInterval = 5;
 // NEU: Statistik nur alle M Frames (Kopier-/nth_element-Last reduzieren). (Schneefuchs)
 static constexpr int   kStatsEvery = 3;
 
-// ── NEU: Richtungswechsel-Glättung per begrenzter Drehrate (Yaw-Rate-Limiter, 2D). (Otter/Schneefuchs)
-// Idee: Begrenze den maximalen Winkel, um den sich die Bewegungsrichtung pro Frame ändern darf.
-// Dadurch entstehen weiche Kurven anstatt harter "Knicke".
-static constexpr float kTURN_BASE_RAD_MIN = 0.06f; // ~3.4° minimal pro Frame
-static constexpr float kTURN_BASE_RAD_MAX = 0.30f; // ~17° maximal pro Frame
-static constexpr float kTURN_SIG_REF      = 1.00f; // Z-Score-Referenz (stdS) für "volles" Drehen
-static constexpr float kTURN_DIST_REF     = 0.25f; // NDC-Referenzbewegung für "volles" Drehen
+// ── NEU (Otter): Zeitbasierte Drehrate statt pro Frame ───────────────────────
+// Interpretiere als rad/sek; gefühlte Range entspricht ~0.06..0.30 rad/Frame @60 FPS.
+static constexpr float kTURN_RATE_MIN_RAD_S = 3.6f;   // ~206°/s
+static constexpr float kTURN_RATE_MAX_RAD_S = 18.0f;  // ~1031°/s
+
+// ── NEU (Schneefuchs): konservative Kopplung Signal×Distanz (geometrisches Mittel)
+static inline float conservative_mix(float a, float b) {
+    a = a < 0.f ? 0.f : (a > 1.f ? 1.f : a);
+    b = b < 0.f ? 0.f : (b > 1.f ? 1.f : b);
+    return std::sqrt(a * b); // AND-artig; beide müssen groß sein
+}
+
+// ── NEU (Otter): Zeitbasis-Glättung/Clamp für dt (sek)
+static constexpr float kDT_EMA_ALPHA = 0.25f;
+static constexpr float kDT_MIN_SEC   = 1.0f / 240.0f; // 240 FPS
+static constexpr float kDT_MAX_SEC   = 1.0f / 24.0f;  // 24 FPS
+
+// ── NEU (Schneefuchs): Sticky-Softmax – kleiner Bonus für den zuletzt akzeptierten Index
+static constexpr float kSTICKY_LOG_BONUS = 0.20f; // additiv im Lograum (~×1.22 Gewicht)
+
+// ── NEU (Otter): EMA-Alpha an „Weltbewegung“ koppeln (Distanz × invZoom)
+static constexpr float kALPHA_WORLD_REF = 0.25f; // Referenzbewegung in NDC/Zoom-Einheiten
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
@@ -173,6 +188,14 @@ static int s_sinceRetarget = 0;
 thread_local bool  g_dirInit = false;
 thread_local float g_prevDirX = 1.0f;
 thread_local float g_prevDirY = 0.0f;
+
+// NEU: Zeitbasis-Speicher für dt/Retarget (Schneefuchs)
+using clock = std::chrono::high_resolution_clock;
+thread_local bool          g_timeInit = false;
+thread_local clock::time_point g_lastCall;
+thread_local float         g_dtSmooth = 1.0f / 60.0f;
+
+thread_local clock::time_point g_lastRetargetTS; // für AlwaysZoom-Zeitdrossel
 } // namespace
 
 namespace ZoomLogic {
@@ -219,8 +242,21 @@ ZoomResult evaluateZoomTarget(
     float2 previousOffset,
     ZoomState& state) noexcept
 {
-    using clock = std::chrono::high_resolution_clock;
     const auto t0 = clock::now();
+
+    // ── Zeitbasis initialisieren (dt und Retarget) (Schneefuchs)
+    float dtSec = 1.0f / 60.0f;
+    if (!g_timeInit) {
+        g_timeInit = true;
+        g_lastCall = t0;
+        g_lastRetargetTS = t0;
+    } else {
+        dtSec = std::chrono::duration<float>(t0 - g_lastCall).count();
+        g_lastCall = t0;
+        // EMA-Glättung + Clamp
+        g_dtSmooth = (1.0f - kDT_EMA_ALPHA) * g_dtSmooth + kDT_EMA_ALPHA * dtSec;
+        dtSec = clampf(g_dtSmooth, kDT_MIN_SEC, kDT_MAX_SEC);
+    }
 
     // ── Warm-up-Timer: ab erstem Aufruf läuft die Uhr. ───────────────────────
     static bool warmupInit = false;
@@ -257,26 +293,30 @@ ZoomResult evaluateZoomTarget(
 
     // Warm-up Early-Exit (Otter)
     if (freezeDirection) {
-        out.shouldZoom = true;
+        out.shouldZoom = Settings::ForceAlwaysZoom ? true : false;
         if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOMV3][WARMUP] freeze-direction t=%.2fs (limit=%.2fs)",
-                           warmupSec, kNO_TURN_WARMUP_SEC);
+            LUCHS_LOG_HOST("[ZOOMV3][WARMUP] freeze-direction t=%.2fs (limit=%.2fs) dt=%.3f ms",
+                           warmupSec, kNO_TURN_WARMUP_SEC, dtSec * 1000.0f);
         }
         return out;
     }
 
-    // Retarget nur alle N Frames (nur bei AlwaysZoom)
+    // Retarget-Drosselung: AlwaysZoom -> zeitbasiert ODER framebasiert (Otter/Schneefuchs)
     if (Settings::ForceAlwaysZoom) {
-        if (++s_sinceRetarget < kRetargetInterval) {
+        const double msSince = std::chrono::duration<double, std::milli>(t0 - g_lastRetargetTS).count();
+        const bool timeGate  = (msSince >= 120.0); // 120 ms Mindestabstand
+        const bool frameGate = (++s_sinceRetarget >= kRetargetInterval);
+        if (!(timeGate && frameGate)) {
             out.shouldZoom = true;           // Zoom läuft, Richtung bleibt
             out.newOffset   = previousOffset;
             if (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ZOOMV3] skip_retarget interval=%d/%d",
-                               s_sinceRetarget, kRetargetInterval);
+                LUCHS_LOG_HOST("[ZOOMV3] skip_retarget ms_since=%.1f frame_gate=%d/%d",
+                               msSince, s_sinceRetarget, kRetargetInterval);
             }
             return out;
         }
-        s_sinceRetarget = 0; // jetzt neu evaluieren
+        s_sinceRetarget = 0;
+        g_lastRetargetTS = t0;
     }
 
     // Konsistente Länge ableiten
@@ -353,7 +393,8 @@ ZoomResult evaluateZoomTarget(
     if (!hasSignal && !Settings::ForceAlwaysZoom) {
         out.shouldZoom = false;
         if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOMV3] no_signal early-exit stdS=%.3f (thr=%.3f)", (float)stdS, kMIN_SIGNAL_Z);
+            LUCHS_LOG_HOST("[ZOOMV3] no_signal early-exit stdS=%.3f (thr=%.3f) dt=%.3f ms",
+                           (float)stdS, kMIN_SIGNAL_Z, dtSec * 1000.0f);
         }
         return out;
     }
@@ -429,6 +470,22 @@ ZoomResult evaluateZoomTarget(
     }
 #endif
 
+    // Sticky-Softmax: Letzten akzeptierten Index mit kleinem Bonus einspeisen (Schneefuchs)
+    if (state.lastAcceptedIndex >= 0 && state.lastAcceptedIndex < N) {
+        const int j = state.lastAcceptedIndex;
+        // Candidate-Check (Innenraum ausschließen)
+        const double cx = (double)currentOffset.x + (double)g_ndcCache.ndcX[j] * invZoom;
+        const double cy = (double)currentOffset.y + (double)g_ndcCache.ndcY[j] * invZoom;
+        if (!isInsideCardioidOrBulb(cx, cy)) {
+            const float sLast   = g_bufS[j];
+            const float sShift  = (sLast - sMax) * invTempF + kSTICKY_LOG_BONUS;
+            const double wStick = std::exp((double)sShift);
+            sumW += wStick;
+            numX += wStick * (double)g_ndcCache.ndcX[j];
+            numY += wStick * (double)g_ndcCache.ndcY[j];
+        }
+    }
+
     // Ergebnis des fusionierten Passes konsumieren
     if (bestAdjIdx >= 0) {
         out.bestIndex    = bestAdjIdx;
@@ -493,11 +550,14 @@ ZoomResult evaluateZoomTarget(
     const float rawDist = std::sqrt(mvx*mvx + mvy*mvy);
 
     // ── NEU: Richtungswechsel "smoother" via Turn-Limiter vor der EMA. (Otter/Schneefuchs)
-    // Drehwinkel-Limit adaptiv in Abhängigkeit von Signalstärke (stdS) und Bewegungsgröße.
-    float sigFactor  = clampf((float)stdS / kTURN_SIG_REF, 0.0f, 1.0f);
-    float distFactor = clampf(rawDist / kTURN_DIST_REF,     0.0f, 1.0f);
-    float turnMaxRad = kTURN_BASE_RAD_MIN +
-                       (kTURN_BASE_RAD_MAX - kTURN_BASE_RAD_MIN) * std::max(sigFactor, distFactor);
+    // Zeitbasierte Drehwinkelbegrenzung (rad/s -> rad/frame), konservative Mischung aus Signal und Distanz.
+    float sigFactor  = clampf((float)stdS / 1.0f, 0.0f, 1.0f);          // Referenz stdS=1
+    float distFactor = clampf(rawDist / 0.25f,     0.0f, 1.0f);          // Referenz NDC-Bewegung
+    const float mix  = conservative_mix(sigFactor, distFactor);
+
+    const float turnRate = kTURN_RATE_MIN_RAD_S +
+                           (kTURN_RATE_MAX_RAD_S - kTURN_RATE_MIN_RAD_S) * mix;
+    float turnMaxRad = clampf(turnRate * dtSec, 0.01f, 0.60f); // 0.6 rad ≈ 34°
 
     if (!g_dirInit) {
         // Erste Initialisierung: Richtung aus aktuellem Move ableiten.
@@ -521,10 +581,10 @@ ZoomResult evaluateZoomTarget(
 
         if (Settings::debugLogging) {
             // Debug: Winkel zwischen alt und Ziel (nur informativ)
-            const float dot = clampf(g_prevDirX*tgtDirX + g_prevDirY*tgtDirY, -1.0f, 1.0f);
+            const float dot = clampf(dirX*tgtDirX + dirY*tgtDirY, -1.0f, 1.0f);
             const float ang = std::acos(dot);
-            LUCHS_LOG_HOST("[ZOOMV3] turn_limit: ang=%.3f rad max=%.3f rad | dir=(%.3f,%.3f) tgt=(%.3f,%.3f)",
-                           ang, turnMaxRad, g_prevDirX, g_prevDirY, tgtDirX, tgtDirY);
+            LUCHS_LOG_HOST("[ZOOMV3] turn_limit: dtheta=%.3f rad max=%.3f rad rate=%.2f rad/s dt=%.3f ms",
+                           ang, turnMaxRad, turnRate, dtSec * 1000.0f);
         }
     }
 
@@ -537,8 +597,11 @@ ZoomResult evaluateZoomTarget(
     const float dy = proposedOffset.y - previousOffset.y;
     const float dist = std::sqrt(dx*dx + dy*dy);
 
-    // Bewegung glätten (EMA, adaptiv nur nach Distanz)
-    float emaAlpha = kEMA_ALPHA_MIN + (kEMA_ALPHA_MAX - kEMA_ALPHA_MIN) * clampf(dist / 0.5f, 0.0f, 1.0f);
+    // Bewegung glätten (EMA), jetzt zoom-sensitiv über "Weltbewegung"
+    const float worldDist = dist * (float)invZoom;
+    float emaAlpha = kEMA_ALPHA_MIN +
+                     (kEMA_ALPHA_MAX - kEMA_ALPHA_MIN) *
+                     clampf(worldDist / kALPHA_WORLD_REF, 0.0f, 1.0f);
     if (Settings::ForceAlwaysZoom && !hasSignal) {
         emaAlpha = std::max(emaAlpha, kFORCE_MIN_DRIFT_ALPHA);
     }
@@ -572,7 +635,7 @@ ZoomResult evaluateZoomTarget(
         const int bx = (out.bestIndex >= 0 && tilesX > 0) ? out.bestIndex % tilesX : -1;
         const int by = (out.bestIndex >= 0 && tilesX > 0) ? out.bestIndex / tilesX : -1;
         const auto t1 = clock::now();
-        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        const double msEval = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         LUCHS_LOG_HOST(
             "[ZOOMV3] best=%d tile=(%d,%d) e=%.4f c=%.4f score=%.3f | stdS=%.3f temp=%.3f signal=%d",
@@ -580,11 +643,11 @@ ZoomResult evaluateZoomTarget(
             (float)stdS, temp, hasSignal ? 1 : 0
         );
         LUCHS_LOG_HOST(
-            "[ZOOMV3] move: dist=%.4f emaAlpha=%.3f ndc=(%.4f,%.4f) propOff=(%.5f,%.5f) newOff=(%.5f,%.5f) tiles=(%d,%d) ms=%.3f",
-            dist, emaAlpha, (float)ndcX, (float)ndcY,
+            "[ZOOMV3] move: dist=%.4f worldDist=%.4f emaAlpha=%.3f ndc=(%.4f,%.4f) propOff=(%.5f,%.5f) newOff=(%.5f,%.5f) tiles=(%d,%d) dt=%.3f ms eval=%.3f ms",
+            dist, worldDist, emaAlpha, (float)ndcX, (float)ndcY,
             proposedOffset.x, proposedOffset.y,
             out.newOffset.x, out.newOffset.y,
-            tilesX, tilesY, ms
+            tilesX, tilesY, dtSec * 1000.0f, msEval
         );
         if (interiorSkipped > 0) {
             LUCHS_LOG_HOST("[ZOOMV3] interior_skip=%d/%d (cardioid/2-bulb hard filter)", interiorSkipped, N);
