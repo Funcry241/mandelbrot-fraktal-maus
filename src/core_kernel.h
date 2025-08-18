@@ -1,4 +1,4 @@
-///// MAUS: header sync — adaptive warmup + interior test documented (no API change)
+///// MAUS: header sync — Fast P1 + adaptive slice sizing documented (no API change)
 // Datei: src/core_kernel.h
 // 🐭 Maus: Header minimal, eindeutig und stabil – keine heimlichen ABI-Änderungen.
 // 🦦 Otter: Klare Param-Doku, exakt die Signaturen wie in .cu verwendet. (Bezug zu Otter)
@@ -37,8 +37,7 @@ extern "C" {
 //  - Keine Exceptions; Fehler werden im Hostpfad geloggt.
 //  - Der Kernel schreibt ausschließlich in devPtr und d_iterations.
 //  - 🦊 Schneefuchs: Analytischer Innen-Test (Cardioid + 2er-Bulb) direkt im Kernel.
-//  - 🦦 Otter: Adaptive Warmup-Iterationen (Pass 1) via device-constant, basierend auf
-//              Survivors-Anteil des vorigen Frames (keine API-/Header-Änderung).
+//  - 🦦 Otter: Warmup & Slice-Strategie sind adaptiv, aber rein intern (keine API-/Header-Änderung).
 //
 void launch_mandelbrotHybrid(
     uchar4* devPtr,

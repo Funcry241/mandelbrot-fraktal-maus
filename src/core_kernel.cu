@@ -1,7 +1,7 @@
-///// MAUS: Pass-1 periodicity + adaptive warmup (Otter/Schneefuchs) — ASCII logs only
+///// MAUS: Fast P1 periodicity + adaptive slice sizing (Otter/Schneefuchs) — ASCII logs only
 // core_kernel.cu — 2-Pass Mandelbrot (Warmup + Sliced Survivor Finish)
-// 🐭 Maus: Kern schlank; ASCII-Logs deterministisch.
-// 🦦 Otter: Smooth Coloring, adaptive Warmup, weiche Farbübergänge.
+// 🐭 Maus: Kern schlank; deterministische ASCII-Logs.
+// 🦦 Otter: Smooth Coloring, adaptive Warmup & Slice-Größe.
 // 🦊 Schneefuchs: Warp-synchron, CHUNKed, Periodizitätsprobe in Pass 1/2, reduzierte Divergenz.
 
 #include <cuda_runtime.h>
@@ -27,15 +27,15 @@ namespace {
     constexpr float LOOP_EPS2         = 1e-6f;  // vorher 5e-8
     constexpr int   LOOP_REQ_HITS     = 1;      // vorher ~2
 
-    // Periodizitätsprobe (Pass 1 – Warmup, leichter als Pass 2)
-    constexpr int   P1_LOOP_EVERY     = 64;
-    constexpr float P1_LOOP_EPS2      = 1e-7f;
-    constexpr int   P1_LOOP_REQ_HITS  = 2;
+    // 🦦 Otter FAST-Preset: Pass-1 Periodizität schärfen
+    constexpr int   P1_LOOP_EVERY     = 48;     // vorher 64 (dichter prüfen)
+    constexpr float P1_LOOP_EPS2      = 2e-7f;  // vorher 1e-7 (toleranter)
+    constexpr int   P1_LOOP_REQ_HITS  = 1;      // vorher 2  (schneller akzeptieren)
 
-    // Basis-Warmup; wird adaptiv über device-constant angehoben (kein API-Touch)
+    // Basis-Warmup; kann via __constant__ adaptiv angehoben werden
     constexpr int   WARMUP_IT_BASE    = 1024;
 
-    // Slice-Steps in Pass 2 (Finish)
+    // Slice-Steps in Pass 2 (Startwert)
     constexpr int   FINISH_SLICE_IT   = 1024;
     constexpr int   MAX_SLICES        = 64;     // Sicherheitskappung
 
@@ -73,7 +73,7 @@ __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
 }
 
 // ---------- Iteration (CHUNKed) ---------------------------------------------
-// Pass 1: Warmup MIT leichter Periodizitätsprobe (escape-only vorher, jetzt erweitert)
+// Pass 1: Warmup MIT leichter Periodizitätsprobe
 __device__ __forceinline__ int iterate_warmup_noLoop(
     float cr, float ci, int maxSteps, float& x, float& y, bool& interiorFlag)
 {
@@ -105,17 +105,16 @@ __device__ __forceinline__ int iterate_warmup_noLoop(
             float xt = fmaf(x, x, -yy) + cr;   // x^2 - y^2 + cr
             y = fmaf(2.0f * x, y, ci);         // 2*x*y + ci
             x = xt;
-            ++it;
-            ++pc;
+            ++it; ++pc;
 
-            // leichte Periodizitätsprobe (kostengünstig, reduziert Survivors)
+            // leichte Periodizitätsprobe (FAST-Preset)
             if (pc >= P1_LOOP_EVERY) {
                 float dx = x - px, dy = y - py;
                 float d2 = dx*dx + dy*dy;
                 if (d2 < P1_LOOP_EPS2) {
                     if (++close_hits >= P1_LOOP_REQ_HITS) {
                         active        = false;
-                        interiorFlag  = true;   // wird im Kernel konsumiert
+                        interiorFlag  = true;   // im Kernel konsumiert
                         it            = maxSteps; // markiere "innen"
                     }
                 } else {
@@ -148,7 +147,7 @@ __device__ __forceinline__ SliceResult iterate_finish_slice(
     float cr, float ci, int start_it, int maxIter,
     float x, float y, int sliceSteps)
 {
-    // Schneefuchs (Sofort-Fix): analytischer Early-Exit
+    // Schneefuchs: analytischer Early-Exit
     if (insideMainCardioidOrBulb(cr, ci)) {
         return { maxIter, x, y, /*escaped*/false, /*interior*/true };
     }
@@ -180,8 +179,7 @@ __device__ __forceinline__ SliceResult iterate_finish_slice(
             float xt = fmaf(x, x, -y2) + cr;   // x^2 - y^2 + cr
             y = fmaf(2.0f * x, y, ci);         // 2*x*y + ci
             x = xt;
-            ++it;
-            ++pc;
+            ++it; ++pc;
 
             if (pc >= LOOP_CHECK_EVERY) {
                 float dx = x - px, dy = y - py;
@@ -300,12 +298,13 @@ void mandelbrotPass1Warmup(
 }
 
 // ---------- Kernel: Pass 2 (Slice + Re-Kompaktierung) -----------------------
+// Otter/Schneefuchs: sliceIt als Parameter (intern), Header unangetastet
 __global__ __launch_bounds__(128, 2)
 void mandelbrotPass2Slice(
     uchar4* __restrict__ out, int* __restrict__ iterOut,
     const Survivor* __restrict__ survIn, int survInCount,
     Survivor* __restrict__ survOut, int* __restrict__ survOutCount,
-    int maxIter)
+    int maxIter, int sliceIt)
 {
     const int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= survInCount) return;
@@ -319,7 +318,7 @@ void mandelbrotPass2Slice(
         return;
     }
 
-    SliceResult r = iterate_finish_slice(s.cr, s.ci, s.it, maxIter, s.x, s.y, FINISH_SLICE_IT);
+    SliceResult r = iterate_finish_slice(s.cr, s.ci, s.it, maxIter, s.x, s.y, sliceIt);
 
     if (r.escaped) {
         float3 col = otter::shade(r.it, maxIter, r.x, r.y, kPalette, kStripeF, kStripeAmp, kGamma);
@@ -536,21 +535,11 @@ namespace {
     }
 
     inline int chooseWarmupIt(int maxIter) {
-        // Otter: einfache, sichere Heuristik basierend auf letzter Survivors-Quote
+        // Otter: einfache Heuristik basierend auf letzter Survivors-Quote
         int warm = WARMUP_IT_BASE;
-        if (g_prevSurvivorsPct >= 90.0) {
-            // sehr viele Innenkandidaten → aggressiver
-            long long target = (long long)WARMUP_IT_BASE * 3LL;
-            warm = (int) (target > maxIter ? maxIter : target);
-        } else if (g_prevSurvivorsPct >= 80.0) {
-            long long target = (long long)WARMUP_IT_BASE * 2LL;
-            warm = (int) (target > maxIter ? maxIter : target);
-        } else if (g_prevSurvivorsPct >= 60.0) {
-            long long target = (long long)WARMUP_IT_BASE * 3LL / 2LL; // x1.5
-            warm = (int) (target > maxIter ? maxIter : target);
-        }
-        // niemals über maxIter
-        if (warm > maxIter) warm = maxIter;
+        if (g_prevSurvivorsPct >= 90.0)      warm = std::min(maxIter, WARMUP_IT_BASE * 3);
+        else if (g_prevSurvivorsPct >= 80.0) warm = std::min(maxIter, WARMUP_IT_BASE * 2);
+        else if (g_prevSurvivorsPct >= 60.0) warm = std::min(maxIter, (WARMUP_IT_BASE * 3) / 2);
         return warm;
     }
 }
@@ -592,13 +581,13 @@ void launch_mandelbrotHybrid(
     // Merken für nächstes Frame
     g_prevSurvivorsPct = survPct;
 
-    // Pass 2: Slices mit Re-Kompaktierung
+    // Pass 2: Slices mit Re-Kompaktierung (adaptives Slice-Sizing)
     if (h_survA > 0) {
-        // L1 bevorzugen (passt gut zu Survivor-Listen)
         cudaFuncSetCacheConfig(mandelbrotPass2Slice, cudaFuncCachePreferL1);
 
         int threads = 128;
         int slice   = 0;
+        int sliceIt = FINISH_SLICE_IT; // Startwert, wird dynamisch geboostet
 
         Survivor* curBuf = g_dSurvivorsA;
         Survivor* nxtBuf = g_dSurvivorsB;
@@ -611,13 +600,24 @@ void launch_mandelbrotHybrid(
             int blocks  = (h_cur + threads - 1) / threads;
 
             mandelbrotPass2Slice<<<blocks, threads>>>(
-                out, d_it, curBuf, h_cur, nxtBuf, nxtCnt, maxIter);
+                out, d_it, curBuf, h_cur, nxtBuf, nxtCnt, maxIter, sliceIt);
 
             int h_next = 0;
             cudaMemcpy(&h_next, nxtCnt, sizeof(int), cudaMemcpyDeviceToHost);
 
             if (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[PERF] slice=%d survivors_in=%d survivors_out=%d", slice, h_cur, h_next);
+                LUCHS_LOG_HOST("[PERF] slice=%d steps=%d survivors_in=%d survivors_out=%d",
+                               slice, sliceIt, h_cur, h_next);
+            }
+
+            // 🦦 Otter: adaptive Slice-Vergrößerung bei geringem Fortschritt
+            const int drop = h_cur - h_next;
+            const double dropPct = (h_cur > 0) ? (double)drop / (double)h_cur : 1.0;
+            if (dropPct < 0.003 && sliceIt < (maxIter / 2)) {
+                sliceIt = min(sliceIt * 2, maxIter / 2);
+                if (Settings::performanceLogging) {
+                    LUCHS_LOG_HOST("[PERF] adapt_slice_it=%d (dropPct=%.4f)", sliceIt, dropPct);
+                }
             }
 
             // Ping-Pong
