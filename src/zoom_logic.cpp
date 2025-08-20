@@ -44,19 +44,22 @@ static constexpr float kSOFTMAX_LOG_EPS = -7.0f;
 static constexpr float kHYST_REL    = 0.12f;
 static constexpr int   kLOCK_FRAMES = 12;
 
-// NEU: Retarget-Throttling – nur alle N Frames neu auswerten (CPU-schonend, ruhiger) (Otter/Schneefuchs)
-static constexpr int   kRetargetInterval = 5;
+// NEU: Retarget-Throttling – dynamisch (CPU-schonend, ruhiger) (Otter/Schneefuchs)
+static constexpr int   kRetargetIntervalMin = 3;
+static constexpr int   kRetargetIntervalMax = 8;
 
 // NEU: Statistik nur alle M Frames (Kopier-/nth_element-Last reduzieren). (Schneefuchs)
 static constexpr int   kStatsEvery = 3;
 
-// ── NEU: Richtungswechsel-Glättung per begrenzter Drehrate (Yaw-Rate-Limiter, 2D). (Otter/Schneefuchs)
-// Idee: Begrenze den maximalen Winkel, um den sich die Bewegungsrichtung pro Frame ändern darf.
-// Dadurch entstehen weiche Kurven anstatt harter "Knicke".
-static constexpr float kTURN_BASE_RAD_MIN = 0.06f; // ~3.4° minimal pro Frame
-static constexpr float kTURN_BASE_RAD_MAX = 0.30f; // ~17° maximal pro Frame
-static constexpr float kTURN_SIG_REF      = 1.00f; // Z-Score-Referenz (stdS) für "volles" Drehen
-static constexpr float kTURN_DIST_REF     = 0.25f; // NDC-Referenzbewegung für "volles" Drehen
+// ── NEU (Otter/Schneefuchs): Zeitstabiler Richtungswechsel-Limiter (Yaw-Rate in rad/s) + Längendämpfung.
+//      • Begrenze maximale Drehrate (rad/s) → in rad/Frame via dt.
+//      • Dämpfe die Translationslänge bei großen Drehwinkeln → keine „seitwärts“-Rucks.
+static constexpr float kTURN_OMEGA_MIN = 2.5f;  // rad/s  (sanfte Grunddrehrate)
+static constexpr float kTURN_OMEGA_MAX = 10.0f; // rad/s  (volle Drehrate bei starkem Signal/Move)
+static constexpr float kTURN_SIG_REF   = 1.00f; // Z-Score-Referenz (stdS) für „volles“ Drehen
+static constexpr float kTURN_DIST_REF  = 0.25f; // NDC-Referenzbewegung für „volles“ Drehen
+static constexpr float kTHETA_DAMP_LO  = 0.35f; // rad (~20°) Beginn der Dämpfung
+static constexpr float kTHETA_DAMP_HI  = 1.20f; // rad (~69°) volle Dämpfung
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
@@ -86,6 +89,10 @@ static inline float mad_inplace_from_center(std::vector<float>& buf, float med) 
 static inline float clampf(float x, float lo, float hi) {
     return x < lo ? lo : (x > hi ? hi : x);
 }
+static inline float smoothstepf(float a, float b, float x) {
+    const float t = clampf((x - a) / (b - a), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
 
 // NEU: 2D-Normalisierung (robust gegen sehr kleine Beträge). (Schneefuchs)
 static inline bool normalize2D(float& x, float& y) {
@@ -97,7 +104,6 @@ static inline bool normalize2D(float& x, float& y) {
 }
 
 // NEU: limitiere Drehung von (dirX,dirY) in Richtung (tx,ty) auf maxAngle (rad). (Otter)
-// Verwendet 2D-"Drehen um ±maxAngle" basierend auf Vorzeichen der Kreuzprodukt-Z-Komponente.
 static inline void rotateTowardsLimited(float& dirX, float& dirY, float tx, float ty, float maxAngle) {
     if (!normalize2D(tx, ty)) return;
     if (!normalize2D(dirX, dirY)) { dirX = tx; dirY = ty; return; }
@@ -173,6 +179,9 @@ static int s_sinceRetarget = 0;
 thread_local bool  g_dirInit = false;
 thread_local float g_prevDirX = 1.0f;
 thread_local float g_prevDirY = 0.0f;
+
+// NEU: Vorherige Signalstärke (für frühes dyn. Retarget-Gating). (Schneefuchs)
+thread_local float g_prevStdS = 0.0f;
 } // namespace
 
 namespace ZoomLogic {
@@ -222,6 +231,14 @@ ZoomResult evaluateZoomTarget(
     using clock = std::chrono::high_resolution_clock;
     const auto t0 = clock::now();
 
+    // Zeitdifferenz dt (sek) für zeitstabile Limits, ohne Header-Änderung. (Schneefuchs)
+    static clock::time_point s_lastCall;
+    static bool s_haveLast = false;
+    double dt = (s_haveLast) ? std::chrono::duration<double>(t0 - s_lastCall).count() : (1.0 / 60.0);
+    s_lastCall = t0;
+    s_haveLast = true;
+    dt = std::max(1.0/240.0, std::min(1.0/15.0, dt)); // clamp gegen Hänger/Spikes
+
     // ── Warm-up-Timer: ab erstem Aufruf läuft die Uhr. ───────────────────────
     static bool warmupInit = false;
     static clock::time_point warmupStart;
@@ -265,14 +282,19 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // Retarget nur alle N Frames (nur bei AlwaysZoom)
+    // Frühzeitiges dyn. Retarget-Throttling (AlwaysZoom) basierend auf vorheriger stdS. (Schneefuchs)
     if (Settings::ForceAlwaysZoom) {
-        if (++s_sinceRetarget < kRetargetInterval) {
+        const float sPrev = clampf(g_prevStdS, 0.0f, 1.0f);
+        int dynIntervalPre = static_cast<int>(std::round(
+            kRetargetIntervalMax - (kRetargetIntervalMax - kRetargetIntervalMin) * sPrev)); // 8..3
+        dynIntervalPre = std::max(kRetargetIntervalMin, std::min(kRetargetIntervalMax, dynIntervalPre));
+
+        if (++s_sinceRetarget < dynIntervalPre) {
             out.shouldZoom = true;           // Zoom läuft, Richtung bleibt
-            out.newOffset   = previousOffset;
+            out.newOffset  = previousOffset;
             if (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ZOOMV3] skip_retarget interval=%d/%d",
-                               s_sinceRetarget, kRetargetInterval);
+                LUCHS_LOG_HOST("[ZOOMV3] skip_retarget %d/%d (dyn-pre sPrev=%.3f)",
+                               s_sinceRetarget, dynIntervalPre, sPrev);
             }
             return out;
         }
@@ -348,15 +370,6 @@ ZoomResult evaluateZoomTarget(
     const double varS  = std::max(0.0, (sumS2 / std::max(1, N)) - meanS * meanS);
     const double stdS  = std::sqrt(varS);
     const bool   hasSignal = (stdS >= kMIN_SIGNAL_Z);
-
-    // Early-Exit bei "kein Signal" (wenn nicht AlwaysZoom)
-    if (!hasSignal && !Settings::ForceAlwaysZoom) {
-        out.shouldZoom = false;
-        if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOMV3] no_signal early-exit stdS=%.3f (thr=%.3f)", (float)stdS, kMIN_SIGNAL_Z);
-        }
-        return out;
-    }
 
     // Softmax-Temperatur adaptiv
     float temp = kTEMP_BASE;
@@ -443,6 +456,9 @@ ZoomResult evaluateZoomTarget(
         out.bestContrast = (bestIdx >= 0) ? contrast[bestIdx] : 0.0f;
     }
 
+    // Update prevStdS (EMA) nach aktueller Messung für frühes Gating im nächsten Frame.
+    g_prevStdS = 0.85f * g_prevStdS + 0.15f * static_cast<float>(stdS);
+
     double ndcX = 0.0, ndcY = 0.0;
     if (sumW > 0.0) {
         const double inv = 1.0 / sumW;
@@ -492,12 +508,14 @@ ZoomResult evaluateZoomTarget(
     float mvy = proposedOffset_raw.y - previousOffset.y;
     const float rawDist = std::sqrt(mvx*mvx + mvy*mvy);
 
-    // ── NEU: Richtungswechsel "smoother" via Turn-Limiter vor der EMA. (Otter/Schneefuchs)
-    // Drehwinkel-Limit adaptiv in Abhängigkeit von Signalstärke (stdS) und Bewegungsgröße.
+    // ── NEU: Richtungswechsel "smoother" via zeitstabilem Turn-Limiter + Längendämpfung. (Otter/Schneefuchs)
+    // Drehrate adaptiv in Abhängigkeit von Signalstärke (stdS) und Bewegungsgröße.
     float sigFactor  = clampf((float)stdS / kTURN_SIG_REF, 0.0f, 1.0f);
     float distFactor = clampf(rawDist / kTURN_DIST_REF,     0.0f, 1.0f);
-    float turnMaxRad = kTURN_BASE_RAD_MIN +
-                       (kTURN_BASE_RAD_MAX - kTURN_BASE_RAD_MIN) * std::max(sigFactor, distFactor);
+    const float omegaMin = kTURN_OMEGA_MIN;
+    const float omegaMax = kTURN_OMEGA_MAX;
+    const float omega    = omegaMin + (omegaMax - omegaMin) * std::max(sigFactor, distFactor);
+    float turnMaxRad     = omega * static_cast<float>(dt); // rad pro Frame
 
     if (!g_dirInit) {
         // Erste Initialisierung: Richtung aus aktuellem Move ableiten.
@@ -513,18 +531,24 @@ ZoomResult evaluateZoomTarget(
     // Bei sehr kleinem Bewegungsvektor vermeiden wir Sprünge; halten Richtung.
     if (hasMove) {
         float dirX = g_prevDirX, dirY = g_prevDirY;
+
+        // Zielwinkel vor der Rotation (für Längendämpfung)
+        const float preDot = clampf(dirX*tgtDirX + dirY*tgtDirY, -1.0f, 1.0f);
+        const float preAng = std::acos(preDot);
+
         rotateTowardsLimited(dirX, dirY, tgtDirX, tgtDirY, turnMaxRad);
-        // Länge unverändert lassen, nur Richtung glätten.
-        mvx = dirX * rawDist;
-        mvy = dirY * rawDist;
+
+        // Länge dämpfen je nach Drehwinkel (S-Kurve) — nimmt die Härte aus Abbiegungen.
+        const float lenScale = 1.0f - smoothstepf(kTHETA_DAMP_LO, kTHETA_DAMP_HI, preAng);
+
+        mvx = dirX * (rawDist * lenScale);
+        mvy = dirY * (rawDist * lenScale);
+
         g_prevDirX = dirX; g_prevDirY = dirY;
 
         if (Settings::debugLogging) {
-            // Debug: Winkel zwischen alt und Ziel (nur informativ)
-            const float dot = clampf(g_prevDirX*tgtDirX + g_prevDirY*tgtDirY, -1.0f, 1.0f);
-            const float ang = std::acos(dot);
-            LUCHS_LOG_HOST("[ZOOMV3] turn_limit: ang=%.3f rad max=%.3f rad | dir=(%.3f,%.3f) tgt=(%.3f,%.3f)",
-                           ang, turnMaxRad, g_prevDirX, g_prevDirY, tgtDirX, tgtDirY);
+            LUCHS_LOG_HOST("[ZOOMV3] turn(dt=%.3f) preAng=%.3f rad max=%.3f rad lenScale=%.3f dir=(%.3f,%.3f) tgt=(%.3f,%.3f)",
+                           dt, preAng, turnMaxRad, lenScale, g_prevDirX, g_prevDirY, tgtDirX, tgtDirY);
         }
     }
 
