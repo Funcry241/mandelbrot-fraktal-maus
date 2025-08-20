@@ -1,7 +1,7 @@
-///// MAUS: Fast P1 periodicity + adaptive slice sizing (Otter/Schneefuchs) — ASCII logs only
+///// MAUS: Fast P1 periodicity + adaptive slice sizing + frame-budget pacing (Otter/Schneefuchs) — ASCII logs only
 // core_kernel.cu — 2-Pass Mandelbrot (Warmup + Sliced Survivor Finish)
 // 🐭 Maus: Kern schlank; deterministische ASCII-Logs.
-// 🦦 Otter: Smooth Coloring, adaptive Warmup & Slice-Größe.
+// 🦦 Otter: Smooth Coloring, adaptive Warmup & Slice-Größe, zeitstabile Pacing-Logik.
 // 🦊 Schneefuchs: Warp-synchron, CHUNKed, Periodizitätsprobe in Pass 1/2, reduzierte Divergenz.
 
 #include <cuda_runtime.h>
@@ -51,6 +51,20 @@ namespace {
     #else
         constexpr float      kGamma     = 2.2f;   // lineare RGBA8-Pipeline
     #endif
+
+    // Frame-Budget-Pacing (Host-seitig)
+    constexpr double FRAME_BUDGET_FALLBACK_MS = 16.6667;            // falls kein Cap aktiv
+    constexpr double KERNEL_BUDGET_FRACTION   = 0.62;               // Anteil für Mandelbrot-Pfad
+    constexpr double MIN_BUDGET_MS            = 6.0;                // harte Untergrenze
+
+    // Slice-Adaption (EMA über Drop-Quote)
+    constexpr float DROP_EMA_ALPHA            = 0.25f;              // Reaktion auf Änderungen
+    constexpr float DROP_UPPER_BACKOFF        = 0.30f;              // >30%: Slice halbieren
+    constexpr float DROP_LOWER_ACCEL          = 0.005f;             // <0.5%: Slice verdoppeln
+
+    // "Deep close" Innen-Detektion (zusätzlich zur normalen Periodizitätsprobe)
+    constexpr float DEEP_EPS2                 = 1e-10f;             // sehr nahe Wiederkehr
+    constexpr int   DEEP_REQ_HITS             = 3;                  // mehrere Treffer nötig
 }
 
 // ---------- Adaptive Warmup (device constant) --------------------------------
@@ -149,7 +163,7 @@ __device__ __forceinline__ SliceResult iterate_finish_slice(
 
     int it = start_it;
     float px = x, py = y;
-    int   pc = 0, close_hits = 0;
+    int   pc = 0, close_hits = 0, deep_hits = 0;
 
     unsigned mask = 0xFFFFFFFFu;
 #if (__CUDA_ARCH__ >= 700)
@@ -175,11 +189,15 @@ __device__ __forceinline__ SliceResult iterate_finish_slice(
                 float dx = x - px, dy = y - py;
                 float d2 = dx*dx + dy*dy;
                 if (d2 < LOOP_EPS2) {
-                    if (++close_hits >= LOOP_REQ_HITS) {
-                        active = false; interior = true; it = maxIter;
-                    }
+                    if (++close_hits >= LOOP_REQ_HITS) { active = false; interior = true; it = maxIter; }
                 } else {
                     close_hits = 0;
+                }
+                // Deep-close Pfad: sehr nahe Rückkehr mehrfach → Innenleben
+                if (d2 < DEEP_EPS2 && (x2 + y2) < 4.0f) {
+                    if (++deep_hits >= DEEP_REQ_HITS) { active = false; interior = true; it = maxIter; }
+                } else {
+                    deep_hits = 0;
                 }
                 px = x; py = y; pc = 0;
             }
@@ -453,30 +471,31 @@ void computeCudaEntropyContrast(
     using clk = std::chrono::high_resolution_clock;
     const bool doLog = (Settings::performanceLogging || Settings::debugLogging);
 
-    std::chrono::time_point<clk> start, mid, end;
     int tilesX = (w + tile - 1) / tile;
     int tilesY = (h + tile - 1) / tile;
 
     cudaMemset(d_e, 0, tilesX * tilesY * sizeof(float));
 
-    if (doLog) start = clk::now();
+    // Event-basiertes Timing ohne unnötige Device-weite Syncs
+    cudaEvent_t evStart, evMid, evEnd; cudaEventCreate(&evStart); cudaEventCreate(&evMid); cudaEventCreate(&evEnd);
+
+    if (doLog) cudaEventRecord(evStart, 0);
     entropyKernel<<<dim3(tilesX, tilesY), 128>>>(d_it, d_e, w, h, tile, maxIter);
-    if (doLog) { cudaDeviceSynchronize(); mid = clk::now(); }
+    if (doLog) cudaEventRecord(evMid, 0);
 
     contrastKernel<<<dim3((tilesX + 15) / 16, (tilesY + 15) / 16), dim3(16,16)>>>(d_e, d_c, tilesX, tilesY);
     if (doLog) {
-        cudaDeviceSynchronize();
-        end = clk::now();
-
-        double entropyMs  = std::chrono::duration<double, std::milli>(mid - start).count();
-        double contrastMs = std::chrono::duration<double, std::milli>(end - mid).count();
-
+        cudaEventRecord(evEnd, 0);
+        cudaEventSynchronize(evEnd); // nur auf End-Event warten
+        float entropyMs=0.f, contrastMs=0.f; cudaEventElapsedTime(&entropyMs, evStart, evMid); cudaEventElapsedTime(&contrastMs, evMid, evEnd);
         if (Settings::performanceLogging) {
             LUCHS_LOG_HOST("[PERF] entropy=%.3f ms contrast=%.3f ms", entropyMs, contrastMs);
         } else if (Settings::debugLogging) {
             LUCHS_LOG_HOST("[TIME] Entropy %.3f ms | Contrast %.3f ms", entropyMs, contrastMs);
         }
     }
+
+    cudaEventDestroy(evStart); cudaEventDestroy(evMid); cudaEventDestroy(evEnd);
 }
 
 // ---------- Host: Mandelbrot 2-Pass Wrapper (Sliced Finish) -----------------
@@ -507,7 +526,16 @@ namespace {
         if (g_prevSurvivorsPct >= 90.0)      warm = std::min(maxIter, WARMUP_IT_BASE * 3);
         else if (g_prevSurvivorsPct >= 80.0) warm = std::min(maxIter, WARMUP_IT_BASE * 2);
         else if (g_prevSurvivorsPct >= 60.0) warm = std::min(maxIter, (WARMUP_IT_BASE * 3) / 2);
+        // Schneefuchs: Kappe an maxIter/3, um Warmup-Spitzen zu vermeiden
+        warm = std::min(warm, std::max(64, maxIter / 3));
         return warm;
+    }
+
+    inline double frameBudgetMsFromSettings() {
+        if (Settings::capFramerate && Settings::capTargetFps > 0) {
+            return std::max(MIN_BUDGET_MS, 1000.0 / double(Settings::capTargetFps));
+        }
+        return std::max(MIN_BUDGET_MS, FRAME_BUDGET_FALLBACK_MS);
     }
 }
 
@@ -516,7 +544,6 @@ void launch_mandelbrotHybrid(
     int w, int h, float zoom, float2 offset,
     int maxIter, int /*tile*/)
 {
-    using clk = std::chrono::high_resolution_clock;
     const bool doLog = (Settings::performanceLogging || Settings::debugLogging);
 
     dim3 block(32, 8); // 256 Threads
@@ -526,15 +553,26 @@ void launch_mandelbrotHybrid(
 
     const int warmupIt = chooseWarmupIt(maxIter);
     cudaMemcpyToSymbol(d_warmup_it, &warmupIt, sizeof(int), 0, cudaMemcpyHostToDevice);
+
     if (Settings::performanceLogging) {
         LUCHS_LOG_HOST("[PERF] warmup_it=%d prev_survivors=%.2f%%", warmupIt, g_prevSurvivorsPct);
     }
 
-    std::chrono::time_point<clk> t0, t1;
-    if (doLog) t0 = clk::now();
+    // Cache-Config bevorzugt L1
+    cudaFuncSetCacheConfig(mandelbrotPass1Warmup, cudaFuncCachePreferL1);
+    cudaFuncSetCacheConfig(mandelbrotPass2Slice, cudaFuncCachePreferL1);
 
+    // Event-Timing & Budget
+    cudaEvent_t evtStart, evtAfterP1, evtSliceEnd; cudaEventCreate(&evtStart); cudaEventCreate(&evtAfterP1); cudaEventCreate(&evtSliceEnd);
+    const double frameBudgetMs  = frameBudgetMsFromSettings();
+    const double kernelBudgetMs = frameBudgetMs * KERNEL_BUDGET_FRACTION;
+
+    if (doLog) cudaEventRecord(evtStart, 0);
+
+    // Pass 1
     cudaMemset(g_dSurvCountA, 0, sizeof(int));
     mandelbrotPass1Warmup<<<grid, block>>>(out, d_it, g_dSurvivorsA, g_dSurvCountA, w, h, zoom, offset, maxIter);
+    if (doLog) cudaEventRecord(evtAfterP1, 0);
 
     int h_survA = 0;
     cudaMemcpy(&h_survA, g_dSurvCountA, sizeof(int), cudaMemcpyDeviceToHost);
@@ -544,58 +582,108 @@ void launch_mandelbrotHybrid(
     }
     g_prevSurvivorsPct = survPct;
 
-    if (h_survA > 0) {
-        cudaFuncSetCacheConfig(mandelbrotPass2Slice, cudaFuncCachePreferL1);
-
-        int threads = 128;
-        int slice   = 0;
-        int sliceIt = FINISH_SLICE_IT;
-
-        Survivor* curBuf = g_dSurvivorsA;
-        Survivor* nxtBuf = g_dSurvivorsB;
-        int*      curCnt = g_dSurvCountA;
-        int*      nxtCnt = g_dSurvCountB;
-        int       h_cur  = h_survA;
-
-        while (h_cur > 0 && slice < MAX_SLICES) {
-            cudaMemset(nxtCnt, 0, sizeof(int));
-            int blocks  = (h_cur + threads - 1) / threads;
-
-            mandelbrotPass2Slice<<<blocks, threads>>>(
-                out, d_it, curBuf, h_cur, nxtBuf, nxtCnt, maxIter, sliceIt);
-
-            int h_next = 0;
-            cudaMemcpy(&h_next, nxtCnt, sizeof(int), cudaMemcpyDeviceToHost);
-
-            if (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[PERF] slice=%d steps=%d survivors_in=%d survivors_out=%d",
-                               slice, sliceIt, h_cur, h_next);
-            }
-
-            const int drop = h_cur - h_next;
-            const double dropPct = (h_cur > 0) ? (double)drop / (double)h_cur : 1.0;
-            if (dropPct < 0.003 && sliceIt < (maxIter / 2)) {
-                sliceIt = std::min(sliceIt * 2, maxIter / 2);
-                if (Settings::performanceLogging) {
-                    LUCHS_LOG_HOST("[PERF] adapt_slice_it=%d (dropPct=%.4f)", sliceIt, dropPct);
-                }
-            }
-
-            std::swap(curBuf, nxtBuf);
-            std::swap(curCnt, nxtCnt);
-            h_cur = h_next;
-            ++slice;
+    // P1-Zeit prüfen
+    float p1Ms = 0.f; if (doLog) cudaEventElapsedTime(&p1Ms, evtStart, evtAfterP1);
+    if (h_survA <= 0) {
+        if (doLog) {
+            float totalMs=0.f; cudaEventElapsedTime(&totalMs, evtStart, evtAfterP1);
+            if (Settings::performanceLogging) LUCHS_LOG_HOST("[PERF] mandelbrot (hybrid-sliced): total=%.3f ms", totalMs);
+            else if (Settings::debugLogging)   LUCHS_LOG_HOST("[TIME] Mandelbrot Sliced | Total %.3f ms", totalMs);
         }
+        cudaEventDestroy(evtStart); cudaEventDestroy(evtAfterP1); cudaEventDestroy(evtSliceEnd);
+        return;
     }
 
+    if (doLog && p1Ms > kernelBudgetMs) {
+        LUCHS_LOG_HOST("[PERF] budget_hit after P1: p1=%.3f ms budget=%.3f ms → defer P2", p1Ms, kernelBudgetMs);
+    }
+
+    // Pass 2 (sliced) — mit Budgetsteuerung
+    int threads = 128;
+    int slice   = 0;
+    int sliceIt = FINISH_SLICE_IT;
+
+    Survivor* curBuf = g_dSurvivorsA;
+    Survivor* nxtBuf = g_dSurvivorsB;
+    int*      curCnt = g_dSurvCountA;
+    int*      nxtCnt = g_dSurvCountB;
+    int       h_cur  = h_survA;
+
+    float emaDrop = 0.2f; // Startwert moderat
+
+    while (h_cur > 0 && slice < MAX_SLICES) {
+        // Budget-Check vor Slice (falls P1 schon sehr teuer war)
+        if (doLog) {
+            float elapsedMs = 0.f; cudaEventElapsedTime(&elapsedMs, evtStart, evtAfterP1);
+            if (elapsedMs >= kernelBudgetMs) {
+                LUCHS_LOG_HOST("[PERF] budget_exhausted before slice %d: elapsed=%.3f ms budget=%.3f ms", slice, elapsedMs, kernelBudgetMs);
+                break;
+            }
+        }
+
+        cudaMemset(nxtCnt, 0, sizeof(int));
+        int blocks  = (h_cur + threads - 1) / threads;
+
+        mandelbrotPass2Slice<<<blocks, threads>>>(
+            out, d_it, curBuf, h_cur, nxtBuf, nxtCnt, maxIter, sliceIt);
+
+        if (doLog) cudaEventRecord(evtSliceEnd, 0);
+
+        // Counter lesen (implizit wartet auf den Slice-Kernel in dieser Stream-Sequenz)
+        int h_next = 0;
+        cudaMemcpy(&h_next, nxtCnt, sizeof(int), cudaMemcpyDeviceToHost);
+
+        // Timing & Budget prüfen
+        if (doLog) {
+            float elapsedMs = 0.f; cudaEventElapsedTime(&elapsedMs, evtStart, evtSliceEnd);
+            LUCHS_LOG_HOST("[PERF] slice=%d steps=%d survivors_in=%d survivors_out=%d elapsed=%.3f ms (budget=%.3f)",
+                           slice, sliceIt, h_cur, h_next, elapsedMs, kernelBudgetMs);
+            if (elapsedMs >= kernelBudgetMs) {
+                LUCHS_LOG_HOST("[PERF] budget_stop at slice %d", slice);
+                // Wir hören nach diesem Slice auf; Rest im nächsten Frame.
+                std::swap(curBuf, nxtBuf); std::swap(curCnt, nxtCnt); h_cur = h_next; ++slice;
+                break;
+            }
+        }
+
+        const int drop = h_cur - h_next;
+        const float dropPct = (h_cur > 0) ? float(drop) / float(h_cur) : 1.0f;
+        emaDrop = (1.0f - DROP_EMA_ALPHA) * emaDrop + DROP_EMA_ALPHA * dropPct;
+
+        // Slice-Länge adaptiv anpassen (Hysterese)
+        if (emaDrop < DROP_LOWER_ACCEL && sliceIt < (maxIter / 2)) {
+            sliceIt = std::min(sliceIt * 2, maxIter / 2);
+            if (Settings::performanceLogging) {
+                LUCHS_LOG_HOST("[PERF] adapt_slice_it=%d (emaDrop=%.4f)", sliceIt, emaDrop);
+            }
+        } else if (emaDrop > DROP_UPPER_BACKOFF && sliceIt > FINISH_SLICE_IT) {
+            sliceIt = std::max(sliceIt / 2, FINISH_SLICE_IT);
+            if (Settings::performanceLogging) {
+                LUCHS_LOG_HOST("[PERF] backoff_slice_it=%d (emaDrop=%.4f)", sliceIt, emaDrop);
+            }
+        }
+
+        std::swap(curBuf, nxtBuf);
+        std::swap(curCnt, nxtCnt);
+        h_cur = h_next;
+        ++slice;
+    }
+
+    // Abschluss-Log (Gesamtzeit bis zum letzten Event)
     if (doLog) {
-        cudaDeviceSynchronize();
-        t1 = clk::now();
-        double totalMs  = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        float totalMs = 0.f;
+        // Wenn keine Slices liefen, ist evtSliceEnd evtl. nicht gesetzt → fallback auf evtAfterP1
+        if (slice == 0) {
+            cudaEventElapsedTime(&totalMs, evtStart, evtAfterP1);
+        } else {
+            cudaEventElapsedTime(&totalMs, evtStart, evtSliceEnd);
+        }
         if (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[PERF] mandelbrot (hybrid-sliced): total=%.3f ms", totalMs);
+            LUCHS_LOG_HOST("[PERF] mandelbrot (hybrid-sliced): total=%.3f ms (budget=%.3f ms)", totalMs, kernelBudgetMs);
         } else if (Settings::debugLogging) {
             LUCHS_LOG_HOST("[TIME] Mandelbrot Sliced | Total %.3f ms", totalMs);
         }
     }
+
+    cudaEventDestroy(evtStart); cudaEventDestroy(evtAfterP1); cudaEventDestroy(evtSliceEnd);
 }
