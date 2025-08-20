@@ -1,11 +1,9 @@
+///// src/zoom_logic.cpp
 // LUCHS1
 // Perf V3 hot path – no header/API change (ASCII logs only)
 // Otter: Warm-up ohne Richtungswechsel: erst zoomen, dann lenken. (Bezug zu Otter)
-// Schneefuchs: Δt-stabile Drehrate (rad/s), dynamisches Retargeting, ASCII-Logs. (Bezug zu Schneefuchs)
-// Änderungen jetzt: 
-//  - Default-Δt an Settings::capTargetFps gekoppelt (kein harter 1/60) — (Schneefuchs/Otter)
-//  - s_lockLeft/s_sinceRetarget sind thread_local statt static — (Schneefuchs)
-//  - kTHETA_DAMP_HI auf 1.00 rad gesenkt für weniger „Stoppen“ in engen Kurven — (Otter)
+// Schneefuchs: Minimalinvasiv, keine Header-/API-Änderung. ASCII-Logs. (Bezug zu Schneefuchs)
+// Neu (Otter/Schneefuchs): Zeitstabile Dreh- und Translations-Limits + Ramp-In gegen Startsprüngen.
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -63,7 +61,12 @@ static constexpr float kTURN_OMEGA_MAX = 10.0f; // rad/s  (volle Drehrate bei st
 static constexpr float kTURN_SIG_REF   = 1.00f; // Z-Score-Referenz (stdS) für „volles“ Drehen
 static constexpr float kTURN_DIST_REF  = 0.25f; // NDC-Referenzbewegung für „volles“ Drehen
 static constexpr float kTHETA_DAMP_LO  = 0.35f; // rad (~20°) Beginn der Dämpfung
-static constexpr float kTHETA_DAMP_HI  = 1.00f; // rad (~57°) volle Dämpfung (vorher 1.20f)
+static constexpr float kTHETA_DAMP_HI  = 1.20f; // rad (~69°) volle Dämpfung
+
+// ── NEU (Otter/Schneefuchs): Zeitstabile Übersetzungs-Limits (NDC/s) + Ramp-In.
+static constexpr float kVEL_MAX_NDC_BASE  = 0.80f; // Grundgeschwindigkeit (NDC pro Sekunde)
+static constexpr float kVEL_MAX_NDC_BOOST = 1.20f; // Zusatz bei starkem Signal/Move (NDC/s)
+static constexpr double kVEL_RAMP_SEC     = 0.75;  // weiche Aufblendzeit nach Warm-up (Sekunden)
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
@@ -175,12 +178,12 @@ thread_local int   g_statsN    = -1;
 thread_local float g_eMed = 0.0f, g_eMad = 1.0f;
 thread_local float g_cMed = 0.0f, g_cMad = 1.0f;
 
-// Hysterese/Lock & Retarget – jetzt thread_local (reentrancy-safe). (Schneefuchs)
-thread_local int s_lockLeft      = 0;
-thread_local int s_sinceRetarget = 0;
+// Hysterese/Lock & Retarget – funktion-lokaler Zustand (kein Header-Touch)
+static int s_lockLeft = 0;
+static int s_sinceRetarget = 0;
 
 // NEU: Vorherige Bewegungsrichtung für Turn-Limiter (persistiert pro Thread). (Otter/Schneefuchs)
-thread_local bool  g_dirInit  = false;
+thread_local bool  g_dirInit = false;
 thread_local float g_prevDirX = 1.0f;
 thread_local float g_prevDirY = 0.0f;
 
@@ -238,10 +241,7 @@ ZoomResult evaluateZoomTarget(
     // Zeitdifferenz dt (sek) für zeitstabile Limits, ohne Header-Änderung. (Schneefuchs)
     static clock::time_point s_lastCall;
     static bool s_haveLast = false;
-    const double defaultDt = (Settings::capFramerate && Settings::capTargetFps > 0)
-        ? (1.0 / static_cast<double>(Settings::capTargetFps))
-        : (1.0 / 60.0);
-    double dt = (s_haveLast) ? std::chrono::duration<double>(t0 - s_lastCall).count() : defaultDt;
+    double dt = (s_haveLast) ? std::chrono::duration<double>(t0 - s_lastCall).count() : (1.0 / 60.0);
     s_lastCall = t0;
     s_haveLast = true;
     dt = std::max(1.0/240.0, std::min(1.0/15.0, dt)); // clamp gegen Hänger/Spikes
@@ -378,15 +378,6 @@ ZoomResult evaluateZoomTarget(
     const double stdS  = std::sqrt(varS);
     const bool   hasSignal = (stdS >= kMIN_SIGNAL_Z);
 
-    // Early-Exit bei "kein Signal" (wenn nicht AlwaysZoom)
-    if (!hasSignal && !Settings::ForceAlwaysZoom) {
-        out.shouldZoom = false;
-        if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOMV3] no_signal early-exit stdS=%.3f (thr=%.3f)", (float)stdS, kMIN_SIGNAL_Z);
-        }
-        return out;
-    }
-
     // Softmax-Temperatur adaptiv
     float temp = kTEMP_BASE;
     if (stdS > 1e-6) temp = static_cast<float>(kTEMP_BASE / (0.5f + (float)stdS));
@@ -522,16 +513,22 @@ ZoomResult evaluateZoomTarget(
     );
     float mvx = proposedOffset_raw.x - previousOffset.x;
     float mvy = proposedOffset_raw.y - previousOffset.y;
-    const float rawDist = std::sqrt(mvx*mvx + mvy*mvy);
+    float rawDist = std::sqrt(mvx*mvx + mvy*mvy);
 
     // ── NEU: Richtungswechsel "smoother" via zeitstabilem Turn-Limiter + Längendämpfung. (Otter/Schneefuchs)
     // Drehrate adaptiv in Abhängigkeit von Signalstärke (stdS) und Bewegungsgröße.
     float sigFactor  = clampf((float)stdS / kTURN_SIG_REF, 0.0f, 1.0f);
     float distFactor = clampf(rawDist / kTURN_DIST_REF,     0.0f, 1.0f);
+
+    // Ramp-In nach Warm-up: skaliert erlaubte Drehrate & Geschwindigkeit weich an. (Otter)
+    const double tSinceWarm = std::max(0.0, warmupSec - kNO_TURN_WARMUP_SEC);
+    const float ramp = smoothstepf(0.0f, (float)kVEL_RAMP_SEC, (float)tSinceWarm);
+
     const float omegaMin = kTURN_OMEGA_MIN;
     const float omegaMax = kTURN_OMEGA_MAX;
     const float omega    = omegaMin + (omegaMax - omegaMin) * std::max(sigFactor, distFactor);
     float turnMaxRad     = omega * static_cast<float>(dt); // rad pro Frame
+    turnMaxRad *= ramp; // Ramp-In: kleine Kurven am Anfang statt harten Knicken
 
     if (!g_dirInit) {
         // Erste Initialisierung: Richtung aus aktuellem Move ableiten.
@@ -565,6 +562,25 @@ ZoomResult evaluateZoomTarget(
         if (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ZOOMV3] turn(dt=%.3f) preAng=%.3f rad max=%.3f rad lenScale=%.3f dir=(%.3f,%.3f) tgt=(%.3f,%.3f)",
                            dt, preAng, turnMaxRad, lenScale, g_prevDirX, g_prevDirY, tgtDirX, tgtDirY);
+        }
+    }
+
+    // ── NEU: Zeitstabiles Übersetzungs-Limit in NDC pro Frame (Otter/Schneefuchs)
+    // idea: clamp |delta_offset| * zoom (≈NDC-Schritt) auf vMaxNdc * dt.
+    rawDist = std::sqrt(mvx*mvx + mvy*mvy);
+    const float safeZoom = std::max(1e-6f, zoom);
+    float ndcStep = rawDist * safeZoom;
+
+    float vMaxNdc = kVEL_MAX_NDC_BASE + kVEL_MAX_NDC_BOOST * std::max(sigFactor, distFactor);
+    vMaxNdc *= ramp; // Ramp-In der Geschwindigkeit
+
+    const float maxStepNdc = vMaxNdc * static_cast<float>(dt);
+    if (ndcStep > maxStepNdc && maxStepNdc > 0.0f) {
+        const float scale = maxStepNdc / ndcStep;
+        mvx *= scale; mvy *= scale;
+        ndcStep = maxStepNdc;
+        if (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOMV3] vel_cap: ndcStep=%.4f max=%.4f scale=%.3f ramp=%.3f", ndcStep, maxStepNdc, scale, ramp);
         }
     }
 
@@ -620,10 +636,8 @@ ZoomResult evaluateZoomTarget(
             (float)stdS, temp, hasSignal ? 1 : 0
         );
         LUCHS_LOG_HOST(
-            "[ZOOMV3] move: dist=%.4f emaAlpha=%.3f ndc=(%.4f,%.4f) propOff=(%.5f,%.5f) newOff=(%.5f,%.5f) tiles=(%d,%d) ms=%.3f",
+            "[ZOOMV3] move: dist=%.4f emaAlpha=%.3f ndc=(%.4f,%.4f) tiles=(%d,%d) ms=%.3f",
             dist, emaAlpha, (float)ndcX, (float)ndcY,
-            proposedOffset.x, proposedOffset.y,
-            out.newOffset.x, out.newOffset.y,
             tilesX, tilesY, ms
         );
         if (interiorSkipped > 0) {
