@@ -1,7 +1,11 @@
 // LUCHS1
 // Perf V3 hot path – no header/API change (ASCII logs only)
 // Otter: Warm-up ohne Richtungswechsel: erst zoomen, dann lenken. (Bezug zu Otter)
-// Schneefuchs: Minimalinvasiv, keine Header-/API-Änderung. ASCII-Logs. (Bezug zu Schneefuchs)
+// Schneefuchs: Δt-stabile Drehrate (rad/s), dynamisches Retargeting, ASCII-Logs. (Bezug zu Schneefuchs)
+// Änderungen jetzt: 
+//  - Default-Δt an Settings::capTargetFps gekoppelt (kein harter 1/60) — (Schneefuchs/Otter)
+//  - s_lockLeft/s_sinceRetarget sind thread_local statt static — (Schneefuchs)
+//  - kTHETA_DAMP_HI auf 1.00 rad gesenkt für weniger „Stoppen“ in engen Kurven — (Otter)
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -59,7 +63,7 @@ static constexpr float kTURN_OMEGA_MAX = 10.0f; // rad/s  (volle Drehrate bei st
 static constexpr float kTURN_SIG_REF   = 1.00f; // Z-Score-Referenz (stdS) für „volles“ Drehen
 static constexpr float kTURN_DIST_REF  = 0.25f; // NDC-Referenzbewegung für „volles“ Drehen
 static constexpr float kTHETA_DAMP_LO  = 0.35f; // rad (~20°) Beginn der Dämpfung
-static constexpr float kTHETA_DAMP_HI  = 1.20f; // rad (~69°) volle Dämpfung
+static constexpr float kTHETA_DAMP_HI  = 1.00f; // rad (~57°) volle Dämpfung (vorher 1.20f)
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
@@ -171,12 +175,12 @@ thread_local int   g_statsN    = -1;
 thread_local float g_eMed = 0.0f, g_eMad = 1.0f;
 thread_local float g_cMed = 0.0f, g_cMad = 1.0f;
 
-// Hysterese/Lock & Retarget – funktion-lokaler Zustand (kein Header-Touch)
-static int s_lockLeft = 0;
-static int s_sinceRetarget = 0;
+// Hysterese/Lock & Retarget – jetzt thread_local (reentrancy-safe). (Schneefuchs)
+thread_local int s_lockLeft      = 0;
+thread_local int s_sinceRetarget = 0;
 
 // NEU: Vorherige Bewegungsrichtung für Turn-Limiter (persistiert pro Thread). (Otter/Schneefuchs)
-thread_local bool  g_dirInit = false;
+thread_local bool  g_dirInit  = false;
 thread_local float g_prevDirX = 1.0f;
 thread_local float g_prevDirY = 0.0f;
 
@@ -234,7 +238,10 @@ ZoomResult evaluateZoomTarget(
     // Zeitdifferenz dt (sek) für zeitstabile Limits, ohne Header-Änderung. (Schneefuchs)
     static clock::time_point s_lastCall;
     static bool s_haveLast = false;
-    double dt = (s_haveLast) ? std::chrono::duration<double>(t0 - s_lastCall).count() : (1.0 / 60.0);
+    const double defaultDt = (Settings::capFramerate && Settings::capTargetFps > 0)
+        ? (1.0 / static_cast<double>(Settings::capTargetFps))
+        : (1.0 / 60.0);
+    double dt = (s_haveLast) ? std::chrono::duration<double>(t0 - s_lastCall).count() : defaultDt;
     s_lastCall = t0;
     s_haveLast = true;
     dt = std::max(1.0/240.0, std::min(1.0/15.0, dt)); // clamp gegen Hänger/Spikes
@@ -370,6 +377,15 @@ ZoomResult evaluateZoomTarget(
     const double varS  = std::max(0.0, (sumS2 / std::max(1, N)) - meanS * meanS);
     const double stdS  = std::sqrt(varS);
     const bool   hasSignal = (stdS >= kMIN_SIGNAL_Z);
+
+    // Early-Exit bei "kein Signal" (wenn nicht AlwaysZoom)
+    if (!hasSignal && !Settings::ForceAlwaysZoom) {
+        out.shouldZoom = false;
+        if (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOMV3] no_signal early-exit stdS=%.3f (thr=%.3f)", (float)stdS, kMIN_SIGNAL_Z);
+        }
+        return out;
+    }
 
     // Softmax-Temperatur adaptiv
     float temp = kTEMP_BASE;
