@@ -1,11 +1,12 @@
+///// src/zoom_logic.cpp
 // LUCHS1
 // Perf V3 hot path – no header/API change (ASCII logs only)
 // Otter: Warm-up ohne Richtungswechsel: erst zoomen, dann lenken. (Bezug zu Otter)
-// Schneefuchs: Δt-stabile Drehrate (rad/s), dynamisches Retargeting, ASCII-Logs. (Bezug zu Schneefuchs)
-// Änderungen jetzt: 
-//  - Default-Δt an Settings::capTargetFps gekoppelt (kein harter 1/60) — (Schneefuchs/Otter)
-//  - s_lockLeft/s_sinceRetarget sind thread_local statt static — (Schneefuchs)
-//  - kTHETA_DAMP_HI auf 1.00 rad gesenkt für weniger „Stoppen“ in engen Kurven — (Otter)
+// Schneefuchs: Minimalinvasiv, keine Header-/API-Änderung. ASCII-Logs. (Bezug zu Schneefuchs)
+// NEU: Anti-Black-Guard — vermeidet „Zoom ins Schwarze“ (Cardioid/Bulb) in Warm-up & bei schwachem Signal.
+//      • Warm-up-Drift: leichter, zielgerichteter Schub aus Innenbereichen heraus (dt-sicher)
+//      • Void-Bias: kleiner Auslenkungsanteil weg von der Cardioid-Mitte, falls Center innen ist
+//      • Zeitstabil: Yaw-Rate-Limiter in rad/s (dt -> rad/Frame), plus Längendämpfung bei großen Drehwinkeln
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -63,7 +64,11 @@ static constexpr float kTURN_OMEGA_MAX = 10.0f; // rad/s  (volle Drehrate bei st
 static constexpr float kTURN_SIG_REF   = 1.00f; // Z-Score-Referenz (stdS) für „volles“ Drehen
 static constexpr float kTURN_DIST_REF  = 0.25f; // NDC-Referenzbewegung für „volles“ Drehen
 static constexpr float kTHETA_DAMP_LO  = 0.35f; // rad (~20°) Beginn der Dämpfung
-static constexpr float kTHETA_DAMP_HI  = 1.00f; // rad (~57°) volle Dämpfung (vorher 1.20f)
+static constexpr float kTHETA_DAMP_HI  = 1.20f; // rad (~69°) volle Dämpfung
+
+// ── NEU: Anti-Black-Guard (Warm-up/Niedrigsignal) ----------------------------------------------
+static constexpr float kWARMUP_DRIFT_NDC = 0.10f; // NDC-Schritt im Warm-up, weg von Innenbereichen
+static constexpr float kVOID_BIAS_NDC    = 0.06f; // NDC-Anteil, der vom Cardioid-Zentrum wegdrückt
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
@@ -134,6 +139,18 @@ static inline bool isInsideCardioidOrBulb(double x, double y) noexcept {
     return false;
 }
 
+// NEU: Anti-Black Drift-Vektor berechnen (weg vom Cardioid-/Bulb-Zentrum). (Otter/Schneefuchs)
+static inline void computeAntiVoidDriftNDC(float cx, float cy, float& ndcX, float& ndcY) {
+    // Richtung weg von (0.25, 0) und zusätzlich weg von (-1, 0) (Period-2 Bulb)
+    float vx1 = cx - 0.25f, vy1 = cy - 0.0f;
+    float vx2 = cx + 1.0f,  vy2 = cy - 0.0f;
+    // Kombiniere Richtungen (gewichtete Summe), normalisiere
+    float vx = vx1 + 0.6f * vx2;
+    float vy = vy1 + 0.6f * vy2;
+    if (!normalize2D(vx, vy)) { vx = 1.0f; vy = 0.0f; }
+    ndcX = vx; ndcY = vy;
+}
+
 // NEU: NDC-Zentren-Cache pro Geometrie (tilesX, tilesY, width, height). (Schneefuchs)
 namespace {
 struct NdcCenterCache {
@@ -175,16 +192,16 @@ thread_local int   g_statsN    = -1;
 thread_local float g_eMed = 0.0f, g_eMad = 1.0f;
 thread_local float g_cMed = 0.0f, g_cMad = 1.0f;
 
-// Hysterese/Lock & Retarget – jetzt thread_local (reentrancy-safe). (Schneefuchs)
-thread_local int s_lockLeft      = 0;
-thread_local int s_sinceRetarget = 0;
+// Hysterese/Lock & Retarget – funktion-lokaler Zustand (kein Header-Touch)
+static int s_lockLeft = 0;
+static int s_sinceRetarget = 0;
 
 // NEU: Vorherige Bewegungsrichtung für Turn-Limiter (persistiert pro Thread). (Otter/Schneefuchs)
-thread_local bool  g_dirInit  = false;
+thread_local bool  g_dirInit = false;
 thread_local float g_prevDirX = 1.0f;
 thread_local float g_prevDirY = 0.0f;
 
-// NEU: Vorherige Signalstärke (für frühes dyn. Retarget-Gating). (Schneefuchs)
+// NEU: Vorherige Signalstärke (für dyn. Retarget-Gating). (Schneefuchs)
 thread_local float g_prevStdS = 0.0f;
 } // namespace
 
@@ -238,10 +255,7 @@ ZoomResult evaluateZoomTarget(
     // Zeitdifferenz dt (sek) für zeitstabile Limits, ohne Header-Änderung. (Schneefuchs)
     static clock::time_point s_lastCall;
     static bool s_haveLast = false;
-    const double defaultDt = (Settings::capFramerate && Settings::capTargetFps > 0)
-        ? (1.0 / static_cast<double>(Settings::capTargetFps))
-        : (1.0 / 60.0);
-    double dt = (s_haveLast) ? std::chrono::duration<double>(t0 - s_lastCall).count() : defaultDt;
+    double dt = (s_haveLast) ? std::chrono::duration<double>(t0 - s_lastCall).count() : (1.0 / 60.0);
     s_lastCall = t0;
     s_haveLast = true;
     dt = std::max(1.0/240.0, std::min(1.0/15.0, dt)); // clamp gegen Hänger/Spikes
@@ -279,12 +293,28 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // Warm-up Early-Exit (Otter)
+    // ── Anti-Black Warm-up: Falls Center innen → Drift weg vom Innenbereich statt blind zu zoomen.
     if (freezeDirection) {
-        out.shouldZoom = true;
-        if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOMV3][WARMUP] freeze-direction t=%.2fs (limit=%.2fs)",
-                           warmupSec, kNO_TURN_WARMUP_SEC);
+        if (isInsideCardioidOrBulb((double)currentOffset.x, (double)currentOffset.y)) {
+            float nX = 1.0f, nY = 0.0f; computeAntiVoidDriftNDC(currentOffset.x, currentOffset.y, nX, nY);
+            const float2 drifted = make_float2(
+                previousOffset.x + nX * (kWARMUP_DRIFT_NDC / std::max(1e-6f, zoom)),
+                previousOffset.y + nY * (kWARMUP_DRIFT_NDC / std::max(1e-6f, zoom))
+            );
+            out.newOffset  = drifted;
+            out.distance   = std::sqrt((drifted.x-previousOffset.x)*(drifted.x-previousOffset.x) +
+                                       (drifted.y-previousOffset.y)*(drifted.y-previousOffset.y));
+            out.shouldZoom = true;
+            if (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ZOOMV3][WARMUP][VOID-GUARD] center_inside -> drift NDC=%.3f (off=(%.5f,%.5f))",
+                               kWARMUP_DRIFT_NDC, drifted.x, drifted.y);
+            }
+        } else {
+            out.shouldZoom = true; // normal warm-up, Richtung bleibt
+            if (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ZOOMV3][WARMUP] freeze-direction t=%.2fs (limit=%.2fs)",
+                               warmupSec, kNO_TURN_WARMUP_SEC);
+            }
         }
         return out;
     }
@@ -297,8 +327,20 @@ ZoomResult evaluateZoomTarget(
         dynIntervalPre = std::max(kRetargetIntervalMin, std::min(kRetargetIntervalMax, dynIntervalPre));
 
         if (++s_sinceRetarget < dynIntervalPre) {
+            // Zusätzlich: wenn Center innen ist, kleine Void-Bias auch ohne Retarget anwenden
+            if (isInsideCardioidOrBulb((double)currentOffset.x, (double)currentOffset.y)) {
+                float nX = 1.0f, nY = 0.0f; computeAntiVoidDriftNDC(currentOffset.x, currentOffset.y, nX, nY);
+                const float2 drifted = make_float2(
+                    previousOffset.x + nX * (kVOID_BIAS_NDC / std::max(1e-6f, zoom)),
+                    previousOffset.y + nY * (kVOID_BIAS_NDC / std::max(1e-6f, zoom))
+                );
+                out.newOffset  = drifted;
+                out.distance   = std::sqrt((drifted.x-previousOffset.x)*(drifted.x-previousOffset.x) +
+                                           (drifted.y-previousOffset.y)*(drifted.y-previousOffset.y));
+            } else {
+                out.newOffset = previousOffset;
+            }
             out.shouldZoom = true;           // Zoom läuft, Richtung bleibt
-            out.newOffset  = previousOffset;
             if (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[ZOOMV3] skip_retarget %d/%d (dyn-pre sPrev=%.3f)",
                                s_sinceRetarget, dynIntervalPre, sPrev);
@@ -377,15 +419,6 @@ ZoomResult evaluateZoomTarget(
     const double varS  = std::max(0.0, (sumS2 / std::max(1, N)) - meanS * meanS);
     const double stdS  = std::sqrt(varS);
     const bool   hasSignal = (stdS >= kMIN_SIGNAL_Z);
-
-    // Early-Exit bei "kein Signal" (wenn nicht AlwaysZoom)
-    if (!hasSignal && !Settings::ForceAlwaysZoom) {
-        out.shouldZoom = false;
-        if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOMV3] no_signal early-exit stdS=%.3f (thr=%.3f)", (float)stdS, kMIN_SIGNAL_Z);
-        }
-        return out;
-    }
 
     // Softmax-Temperatur adaptiv
     float temp = kTEMP_BASE;
@@ -524,8 +557,17 @@ ZoomResult evaluateZoomTarget(
     float mvy = proposedOffset_raw.y - previousOffset.y;
     const float rawDist = std::sqrt(mvx*mvx + mvy*mvy);
 
+    // ── NEU: Kleine Void-Bias auch NACH Retarget, falls Center aktuell innen ist
+    if (isInsideCardioidOrBulb((double)currentOffset.x, (double)currentOffset.y)) {
+        float nX = 1.0f, nY = 0.0f; computeAntiVoidDriftNDC(currentOffset.x, currentOffset.y, nX, nY);
+        mvx += nX * (kVOID_BIAS_NDC / std::max(1e-6f, zoom));
+        mvy += nY * (kVOID_BIAS_NDC / std::max(1e-6f, zoom));
+        if (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOMV3][VOID-GUARD] center_inside -> add bias ndc=%.3f", kVOID_BIAS_NDC);
+        }
+    }
+
     // ── NEU: Richtungswechsel "smoother" via zeitstabilem Turn-Limiter + Längendämpfung. (Otter/Schneefuchs)
-    // Drehrate adaptiv in Abhängigkeit von Signalstärke (stdS) und Bewegungsgröße.
     float sigFactor  = clampf((float)stdS / kTURN_SIG_REF, 0.0f, 1.0f);
     float distFactor = clampf(rawDist / kTURN_DIST_REF,     0.0f, 1.0f);
     const float omegaMin = kTURN_OMEGA_MIN;
@@ -620,9 +662,9 @@ ZoomResult evaluateZoomTarget(
             (float)stdS, temp, hasSignal ? 1 : 0
         );
         LUCHS_LOG_HOST(
-            "[ZOOMV3] move: dist=%.4f emaAlpha=%.3f ndc=(%.4f,%.4f) propOff=(%.5f,%.5f) newOff=(%.5f,%.5f) tiles=(%d,%d) ms=%.3f",
+            "[ZOOMV3] move: dist=%.4f emaAlpha=%.3f ndc=(%.4f,%.4f) offRaw=(%.5f,%.5f) newOff=(%.5f,%.5f) tiles=(%d,%d) ms=%.3f",
             dist, emaAlpha, (float)ndcX, (float)ndcY,
-            proposedOffset.x, proposedOffset.y,
+            proposedOffset_raw.x, proposedOffset_raw.y,
             out.newOffset.x, out.newOffset.y,
             tilesX, tilesY, ms
         );
