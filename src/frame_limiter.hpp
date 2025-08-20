@@ -1,4 +1,4 @@
-///// src/frame_limiter.hpp
+// MAUS:
 // ============================================================================
 // Datei: src/frame_limiter.hpp
 // FrameLimiter — precise 60 FPS pacing (sleep+spin), ASCII logs only.

@@ -1,4 +1,3 @@
-///// src/renderer_loop.cpp
 // ============================================================================
 // Datei: src/renderer_loop.cpp
 // 🐭 Maus-Kommentar: Loop orchestriert die FramePipeline deterministisch; periodisches Device-Log-Flush, klarer Δt-Track.
