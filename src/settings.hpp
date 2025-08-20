@@ -1,12 +1,14 @@
+///// src/settings.hpp
 // MAUS:
 // ============================================================================
 // Datei: src/settings.hpp
 // Central project settings — fully documented.
 // Policy: All runtime LOG/DEBUG output must be English and ASCII-only.
-// Comments here may be German. References:
+// Comments hier dürfen Deutsch sein. Referenzen:
 //   – Otter = vom User inspiriert (Bezug zu Otter)
 //   – Schneefuchs = von Schwester inspiriert (Bezug zu Schneefuchs)
 // Keine Regressionen, keine versteckten Semantik-Änderungen. Werte bleiben identisch.
+// Neu (Otter/Schneefuchs): Framerate-Cap (60 FPS) + optionales VSync.
 // ============================================================================
 
 #pragma once
@@ -96,6 +98,63 @@ namespace Settings {
     //   Schneefuchs-Prinzip: Messen, dann abschalten. (Bezug zu Schneefuchs)
     // ------------------------------------------------------------------------
     inline constexpr bool performanceLogging = true;
+
+    // ------------------------------------------------------------------------
+    // capFramerate  (NEU)
+    // Wirkung:
+    //   Aktiviert eine präzise CPU-Seitenratenbegrenzung (sleep+spin), die — in
+    //   Kombination mit optionalem VSync — das Pacing auf eine Ziel-FPS deckelt.
+    //   Ziel: glattes 60 FPS-Motion-Feeling unabhängig von Monitor-Hz.
+    //
+    // Empfehlung (Min..Max):
+    //   false .. true (bool)
+    //
+    // Erhöhung/Reduzierung:
+    //   • true: stabilisiert Bewegungs-Pacing; reduziert Jitter sichtbar. (Otter)
+    //   • false: volles Tempo (keine Deckelung), geeignet für Benchmarks.
+    //
+    // Hinweis:
+    //   In Kombination mit preferVSync auf >60 Hz Displays hält der Limiter
+    //   die 60er-Taktung, jeder Frame bleibt 2–3 Refreshes sichtbar. (Schneefuchs)
+    // ------------------------------------------------------------------------
+    inline constexpr bool capFramerate = true;
+
+    // ------------------------------------------------------------------------
+    // capTargetFps  (NEU)
+    // Wirkung:
+    //   Zieltakt der Framebegrenzung in FPS.
+    //
+    // Empfehlung (Min..Max):
+    //   30 .. 240
+    //
+    // Erhöhung/Reduzierung:
+    //   • Höher: straffere Zielrate, geringere Sleepzeit, potenziell mehr Last.
+    //   • Niedriger: mehr Ruhezeit → weniger Last, aber weniger temporale Auflösung.
+    //
+    // Hinweis:
+    //   Standard = 60 für natürliches Motion-Feeling. (Bezug zu Otter)
+    // ------------------------------------------------------------------------
+    inline constexpr int capTargetFps = 60;
+
+    // ------------------------------------------------------------------------
+    // preferVSync  (NEU)
+    // Wirkung:
+    //   Setzt beim Start `glfwSwapInterval(1)` für Tear-freies Rendering.
+    //   In Verbindung mit capFramerate wird *vor/um* den Swap getaktet, sodass
+    //   bei 120/144 Hz Displays dennoch 60 FPS gezeigt werden (Frames „leben“
+    //   dann über mehrere Refreshes).
+    //
+    // Empfehlung (Min..Max):
+    //   false .. true (bool)
+    //
+    // Erhöhung/Reduzierung:
+    //   • true: Tear-frei, natürliche Präsentation; etwas höhere Latenz möglich.
+    //   • false: Kein VSync (SwapInterval 0) — rein softwareseitiges Pacing.
+    //
+    // Hinweis:
+    //   Bei Messläufen ohne Tearing-Bedarf kann VSync aus. (Bezug zu Schneefuchs)
+    // ------------------------------------------------------------------------
+    inline constexpr bool preferVSync = true;
 
     // ------------------------------------------------------------------------
     // heatmapOverlayEnabled
