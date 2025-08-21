@@ -1,12 +1,15 @@
 <!-- Datei: AGENTS.md -->
-
-<!-- Zeilen: 113 -->
-
-<!-- 🐭 Maus-Kommentar: Dokumentiert Buildprozesse und Toolchains für OtterDream. Jetzt mit Hotkey-Doku, CUDA-Architektur-Hinweis und Robbe-Regel für API-Synchronität. Schneefuchs flüstert: „Ein Agent kennt auch die versteckten Knöpfe und sorgt für saubere Übergänge.“ -->
+<!-- 🐭 Maus-Kommentar: Dokumentiert Buildprozesse und Toolchains für OtterDream. Jetzt mit Hotkey-Doku, CUDA-Architektur-Hinweis, Frame-Budget-Pacing-Hinweis und Robbe-Regel für API-Synchronität. Schneefuchs flüstert: „Ein Agent kennt auch die versteckten Knöpfe und sorgt für saubere Übergänge.“ -->
 
 # 👩‍💻 OtterDream Build Agents
 
 Diese Datei dokumentiert die automatisierten Prozesse und Tools für den Build und die Pflege des OtterDream Mandelbrot-Renderers. **Ab Alpha 41 gilt das "Robbe-Prinzip": Alle Header-/Source-Schnittstellen werden IMMER synchron gepflegt. Kein Drift, kein API-Bruch.**
+
+Seit **Alpha 81** zusätzlich relevant:
+
+* **Silk‑Lite Zoom** im Runtime‑Pfad (zeitstabile Drehraten, Längendämpfung)
+* **Frame‑Budget‑Pacing** im Kernel-Wrapping (CI geprüft)
+* **Logging ohne Seiteneffekte** (reine ASCII‑Logs; Verhalten der Pipelines bleibt unverändert)
 
 ---
 
@@ -14,10 +17,13 @@ Diese Datei dokumentiert die automatisierten Prozesse und Tools für den Build u
 
 Das Projekt verwendet folgende Agents und Werkzeuge:
 
-| Agent               | Zweck                           | Trigger         | Aktionen                                      |
-| ------------------- | ------------------------------- | --------------- | --------------------------------------------- |
-| GitHub Actions (CI) | Build- & Install-Check bei Push | Push auf `main` | CMake-Konfiguration, Ninja-Build, `--install` |
-| Dependabot          | Abhängigkeits-Updates für vcpkg | Wöchentlich     | Überwachung von `vcpkg.json`                  |
+| Agent               | Zweck                                  | Trigger         | Aktionen                                            |
+| ------------------- | -------------------------------------- | --------------- | --------------------------------------------------- |
+| GitHub Actions (CI) | Build-, Test- & Install-Check bei Push | Push auf `main` | CMake-Konfiguration, Ninja-Build, `cmake --install` |
+| Dependabot          | Abhängigkeits-Updates für vcpkg        | Wöchentlich     | Überwachung/PRs für `vcpkg.json`                    |
+| Waschbär-Watchdog   | Hygiene & Auto-Fixes (lokal)           | On-Demand       | Bereinigt vcpkg/GLEW-Fallen, räumt CMake-Caches auf |
+
+> CI erzeugt deterministische Artefakte und prüft zusätzlich, dass **Debug-/Perf-Logging keine Seiteneffekte** (z. B. Barrieren, Zustandsänderungen) hat.
 
 ---
 
@@ -52,6 +58,8 @@ Diese Tastenkürzel sind während der Laufzeit verfügbar:
 | `H`     | Heatmap-Overlay ein-/ausschalten    |
 | `T`     | HUD (WarzenschweinOverlay) toggeln  |
 
+> Hinweis: Die **Silk‑Lite**-Planung sorgt bei Richtungswechseln für sanfte Übergänge (Yaw‑Limiter + Dämpfung). Das Verhalten ist unabhängig von Debug‑Logs.
+
 ---
 
 ## 🧠 CUDA Architekturen
@@ -63,20 +71,30 @@ Für andere GPUs kann diese wie folgt überschrieben werden:
 cmake --preset windows-release -DCMAKE_CUDA_ARCHITECTURES=90
 ```
 
-Die passende Architektur für deine GPU findest du auf der [offiziellen NVIDIA-Liste](https://developer.nvidia.com/cuda-gpus).
+Die passende Architektur für deine GPU findest du auf der offiziellen NVIDIA-Liste.
 
 ---
 
 ## ⚙️ Lokaler Build
 
-### 🪟 Windows
+### 🪟 Windows (zwei Wege)
 
-```bash
+**A) Komfortskript**
+
+```powershell
+./build.ps1
+```
+
+**B) Manuell mit Presets**
+
+```powershell
 cmake --preset windows-msvc
 cmake --build --preset windows-msvc
 cmake --install build/windows --prefix ./dist
-.\dist\mandelbrot_otterdream.exe
+./dist/mandelbrot_otterdream.exe
 ```
+
+> Das Skript erkennt bekannte Fallstricke (z. B. `glew32d.lib`), bereinigt CMake-Caches und setzt die Pfade für CUDA automatisch.
 
 ### 🐧 Linux
 
@@ -87,7 +105,7 @@ sudo apt update
 sudo apt install build-essential cmake git ninja-build libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config libcuda1-525
 ```
 
-> *Hinweis:* Je nach Distribution kann die CUDA-Runtime-Bibliothek anders heißen (z.B. `libcuda1-545`).
+> *Hinweis:* Je nach Distribution kann die CUDA-Runtime-Bibliothek anders heißen (z. B. `libcuda1-545`).
 
 2. **Repository klonen & vcpkg initialisieren**:
 
@@ -120,17 +138,46 @@ Ab Alpha 41 gilt:
 > **Jede Änderung an Funktionssignaturen, Headern oder APIs wird immer gleichzeitig in Header- und Source-Dateien umgesetzt und committed. Kein Drift!**
 
 * Nie wieder schleichende Bugs durch asynchrone Schnittstellen.
-* Funktionsänderungen, die Robbe nicht sieht, werden nicht gebaut!
+* Funktionsänderungen, die Robbe nicht sieht, werden nicht gebaut.
 
-Robbe wacht über jede Funktion. Wenn Header und Source abweichen, watschelt sie quer durch den Commit und macht lautstark OOU-OOU!
+Robbe wacht über jede Funktion. Wenn Header und Source abweichen, watschelt sie quer durch den Commit und macht lautstark **OOU‑OOU!**
+
+---
+
+## 🧪 Logging-Regeln (seit Alpha 81)
+
+* **ASCII‑only** – keine binären Dumps im Hot‑Path.
+* **Zero Side‑Effects** – Logs dürfen **keine** Zustände verändern, keine Synchronisationspunkte erzwingen und sind klar hinter Performance‑kritischen Pfaden platziert.
+* **Performance‑Logging** und **Debug‑Logging** sind strikt getrennt und können unabhängig voneinander aktiviert werden.
 
 ---
 
 ## 🌐 CI/CD Pipelines
 
-* **GitHub Actions**:
+**GitHub Actions**
 
-  * `.github/workflows/ci.yml` führt bei jedem Push auf `main` einen vollständigen Build und anschließenden `cmake --install` aus.
-* **Dependabot**:
+* Workflow: `.github/workflows/ci.yml`
+* Schritte: Configure → Build (Ninja) → Install
+* Artefakte: Install‑Tree unter `dist/`
+* Prüft zusätzlich:
 
-  * Automatisches Update der vcpkg-Abhängigkeiten wöchentlich.
+  * erfolgreiche CUDA‑Kompilation für Presets
+  * konsistente CMake‑Presets
+  * deterministische Builds (gleiche Inputs → gleiche Outputs)
+
+**Dependabot**
+
+* Automatisches Update der vcpkg‑Abhängigkeiten (wöchentlich)
+* PRs werden vom CI‑Workflow gebaut
+
+---
+
+## ❓ Troubleshooting (Kurz)
+
+* **nvcc nicht gefunden** → CUDA 12.9 installieren und PATH prüfen.
+* **Linker findet `glew32d.lib`** → vcpkg‑Triplet auf Release prüfen; im Zweifel `build.ps1` nutzen (räumt auf).
+* **Schwarze Frames bei extremer Kamerabewegung** → sicherstellen, dass Runtime‑Einstellungen (Silk‑Lite/Anti‑Black‑Guard) aktiv sind; Logging muss aus sein bei Performance‑Messungen.
+
+---
+
+**Agenten‑Motto:** Maus sorgt für Fokus, Schneefuchs für Präzision, Robbe für API‑Disziplin, Waschbär für Hygiene. 💫
