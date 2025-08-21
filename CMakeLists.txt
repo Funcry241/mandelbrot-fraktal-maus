@@ -1,7 +1,6 @@
 # Datei: CMakeLists.txt
-# 🐭 Maus-Kommentar: Alpha 81 – vcpkg triplet nun dynamisch: Windows nutzt x64-windows-static, CI bekommt x64-linux. Plattformsicher.
-# 🦦 Otter: portable durch bedingten VCPKG_TARGET_TRIPLET. Kein harter Windows-Zwang mehr.
-# 🐑 Schneefuchs: volle Kompatibilität mit GitHub Actions unter Ubuntu. Kein Anpassungsbedarf im CI-Workflow nötig.
+# 🐭 Maus-Kommentar: Alpha 81 – vcpkg Triplet dynamisch; Windows-Hardening nur im HOST_LINK.
+# Fix: /HIGHENTROPYVA & Co. werden NICHT mehr dem NVCC Device-Link/Compiler übergeben (D8021 behoben).
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
@@ -55,7 +54,7 @@ find_path(CUDA_GL_INTEROP_INCLUDE_DIR cuda_gl_interop.h
         "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9/include"
         "/usr/local/cuda/include"
         "/opt/cuda/include"
-        "/usr/include"  # 🛠️ Ergänzt für Ubuntu-kompatible CUDA-Installationen (Schwester-Vorschlag)
+        "/usr/include"  # Ubuntu-kompatible CUDA-Installationen
     DOC "Pfad zu cuda_gl_interop.h"
 )
 
@@ -68,15 +67,15 @@ include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
 # ---------------------------------------------------------
 # 🛠 Executable: zentrale Dateien des Mandelbrot-Renderers
 add_executable(mandelbrot_otterdream
-    src/main.cpp    
+    src/main.cpp
     src/luchs_log_host.cpp
-    src/luchs_cuda_log_buffer.cu    
+    src/luchs_cuda_log_buffer.cu
     src/renderer_core.cu
     src/renderer_loop.cpp
     src/renderer_state.cpp
     src/renderer_pipeline.cpp
     src/renderer_window.cpp
-    src/renderer_resources.cpp    
+    src/renderer_resources.cpp
     src/opengl_utils.cpp
     src/heatmap_overlay.cpp
     src/warzenschwein_overlay.cpp
@@ -84,7 +83,7 @@ add_executable(mandelbrot_otterdream
     src/core_kernel.cu
     src/zoom_logic.cpp
     src/zoom_command.cpp
-    src/frame_pipeline.cpp    
+    src/frame_pipeline.cpp
     src/frame_context.cpp
     src/hermelin_buffer.cpp
     src/bear_CudaPBOResource.cpp
@@ -118,12 +117,13 @@ if (MSVC)
     endforeach()
 endif()
 
-# 🔧 CUDA-separat builden
+# 🔧 CUDA-separat builden (erfordert Device-Link)
 set_target_properties(mandelbrot_otterdream PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
 )
 
-# ✅ explizit: CUDA bekommt --std=c++23, auch wenn CMake das Label nicht kennt
+# ✅ explizit: CUDA bekommt --std=c++20, auch wenn CMake das Label nicht kennt
+# (Keine Security-/Linker-Flags hier! Sonst landen sie via NVCC im Compile-/Device-Link.)
 target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:--std=c++20 --expt-relaxed-constexpr>
     $<$<COMPILE_LANGUAGE:CXX>:
@@ -133,22 +133,33 @@ target_compile_options(mandelbrot_otterdream PRIVATE
 )
 
 # 🚀 Projekt Phönix: Keine Abhängigkeit mehr zu Freetype
+# (Nur notwendige Libs, Windows-Standard-Libs via CMake verlinkt.)
 target_link_libraries(mandelbrot_otterdream PRIVATE
     OpenGL::GL
     GLEW::GLEW
     glfw
     CUDA::cudart
-    Threads::Threads    
+    Threads::Threads
 )
 
 # 🧠 CUDA-Dateien explizit markieren
 set_source_files_properties(
-    src/renderer_core.cu    
+    src/renderer_core.cu
     src/cuda_interop.cu
     src/core_kernel.cu
-    src/luchs_cuda_log_buffer.cu    
+    src/luchs_cuda_log_buffer.cu
     PROPERTIES LANGUAGE CUDA
 )
+
+# 🧱 Windows-Hardening NUR im Host-Link (nicht in NVCC Device-Link/Compile)
+# Verhindert Fehler wie: "cl : D8021 Ungültiges numerisches Argument /HIGHENTROPYVA"
+if(MSVC)
+  # Flags nur in finalem Host-Link anwenden (Release & RelWithDebInfo)
+  target_link_options(mandelbrot_otterdream PRIVATE
+    $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
+    $<$<CONFIG:RelWithDebInfo>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
+  )
+endif()
 
 # 🛠️ Build-Typ Default setzen
 if(NOT CMAKE_BUILD_TYPE)
