@@ -270,6 +270,10 @@ void mandelbrotPass1Warmup(
         return;
     }
 
+    // --- NEU: Survivors sofort schwärzen (Ghosting verhindern) ---
+    out[idx] = make_uchar4(0,0,0,255);
+    // iterOut bewusst unverändert lassen (Overlay/Stats behalten optional vorhandene Werte)
+
     unsigned actMask = 0xFFFFFFFFu;
 #if (__CUDA_ARCH__ >= 700)
     actMask = __activemask();
@@ -329,6 +333,9 @@ void mandelbrotPass2Slice(
         iterOut[s.idx] = r.it;
         return;
     }
+
+    // --- NEU: Noch nicht fertig → sofort schwärzen (Ghosting verhindern) ---
+    out[s.idx] = make_uchar4(0,0,0,255);
 
     unsigned actMask = 0xFFFFFFFFu;
 #if (__CUDA_ARCH__ >= 700)
