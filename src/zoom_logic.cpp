@@ -7,6 +7,7 @@
 //      • Warm-up-Drift: leichter, zielgerichteter Schub aus Innenbereichen heraus (dt-sicher)
 //      • Void-Bias: kleiner Auslenkungsanteil weg von der Cardioid-Mitte, falls Center innen ist
 //      • Zeitstabil: Yaw-Rate-Limiter in rad/s (dt -> rad/Frame), plus Längendämpfung bei großen Drehwinkeln
+//      • dt-basierte EMA mit Zeitkonstante τ(dist): stabil bei Framedrops und Extrembewegung
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -29,9 +30,11 @@ static constexpr float kALPHA_E = 1.00f; // Gewicht Entropie
 static constexpr float kBETA_C  = 0.50f; // Gewicht Kontrast
 // Softmax
 static constexpr float kTEMP_BASE = 1.00f; // Grundtemperatur für Softmax (wird adaptiv skaliert)
-// Bewegung / Glättung
-static constexpr float kEMA_ALPHA_MIN = 0.06f; // minimale Glättung
-static constexpr float kEMA_ALPHA_MAX = 0.30f; // maximale Glättung
+// Bewegung / Glättung (EMA: alpha = 1 - exp(-dt/τ))
+static constexpr float kEMA_ALPHA_MIN = 0.06f; // untere Klammer
+static constexpr float kEMA_ALPHA_MAX = 0.30f; // obere Klammer
+static constexpr float kEMA_TAU_MIN   = 0.040f; // s, starke Bewegung → kurze τ → größere alpha
+static constexpr float kEMA_TAU_MAX   = 0.220f; // s, feine Bewegung → lange τ → kleine alpha
 // Signaldetektion
 static constexpr float kMIN_SIGNAL_Z  = 0.15f; // minimale Z-Score-Stärke für "aktives" Signal
 // Deadzone (nur Dokumentation – Ausgabe in out.minDistance)
@@ -619,8 +622,11 @@ ZoomResult evaluateZoomTarget(
     const float dy = proposedOffset.y - previousOffset.y;
     const float dist = std::sqrt(dx*dx + dy*dy);
 
-    // Bewegung glätten (EMA, adaptiv nur nach Distanz)
-    float emaAlpha = kEMA_ALPHA_MIN + (kEMA_ALPHA_MAX - kEMA_ALPHA_MIN) * clampf(dist / 0.5f, 0.0f, 1.0f);
+    // Bewegung glätten (EMA, dt-basiert; τ abhängig von Distanz)
+    const float distNorm = clampf(dist / 0.5f, 0.0f, 1.0f);
+    const float tau = kEMA_TAU_MAX + (kEMA_TAU_MIN - kEMA_TAU_MAX) * distNorm; // lerp
+    float emaAlpha = 1.0f - std::exp(-static_cast<float>(dt) / std::max(1e-5f, tau));
+    emaAlpha = clampf(emaAlpha, kEMA_ALPHA_MIN, kEMA_ALPHA_MAX);
     if (Settings::ForceAlwaysZoom && !hasSignal) {
         emaAlpha = std::max(emaAlpha, kFORCE_MIN_DRIFT_ALPHA);
     }
