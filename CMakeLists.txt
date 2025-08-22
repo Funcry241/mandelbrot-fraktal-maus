@@ -1,6 +1,6 @@
 # Datei: CMakeLists.txt
-# 🐭 Maus-Kommentar: Alpha 81 – vcpkg Triplet dynamisch; Windows-Hardening nur im HOST_LINK.
-# Fix: /HIGHENTROPYVA & Co. werden NICHT mehr dem NVCC Device-Link/Compiler übergeben (D8021 behoben).
+# 🐭 Maus-Kommentar: Alpha 81 – vcpkg Triplet dynamisch; **Windows-Hardening nur im HOST_LINK**.
+# Fix: /HIGHENTROPYVA & Co. werden NICHT dem NVCC Device-Link/Compiler übergeben (D8021 behoben).
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
@@ -132,6 +132,13 @@ target_compile_options(mandelbrot_otterdream PRIVATE
     >
 )
 
+# CFG (Control Flow Guard): nur C++-Quellen, nicht CUDA
+# → verhindert, dass NVCC die Option sieht
+#   (NVCC würde /guard:cf beim Device-Link nicht verstehen.)
+target_compile_options(mandelbrot_otterdream PRIVATE
+  $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<COMPILE_LANGUAGE:CXX>>:/guard:cf>
+)
+
 # 🚀 Projekt Phönix: Keine Abhängigkeit mehr zu Freetype
 # (Nur notwendige Libs, Windows-Standard-Libs via CMake verlinkt.)
 target_link_libraries(mandelbrot_otterdream PRIVATE
@@ -154,11 +161,21 @@ set_source_files_properties(
 # 🧱 Windows-Hardening NUR im Host-Link (nicht in NVCC Device-Link/Compile)
 # Verhindert Fehler wie: "cl : D8021 Ungültiges numerisches Argument /HIGHENTROPYVA"
 if(MSVC)
-  # Flags nur in finalem Host-Link anwenden (Release & RelWithDebInfo)
+  # Release-Link-Optimierungen: nur Host-Link, nicht Device-Link
+  target_link_options(mandelbrot_otterdream PRIVATE
+    $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO /OPT:REF /OPT:ICF>>
+  )
+
+  # Hardening-Flags: nur Host-Link (Release & RelWithDebInfo)
   target_link_options(mandelbrot_otterdream PRIVATE
     $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
     $<$<CONFIG:RelWithDebInfo>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
   )
+
+  # Optional: saubere Fehlermeldung, falls 32-bit Toolchain erwischt wurde
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "HIGHENTROPYVA erfordert 64-bit (/MACHINE:X64). Bitte 64-bit-Toolchain verwenden.")
+  endif()
 endif()
 
 # 🛠️ Build-Typ Default setzen
