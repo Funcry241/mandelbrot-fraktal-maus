@@ -8,6 +8,7 @@
 //      • Void-Bias: kleiner Auslenkungsanteil weg von der Cardioid-Mitte, falls Center innen ist
 //      • Zeitstabil: Yaw-Rate-Limiter in rad/s (dt -> rad/Frame), plus Längendämpfung bei großen Drehwinkeln
 //      • dt-basierte EMA mit Zeitkonstante τ(dist): stabil bei Framedrops und Extrembewegung
+//      • Turn-Transition Gate + Acc-Limiter: weiche Rampen nach Richtungswechsel (kein harter Antritt)
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -60,19 +61,26 @@ static constexpr int   kRetargetIntervalMax = 8;
 static constexpr int   kStatsEvery = 3;
 
 // ── NEU (Otter/Schneefuchs): Zeitstabiler Richtungswechsel-Limiter (Yaw-Rate in rad/s) + Längendämpfung.
-//      • Begrenze maximale Drehrate (rad/s) → in rad/Frame via dt.
-//      • Dämpfe die Translationslänge bei großen Drehwinkeln → keine „seitwärts“-Rucks.
-static constexpr float kTURN_OMEGA_MIN = 2.5f;  // rad/s  (sanfte Grunddrehrate)
-static constexpr float kTURN_OMEGA_MAX = 10.0f; // rad/s  (volle Drehrate bei starkem Signal/Move)
-static constexpr float kTURN_SIG_REF   = 1.00f; // Z-Score-Referenz (stdS) für „volles“ Drehen
-static constexpr float kTURN_DIST_REF  = 0.25f; // NDC-Referenzbewegung für „volles“ Drehen
-static constexpr float kTHETA_DAMP_LO  = 0.35f; // rad (~20°) Beginn der Dämpfung
-static constexpr float kTHETA_DAMP_HI  = 1.20f; // rad (~69°) volle Dämpfung
+static constexpr float kTURN_OMEGA_MIN = 2.5f;  // rad/s
+static constexpr float kTURN_OMEGA_MAX = 10.0f; // rad/s
+static constexpr float kTURN_SIG_REF   = 1.00f; // stdS
+static constexpr float kTURN_DIST_REF  = 0.25f; // NDC
+static constexpr float kTHETA_DAMP_LO  = 0.35f; // rad (~20°)
+static constexpr float kTHETA_DAMP_HI  = 1.20f; // rad (~69°)
 
 // ── NEU: Anti-Black-Guard (Warm-up/Niedrigsignal) ----------------------------------------------
-// (kürzere Schritte & zarter Bias; ursprüngliche 0.10/0.06 haben anfangs spürbar nach links gezogen)
-static constexpr float kWARMUP_DRIFT_NDC = 0.030f; // NDC-Schritt im Warm-up
-static constexpr float kVOID_BIAS_NDC    = 0.020f; // zarter Bias weg von Cardioid/2er-Bulb
+static constexpr float kWARMUP_DRIFT_NDC = 0.030f; // sanfter
+static constexpr float kVOID_BIAS_NDC    = 0.020f; // zarter Bias
+
+// ── NEU: Turn-Transition Gate (weiche Rampen nach Richtungswechsel) -----------------------------
+static constexpr float kTURN_GATE_TRIG   = 0.60f; // rad (~34°)
+static constexpr float kTURN_GATE_T_MIN  = 0.18f; // s
+static constexpr float kTURN_GATE_T_MAX  = 0.40f; // s
+static constexpr float kTURN_GATE_START  = 0.18f; // Start-Skalierung
+static constexpr float kSTEP_CAP_NDC     = 0.06f; // max NDC-Step direkt nach Trigger
+
+// ── NEU: Acceleration Limiter -------------------------------------------------------------------
+static constexpr float kACC_BASE = 1.50f; // units/s^2; eff. accMax = kACC_BASE / zoom
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
@@ -82,7 +90,6 @@ static inline float median_inplace(std::vector<float>& v) {
     std::nth_element(v.begin(), v.begin() + mid, v.end());
     float m = v[mid];
     if ((n & 1) == 0) {
-        // Schneefuchs: korrektes Even-N-Handling via zweitem nth_element
         std::nth_element(v.begin(), v.begin() + (mid - 1), v.begin() + mid);
         const float m2 = v[mid - 1];
         m = 0.5f * (m + m2);
@@ -90,7 +97,6 @@ static inline float median_inplace(std::vector<float>& v) {
     return m;
 }
 
-// NEU: MAD in-place auf wiederverwendetem Buffer; keine zusätzlichen Allokationen. (Schneefuchs)
 static inline float mad_inplace_from_center(std::vector<float>& buf, float med) {
     if (buf.empty()) return 1.0f;
     for (float& x : buf) x = std::fabs(x - med);
@@ -106,8 +112,12 @@ static inline float smoothstepf(float a, float b, float x) {
     const float t = clampf((x - a) / (b - a), 0.0f, 1.0f);
     return t * t * (3.0f - 2.0f * t);
 }
+static inline float sCurve01(float u) {
+    u = clampf(u, 0.0f, 1.0f);
+    return u * u * (3.0f - 2.0f * u);
+}
 
-// NEU: 2D-Normalisierung (robust gegen sehr kleine Beträge). (Schneefuchs)
+// Normalisieren
 static inline bool normalize2D(float& x, float& y) {
     const float n2 = x*x + y*y;
     if (n2 <= 1e-20f) return false;
@@ -116,7 +126,7 @@ static inline bool normalize2D(float& x, float& y) {
     return true;
 }
 
-// NEU: limitiere Drehung von (dirX,dirY) in Richtung (tx,ty) auf maxAngle (rad). (Otter)
+// Limitierte Rotation
 static inline void rotateTowardsLimited(float& dirX, float& dirY, float tx, float ty, float maxAngle) {
     if (!normalize2D(tx, ty)) return;
     if (!normalize2D(dirX, dirY)) { dirX = tx; dirY = ty; return; }
@@ -133,7 +143,7 @@ static inline void rotateTowardsLimited(float& dirX, float& dirY, float tx, floa
     dirX = nx; dirY = ny;
 }
 
-// NEU: Analytischer Innen-Test (Cardioid + 2er-Bulb) – harter Ausschluss. (Otter/Schneefuchs)
+// Innen-Test
 static inline bool isInsideCardioidOrBulb(double x, double y) noexcept {
     const double xm = x - 0.25;
     const double q  = xm*xm + y*y;
@@ -143,19 +153,17 @@ static inline bool isInsideCardioidOrBulb(double x, double y) noexcept {
     return false;
 }
 
-// NEU: Anti-Black Drift-Vektor berechnen (weg vom Cardioid-/Bulb-Zentrum). (Otter/Schneefuchs)
+// Anti-Black Drift-Richtung
 static inline void computeAntiVoidDriftNDC(float cx, float cy, float& ndcX, float& ndcY) {
-    // Richtung weg von (0.25, 0) und zusätzlich weg von (-1, 0) (Period-2 Bulb)
     float vx1 = cx - 0.25f, vy1 = cy - 0.0f;
     float vx2 = cx + 1.0f,  vy2 = cy - 0.0f;
-    // Kombiniere Richtungen (gewichtete Summe), normalisiere
     float vx = vx1 + 0.6f * vx2;
     float vy = vy1 + 0.6f * vy2;
     if (!normalize2D(vx, vy)) { vx = 1.0f; vy = 0.0f; }
     ndcX = vx; ndcY = vy;
 }
 
-// NEU: NDC-Zentren-Cache pro Geometrie (tilesX, tilesY, width, height). (Schneefuchs)
+// ── Caches & Zustände ───────────────────────────────────────────────────────
 namespace {
 struct NdcCenterCache {
     int tilesX = -1, tilesY = -1, width = -1, height = -1;
@@ -166,7 +174,7 @@ struct NdcCenterCache {
         const int total = tx * ty;
         if (tx == tilesX && ty == tilesY && w == width && h == height &&
             (int)ndcX.size() == total && (int)ndcY.size() == total) {
-            return; // Schneefuchs: Cache hit
+            return;
         }
         tilesX = tx; tilesY = ty; width = w; height = h;
         ndcX.resize(total);
@@ -182,31 +190,31 @@ struct NdcCenterCache {
     }
 };
 
-// thread_local, um Re-Allokationen und false sharing zu vermeiden. (Schneefuchs)
 thread_local NdcCenterCache g_ndcCache;
 
-// thread_local Buffer – Allokationen vermeiden. (Schneefuchs)
 thread_local std::vector<float> g_bufE;
 thread_local std::vector<float> g_bufC;
 thread_local std::vector<float> g_bufS;
 
-// Stats-Cache & Cadence (alle kStatsEvery Frames neu) (Schneefuchs)
 thread_local int   g_statsTick = 0;
 thread_local int   g_statsN    = -1;
 thread_local float g_eMed = 0.0f, g_eMad = 1.0f;
 thread_local float g_cMed = 0.0f, g_cMad = 1.0f;
 
-// Hysterese/Lock & Retarget – funktion-lokaler Zustand (kein Header-Touch)
 static int s_lockLeft = 0;
 static int s_sinceRetarget = 0;
 
-// NEU: Vorherige Bewegungsrichtung für Turn-Limiter (persistiert pro Thread). (Otter/Schneefuchs)
 thread_local bool  g_dirInit = false;
 thread_local float g_prevDirX = 1.0f;
 thread_local float g_prevDirY = 0.0f;
 
-// NEU: Vorherige Signalstärke (für dyn. Retarget-Gating). (Schneefuchs)
 thread_local float g_prevStdS = 0.0f;
+
+// Turn-Transition-Gate & Acc-Limiter
+thread_local bool  g_turnGateActive = false;
+thread_local float g_turnGateT      = 0.0f;
+thread_local float g_turnGateDur    = 0.0f;
+thread_local float g_speed          = 0.0f; // units/s
 } // namespace
 
 namespace ZoomLogic {
@@ -221,7 +229,6 @@ float computeEntropyContrast(
     const int total  = tilesX * tilesY;
     if (total <= 0 || (int)entropy.size() < total) return 0.0f;
 
-    // Mittelwert der lokalen Kontraste (4-Nachbarn)
     double acc = 0.0;
     int cnt = 0;
     for (int ty = 0; ty < tilesY; ++ty) {
@@ -256,15 +263,18 @@ ZoomResult evaluateZoomTarget(
     using clock = std::chrono::high_resolution_clock;
     const auto t0 = clock::now();
 
-    // Zeitdifferenz dt (sek) für zeitstabile Limits, ohne Header-Änderung. (Schneefuchs)
+    // dt
     static clock::time_point s_lastCall;
     static bool s_haveLast = false;
     double dt = (s_haveLast) ? std::chrono::duration<double>(t0 - s_lastCall).count() : (1.0 / 60.0);
     s_lastCall = t0;
     s_haveLast = true;
-    dt = std::max(1.0/240.0, std::min(1.0/15.0, dt)); // clamp gegen Hänger/Spikes
+    dt = std::max(1.0/240.0, std::min(1.0/15.0, dt)); // clamp
 
-    // ── Warm-up-Timer: ab erstem Aufruf läuft die Uhr. ───────────────────────
+    // invZoom EINMAL definiert (robust)
+    const double invZoom = 1.0 / std::max(1e-6, (double)zoom);
+
+    // Warm-up-Timer
     static bool warmupInit = false;
     static clock::time_point warmupStart;
     if (!warmupInit) { warmupStart = t0; warmupInit = true; }
@@ -275,7 +285,7 @@ ZoomResult evaluateZoomTarget(
     out.bestIndex   = -1;
     out.shouldZoom  = false;
     out.isNewTarget = false;
-    out.newOffset   = previousOffset; // default: keine Änderung
+    out.newOffset   = previousOffset;
     out.minDistance = kMIN_DISTANCE;
     out.bestScore   = 0.0f;
     out.bestEntropy = 0.0f;
@@ -297,23 +307,19 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // ── Anti-Black Warm-up: Falls Center innen → eingeschränkter Drift, rechts-präferent, mini-EMA.
+    // Warm-up: sanfter, rechts-präferenter Drift aus Innenbereichen
     if (freezeDirection) {
         if (isInsideCardioidOrBulb((double)currentOffset.x, (double)currentOffset.y)) {
             float nX = 1.0f, nY = 0.0f;
             computeAntiVoidDriftNDC(currentOffset.x, currentOffset.y, nX, nY);
+            if (currentOffset.x < -0.30f && nX < 0.0f) nX = 0.0f;
+            if (nX < 0.0f) nX = std::fabs(nX) * 0.35f;
 
-            // Rechts-Priorität während Warm-up (keine initiale Linksflucht)
-            if (currentOffset.x < -0.30f && nX < 0.0f) nX = 0.0f;      // harten Links-Push unterbinden
-            if (nX < 0.0f) nX = std::fabs(nX) * 0.35f;                 // Rest dämpfen/spiegeln leicht
-
-            const float invZ = 1.0f / std::max(1e-6f, zoom);
             const float2 target = make_float2(
-                previousOffset.x + nX * (kWARMUP_DRIFT_NDC * invZ),
-                previousOffset.y + nY * (kWARMUP_DRIFT_NDC * invZ)
+                previousOffset.x + nX * (kWARMUP_DRIFT_NDC * (float)invZoom),
+                previousOffset.y + nY * (kWARMUP_DRIFT_NDC * (float)invZoom)
             );
 
-            // Mini-EMA im Warm-up (sprunghartes „Zacken“ vermeiden)
             const float alphaWarm = 0.20f;
             out.newOffset = make_float2(
                 previousOffset.x * (1.0f - alphaWarm) + target.x * alphaWarm,
@@ -329,7 +335,7 @@ ZoomResult evaluateZoomTarget(
                                currentOffset.x, nX, nY, out.newOffset.x, out.newOffset.y);
             }
         } else {
-            out.shouldZoom = true; // normal warm-up, Richtung bleibt
+            out.shouldZoom = true;
             if (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[ZOOMV3][WARMUP] freeze-direction t=%.2fs (limit=%.2fs)",
                                warmupSec, kNO_TURN_WARMUP_SEC);
@@ -338,23 +344,22 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // Frühzeitiges dyn. Retarget-Throttling (AlwaysZoom) basierend auf vorheriger stdS. (Schneefuchs)
+    // Dyn Retarget-Throttle (AlwaysZoom)
     if (Settings::ForceAlwaysZoom) {
         const float sPrev = clampf(g_prevStdS, 0.0f, 1.0f);
         int dynIntervalPre = static_cast<int>(std::round(
-            kRetargetIntervalMax - (kRetargetIntervalMax - kRetargetIntervalMin) * sPrev)); // 8..3
+            kRetargetIntervalMax - (kRetargetIntervalMax - kRetargetIntervalMin) * sPrev));
         dynIntervalPre = std::max(kRetargetIntervalMin, std::min(kRetargetIntervalMax, dynIntervalPre));
 
         if (++s_sinceRetarget < dynIntervalPre) {
-            // Zusätzlich: wenn Center innen ist, kleine Void-Bias auch ohne Retarget anwenden (rechts-präferent)
             if (isInsideCardioidOrBulb((double)currentOffset.x, (double)currentOffset.y)) {
                 float nX = 1.0f, nY = 0.0f; computeAntiVoidDriftNDC(currentOffset.x, currentOffset.y, nX, nY);
                 if (currentOffset.x < -0.30f && nX < 0.0f) nX = 0.0f;
                 if (nX < 0.0f) nX = std::fabs(nX) * 0.35f;
 
                 const float2 drifted = make_float2(
-                    previousOffset.x + nX * (kVOID_BIAS_NDC / std::max(1e-6f, zoom)),
-                    previousOffset.y + nY * (kVOID_BIAS_NDC / std::max(1e-6f, zoom))
+                    previousOffset.x + nX * (kVOID_BIAS_NDC * (float)invZoom),
+                    previousOffset.y + nY * (kVOID_BIAS_NDC * (float)invZoom)
                 );
                 out.newOffset  = drifted;
                 out.distance   = std::sqrt((drifted.x-previousOffset.x)*(drifted.x-previousOffset.x) +
@@ -362,17 +367,17 @@ ZoomResult evaluateZoomTarget(
             } else {
                 out.newOffset = previousOffset;
             }
-            out.shouldZoom = true;           // Zoom läuft, Richtung bleibt
+            out.shouldZoom = true;
             if (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[ZOOMV3] skip_retarget %d/%d (dyn-pre sPrev=%.3f)",
                                s_sinceRetarget, dynIntervalPre, sPrev);
             }
             return out;
         }
-        s_sinceRetarget = 0; // jetzt neu evaluieren
+        s_sinceRetarget = 0;
     }
 
-    // Konsistente Länge ableiten
+    // Konsistente Länge
     const int N = std::min<int>(totalTiles, std::min<int>((int)entropy.size(), (int)contrast.size()));
     if (N <= 0) {
         if (Settings::debugLogging) LUCHS_LOG_HOST("[ZOOMV3] empty metrics -> no zoom");
@@ -385,10 +390,10 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // NDC-Zentren cachen (Schneefuchs)
+    // NDC-Zentren cachen
     g_ndcCache.ensure(tilesX, tilesY, width, height);
 
-    // Robuste Statistik: nur alle kStatsEvery Frames oder wenn N wechselt (Schneefuchs)
+    // Statistik (robust, throttled)
     const bool statsNChanged = (g_statsN != N);
     const bool recomputeStats = statsNChanged || ((++g_statsTick % kStatsEvery) == 1);
     if (recomputeStats) {
@@ -410,7 +415,7 @@ ZoomResult evaluateZoomTarget(
     const float c_med = g_cMed;
     const float c_mad = (g_cMad > 1e-6f) ? g_cMad : 1.0f;
 
-    // 1. Pass: Scores & Summen
+    // 1. Pass: Scores
     g_bufS.resize(N);
     double sumS  = 0.0;
     double sumS2 = 0.0;
@@ -427,7 +432,6 @@ ZoomResult evaluateZoomTarget(
         sumS2 += (double)si * (double)si;
     }
 
-    // bestScore/bestIdx (seriell – billig)
     float bestScore = -1e9f;
     int   bestIdx   = -1;
     for (int i = 0; i < N; ++i) {
@@ -435,8 +439,6 @@ ZoomResult evaluateZoomTarget(
         if (si > bestScore) { bestScore = si; bestIdx = i; }
     }
 
-    // Signalstärke via Z-Score-Streuung
-    (void)bestIdx;
     const double meanS = sumS / std::max(1, N);
     const double varS  = std::max(0.0, (sumS2 / std::max(1, N)) - meanS * meanS);
     const double stdS  = std::sqrt(varS);
@@ -450,10 +452,9 @@ ZoomResult evaluateZoomTarget(
     // Softmax-Schwelle & Konstanten
     const float  sMax      = bestScore;
     const float  sCutScore = sMax + temp * kSOFTMAX_LOG_EPS;
-    const double invZoom   = 1.0 / (double)zoom;
     const float  invTempF  = 1.0f / std::max(1e-6f, temp);
 
-    // ── 2. Pass (FUSIONIERT): Softmax-Reduktion + bestAdj in EINER Schleife ─────────
+    // 2. Pass: Softmax-Reduktion + bestAdj
     double sumW = 0.0, numX = 0.0, numY = 0.0;
     int    interiorSkipped = 0;
     float  bestAdjScore = -1e9f;
@@ -465,13 +466,11 @@ ZoomResult evaluateZoomTarget(
         float  threadBestScore = -1e9f;
         int    threadBestIdx   = -1;
 
-        // Reduktionsklauseln für die Summen; bestAdj via thread-lokal + critical
 #pragma omp for reduction(+:sumW,numX,numY,interiorSkipped) schedule(static)
         for (int i = 0; i < N; ++i) {
             const float si = g_bufS[i];
             if (si < sCutScore) continue;
 
-            // Complex coords des Tile-Zentrums (Offset/Zoom)
             const double cx = (double)currentOffset.x + (double)g_ndcCache.ndcX[i] * invZoom;
             const double cy = (double)currentOffset.y + (double)g_ndcCache.ndcY[i] * invZoom;
 
@@ -513,23 +512,22 @@ ZoomResult evaluateZoomTarget(
     }
 #endif
 
-    // Ergebnis des fusionierten Passes konsumieren
     if (bestAdjIdx >= 0) {
         out.bestIndex    = bestAdjIdx;
         out.bestScore    = bestAdjScore;
         out.bestEntropy  = entropy[bestAdjIdx];
         out.bestContrast = contrast[bestAdjIdx];
     } else {
-        // Fallback: alles gefiltert -> initial best
         out.bestIndex    = bestIdx;
         out.bestScore    = bestScore;
         out.bestEntropy  = (bestIdx >= 0) ? entropy[bestIdx]  : 0.0f;
         out.bestContrast = (bestIdx >= 0) ? contrast[bestIdx] : 0.0f;
     }
 
-    // Update prevStdS (EMA) nach aktueller Messung für frühes Gating im nächsten Frame.
+    // prevStdS aktualisieren
     g_prevStdS = 0.85f * g_prevStdS + 0.15f * static_cast<float>(stdS);
 
+    // Bewegungsvektor (roh)
     double ndcX = 0.0, ndcY = 0.0;
     if (sumW > 0.0) {
         const double inv = 1.0 / sumW;
@@ -537,8 +535,8 @@ ZoomResult evaluateZoomTarget(
         ndcY = numY * inv;
     }
 
-    // Relative Hysterese + Lock auf Zielwechsel (vor Bewegung)
-    if (state.lastAcceptedIndex >= 0 && out.bestIndex >= 0 && out.bestIndex != state.lastAcceptedIndex) {
+    const bool indexChanged = (out.bestIndex != state.lastAcceptedIndex);
+    if (state.lastAcceptedIndex >= 0 && out.bestIndex >= 0 && indexChanged) {
         if (s_lockLeft > 0) {
             --s_lockLeft;
             out.bestIndex    = state.lastAcceptedIndex;
@@ -570,69 +568,114 @@ ZoomResult evaluateZoomTarget(
         }
     }
 
-    // ── Bewegungsvektor berechnen (proposed ohne Glättung) ──────────────────────────
     const float2 proposedOffset_raw = make_float2(
         currentOffset.x + (float)(ndcX * invZoom),
         currentOffset.y + (float)(ndcY * invZoom)
     );
     float mvx = proposedOffset_raw.x - previousOffset.x;
     float mvy = proposedOffset_raw.y - previousOffset.y;
-    const float rawDist = std::sqrt(mvx*mvx + mvy*mvy);
+    float rawDist = std::sqrt(mvx*mvx + mvy*mvy);
 
-    // ── NEU: Kleine Void-Bias auch NACH Retarget, falls Center aktuell innen ist (rechts-präferent)
+    // Void-Bias nach Retarget (rechts-präferent)
     if (isInsideCardioidOrBulb((double)currentOffset.x, (double)currentOffset.y)) {
         float nX = 1.0f, nY = 0.0f; computeAntiVoidDriftNDC(currentOffset.x, currentOffset.y, nX, nY);
         if (currentOffset.x < -0.30f && nX < 0.0f) nX = 0.0f;
         if (nX < 0.0f) nX = std::fabs(nX) * 0.35f;
 
-        mvx += nX * (kVOID_BIAS_NDC / std::max(1e-6f, zoom));
-        mvy += nY * (kVOID_BIAS_NDC / std::max(1e-6f, zoom));
+        mvx += nX * (kVOID_BIAS_NDC * (float)invZoom);
+        mvy += nY * (kVOID_BIAS_NDC * (float)invZoom);
+        rawDist = std::sqrt(mvx*mvx + mvy*mvy);
         if (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ZOOMV3][VOID-GUARD] center_inside -> add bias ndc=%.3f (nX=%.3f nY=%.3f)",
                            kVOID_BIAS_NDC, nX, nY);
         }
     }
 
-    // ── NEU: Richtungswechsel "smoother" via zeitstabilem Turn-Limiter + Längendämpfung. (Otter/Schneefuchs)
-    float sigFactor  = clampf((float)stdS / kTURN_SIG_REF, 0.0f, 1.0f);
-    float distFactor = clampf(rawDist / kTURN_DIST_REF,     0.0f, 1.0f);
-    const float omegaMin = kTURN_OMEGA_MIN;
-    const float omegaMax = kTURN_OMEGA_MAX;
-    const float omega    = omegaMin + (omegaMax - omegaMin) * std::max(sigFactor, distFactor);
-    float turnMaxRad     = omega * static_cast<float>(dt); // rad pro Frame
+    // Yaw-Limiter + Längendämpfung
+    float preAngForGate = 0.0f; bool havePreAng = false;
+    {
+        float tgtDirX = mvx, tgtDirY = mvy;
+        const bool hasMove = normalize2D(tgtDirX, tgtDirY);
+        if (hasMove) {
+            float dirX = g_prevDirX, dirY = g_prevDirY;
+            const float preDot = clampf(dirX*tgtDirX + dirY*tgtDirY, -1.0f, 1.0f);
+            const float preAng = std::acos(preDot);
+            havePreAng = true; preAngForGate = preAng;
 
-    if (!g_dirInit) {
-        // Erste Initialisierung: Richtung aus aktuellem Move ableiten.
-        g_prevDirX = (rawDist > 0.0f) ? (mvx / rawDist) : 1.0f;
-        g_prevDirY = (rawDist > 0.0f) ? (mvy / rawDist) : 0.0f;
-        g_dirInit  = true;
+            const float sigFactor  = clampf((float)stdS / kTURN_SIG_REF, 0.0f, 1.0f);
+            const float distFactor = clampf(rawDist   / kTURN_DIST_REF,  0.0f, 1.0f);
+            const float omega      = kTURN_OMEGA_MIN + (kTURN_OMEGA_MAX - kTURN_OMEGA_MIN) * std::max(sigFactor, distFactor);
+            const float turnMaxRad = omega * static_cast<float>(dt);
+
+            rotateTowardsLimited(dirX, dirY, tgtDirX, tgtDirY, turnMaxRad);
+
+            const float lenScale = 1.0f - smoothstepf(kTHETA_DAMP_LO, kTHETA_DAMP_HI, preAng);
+            const float newLen   = rawDist * lenScale;
+            mvx = dirX * newLen;
+            mvy = dirY * newLen;
+
+            g_prevDirX = dirX; g_prevDirY = dirY;
+            if (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ZOOMV3] turn(dt=%.3f) preAng=%.3f rad max=%.3f rad lenScale=%.3f dir=(%.3f,%.3f)",
+                               dt, preAng, turnMaxRad, lenScale, g_prevDirX, g_prevDirY);
+            }
+        } else if (!g_dirInit && rawDist > 0.0f) {
+            g_prevDirX = mvx / rawDist; g_prevDirY = mvy / rawDist; g_dirInit = true;
+        }
     }
 
-    // Zielrichtung = Richtung des aktuellen Bewegungsvektors (falls vorhanden)
-    float tgtDirX = mvx, tgtDirY = mvy;
-    const bool hasMove = normalize2D(tgtDirX, tgtDirY);
+    // Turn-Transition Gate (sanfter Ramp-Up)
+    {
+        const bool strongTurn = (havePreAng && preAngForGate > kTURN_GATE_TRIG);
+        bool triggerGate = (strongTurn || (indexChanged && hasSignal));
+        if (triggerGate && !g_turnGateActive) {
+            const float ang01 = havePreAng
+                              ? clampf((preAngForGate - kTURN_GATE_TRIG) / (kTHETA_DAMP_HI - kTURN_GATE_TRIG), 0.0f, 1.0f)
+                              : 1.0f;
+            float dur = kTURN_GATE_T_MIN + (kTURN_GATE_T_MAX - kTURN_GATE_T_MIN) * ang01;
+            const float sig01 = clampf((float)stdS / kTURN_SIG_REF, 0.0f, 1.0f);
+            dur *= (0.85f + (1.0f - sig01) * 0.30f);
+            g_turnGateActive = true;
+            g_turnGateT      = 0.0f;
+            g_turnGateDur    = dur;
+        }
 
-    // Bei sehr kleinem Bewegungsvektor vermeiden wir Sprünge; halten Richtung.
-    if (hasMove) {
-        float dirX = g_prevDirX, dirY = g_prevDirY;
+        if (g_turnGateActive) {
+            g_turnGateT += static_cast<float>(dt);
+            float u = (g_turnGateDur > 1e-6f) ? (g_turnGateT / g_turnGateDur) : 1.0f;
+            const float ramp = kTURN_GATE_START + (1.0f - kTURN_GATE_START) * sCurve01(u);
 
-        // Zielwinkel vor der Rotation (für Längendämpfung)
-        const float preDot = clampf(dirX*tgtDirX + dirY*tgtDirY, -1.0f, 1.0f);
-        const float preAng = std::acos(preDot);
+            const float stepCap = kSTEP_CAP_NDC * (float)invZoom;
+            const float curLen  = std::sqrt(mvx*mvx + mvy*mvy);
+            float targetLen     = curLen * ramp;
+            if (g_turnGateT <= 2.0f * (float)dt) targetLen = std::min(targetLen, stepCap);
 
-        rotateTowardsLimited(dirX, dirY, tgtDirX, tgtDirY, turnMaxRad);
+            if (curLen > 1e-12f) {
+                const float s = targetLen / curLen;
+                mvx *= s; mvy *= s;
+            }
 
-        // Länge dämpfen je nach Drehwinkel (S-Kurve) — nimmt die Härte aus Abbiegungen.
-        const float lenScale = 1.0f - smoothstepf(kTHETA_DAMP_LO, kTHETA_DAMP_HI, preAng);
+            if (u >= 1.0f) g_turnGateActive = false;
+        }
+    }
 
-        mvx = dirX * (rawDist * lenScale);
-        mvy = dirY * (rawDist * lenScale);
+    // Acceleration Limiter (zoomskaliert)
+    {
+        const float curLen = std::sqrt(mvx*mvx + mvy*mvy);
+        const float desiredV = (dt > 1e-6) ? (curLen / (float)dt) : 0.0f;
+        const float accMax   = kACC_BASE * (float)invZoom;
+        const float dvMax    = accMax * (float)dt;
 
-        g_prevDirX = dirX; g_prevDirY = dirY;
+        if (!std::isfinite(g_speed)) g_speed = 0.0f;
+        float dv = desiredV - g_speed;
+        if (dv >  dvMax) dv =  dvMax;
+        if (dv < -dvMax) dv = -dvMax;
+        g_speed += dv;
+        const float newLen = g_speed * (float)dt;
 
-        if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOMV3] turn(dt=%.3f) preAng=%.3f rad max=%.3f rad lenScale=%.3f dir=(%.3f,%.3f) tgt=(%.3f,%.3f)",
-                           dt, preAng, turnMaxRad, lenScale, g_prevDirX, g_prevDirY, tgtDirX, tgtDirY);
+        if (curLen > 1e-12f) {
+            const float s = (newLen > 0.0f) ? (newLen / curLen) : 0.0f;
+            mvx *= s; mvy *= s;
         }
     }
 
@@ -645,9 +688,9 @@ ZoomResult evaluateZoomTarget(
     const float dy = proposedOffset.y - previousOffset.y;
     const float dist = std::sqrt(dx*dx + dy*dy);
 
-    // Bewegung glätten (EMA, dt-basiert; τ abhängig von Distanz)
+    // EMA-Glättung (dt-basiert, τ abhängig von Distanz)
     const float distNorm = clampf(dist / 0.5f, 0.0f, 1.0f);
-    const float tau = kEMA_TAU_MAX + (kEMA_TAU_MIN - kEMA_TAU_MAX) * distNorm; // lerp
+    const float tau = kEMA_TAU_MAX + (kEMA_TAU_MIN - kEMA_TAU_MAX) * distNorm;
     float emaAlpha = 1.0f - std::exp(-static_cast<float>(dt) / std::max(1e-5f, tau));
     emaAlpha = clampf(emaAlpha, kEMA_ALPHA_MIN, kEMA_ALPHA_MAX);
     if (Settings::ForceAlwaysZoom && !hasSignal) {
@@ -664,9 +707,9 @@ ZoomResult evaluateZoomTarget(
     out.newOffset  = (hasSignal || Settings::ForceAlwaysZoom) ? smoothed : previousOffset;
     out.shouldZoom = (hasSignal || Settings::ForceAlwaysZoom);
 
-    // Kompatibilitäts-State
-    const bool indexChanged = (out.bestIndex != state.lastAcceptedIndex);
-    out.isNewTarget = indexChanged && hasSignal;
+    // State-Update
+    const bool indexChangedFinal = (out.bestIndex != state.lastAcceptedIndex);
+    out.isNewTarget = indexChangedFinal && hasSignal;
     if (hasSignal && out.bestIndex >= 0) {
         const bool first = (state.lastAcceptedIndex < 0);
         state.lastAcceptedIndex = out.bestIndex;
@@ -691,11 +734,9 @@ ZoomResult evaluateZoomTarget(
             (float)stdS, temp, hasSignal ? 1 : 0
         );
         LUCHS_LOG_HOST(
-            "[ZOOMV3] move: dist=%.4f emaAlpha=%.3f ndc=(%.4f,%.4f) offRaw=(%.5f,%.5f) newOff=(%.5f,%.5f) tiles=(%d,%d) ms=%.3f",
-            dist, emaAlpha, (float)ndcX, (float)ndcY,
-            proposedOffset_raw.x, proposedOffset_raw.y,
-            out.newOffset.x, out.newOffset.y,
-            tilesX, tilesY, ms
+            "[ZOOMV3] move: dist=%.4f emaAlpha=%.3f gate=%d gateT=%.3f/%.3f vel=%.4f ms=%.3f off=(%.5f,%.5f)",
+            dist, emaAlpha, g_turnGateActive ? 1 : 0, g_turnGateT, g_turnGateDur, g_speed, ms,
+            out.newOffset.x, out.newOffset.y
         );
         if (interiorSkipped > 0) {
             LUCHS_LOG_HOST("[ZOOMV3] interior_skip=%d/%d (cardioid/2-bulb hard filter)", interiorSkipped, N);
