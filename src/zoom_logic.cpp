@@ -70,7 +70,7 @@ static constexpr float kTHETA_DAMP_LO  = 0.35f; // rad (~20°) Beginn der Dämpf
 static constexpr float kTHETA_DAMP_HI  = 1.20f; // rad (~69°) volle Dämpfung
 
 // ── NEU: Anti-Black-Guard (Warm-up/Niedrigsignal) ----------------------------------------------
-static constexpr float kWARMUP_DRIFT_NDC = 0.10f; // NDC-Schritt im Warm-up, weg von Innenbereichen
+static constexpr float kWARMUP_DRIFT_NDC = 0.03f; // NDC-Schritt im Warm-up, weg von Innenbereichen
 static constexpr float kVOID_BIAS_NDC    = 0.06f; // NDC-Anteil, der vom Cardioid-Zentrum wegdrückt
 
 // --- robuste Statistik (Median/MAD) ---
