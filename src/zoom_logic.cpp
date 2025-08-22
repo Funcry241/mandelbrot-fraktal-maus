@@ -43,7 +43,7 @@ static constexpr float kMIN_DISTANCE  = 0.02f; // ~NDC/Zoom-Skala
 static constexpr float kFORCE_MIN_DRIFT_ALPHA = 0.05f;
 
 // NEU: Warm-up-Zeit (Sekunden), in der KEIN Richtungswechsel erfolgt. (Bezug zu Otter)
-static constexpr double kNO_TURN_WARMUP_SEC = 0.3;
+static constexpr double kNO_TURN_WARMUP_SEC = 1.0;
 
 // NEU: Softmax-Sparsification – ignoriere Beiträge mit sehr kleiner Gewichtung. (Bezug zu Schneefuchs)
 static constexpr float kSOFTMAX_LOG_EPS = -7.0f;
@@ -70,8 +70,9 @@ static constexpr float kTHETA_DAMP_LO  = 0.35f; // rad (~20°) Beginn der Dämpf
 static constexpr float kTHETA_DAMP_HI  = 1.20f; // rad (~69°) volle Dämpfung
 
 // ── NEU: Anti-Black-Guard (Warm-up/Niedrigsignal) ----------------------------------------------
-static constexpr float kWARMUP_DRIFT_NDC = 0.001f; // NDC-Schritt im Warm-up, weg von Innenbereichen
-static constexpr float kVOID_BIAS_NDC    = 0.02f; // NDC-Anteil, der vom Cardioid-Zentrum wegdrückt
+// (kürzere Schritte & zarter Bias; ursprüngliche 0.10/0.06 haben anfangs spürbar nach links gezogen)
+static constexpr float kWARMUP_DRIFT_NDC = 0.030f; // NDC-Schritt im Warm-up
+static constexpr float kVOID_BIAS_NDC    = 0.020f; // zarter Bias weg von Cardioid/2er-Bulb
 
 // --- robuste Statistik (Median/MAD) ---
 static inline float median_inplace(std::vector<float>& v) {
@@ -296,21 +297,36 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // ── Anti-Black Warm-up: Falls Center innen → Drift weg vom Innenbereich statt blind zu zoomen.
+    // ── Anti-Black Warm-up: Falls Center innen → eingeschränkter Drift, rechts-präferent, mini-EMA.
     if (freezeDirection) {
         if (isInsideCardioidOrBulb((double)currentOffset.x, (double)currentOffset.y)) {
-            float nX = 1.0f, nY = 0.0f; computeAntiVoidDriftNDC(currentOffset.x, currentOffset.y, nX, nY);
-            const float2 drifted = make_float2(
-                previousOffset.x + nX * (kWARMUP_DRIFT_NDC / std::max(1e-6f, zoom)),
-                previousOffset.y + nY * (kWARMUP_DRIFT_NDC / std::max(1e-6f, zoom))
+            float nX = 1.0f, nY = 0.0f;
+            computeAntiVoidDriftNDC(currentOffset.x, currentOffset.y, nX, nY);
+
+            // Rechts-Priorität während Warm-up (keine initiale Linksflucht)
+            if (currentOffset.x < -0.30f && nX < 0.0f) nX = 0.0f;      // harten Links-Push unterbinden
+            if (nX < 0.0f) nX = std::fabs(nX) * 0.35f;                 // Rest dämpfen/spiegeln leicht
+
+            const float invZ = 1.0f / std::max(1e-6f, zoom);
+            const float2 target = make_float2(
+                previousOffset.x + nX * (kWARMUP_DRIFT_NDC * invZ),
+                previousOffset.y + nY * (kWARMUP_DRIFT_NDC * invZ)
             );
-            out.newOffset  = drifted;
-            out.distance   = std::sqrt((drifted.x-previousOffset.x)*(drifted.x-previousOffset.x) +
-                                       (drifted.y-previousOffset.y)*(drifted.y-previousOffset.y));
+
+            // Mini-EMA im Warm-up (sprunghartes „Zacken“ vermeiden)
+            const float alphaWarm = 0.20f;
+            out.newOffset = make_float2(
+                previousOffset.x * (1.0f - alphaWarm) + target.x * alphaWarm,
+                previousOffset.y * (1.0f - alphaWarm) + target.y * alphaWarm
+            );
+
+            out.distance   = std::sqrt((out.newOffset.x-previousOffset.x)*(out.newOffset.x-previousOffset.x) +
+                                       (out.newOffset.y-previousOffset.y)*(out.newOffset.y-previousOffset.y));
             out.shouldZoom = true;
+
             if (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ZOOMV3][WARMUP][VOID-GUARD] center_inside -> drift NDC=%.3f (off=(%.5f,%.5f))",
-                               kWARMUP_DRIFT_NDC, drifted.x, drifted.y);
+                LUCHS_LOG_HOST("[ZOOMV3][WARMUP][VOID-GUARD] cx=%.4f nX=%.3f nY=%.3f -> off=(%.5f,%.5f)",
+                               currentOffset.x, nX, nY, out.newOffset.x, out.newOffset.y);
             }
         } else {
             out.shouldZoom = true; // normal warm-up, Richtung bleibt
@@ -330,9 +346,12 @@ ZoomResult evaluateZoomTarget(
         dynIntervalPre = std::max(kRetargetIntervalMin, std::min(kRetargetIntervalMax, dynIntervalPre));
 
         if (++s_sinceRetarget < dynIntervalPre) {
-            // Zusätzlich: wenn Center innen ist, kleine Void-Bias auch ohne Retarget anwenden
+            // Zusätzlich: wenn Center innen ist, kleine Void-Bias auch ohne Retarget anwenden (rechts-präferent)
             if (isInsideCardioidOrBulb((double)currentOffset.x, (double)currentOffset.y)) {
                 float nX = 1.0f, nY = 0.0f; computeAntiVoidDriftNDC(currentOffset.x, currentOffset.y, nX, nY);
+                if (currentOffset.x < -0.30f && nX < 0.0f) nX = 0.0f;
+                if (nX < 0.0f) nX = std::fabs(nX) * 0.35f;
+
                 const float2 drifted = make_float2(
                     previousOffset.x + nX * (kVOID_BIAS_NDC / std::max(1e-6f, zoom)),
                     previousOffset.y + nY * (kVOID_BIAS_NDC / std::max(1e-6f, zoom))
@@ -560,13 +579,17 @@ ZoomResult evaluateZoomTarget(
     float mvy = proposedOffset_raw.y - previousOffset.y;
     const float rawDist = std::sqrt(mvx*mvx + mvy*mvy);
 
-    // ── NEU: Kleine Void-Bias auch NACH Retarget, falls Center aktuell innen ist
+    // ── NEU: Kleine Void-Bias auch NACH Retarget, falls Center aktuell innen ist (rechts-präferent)
     if (isInsideCardioidOrBulb((double)currentOffset.x, (double)currentOffset.y)) {
         float nX = 1.0f, nY = 0.0f; computeAntiVoidDriftNDC(currentOffset.x, currentOffset.y, nX, nY);
+        if (currentOffset.x < -0.30f && nX < 0.0f) nX = 0.0f;
+        if (nX < 0.0f) nX = std::fabs(nX) * 0.35f;
+
         mvx += nX * (kVOID_BIAS_NDC / std::max(1e-6f, zoom));
         mvy += nY * (kVOID_BIAS_NDC / std::max(1e-6f, zoom));
         if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOMV3][VOID-GUARD] center_inside -> add bias ndc=%.3f", kVOID_BIAS_NDC);
+            LUCHS_LOG_HOST("[ZOOMV3][VOID-GUARD] center_inside -> add bias ndc=%.3f (nX=%.3f nY=%.3f)",
+                           kVOID_BIAS_NDC, nX, nY);
         }
     }
 
