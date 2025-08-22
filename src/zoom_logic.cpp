@@ -43,7 +43,7 @@ static constexpr float kMIN_DISTANCE  = 0.02f; // ~NDC/Zoom-Skala
 static constexpr float kFORCE_MIN_DRIFT_ALPHA = 0.05f;
 
 // NEU: Warm-up-Zeit (Sekunden), in der KEIN Richtungswechsel erfolgt. (Bezug zu Otter)
-static constexpr double kNO_TURN_WARMUP_SEC = 1.0;
+static constexpr double kNO_TURN_WARMUP_SEC = 0.3;
 
 // NEU: Softmax-Sparsification – ignoriere Beiträge mit sehr kleiner Gewichtung. (Bezug zu Schneefuchs)
 static constexpr float kSOFTMAX_LOG_EPS = -7.0f;

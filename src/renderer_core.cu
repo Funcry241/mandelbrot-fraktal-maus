@@ -1,4 +1,3 @@
-// MAUS:
 // Datei: src/renderer_core.cu
 // 🐭 Maus-Kommentar: Alpha 80 – Kontextfix & klare Zuständigkeiten. Keine Zoom-Logik mehr hier.
 // 🦦 Otter: Renderer steuert nur Fenster/GL; Zoom/Analyse liegen in der Pipeline/Loop. (Bezug zu Otter)
@@ -13,7 +12,6 @@
 #include "common.hpp"
 #include "settings.hpp"
 #include "cuda_interop.hpp"
-// #include "zoom_logic.hpp"      // Schneefuchs: Zoom-Entscheidung liegt nicht mehr hier
 #include "heatmap_overlay.hpp"
 #include "warzenschwein_overlay.hpp"
 #include "luchs_log_host.hpp"
