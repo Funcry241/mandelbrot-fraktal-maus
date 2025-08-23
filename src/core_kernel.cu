@@ -1,10 +1,10 @@
 // core_kernel.cu — 2-pass Mandelbrot (Warmup + Sliced Survivor Finish)
 // Features:
-// - Metric AA via distance estimator (no supersampling, no higher precision).
-// - Consolidated post-fx: hue rotation, edge glow, orbit tint, green hotspot pulses.
-// - Hotspot gate now also by angle-crest detector (gives actual bright dots).
-// - Fast pass-1 periodicity, adaptive slice sizing, frame-budget pacing.
-// ASCII-only comments/strings.
+// - Metric AA via distance estimator (no supersampling).
+// - Consolidated post-fx: hue rotation, edge glow, orbit tint.
+// - Wavy green hotspot ripples: circular, screen-space, soft, animated.
+// - Angle-crest + orbit-trap gating; budget-aware sliced finish.
+// All comments/strings ASCII-only.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -58,26 +58,43 @@ constexpr float DROP_LOWER_ACCEL    = 0.005f;
 constexpr float DEEP_EPS2           = 1e-10f;
 constexpr int   DEEP_REQ_HITS       = 3;
 
+constexpr float PI2 = 6.28318530717958647692f;
+
 // --------------------------- device constants --------------------------------
 struct EffectsParams {
-    // AA scale
-    float aaK;                 // DE coverage scale (e.g. 2.0)
+    // AA scale (coverage from DE)
+    float aaK;
+
     // hue rotation
     float huePhase;            // radians
+
     // edge glow
     float glowAmount;          // 0..1
+
     // orbit tint
     float orbitK;              // exp(-k * sqrt(minR2))
     float tintMix;             // 0..1
     float3 tint;               // RGB 0..1
+
     // angle-crest detector
     float crestF;              // frequency for cos(F * angle)
     float crestSharp;          // exponent to sharpen peaks
-    // green hotspot pulses
+
+    // green hotspot pulses (intensity base/gating)
     float hotspotStrength;     // intensity
     float hotspotRate;         // pulses per unit phase
     float hotspotTau;          // decay in phase units
     float3 hotColor;           // RGB 0..1
+
+    // screen-space sprite layout
+    float dotCellPx;           // grid cell size in pixels
+    float dotRadiusPx;         // reference radius in pixels
+
+    // wave-ring controls (radial ripples)
+    float waveLambdaPx;        // wavelength in pixels
+    float waveWidthPx;         // gaussian envelope sigma (px)
+    float waveSpeed;           // phase speed multiplier
+    float waveGain;            // extra gain for the ring crest
 };
 __device__ __constant__ EffectsParams d_fx;
 
@@ -157,14 +174,57 @@ __device__ __forceinline__ float coverage_from_de(float r2, float dx, float dy, 
 __device__ __forceinline__ float crest_weight(float zx, float zy) {
     float ang = atan2f(zy, zx);              // -pi..pi
     float v   = 0.5f * (cosf(d_fx.crestF * ang) + 1.0f); // 0..1
-    // sharpen peaks
     return powf(clamp01(v), fmaxf(1.0f, d_fx.crestSharp));
 }
 
-// consolidated post-fx
+// wavy circular sprite (radial ripple), deterministic per cell; returns 0..1
+__device__ __forceinline__ float dot_mask_wave_screen(
+    int xPix, int yPix, int w, int h,
+    float cellPx, float radiusPx,
+    float lambdaPx, float sigmaPx, float speed, float phase)
+{
+    // cell indices
+    float gx = float(xPix) / fmaxf(cellPx, 1.0f);
+    float gy = float(yPix) / fmaxf(cellPx, 1.0f);
+    int ix = int(floorf(gx));
+    int iy = int(floorf(gy));
+
+    // jittered center inside cell (stable)
+    float jx = hash2(float(ix), float(iy)) - 0.5f; // [-0.5, 0.5)
+    float jy = hash2(float(iy), float(ix)) - 0.5f;
+    float cx = (float(ix) + 0.5f + 0.35f * jx) * cellPx;
+    float cy = (float(iy) + 0.5f + 0.35f * jy) * cellPx;
+
+    // pixel center
+    float px = float(xPix) + 0.5f;
+    float py = float(yPix) + 0.5f;
+
+    float dx = px - cx;
+    float dy = py - cy;
+    float d  = sqrtf(dx*dx + dy*dy);
+
+    // gaussian envelope around radiusPx (soft window)
+    float sig = fmaxf(0.5f, sigmaPx);
+    float g   = __expf(-((d - radiusPx)*(d - radiusPx)) / (2.0f * sig * sig));
+
+    // radial sine wave centered at radiusPx
+    float k   = PI2 / fmaxf(1.0f, lambdaPx);
+    // slight per-cell phase offset for dephasing
+    float phiJ = PI2 * hash2(float(ix)*3.1f, float(iy)*7.7f);
+    float arg  = k * (d - radiusPx) - speed * phase + phiJ;
+
+    float wave = 0.5f * (cosf(arg) + 1.0f); // 0..1
+    // sharpen crest
+    wave = powf(wave, 3.0f);
+
+    return clamp01(g * wave);
+}
+
+// consolidated post-fx with wavy dots
 __device__ __forceinline__ float3 apply_post_fx(
     float3 base, float coverage, float trapMinR2,
-    float cr, float ci, float zx, float zy, float phase01)
+    float cr, float ci, float zx, float zy, float phase01,
+    int xPix, int yPix, int w, int h)
 {
     // edge weight: 0 in interior, 1 near thin edge
     float edgeW = 1.0f - clamp01(coverage);
@@ -189,16 +249,24 @@ __device__ __forceinline__ float3 apply_post_fx(
         base.z = (1.0f - m) * base.z + m * d_fx.tint.z;
     }
 
-    // green hotspot pulses: gate by either orbit proximity OR angle crest
+    // hotspot gate: either orbit proximity OR angle crest
+    float crestW = crest_weight(zx, zy);
+    float gate   = fmaxf(trapW, crestW);
+
+    // pulsation envelope (phase01 in 0..1)
+    float s   = fractf(phase01 * d_fx.hotspotRate + hash2(cr, ci));
+    float env = __expf(-s / fmaxf(1e-3f, d_fx.hotspotTau));
+
+    // wavy circular sprite in screen space
+    float dotM = dot_mask_wave_screen(
+        xPix, yPix, w, h,
+        d_fx.dotCellPx, d_fx.dotRadiusPx,
+        d_fx.waveLambdaPx, d_fx.waveWidthPx,
+        d_fx.waveSpeed, phase01 * PI2);
+
+    // final hotspot (additive with gain, modulated by gates)
     if (d_fx.hotspotStrength > 1e-6f) {
-        float crestW = crest_weight(zx, zy);
-        float gate   = fmaxf(trapW, crestW);
-
-        float s   = fractf(phase01 * d_fx.hotspotRate + hash2(cr, ci));
-        float env = __expf(-s / fmaxf(1e-3f, d_fx.hotspotTau));
-
-        float hot = d_fx.hotspotStrength * gate * edgeW * env;
-
+        float hot = d_fx.hotspotStrength * d_fx.waveGain * gate * edgeW * env * dotM;
         base.x = fminf(1.0f, base.x + hot * d_fx.hotColor.x);
         base.y = fminf(1.0f, base.y + hot * d_fx.hotColor.y);
         base.z = fminf(1.0f, base.z + hot * d_fx.hotColor.z);
@@ -403,7 +471,7 @@ void mandelbrotPass1Warmup(
     if (escaped) {
         float cov = coverage_from_de(r2, dx, dy, pixR);
         float3 col = otter::shade(itWarm, maxIter, zx, zy, kPalette, kStripeF, kStripeAmp, kGamma);
-        col = apply_post_fx(col, cov, trapMinR2, c.x, c.y, zx, zy, phase01);
+        col = apply_post_fx(col, cov, trapMinR2, c.x, c.y, zx, zy, phase01, xPix, yPix, w, h);
 
         out[idx] = make_uchar4(
             (unsigned char)(255.0f * fminf(fmaxf(col.x, 0.0f), 1.0f)),
@@ -446,7 +514,8 @@ void mandelbrotPass2Slice(
     uchar4* __restrict__ out, int* __restrict__ iterOut,
     const Survivor* __restrict__ survIn, int survInCount,
     Survivor* __restrict__ survOut, int* __restrict__ survOutCount,
-    int maxIter, int sliceIt, float pixR)
+    int maxIter, int sliceIt, float pixR,
+    int w, int h) // pass w,h to reconstruct pixel coords
 {
     const int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= survInCount) return;
@@ -464,10 +533,14 @@ void mandelbrotPass2Slice(
 
     float phase01 = fractf(d_fx.huePhase * (0.5f / CUDART_PI_F) + 0.5f);
 
+    // reconstruct pixel coords from linear index
+    int xPix = s.idx % w;
+    int yPix = s.idx / w;
+
     if (r.escaped) {
         float cov = coverage_from_de(r.x*r.x + r.y*r.y, r.dx, r.dy, pixR);
         float3 col = otter::shade(r.it, maxIter, r.x, r.y, kPalette, kStripeF, kStripeAmp, kGamma);
-        col = apply_post_fx(col, cov, r.trapMinR2, s.cr, s.ci, r.x, r.y, phase01);
+        col = apply_post_fx(col, cov, r.trapMinR2, s.cr, s.ci, r.x, r.y, phase01, xPix, yPix, w, h);
 
         out[s.idx] = make_uchar4(
             (unsigned char)(255.0f * fminf(fmaxf(col.x, 0.0f), 1.0f)),
@@ -672,12 +745,18 @@ void launch_mandelbrotHybrid(
     fx.orbitK          = 6.0f;
     fx.tintMix         = 0.25f;
     fx.tint            = make_float3(0.62f, 0.40f, 0.95f);   // soft violet
-    fx.crestF          = 9.0f;   // number of bright dots around lobes
-    fx.crestSharp      = 4.0f;   // sharpness of dots
-    fx.hotspotStrength = 0.55f;  // stronger by default
+    fx.crestF          = 9.0f;   // number of bright crests around lobes
+    fx.crestSharp      = 4.0f;   // sharpness of crests
+    fx.hotspotStrength = 0.55f;  // hotspot intensity
     fx.hotspotRate     = 1.2f;
     fx.hotspotTau      = 0.35f;
     fx.hotColor        = make_float3(0.05f, 1.0f, 0.10f);    // green
+    fx.dotCellPx       = 12.0f;  // cell size in pixels
+    fx.dotRadiusPx     = 5.0f;   // radius where the ring sits
+    fx.waveLambdaPx    = 5.0f;   // distance between ripple crests
+    fx.waveWidthPx     = 8.0f;   // gaussian sigma around radius
+    fx.waveSpeed       = 1.25f;  // ripple motion speed
+    fx.waveGain        = 1.0f;   // extra crest gain
     cudaMemcpyToSymbol(d_fx, &fx, sizeof(EffectsParams), 0, cudaMemcpyHostToDevice);
 
     // pixel footprint radius in c-plane (half pixel diagonal)
@@ -760,7 +839,7 @@ void launch_mandelbrotHybrid(
         int blocks = (h_cur + threads - 1) / threads;
 
         mandelbrotPass2Slice<<<blocks, threads>>>(
-            out, d_it, curBuf, h_cur, nxtBuf, nxtCnt, maxIter, sliceIt, pixR);
+            out, d_it, curBuf, h_cur, nxtBuf, nxtCnt, maxIter, sliceIt, pixR, w, h);
 
         int h_next = 0;
         cudaMemcpy(&h_next, nxtCnt, sizeof(int), cudaMemcpyDeviceToHost);
