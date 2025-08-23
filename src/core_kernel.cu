@@ -1,8 +1,6 @@
-///// MAUS: Fast P1 periodicity + adaptive slice sizing + frame-budget pacing (Otter/Schneefuchs) — ASCII logs only
+///// MAUS: Fast P1 periodicity + adaptive slice sizing + frame-budget pacing (Otter/Schneefuchs) — ASCII-only
 // core_kernel.cu — 2-Pass Mandelbrot (Warmup + Sliced Survivor Finish)
-// 🐭 Maus: Kern schlank; deterministische ASCII-Logs.
-// 🦦 Otter: Smooth Coloring, adaptive Warmup & Slice-Größe, zeitstabile Pacing-Logik (log-unabhängig).
-// 🦊 Schneefuchs: Warp-synchron, CHUNKed, Periodizitätsprobe in Pass 1/2, reduzierte Divergenz.
+// + Metric AA (DE-based): |dz/dc|-Distance-Estimator smooths edges without supersampling / higher precision.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -20,52 +18,55 @@
 
 // ---------- Tuning -----------------------------------------------------------
 namespace {
-    // Größerer CHUNK → weniger Ballots, gleiche Bildqualität.
-    constexpr int   WARP_CHUNK        = 64;     // vorher 32
+    // Larger CHUNK -> fewer ballots, same image quality.
+    constexpr int   WARP_CHUNK        = 64;     // was 32
     static_assert((WARP_CHUNK % 32) == 0, "WARP_CHUNK must be a multiple of 32 (warp size)");
 
-    // Periodizitätsprobe (Pass 2 – Finish)
-    constexpr int   LOOP_CHECK_EVERY  = 16;     // vorher 32
-    constexpr float LOOP_EPS2         = 1e-6f;  // vorher 5e-8
-    constexpr int   LOOP_REQ_HITS     = 1;      // vorher ~2
+    // Periodicity check (Pass 2 - Finish)
+    constexpr int   LOOP_CHECK_EVERY  = 16;     // was 32
+    constexpr float LOOP_EPS2         = 1e-6f;  // was 5e-8
+    constexpr int   LOOP_REQ_HITS     = 1;      // was ~2
 
-    // 🦦 Otter FAST-Preset: Pass-1 Periodizität schärfen
-    constexpr int   P1_LOOP_EVERY     = 48;     // vorher 64 (dichter prüfen)
-    constexpr float P1_LOOP_EPS2      = 2e-7f;  // vorher 1e-7 (toleranter)
-    constexpr int   P1_LOOP_REQ_HITS  = 1;      // vorher 2  (schneller akzeptieren)
+    // Otter FAST-preset: sharpen Pass-1 periodicity
+    constexpr int   P1_LOOP_EVERY     = 48;     // was 64 (denser)
+    constexpr float P1_LOOP_EPS2      = 2e-7f;  // was 1e-7 (more tolerant)
+    constexpr int   P1_LOOP_REQ_HITS  = 1;      // was 2  (faster accept)
 
-    // Basis-Warmup; kann via __constant__ adaptiv angehoben werden
+    // Base warmup; can be raised via __constant__ adaptively
     constexpr int   WARMUP_IT_BASE    = 1024;
 
-    // Slice-Steps in Pass 2 (Startwert)
+    // Slice steps in Pass 2 (start)
     constexpr int   FINISH_SLICE_IT   = 1024;
-    constexpr int   MAX_SLICES        = 64;     // Sicherheitskappung
+    constexpr int   MAX_SLICES        = 64;     // safety cap
 
-    // Otter: Paletten-/Shading-Defaults
+    // Otter: palette / shading defaults
     constexpr otter::Palette kPalette   = otter::Palette::Glacier; // Aurora/Glacier/Ember
     constexpr float          kStripeF   = 3.0f;
     constexpr float          kStripeAmp = 0.10f;
 
-    // Gamma: Fallback unabhängig von Settings::EnableSRGB (in älteren Branches nicht vorhanden)
+    // Gamma: fallback independent from Settings::EnableSRGB (older branches may not have SRGB FBO)
     #if defined(OTTER_FRAMEBUFFER_SRGB) && (OTTER_FRAMEBUFFER_SRGB)
-        constexpr float      kGamma     = 1.0f;   // FBO konvertiert → kein zusätzliches Gamma im Shader
+        constexpr float      kGamma     = 1.0f;   // FBO converts -> no extra gamma here
     #else
-        constexpr float      kGamma     = 2.2f;   // lineare RGBA8-Pipeline
+        constexpr float      kGamma     = 2.2f;   // linear RGBA8 pipeline
     #endif
 
-    // Frame-Budget-Pacing (Host-seitig, *log-unabhängig*; keine Events nötig)
-    constexpr double FRAME_BUDGET_FALLBACK_MS = 16.6667;            // falls kein Cap aktiv
-    constexpr double KERNEL_BUDGET_FRACTION   = 0.62;               // Anteil für Mandelbrot-Pfad
-    constexpr double MIN_BUDGET_MS            = 6.0;                // harte Untergrenze
+    // Frame-budget pacing (host side, log-independent; no events required)
+    constexpr double FRAME_BUDGET_FALLBACK_MS = 16.6667; // if no FPS cap
+    constexpr double KERNEL_BUDGET_FRACTION   = 0.62;    // share for fractal path
+    constexpr double MIN_BUDGET_MS            = 6.0;     // hard lower bound
 
-    // Slice-Adaption (EMA über Drop-Quote)
-    constexpr float DROP_EMA_ALPHA            = 0.25f;              // Reaktion auf Änderungen
-    constexpr float DROP_UPPER_BACKOFF        = 0.30f;              // >30%: Slice halbieren
-    constexpr float DROP_LOWER_ACCEL          = 0.005f;             // <0.5%: Slice verdoppeln
+    // Slice adaptation (EMA over survivor-drop ratio)
+    constexpr float DROP_EMA_ALPHA            = 0.25f;   // reaction speed
+    constexpr float DROP_UPPER_BACKOFF        = 0.30f;   // >30%: halve slice
+    constexpr float DROP_LOWER_ACCEL          = 0.005f;  // <0.5%: double slice
 
-    // "Deep close" Innen-Detektion (zusätzlich zur normalen Periodizitätsprobe)
-    constexpr float DEEP_EPS2                 = 1e-10f;             // sehr nahe Wiederkehr
-    constexpr int   DEEP_REQ_HITS             = 3;                  // mehrere Treffer nötig
+    // "Deep close" interior detection (in addition to normal periodicity check)
+    constexpr float DEEP_EPS2                 = 1e-10f;  // very close return
+    constexpr int   DEEP_REQ_HITS             = 3;       // require multiple hits
+
+    // Metric-AA strength (bigger = softer edge, smaller = sharper)
+    constexpr float AA_K                      = 2.0f;    // 1.5 .. 3.0 recommended
 }
 
 // ---------- Adaptive Warmup (device constant) --------------------------------
@@ -91,16 +92,23 @@ __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
     return false;
 }
 
+__device__ __forceinline__ float smooth01(float x) {
+    x = fminf(fmaxf(x, 0.0f), 1.0f);
+    return x * x * (3.0f - 2.0f * x);
+}
+
 // ---------- Iteration (CHUNKed) ---------------------------------------------
-// Pass 1: Warmup MIT leichter Periodizitätsprobe
+// Pass 1: Warmup WITH light periodicity test + dz/dc accumulation
 __device__ __forceinline__ int iterate_warmup_noLoop(
-    float cr, float ci, int maxSteps, float& x, float& y, bool& interiorFlag)
+    float cr, float ci, int maxSteps,
+    float& x, float& y, bool& interiorFlag,
+    float& dx, float& dy) // dz/dc
 {
-    x = 0.0f; y = 0.0f;
+    x = 0.0f; y = 0.0f; dx = 0.0f; dy = 0.0f;
     int it = 0;
     interiorFlag = false;
 
-    float px = x, py = y; // Referenz für P1-Loop-Check
+    float px = x, py = y; // reference for P1 loop check
     int   pc = 0;
     int   close_hits = 0;
 
@@ -120,14 +128,20 @@ __device__ __forceinline__ int iterate_warmup_noLoop(
             float yy = y * y;
             if (xx + yy > 4.0f) { active = false; ++pc; continue; }
 
+            // dz/dc <- 2*z*dz/dc + 1
+            float ndx = 2.0f * (x * dx - y * dy) + 1.0f;
+            float ndy = 2.0f * (x * dy + y * dx);
+
             float xt = fmaf(x, x, -yy) + cr;   // x^2 - y^2 + cr
             y = fmaf(2.0f * x, y, ci);         // 2*x*y + ci
             x = xt;
+            dx = ndx; dy = ndy;
+
             ++it; ++pc;
 
             if (pc >= P1_LOOP_EVERY) {
-                float dx = x - px, dy = y - py;
-                float d2 = dx*dx + dy*dy;
+                float ex = x - px, ey = y - py;
+                float d2 = ex*ex + ey*ey;
                 if (d2 < P1_LOOP_EPS2) {
                     if (++close_hits >= P1_LOOP_REQ_HITS) {
                         active        = false;
@@ -149,17 +163,18 @@ __device__ __forceinline__ int iterate_warmup_noLoop(
 }
 
 // ---------- Survivor-Payload -------------------------------------------------
-struct Survivor { float x, y, cr, ci; int it, idx; };
+struct Survivor { float x, y, dx, dy, cr, ci; int it, idx; };
 
 // ---------- Pass-2 Slice Iteration ------------------------------------------
-struct SliceResult { int it; float x, y; bool escaped; bool interior; };
+struct SliceResult { int it; float x, y, dx, dy; bool escaped; bool interior; float de; };
 
 __device__ __forceinline__ SliceResult iterate_finish_slice(
     float cr, float ci, int start_it, int maxIter,
-    float x, float y, int sliceSteps)
+    float x, float y, float dx, float dy,
+    int sliceSteps)
 {
     if (insideMainCardioidOrBulb(cr, ci)) {
-        return { maxIter, x, y, false, true };
+        return { maxIter, x, y, dx, dy, false, true, 0.0f };
     }
 
     int it = start_it;
@@ -171,6 +186,7 @@ __device__ __forceinline__ SliceResult iterate_finish_slice(
     mask = __activemask();
 #endif
     bool active = true, escaped = false, interior = false;
+    float deOut = 0.0f;
 
 #pragma unroll 1
     for (int k = 0; k < sliceSteps; k += WARP_CHUNK) {
@@ -179,7 +195,18 @@ __device__ __forceinline__ SliceResult iterate_finish_slice(
             if (!active) { ++pc; continue; }
 
             float x2 = x * x, y2 = y * y;
-            if (x2 + y2 > 4.0f) { active = false; escaped = true; ++pc; continue; }
+            if (x2 + y2 > 4.0f) {
+                // Distance estimator on escape
+                float r   = sqrtf(x2 + y2);
+                float dd  = fmaxf(1e-30f, sqrtf(dx*dx + dy*dy));
+                deOut     = (r > 0.0f) ? (r * logf(r) / dd) : 0.0f;
+                active    = false; escaped = true; ++pc; continue;
+            }
+
+            // dz/dc <- 2*z*dz/dc + 1
+            float ndx = 2.0f * (x * dx - y * dy) + 1.0f;
+            float ndy = 2.0f * (x * dy + y * dx);
+            dx = ndx; dy = ndy;
 
             float xt = fmaf(x, x, -y2) + cr;
             y = fmaf(2.0f * x, y, ci);
@@ -187,14 +214,13 @@ __device__ __forceinline__ SliceResult iterate_finish_slice(
             ++it; ++pc;
 
             if (pc >= LOOP_CHECK_EVERY) {
-                float dx = x - px, dy = y - py;
-                float d2 = dx*dx + dy*dy;
+                float ex = x - px, ey = y - py;
+                float d2 = ex*ex + ey*ey;
                 if (d2 < LOOP_EPS2) {
                     if (++close_hits >= LOOP_REQ_HITS) { active = false; interior = true; it = maxIter; }
                 } else {
                     close_hits = 0;
                 }
-                // Deep-close Pfad: sehr nahe Rückkehr mehrfach → Innenleben
                 if (d2 < DEEP_EPS2 && (x2 + y2) < 4.0f) {
                     if (++deep_hits >= DEEP_REQ_HITS) { active = false; interior = true; it = maxIter; }
                 } else {
@@ -207,16 +233,16 @@ __device__ __forceinline__ SliceResult iterate_finish_slice(
         unsigned anyActive = __ballot_sync(mask, active);
         if (anyActive == 0u) break;
     }
-    return { it, x, y, escaped, interior };
+    return { it, x, y, dx, dy, escaped, interior, deOut };
 }
 
-// ---------- Kernel: Pass 1 (Warmup + Kompaktierung) -------------------------
+// ---------- Kernel: Pass 1 (Warmup + compaction) ----------------------------
 __global__ __launch_bounds__(256, 2)
 void mandelbrotPass1Warmup(
     uchar4* __restrict__ out, int* __restrict__ iterOut,
     Survivor* __restrict__ surv, int* __restrict__ survCount,
     int w, int h, float zoom, float2 offset,
-    int maxIter)
+    int maxIter, float pixR) // pixel footprint radius in c-plane
 {
     const bool doLog = Settings::debugLogging;
 
@@ -248,8 +274,8 @@ void mandelbrotPass1Warmup(
 
     const int warmupSteps = d_warmup_it;
 
-    float zx=0.0f, zy=0.0f; bool interior = false;
-    int itWarm = iterate_warmup_noLoop(c.x, c.y, warmupSteps, zx, zy, interior);
+    float zx=0.0f, zy=0.0f, dx=0.0f, dy=0.0f; bool interior = false;
+    int itWarm = iterate_warmup_noLoop(c.x, c.y, warmupSteps, zx, zy, interior, dx, dy);
 
     if (interior) {
         out[idx]     = make_uchar4(0,0,0,255);
@@ -257,11 +283,19 @@ void mandelbrotPass1Warmup(
         return;
     }
 
-    const float norm = zx*zx + zy*zy;
-    const bool escaped = (itWarm < warmupSteps) && (norm > 4.0f);
+    const float r2 = zx*zx + zy*zy;
+    const bool escaped = (itWarm < warmupSteps) && (r2 > 4.0f);
 
     if (escaped) {
+        // Metric-AA: coverage via distance estimator vs pixel radius
+        const float r  = sqrtf(r2);
+        const float dd = fmaxf(1e-30f, sqrtf(dx*dx + dy*dy));
+        const float de = (r > 0.0f) ? (r * logf(r) / dd) : 0.0f;
+        const float cov = smooth01(de / (AA_K * pixR));
+
         float3 col = otter::shade(itWarm, maxIter, zx, zy, kPalette, kStripeF, kStripeAmp, kGamma);
+        col.x *= cov; col.y *= cov; col.z *= cov;
+
         out[idx] = make_uchar4(
             (unsigned char)(255.0f * fminf(fmaxf(col.x, 0.0f), 1.0f)),
             (unsigned char)(255.0f * fminf(fmaxf(col.y, 0.0f), 1.0f)),
@@ -271,9 +305,8 @@ void mandelbrotPass1Warmup(
         return;
     }
 
-    // --- Survivors sofort schwärzen (Ghosting verhindern) ---
+    // Survivors: black immediately (prevent ghosting)
     out[idx] = make_uchar4(0,0,0,255);
-    // iterOut unverändert lassen (Overlay/Stats optional)
 
     unsigned actMask = 0xFFFFFFFFu;
 #if (__CUDA_ARCH__ >= 700)
@@ -293,17 +326,17 @@ void mandelbrotPass1Warmup(
     if (lane == leader) base = atomicAdd(survCount, voteCount);
     base = __shfl_sync(ballot, base, leader);
 
-    Survivor s; s.x = zx; s.y = zy; s.cr = c.x; s.ci = c.y; s.it = itWarm; s.idx = idx;
+    Survivor s; s.x = zx; s.y = zy; s.dx = dx; s.dy = dy; s.cr = c.x; s.ci = c.y; s.it = itWarm; s.idx = idx;
     surv[base + prefix] = s;
 }
 
-// ---------- Kernel: Pass 2 (Slice + Re-Kompaktierung) -----------------------
+// ---------- Kernel: Pass 2 (Slice + compaction) -----------------------------
 __global__ __launch_bounds__(128, 2)
 void mandelbrotPass2Slice(
     uchar4* __restrict__ out, int* __restrict__ iterOut,
     const Survivor* __restrict__ survIn, int survInCount,
     Survivor* __restrict__ survOut, int* __restrict__ survOutCount,
-    int maxIter, int sliceIt)
+    int maxIter, int sliceIt, float pixR) // pixel footprint radius
 {
     const int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= survInCount) return;
@@ -316,10 +349,13 @@ void mandelbrotPass2Slice(
         return;
     }
 
-    SliceResult r = iterate_finish_slice(s.cr, s.ci, s.it, maxIter, s.x, s.y, sliceIt);
+    SliceResult r = iterate_finish_slice(s.cr, s.ci, s.it, maxIter, s.x, s.y, s.dx, s.dy, sliceIt);
 
     if (r.escaped) {
+        const float cov = smooth01(r.de / (AA_K * pixR));
         float3 col = otter::shade(r.it, maxIter, r.x, r.y, kPalette, kStripeF, kStripeAmp, kGamma);
+        col.x *= cov; col.y *= cov; col.z *= cov;
+
         out[s.idx] = make_uchar4(
             (unsigned char)(255.0f * fminf(fmaxf(col.x, 0.0f), 1.0f)),
             (unsigned char)(255.0f * fminf(fmaxf(col.y, 0.0f), 1.0f)),
@@ -335,7 +371,7 @@ void mandelbrotPass2Slice(
         return;
     }
 
-    // --- Noch nicht fertig → sofort schwärzen (Ghosting verhindern) ---
+    // Not finished yet -> black immediately (prevent ghosting)
     out[s.idx] = make_uchar4(0,0,0,255);
 
     unsigned actMask = 0xFFFFFFFFu;
@@ -355,7 +391,7 @@ void mandelbrotPass2Slice(
     if (lane == leader) base = atomicAdd(survOutCount, voteCount);
     base = __shfl_sync(ballot, base, leader);
 
-    Survivor ns; ns.x = r.x; ns.y = r.y; ns.cr = s.cr; ns.ci = s.ci; ns.it = r.it; ns.idx = s.idx;
+    Survivor ns; ns.x = r.x; ns.y = r.y; ns.dx = r.dx; ns.dy = r.dy; ns.cr = s.cr; ns.ci = s.ci; ns.it = r.it; ns.idx = s.idx;
     survOut[base + prefix] = ns;
 }
 
@@ -483,7 +519,7 @@ void computeCudaEntropyContrast(
 
     cudaMemset(d_e, 0, tilesX * tilesY * sizeof(float));
 
-    // Event-basiertes Timing nur für Log; *kein* Einfluss auf Funktionalität.
+    // Event-based timing only for logging; no functional impact.
     if (doLog) {
         cudaEvent_t evStart, evMid, evEnd;
         cudaEventCreate(&evStart); cudaEventCreate(&evMid); cudaEventCreate(&evEnd);
@@ -494,7 +530,7 @@ void computeCudaEntropyContrast(
 
         contrastKernel<<<dim3((tilesX + 15) / 16, (tilesY + 15) / 16), dim3(16,16)>>>(d_e, d_c, tilesX, tilesY);
         cudaEventRecord(evEnd, 0);
-        cudaEventSynchronize(evEnd); // nur für Timing
+        cudaEventSynchronize(evEnd); // timing only
 
         float entropyMs=0.f, contrastMs=0.f;
         cudaEventElapsedTime(&entropyMs, evStart, evMid);
@@ -508,7 +544,7 @@ void computeCudaEntropyContrast(
 
         cudaEventDestroy(evStart); cudaEventDestroy(evMid); cudaEventDestroy(evEnd);
     } else {
-        // Keine Events → direkt launchen; keine zusätzlichen Syncs.
+        // No events -> launch directly; no extra syncs.
         entropyKernel<<<dim3(tilesX, tilesY), 128>>>(d_it, d_e, w, h, tile, maxIter);
         contrastKernel<<<dim3((tilesX + 15) / 16, (tilesY + 15) / 16), dim3(16,16)>>>(d_e, d_c, tilesX, tilesY);
     }
@@ -542,7 +578,7 @@ namespace {
         if (g_prevSurvivorsPct >= 90.0)      warm = std::min(maxIter, WARMUP_IT_BASE * 3);
         else if (g_prevSurvivorsPct >= 80.0) warm = std::min(maxIter, WARMUP_IT_BASE * 2);
         else if (g_prevSurvivorsPct >= 60.0) warm = std::min(maxIter, (WARMUP_IT_BASE * 3) / 2);
-        // Schneefuchs: Kappe an maxIter/3, um Warmup-Spitzen zu vermeiden
+        // Cap to maxIter/3 to avoid warmup spikes
         warm = std::min(warm, std::max(64, maxIter / 3));
         return warm;
     }
@@ -563,7 +599,7 @@ void launch_mandelbrotHybrid(
     using clk = std::chrono::high_resolution_clock;
     const bool doLog = (Settings::performanceLogging || Settings::debugLogging);
 
-    dim3 block(32, 8); // 256 Threads
+    dim3 block(32, 8); // 256 threads
     dim3 grid((w + block.x - 1)/block.x, (h + block.y - 1)/block.y);
 
     ensureSurvivorCapacity(size_t(w) * size_t(h));
@@ -575,28 +611,35 @@ void launch_mandelbrotHybrid(
         LUCHS_LOG_HOST("[PERF] warmup_it=%d prev_survivors=%.2f%%", warmupIt, g_prevSurvivorsPct);
     }
 
-    // Cache-Config bevorzugt L1
+    // Prefer L1
     cudaFuncSetCacheConfig(mandelbrotPass1Warmup, cudaFuncCachePreferL1);
     cudaFuncSetCacheConfig(mandelbrotPass2Slice,  cudaFuncCachePreferL1);
 
-    // Budget (log-unabhängig); Host-Timing + implizite Sync via cudaMemcpy auf Zähler
+    // Pixel footprint in c-plane (half pixel diagonal), robust clamp
+    const float scale = 1.0f / zoom;
+    const float spanX = 3.5f * scale;
+    const float spanY = spanX * (float)h / (float)w;
+    const float pixDiag = std::sqrt((spanX / w) * (spanX / w) + (spanY / h) * (spanY / h));
+    const float pixR  = fmaxf(1e-25f, 0.5f * pixDiag);
+
+    // Budget (log-independent); host timing + implicit sync via counter memcpy
     const double frameBudgetMs  = frameBudgetMsFromSettings();
     const double kernelBudgetMs = frameBudgetMs * KERNEL_BUDGET_FRACTION;
     const auto   hostStart      = clk::now();
 
     // Pass 1
     cudaMemset(g_dSurvCountA, 0, sizeof(int));
-    mandelbrotPass1Warmup<<<grid, block>>>(out, d_it, g_dSurvivorsA, g_dSurvCountA, w, h, zoom, offset, maxIter);
+    mandelbrotPass1Warmup<<<grid, block>>>(out, d_it, g_dSurvivorsA, g_dSurvCountA, w, h, zoom, offset, maxIter, pixR);
 
     int h_survA = 0;
-    cudaMemcpy(&h_survA, g_dSurvCountA, sizeof(int), cudaMemcpyDeviceToHost); // implizit wartet auf P1
+    cudaMemcpy(&h_survA, g_dSurvCountA, sizeof(int), cudaMemcpyDeviceToHost); // waits for P1
     const double survPct = (double)h_survA * 100.0 / (double(w) * double(h));
     if (Settings::performanceLogging) {
         LUCHS_LOG_HOST("[PERF] survivors=%d (%.2f%% of %d)", h_survA, survPct, w*h);
     }
     g_prevSurvivorsPct = survPct;
 
-    // P1-Zeit (Host, garantiert nach P1 gültig)
+    // P1 time (host)
     double p1Ms = std::chrono::duration<double, std::milli>(clk::now() - hostStart).count();
     if (h_survA <= 0) {
         if (doLog) {
@@ -606,10 +649,10 @@ void launch_mandelbrotHybrid(
         return;
     }
     if (p1Ms > kernelBudgetMs && doLog) {
-        LUCHS_LOG_HOST("[PERF] budget_hit after P1: p1=%.3f ms budget=%.3f ms → defer P2", p1Ms, kernelBudgetMs);
+        LUCHS_LOG_HOST("[PERF] budget_hit after P1: p1=%.3f ms budget=%.3f ms -> defer P2", p1Ms, kernelBudgetMs);
     }
 
-    // Pass 2 (sliced) — Budgetsteuerung via Host-Timing
+    // Pass 2 (sliced) — budget control via host timing
     int threads = 128;
     int slice   = 0;
     int sliceIt = FINISH_SLICE_IT;
@@ -620,10 +663,10 @@ void launch_mandelbrotHybrid(
     int*      nxtCnt = g_dSurvCountB;
     int       h_cur  = h_survA;
 
-    float emaDrop = 0.2f; // Startwert moderat
+    float emaDrop = 0.2f; // moderate start
 
     while (h_cur > 0 && slice < MAX_SLICES) {
-        // Budget-Check vor Slice (P1 ist bereits enthalten)
+        // Budget check before slice (P1 already included)
         double elapsedMs = std::chrono::duration<double, std::milli>(clk::now() - hostStart).count();
         if (elapsedMs >= kernelBudgetMs) {
             if (doLog) LUCHS_LOG_HOST("[PERF] budget_exhausted before slice %d: elapsed=%.3f ms budget=%.3f ms", slice, elapsedMs, kernelBudgetMs);
@@ -634,9 +677,9 @@ void launch_mandelbrotHybrid(
         int blocks  = (h_cur + threads - 1) / threads;
 
         mandelbrotPass2Slice<<<blocks, threads>>>(
-            out, d_it, curBuf, h_cur, nxtBuf, nxtCnt, maxIter, sliceIt);
+            out, d_it, curBuf, h_cur, nxtBuf, nxtCnt, maxIter, sliceIt, pixR);
 
-        // Counter lesen (implizit wartet auf Slice-Kernel)
+        // Read counter (waits for slice kernel)
         int h_next = 0;
         cudaMemcpy(&h_next, nxtCnt, sizeof(int), cudaMemcpyDeviceToHost);
 
@@ -648,14 +691,14 @@ void launch_mandelbrotHybrid(
         if (elapsedMs >= kernelBudgetMs) {
             if (doLog) LUCHS_LOG_HOST("[PERF] budget_stop at slice %d", slice);
             std::swap(curBuf, nxtBuf); std::swap(curCnt, nxtCnt); h_cur = h_next; ++slice;
-            break; // Rest im nächsten Frame
+            break; // rest next frame
         }
 
         const int drop = h_cur - h_next;
         const float dropPct = (h_cur > 0) ? float(drop) / float(h_cur) : 1.0f;
         emaDrop = (1.0f - DROP_EMA_ALPHA) * emaDrop + DROP_EMA_ALPHA * dropPct;
 
-        // Slice-Länge adaptiv anpassen (Hysterese)
+        // Adapt slice length (hysteresis)
         if (emaDrop < DROP_LOWER_ACCEL && sliceIt < (maxIter / 2)) {
             sliceIt = std::min(sliceIt * 2, maxIter / 2);
             if (Settings::performanceLogging) {
@@ -674,7 +717,7 @@ void launch_mandelbrotHybrid(
         ++slice;
     }
 
-    // Abschluss-Log (Gesamtzeit, Host)
+    // Final log (host total)
     if (doLog) {
         double totalMs = std::chrono::duration<double, std::milli>(clk::now() - hostStart).count();
         if (Settings::performanceLogging) {
