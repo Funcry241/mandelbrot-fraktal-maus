@@ -2,6 +2,7 @@
 // Features:
 // - Metric AA via distance estimator (no supersampling, no higher precision).
 // - Consolidated post-fx: hue rotation, edge glow, orbit tint, green hotspot pulses.
+// - Hotspot gate now also by angle-crest detector (gives actual bright dots).
 // - Fast pass-1 periodicity, adaptive slice sizing, frame-budget pacing.
 // ASCII-only comments/strings.
 
@@ -21,7 +22,7 @@
 
 namespace {
 // ------------------------------- tuning --------------------------------------
-constexpr int   WARP_CHUNK        = 64;   // chunk per inner loop (multiple of 32)
+constexpr int   WARP_CHUNK        = 64;
 static_assert((WARP_CHUNK % 32) == 0, "WARP_CHUNK must be multiple of 32");
 
 constexpr int   LOOP_CHECK_EVERY  = 16;
@@ -69,6 +70,9 @@ struct EffectsParams {
     float orbitK;              // exp(-k * sqrt(minR2))
     float tintMix;             // 0..1
     float3 tint;               // RGB 0..1
+    // angle-crest detector
+    float crestF;              // frequency for cos(F * angle)
+    float crestSharp;          // exponent to sharpen peaks
     // green hotspot pulses
     float hotspotStrength;     // intensity
     float hotspotRate;         // pulses per unit phase
@@ -94,9 +98,9 @@ __device__ __forceinline__ float2 pixelToComplex(
 __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y) {
     float xm = x - 0.25f;
     float q  = xm * xm + y * y;
-    if (q * (q + xm) <= 0.25f * y * y) return true;       // main cardioid
+    if (q * (q + xm) <= 0.25f * y * y) return true;
     float xp = x + 1.0f;
-    if (xp * xp + y * y <= 0.0625f) return true;          // period-2 bulb
+    if (xp * xp + y * y <= 0.0625f) return true;
     return false;
 }
 
@@ -149,10 +153,18 @@ __device__ __forceinline__ float coverage_from_de(float r2, float dx, float dy, 
     return cov;
 }
 
+// angle-crest weight from escape z = (zx, zy)
+__device__ __forceinline__ float crest_weight(float zx, float zy) {
+    float ang = atan2f(zy, zx);              // -pi..pi
+    float v   = 0.5f * (cosf(d_fx.crestF * ang) + 1.0f); // 0..1
+    // sharpen peaks
+    return powf(clamp01(v), fmaxf(1.0f, d_fx.crestSharp));
+}
+
 // consolidated post-fx
 __device__ __forceinline__ float3 apply_post_fx(
     float3 base, float coverage, float trapMinR2,
-    float cr, float ci, float phase01)
+    float cr, float ci, float zx, float zy, float phase01)
 {
     // edge weight: 0 in interior, 1 near thin edge
     float edgeW = 1.0f - clamp01(coverage);
@@ -177,11 +189,16 @@ __device__ __forceinline__ float3 apply_post_fx(
         base.z = (1.0f - m) * base.z + m * d_fx.tint.z;
     }
 
-    // green hotspot pulses
+    // green hotspot pulses: gate by either orbit proximity OR angle crest
     if (d_fx.hotspotStrength > 1e-6f) {
+        float crestW = crest_weight(zx, zy);
+        float gate   = fmaxf(trapW, crestW);
+
         float s   = fractf(phase01 * d_fx.hotspotRate + hash2(cr, ci));
         float env = __expf(-s / fmaxf(1e-3f, d_fx.hotspotTau));
-        float hot = d_fx.hotspotStrength * trapW * edgeW * env;
+
+        float hot = d_fx.hotspotStrength * gate * edgeW * env;
+
         base.x = fminf(1.0f, base.x + hot * d_fx.hotColor.x);
         base.y = fminf(1.0f, base.y + hot * d_fx.hotColor.y);
         base.z = fminf(1.0f, base.z + hot * d_fx.hotColor.z);
@@ -386,7 +403,7 @@ void mandelbrotPass1Warmup(
     if (escaped) {
         float cov = coverage_from_de(r2, dx, dy, pixR);
         float3 col = otter::shade(itWarm, maxIter, zx, zy, kPalette, kStripeF, kStripeAmp, kGamma);
-        col = apply_post_fx(col, cov, trapMinR2, c.x, c.y, phase01);
+        col = apply_post_fx(col, cov, trapMinR2, c.x, c.y, zx, zy, phase01);
 
         out[idx] = make_uchar4(
             (unsigned char)(255.0f * fminf(fmaxf(col.x, 0.0f), 1.0f)),
@@ -450,7 +467,7 @@ void mandelbrotPass2Slice(
     if (r.escaped) {
         float cov = coverage_from_de(r.x*r.x + r.y*r.y, r.dx, r.dy, pixR);
         float3 col = otter::shade(r.it, maxIter, r.x, r.y, kPalette, kStripeF, kStripeAmp, kGamma);
-        col = apply_post_fx(col, cov, r.trapMinR2, s.cr, s.ci, phase01);
+        col = apply_post_fx(col, cov, r.trapMinR2, s.cr, s.ci, r.x, r.y, phase01);
 
         out[s.idx] = make_uchar4(
             (unsigned char)(255.0f * fminf(fmaxf(col.x, 0.0f), 1.0f)),
@@ -655,7 +672,9 @@ void launch_mandelbrotHybrid(
     fx.orbitK          = 6.0f;
     fx.tintMix         = 0.25f;
     fx.tint            = make_float3(0.62f, 0.40f, 0.95f);   // soft violet
-    fx.hotspotStrength = 0.35f;
+    fx.crestF          = 9.0f;   // number of bright dots around lobes
+    fx.crestSharp      = 4.0f;   // sharpness of dots
+    fx.hotspotStrength = 0.55f;  // stronger by default
     fx.hotspotRate     = 1.2f;
     fx.hotspotTau      = 0.35f;
     fx.hotColor        = make_float3(0.05f, 1.0f, 0.10f);    // green
