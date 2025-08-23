@@ -2,7 +2,7 @@
 // Features:
 // - Metric AA via distance estimator (no supersampling).
 // - Consolidated post-fx: hue rotation, edge glow, orbit tint.
-// - Wavy green hotspot ripples: circular, screen-space, soft, animated.
+// - Circular wavy hotspot ripples (screen-space, soft, animated).
 // - Angle-crest + orbit-trap gating; budget-aware sliced finish.
 // All comments/strings ASCII-only.
 
@@ -269,7 +269,7 @@ __device__ __forceinline__ float3 apply_post_fx(
         float hot = d_fx.hotspotStrength * d_fx.waveGain * gate * edgeW * env * dotM;
         base.x = fminf(1.0f, base.x + hot * d_fx.hotColor.x);
         base.y = fminf(1.0f, base.y + hot * d_fx.hotColor.y);
-        base.z = fminf(1.0f, base.z + hot * d_fx.hotColor.z);
+        base.z = fminf(1.0f, base.z + d_fx.hotColor.z * hot);
     }
 
     return base;
@@ -740,7 +740,7 @@ void launch_mandelbrotHybrid(
     // default FX params (can be adjusted live before memcpy)
     EffectsParams fx{};
     fx.aaK             = 2.0f;
-    fx.huePhase        = float(duration<double>(clk::now().time_since_epoch()).count() * 0.6); // slow drift
+    fx.huePhase        = float(duration<double>(clk::now().time_since_epoch()).count() * 0.6f); // slow drift
     fx.glowAmount      = 0.15f;
     fx.orbitK          = 6.0f;
     fx.tintMix         = 0.25f;
@@ -752,11 +752,11 @@ void launch_mandelbrotHybrid(
     fx.hotspotTau      = 0.35f;
     fx.hotColor        = make_float3(0.05f, 1.0f, 0.10f);    // green
     fx.dotCellPx       = 12.0f;  // cell size in pixels
-    fx.dotRadiusPx     = 5.0f;   // radius where the ring sits
-    fx.waveLambdaPx    = 5.0f;   // distance between ripple crests
+    fx.dotRadiusPx     = 5.0f;   // base ring radius
+    fx.waveLambdaPx    = 5.0f;   // ring spacing
     fx.waveWidthPx     = 8.0f;   // gaussian sigma around radius
     fx.waveSpeed       = 1.25f;  // ripple motion speed
-    fx.waveGain        = 1.0f;   // extra crest gain
+    fx.waveGain        = 1.0f;   // crest gain
     cudaMemcpyToSymbol(d_fx, &fx, sizeof(EffectsParams), 0, cudaMemcpyHostToDevice);
 
     // pixel footprint radius in c-plane (half pixel diagonal)
