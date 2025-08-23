@@ -466,6 +466,7 @@ void mandelbrotPass1Warmup(
     const float r2 = zx*zx + zy*zy;
     const bool escaped = (itWarm < warmupSteps) && (r2 > 4.0f);
 
+    // phase in 0..1 from huePhase
     float phase01 = fractf(d_fx.huePhase * (0.5f / CUDART_PI_F) + 0.5f);
 
     if (escaped) {
@@ -735,28 +736,30 @@ void launch_mandelbrotHybrid(
     int w, int h, float zoom, float2 offset,
     int maxIter, int /*tile*/)
 {
-    using namespace std::chrono;
-
     // default FX params (can be adjusted live before memcpy)
     EffectsParams fx{};
+    // time-based hue drift
+    double nowSec = std::chrono::duration<double>(
+        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
     fx.aaK             = 2.0f;
-    fx.huePhase        = float(duration<double>(clk::now().time_since_epoch()).count() * 0.6f); // slow drift
+    fx.huePhase        = float(nowSec * 0.6); // slow drift
     fx.glowAmount      = 0.15f;
     fx.orbitK          = 6.0f;
     fx.tintMix         = 0.25f;
     fx.tint            = make_float3(0.62f, 0.40f, 0.95f);   // soft violet
     fx.crestF          = 9.0f;   // number of bright crests around lobes
     fx.crestSharp      = 4.0f;   // sharpness of crests
-    fx.hotspotStrength = 0.55f;  // hotspot intensity
+    // stronger default for visible green dots
+    fx.hotspotStrength = 0.85f;
     fx.hotspotRate     = 1.2f;
     fx.hotspotTau      = 0.35f;
     fx.hotColor        = make_float3(0.05f, 1.0f, 0.10f);    // green
-    fx.dotCellPx       = 12.0f;  // cell size in pixels
-    fx.dotRadiusPx     = 5.0f;   // base ring radius
-    fx.waveLambdaPx    = 5.0f;   // ring spacing
-    fx.waveWidthPx     = 8.0f;   // gaussian sigma around radius
+    fx.dotCellPx       = 10.0f;  // cell size in pixels
+    fx.dotRadiusPx     = 6.5f;   // base ring radius
+    fx.waveLambdaPx    = 4.0f;   // ring spacing
+    fx.waveWidthPx     = 6.0f;   // gaussian sigma around radius
     fx.waveSpeed       = 1.25f;  // ripple motion speed
-    fx.waveGain        = 1.0f;   // crest gain
+    fx.waveGain        = 1.6f;   // crest gain
     cudaMemcpyToSymbol(d_fx, &fx, sizeof(EffectsParams), 0, cudaMemcpyHostToDevice);
 
     // pixel footprint radius in c-plane (half pixel diagonal)
@@ -785,7 +788,7 @@ void launch_mandelbrotHybrid(
     // frame budget pacing (host-side only)
     const double frameBudgetMs  = frameBudgetMsFromSettings();
     const double kernelBudgetMs = frameBudgetMs * KERNEL_BUDGET_FRAC;
-    const auto   hostStart      = clk::now();
+    const auto   hostStart      = std::chrono::high_resolution_clock::now();
 
     // pass 1
     cudaMemset(g_pools.cntA, 0, sizeof(int));
@@ -799,7 +802,8 @@ void launch_mandelbrotHybrid(
     }
     g_prevSurvivorsPct = survPct;
 
-    double p1Ms = duration<double, std::milli>(clk::now() - hostStart).count();
+    double p1Ms = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - hostStart).count();
     if (h_survA <= 0) {
         if (Settings::performanceLogging) {
             LUCHS_LOG_HOST("[PERF] mandelbrot (hybrid-sliced): total=%.3f ms", p1Ms);
@@ -826,7 +830,8 @@ void launch_mandelbrotHybrid(
     float emaDrop = 0.2f;
 
     while (h_cur > 0 && slice < MAX_SLICES) {
-        double elapsedMs = duration<double, std::milli>(clk::now() - hostStart).count();
+        double elapsedMs = std::chrono::duration<double, std::milli>(
+            std::chrono::high_resolution_clock::now() - hostStart).count();
         if (elapsedMs >= kernelBudgetMs) {
             if (Settings::performanceLogging) {
                 LUCHS_LOG_HOST("[PERF] budget_exhausted before slice %d: elapsed=%.3f ms budget=%.3f ms",
@@ -844,7 +849,8 @@ void launch_mandelbrotHybrid(
         int h_next = 0;
         cudaMemcpy(&h_next, nxtCnt, sizeof(int), cudaMemcpyDeviceToHost);
 
-        elapsedMs = duration<double, std::milli>(clk::now() - hostStart).count();
+        elapsedMs = std::chrono::duration<double, std::milli>(
+            std::chrono::high_resolution_clock::now() - hostStart).count();
         if (Settings::performanceLogging || Settings::debugLogging) {
             LUCHS_LOG_HOST("[PERF] slice=%d steps=%d survivors_in=%d survivors_out=%d elapsed=%.3f ms (budget=%.3f)",
                            slice, sliceIt, h_cur, h_next, elapsedMs, kernelBudgetMs);
@@ -881,7 +887,8 @@ void launch_mandelbrotHybrid(
     }
 
     if (Settings::performanceLogging || Settings::debugLogging) {
-        double totalMs = duration<double, std::milli>(clk::now() - hostStart).count();
+        double totalMs = std::chrono::duration<double, std::milli>(
+            std::chrono::high_resolution_clock::now() - hostStart).count();
         if (Settings::performanceLogging) {
             LUCHS_LOG_HOST("[PERF] mandelbrot (hybrid-sliced): total=%.3f ms (budget=%.3f ms)",
                            totalMs, kernelBudgetMs);
