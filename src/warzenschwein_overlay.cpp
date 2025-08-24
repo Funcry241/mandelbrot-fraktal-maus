@@ -208,8 +208,8 @@ void generateOverlayQuads(const std::string& text,
     const float boxH   = static_cast<float>(lines.size()) * advY;
 
     // Symmetrisches Innenpadding (Pixel)
-    const float padL = 12.0f, padR = 12.0f;
-    const float padT = 8.0f,  padB = 8.0f;
+    const float padL = 16.0f, padR = 12.0f;
+    const float padT = 16.0f,  padB = 8.0f;
 
     // Hintergrund-Panel (pixel space, y nach unten)
     const float bgX0 = x0 - padL;
