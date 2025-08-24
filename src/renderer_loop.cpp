@@ -1,10 +1,9 @@
-// ============================================================================
-// Datei: src/renderer_loop.cpp
-// 🐭 Maus-Kommentar: Loop orchestriert die FramePipeline deterministisch; periodisches Device-Log-Flush, klarer Δt-Track.
-// 🦦 Otter: Kein doppelter Upload/Draw hier – das macht die Pipeline. ASCII-Logs, kompakt. (Bezug zu Otter)
-// 🐑 Schneefuchs: C4127-frei via if constexpr; unnötige Includes & ungenutzte Statics entfernt. (Bezug zu Schneefuchs)
-// Neu (Otter/Schneefuchs): 60 FPS Cap via FrameLimiter + optional VSync — smooth pacing, jitterarm.
-// ============================================================================
+//MAUS
+// Loop orchestrates the FramePipeline deterministically; periodic device-log flush, clear dt tracking.
+// Otter: No duplicate upload/draw here – the pipeline does it. ASCII logs, compact. (Bezug zu Otter)
+// Schneefuchs: C4127-free via if constexpr; removed unnecessary includes/statics. (Bezug zu Schneefuchs)
+// New (Otter/Schneefuchs): 60 FPS cap via FrameLimiter + optional VSync — smooth pacing, low jitter.
+// New (Otter): Ultra-low-overhead capture of the 100th frame via async PBO+fence (single-shot, no stall).
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -17,26 +16,24 @@
 #include "frame_pipeline.hpp"
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
-#include "frame_limiter.hpp"   // Header liegt in src/
-#include <cmath>
+#include "frame_limiter.hpp"   // header in src/
+#include "frame_capture.hpp"   // async single-shot 100th-frame capture (Otter)
 #include <algorithm>
 #include <cuda_runtime.h>
 
 namespace RendererLoop {
 
 namespace {
-    // 🐭 Maus: Lokaler FrameLimiter — keine API-Änderung notwendig.
-    static pace::FrameLimiter g_frameLimiter; // Namespace umbenannt von fps → pace
+    static pace::FrameLimiter g_frameLimiter; // namespace pace
     static bool g_vsyncInit = false;
 
-    // 🐑 Schneefuchs: interne Helferfunktion umbenannt, um C4211 zu vermeiden.
     static inline void beginFrameLocal(RendererState& state) {
         const float now = static_cast<float>(glfwGetTime());
         float delta = now - static_cast<float>(state.lastTime);
-        if (delta < 0.0f) delta = 0.0f;                 // robust gegen Zeit-Glitches
+        if (delta < 0.0f) delta = 0.0f;
         state.deltaTime = delta;
         state.lastTime  = static_cast<double>(now);
-        state.frameCount++;
+        state.frameCount++; // 1-based after first frame
     }
 
     static inline void initVSyncOnce() {
@@ -60,10 +57,15 @@ void renderFrame_impl(RendererState& state) {
     initVSyncOnce();
     beginFrameLocal(state);
 
-    // Vollständige Frame-Pipeline (CUDA → Upload → Draw → Overlays → PERF)
+    // Full frame pipeline (CUDA → Upload → Draw → Overlays → PERF)
     FramePipeline::execute(state);
 
-    // 🐑 Schneefuchs: Device-Logs bei Bedarf flushen (Fehler oder periodisch).
+    // --- Single-shot async capture of the 100th frame (non-blocking) -----------
+    // Cost per frame is a tiny branch. Actual GPU readback is enqueued once,
+    // then we poll completion on later frames without stalling the render path.
+    FrameCapture::OnFrameRendered(state.frameCount);
+
+    // Device log flush (debug or periodic)
     if constexpr (Settings::debugLogging) {
         const cudaError_t err = cudaPeekAtLastError();
         if (err != cudaSuccess || (state.frameCount % 60 == 0)) {
@@ -76,13 +78,11 @@ void renderFrame_impl(RendererState& state) {
         }
     }
 
-    // 🦦 Otter: 60 FPS Cap — präzises Sleep+Spin-Pacing, jitterarm.
+    // 60 FPS cap — precise sleep+spin pacing, low jitter.
     if constexpr (Settings::capFramerate) {
         g_frameLimiter.limit(Settings::capTargetFps);
-        // Hinweis: state.deltaTime wird am nächsten beginFrameLocal() gemessen und enthält das Pacing.
-        // Dadurch bleibt der Planner „indirekt“ auf 60 FPS eingetaktet (smooth).
     } else {
-        g_frameLimiter.limit(0); // update internals ohne Sleep (real dt track)
+        g_frameLimiter.limit(0); // update internals without sleeping
     }
 }
 
