@@ -2,7 +2,7 @@
 // Datei: src/warzenschwein_overlay.cpp
 // 🐭 Maus-Kommentar: Vollständig gekapselt wie HeatmapOverlay – keine GL-State-Leaks.
 // 🦦 Otter: Orphaning + SubData, deterministischer Draw, ASCII-Logs nur bei Bedarf. (Bezug zu Otter)
-// 🐑 Schneefuchs: if constexpr statt konstanter ifs (C4127-frei), Shader-Fehler geben 0 zurück. (Bezug zu Schneefuchs)
+// 🐑 Schneefuchs: Pixel-Space im CPU-Pfad + px->NDC im VS; getrennte X/Y-Skalierung fixiert Aspect Ratio. (Bezug zu Schneefuchs)
 
 #pragma warning(push)
 #pragma warning(disable: 4100)
@@ -15,25 +15,47 @@
 #include "luchs_log_host.hpp"
 #include <vector>
 #include <string>
+#include <algorithm>
 
 namespace WarzenschweinOverlay {
 
-constexpr int glyphW = 8, glyphH = 12;
+constexpr int glyphW = 8, glyphH = 12; // Bitmap-Font: 8x12 Pixel pro Glyph
 
+// GL objects & CPU buffers
 static GLuint vao = 0, vbo = 0, shader = 0;
-static std::vector<float> vertices;
-static std::vector<float> background;
+static std::vector<float> vertices;   // interleaved: x,y,r,g,b  (glyphs)
+static std::vector<float> background; // interleaved: x,y,r,g,b  (panel)
 static std::string currentText;
 static bool visible = true;
 
+// cached uniform locations
+static GLint uViewportPxLoc = -1;
+static GLint uHudScaleLoc   = -1;
+
+// ----------------------------------------------------------------------------
+// Shader: Wir liefern Positionen in PIXELKOORDINATEN (Origin: top-left).
+// Der Vertex-Shader rechnet erst am Ende korrekt nach NDC um (getrennt X/Y).
+// Dadurch gibt es kein „Gestaucht“-Problem mehr.
+// ----------------------------------------------------------------------------
 static const char* vsSrc = R"GLSL(
 #version 430 core
-layout(location = 0) in vec2 aPos;
+layout(location = 0) in vec2 aPosPx;   // pixel space, origin top-left
 layout(location = 1) in vec3 aColor;
+uniform vec2 uViewportPx;              // (width, height) in pixels
+uniform vec2 uHudScale;                // optional fine-tune scale per axis (default 1,1)
 out vec3 vColor;
+
+vec2 toNdc(vec2 px, vec2 vp) {
+    float x = (px.x / vp.x) * 2.0 - 1.0;
+    float y = 1.0 - (px.y / vp.y) * 2.0; // invert Y for top-left origin
+    return vec2(x, y);
+}
+
 void main() {
-    gl_Position = vec4(aPos, 0.0, 1.0);
-    vColor = aColor;
+    vec2 scaled = aPosPx * uHudScale;
+    vec2 ndc    = toNdc(scaled, uViewportPx);
+    gl_Position = vec4(ndc, 0.0, 1.0);
+    vColor      = aColor;
 }
 )GLSL";
 
@@ -107,7 +129,7 @@ static void initGL() {
     shader = link(vs, fs);
     if (shader == 0) {
         if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[WS] initGL failed (shader=0) – overlay disabled");
+            LUCHS_LOG_HOST("[WS] initGL failed (shader=0) - overlay disabled");
         return;
     }
 
@@ -122,11 +144,16 @@ static void initGL() {
     glEnableVertexAttribArray(1);
     glBindVertexArray(0);
 
+    // cache uniform locations
+    uViewportPxLoc = glGetUniformLocation(shader, "uViewportPx");
+    uHudScaleLoc   = glGetUniformLocation(shader, "uHudScale");
+
     if constexpr (Settings::debugLogging)
-        LUCHS_LOG_HOST("[WS] initGL ok: VAO=%u VBO=%u Program=%u", vao, vbo, shader);
+        LUCHS_LOG_HOST("[WS] initGL ok: VAO=%u VBO=%u Program=%u uViewportPxLoc=%d uHudScaleLoc=%d",
+                       vao, vbo, shader, (int)uViewportPxLoc, (int)uHudScaleLoc);
 }
 
-// ---- Background Quad --------------------------------------------------------
+// ---- Background Quad (pixel space) -----------------------------------------
 static void buildBackground(float x0, float y0, float x1, float y1) {
     const float bg[3] = {0.10f, 0.10f, 0.10f};
     const float quad[6][5] = {
@@ -140,23 +167,25 @@ static void buildBackground(float x0, float y0, float x1, float y1) {
     background.insert(background.end(), &quad[0][0], &quad[0][0] + 6 * 5);
 }
 
-// Otter: symmetric padding; Schneefuchs: Advance stabil halten.
+// Otter: Symmetric padding; Schneefuchs: Glyph-Advance stabil, px-sicher.
+// WICHTIG: Wir generieren ALLE Koordinaten in PIXELN (origin top-left).
 void generateOverlayQuads(const std::string& text,
                           std::vector<float>& vertexOut,
                           std::vector<float>& backgroundOut,
                           const RendererState& ctx)
 {
+    (void)ctx; // nur für mögliche künftige Layout-Regeln; aktuell nicht benötigt
     vertexOut.clear();
     backgroundOut.clear();
 
-    // Screen-Pixel → NDC
-    const float px  = Settings::hudPixelSize;  // NDC pro HUD-"Pixel"
-    const float pxX = 2.0f / ctx.width;
-    const float pxY = 2.0f / ctx.height;
+    // Skalierung der HUD-Glyphen in Pixeln (Otter: Settings steuert Größe)
+    const float scalePx = std::max(1.0f, Settings::hudPixelSize); // Schneefuchs: min 1.0
 
-    // Anker (oben links, mit Außenpadding in echten Screen-Pixeln)
-    const float x0 = -1.0f + 16.0f * pxX;
-    const float y0 =  1.0f - 16.0f * pxY;
+    // Anker oben-links in PIXELN (Außenabstand zum Fensterrand)
+    const float marginX = 16.0f;
+    const float marginY = 16.0f;
+    const float x0 = marginX;
+    const float y0 = marginY;
 
     // Zeilen splitten
     std::vector<std::string> lines;
@@ -170,49 +199,49 @@ void generateOverlayQuads(const std::string& text,
         if (!cur.empty()) lines.push_back(cur);
     }
 
-    // Content-Box (in HUD-Pixeln)
+    // Content-Box in PIXELN
     std::size_t maxW = 0;
     for (const auto& l : lines) maxW = std::max(maxW, l.size());
-    const float boxW = (maxW * (glyphW + 1) + 2) * px;
-    const float boxH = (static_cast<float>(lines.size()) * (glyphH + 2) + 2) * px;
+    const float advX   = (glyphW + 1) * scalePx; // 1px tracking
+    const float advY   = (glyphH + 2) * scalePx; // 2px line gap
+    const float boxW   = static_cast<float>(maxW) * advX;
+    const float boxH   = static_cast<float>(lines.size()) * advY;
 
-    // Symmetrisches Innenpadding
-    const float padL = 1.0f * px, padR = 1.0f * px;
-    const float padT = 4.0f * px, padB = 4.0f * px;
+    // Symmetrisches Innenpadding (Pixel)
+    const float padL = 12.0f, padR = 12.0f;
+    const float padT = 8.0f,  padB = 8.0f;
 
-    // Hintergrund
+    // Hintergrund-Panel (pixel space, y nach unten)
     const float bgX0 = x0 - padL;
-    const float bgY0 = y0 + padT;
+    const float bgY0 = y0 - padT;
     const float bgX1 = x0 + boxW + padR;
-    const float bgY1 = y0 - boxH - padB;
+    const float bgY1 = y0 + boxH + padB;
     buildBackground(bgX0, bgY0, bgX1, bgY1);
 
-    // Erste Baseline um Top-Delta verschieben (Advance unverändert)
-    const float deltaTop = (padT - 1.0f * px);
-
-    // Glyphen
+    // Glyphen zeichnen
     const float r = 1.0f, g = 0.8f, b = 0.3f;
+
     for (std::size_t row = 0; row < lines.size(); ++row) {
         const std::string& line = lines[row];
-        const float yBase = (y0 - deltaTop) - static_cast<float>(row) * (glyphH + 2) * px;
+        const float yBase = y0 + row * advY; // top of line in pixel space
 
         for (std::size_t col = 0; col < line.size(); ++col) {
             const auto& glyph = WarzenschweinFont::get(line[col]);
-            const float xBase = x0 + static_cast<float>(col) * (glyphW + 1) * px;
+            const float xBase = x0 + col * advX;
 
             for (int gy = 0; gy < glyphH; ++gy) {
                 const uint8_t bits = glyph[gy];
                 for (int gx = 0; gx < glyphW; ++gx) {
                     if ((bits >> (7 - gx)) & 1) {
-                        const float x = xBase + gx * px;
-                        const float y = yBase - gy * px;
+                        const float x = xBase + gx * scalePx;
+                        const float y = yBase + gy * scalePx;
                         const float quad[6][5] = {
-                            {x,       y,       r, g, b},
-                            {x + px,  y,       r, g, b},
-                            {x + px,  y - px,  r, g, b},
-                            {x,       y,       r, g, b},
-                            {x + px,  y - px,  r, g, b},
-                            {x,       y - px,  r, g, b},
+                            {x,               y,               r, g, b},
+                            {x + scalePx,     y,               r, g, b},
+                            {x + scalePx,     y + scalePx,     r, g, b},
+                            {x,               y,               r, g, b},
+                            {x + scalePx,     y + scalePx,     r, g, b},
+                            {x,               y + scalePx,     r, g, b},
                         };
                         vertexOut.insert(vertexOut.end(), &quad[0][0], &quad[0][0] + 6 * 5);
                     }
@@ -225,8 +254,9 @@ void generateOverlayQuads(const std::string& text,
 // ---- Draw -------------------------------------------------------------------
 void drawOverlay(RendererState& ctx) {
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[WS] drawOverlay: visible=%d empty=%d",
-                       visible ? 1 : 0, currentText.empty() ? 1 : 0);
+        LUCHS_LOG_HOST("[WS] drawOverlay: visible=%d empty=%d viewport=%dx%d",
+                       visible ? 1 : 0, currentText.empty() ? 1 : 0,
+                       (int)ctx.width, (int)ctx.height);
     }
     if (!Settings::warzenschweinOverlayEnabled || !visible || currentText.empty())
         return;
@@ -253,6 +283,10 @@ void drawOverlay(RendererState& ctx) {
     glUseProgram(shader);
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+    // Set uniforms (viewport + optional per-axis scale = 1,1)
+    if (uViewportPxLoc >= 0) glUniform2f(uViewportPxLoc, (float)ctx.width, (float)ctx.height);
+    if (uHudScaleLoc   >= 0) glUniform2f(uHudScaleLoc,   1.0f, 1.0f);
 
     // Background upload (Orphaning + SubData)
     if (!background.empty()) {
@@ -303,6 +337,8 @@ void cleanup() {
     background.clear();
     currentText.clear();
     visible = false;
+    uViewportPxLoc = -1;
+    uHudScaleLoc   = -1;
 }
 
 } // namespace WarzenschweinOverlay
