@@ -1,13 +1,11 @@
 // 🐭 Maus: Eine Quelle für Tiles pro Frame. Vor Render: Buffer-Sync via setupCudaBuffers(...).
 // 🦦 Otter: Sanity-Logs, deterministische Reihenfolge; Zoom V2 außerhalb der CUDA-Interop. (Bezug zu Otter)
 // 🐑 Schneefuchs: Kein doppeltes Sizing, keine Alt-Settings. (Bezug zu Schneefuchs)
-// 🐑 Schneefuchs: Fixes für /WX – keine konstanten ifs; Debug/Perf via if constexpr (ASCII logs only).
+// 🐑 Schneefuchs: /WX-fest – keine konstanten ifs (C4127) und keine C4702 mehr; Debug/Perf via if constexpr. ASCII logs only.
 
 #include "pch.hpp"
 #include <vector_types.h>
-#include <chrono>   // Zeitmessung
-#include <sstream>
-#include <iomanip>
+#include <chrono>   // timing
 #include <cstdio>   // snprintf (ASCII only)
 #include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
@@ -28,34 +26,40 @@ static FrameContext g_ctx;
 static CommandBus g_zoomBus;
 static int globalFrameCounter = 0;
 
-// Kleiner, lokaler Zoom-Gain (pro akzeptiertem Schritt)
+// Small local zoom gain (per accepted step)
 static constexpr float kZOOM_GAIN = 1.006f;
 
-// 🦦 Otter: Lokale Performance-Akkumulatoren für diesen TU (ASCII-only).
+// 🦦 Otter: Local perf accumulators for this TU (ASCII-only).
 namespace {
     using Clock = std::chrono::high_resolution_clock;
     using msd   = std::chrono::duration<double, std::milli>;
 
-    // Warmup & Modulo nur aktiv, wenn Settings::performanceLogging = true
+    // Warmup & periodic logging (only when Settings::performanceLogging == true)
     constexpr int PERF_WARMUP_FRAMES = 30;
     constexpr int PERF_LOG_EVERY     = 30;
 
-    // Phasenzeiten, die in diesem File gemessen werden (Tex/Overlays/Frame total).
-    // Map/Kernel/Entropy/Contrast kommen aus state.lastTimings (Interop/CUDA).
+    // Phase timings measured here (tex upload + draw, overlays, frame total).
+    // Map/Kernel/Entropy/Contrast are provided by state.lastTimings (Interop/CUDA).
     double g_perfTexMs       = 0.0;
     double g_perfOverlaysMs  = 0.0;
     double g_perfFrameTotal  = 0.0;
 
+    // NOTE: Implemented without an unconditional early return in the same branch
+    // to avoid MSVC C4702 "unreachable code" under /WX.
     inline bool perfShouldLog(int frameIdx) {
-        // Schneefuchs: compile-time Gate – kein C4127.
-        if constexpr (!Settings::performanceLogging) return false;
-        if (frameIdx <= PERF_WARMUP_FRAMES) return false;
-        return (frameIdx % PERF_LOG_EVERY) == 0;
+        if constexpr (Settings::performanceLogging) {
+            if (frameIdx <= PERF_WARMUP_FRAMES) return false;
+            return (frameIdx % PERF_LOG_EVERY) == 0;
+        } else {
+            (void)frameIdx;
+            return false;
+        }
     }
 }
 
+// --------------------------------- frame begin --------------------------------
 void beginFrame(FrameContext& frameCtx) {
-    const double now = glfwGetTime(); // Schneefuchs: eine Zeitabfrage, mehrfach nutzen.
+    const double now = glfwGetTime();
     if constexpr (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] beginFrame: time=%.4f, totalFrames=%d", now, globalFrameCounter);
 
@@ -68,6 +72,7 @@ void beginFrame(FrameContext& frameCtx) {
     ++globalFrameCounter;
 }
 
+// ------------------------------- CUDA + analysis ------------------------------
 void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     if constexpr (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] computeCudaFrame: dimensions=%dx%d, zoom=%.5f, tileSize=%d",
@@ -99,7 +104,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
                        state.d_iterations.size(), state.d_entropy.size(), state.d_contrast.size());
     }
 
-    // Schneefuchs: compile-time Gate für Timing – kein C4127, kein toter Code.
+    // Host-side timing gated at compile-time (no constant-if warning).
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         auto t0 = Clock::now();
 
@@ -142,7 +147,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
             }
         }
     } else {
-        // Hot path ohne Host-Timing
+        // Hot path without host timing
         CudaInterop::renderCudaFrame(
             state.d_iterations,
             state.d_entropy,
@@ -162,7 +167,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 
-    // 🐑 Schneefuchs: deterministisches, modulares Flush; Sofort-Flush nur auf Fehler.
+    // Deterministic, modular device-log flush; immediate flush on error.
     cudaError_t err = cudaPeekAtLastError();
     if (err != cudaSuccess || (globalFrameCounter % 30 == 0)) {
         if constexpr (Settings::debugLogging)
@@ -184,7 +189,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         state.zoomV2State
     );
 
-    // Analysewerte persistieren
+    // Persist analysis
     if (zr.bestIndex >= 0) {
         frameCtx.lastEntropy  = zr.bestEntropy;
         frameCtx.lastContrast = zr.bestContrast;
@@ -213,7 +218,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
                 const float e = frameCtx.h_entropy[i];
                 const float c = frameCtx.h_contrast[i];
                 minE = std::min(minE, e);
-                maxE = std::max(maxE, e);   // 🐑 Schneefuchs: Fix – vorher fälschlich Contrast für maxE.
+                maxE = std::max(maxE, e);
                 minC = std::min(minC, c);
                 maxC = std::max(maxC, c);
             }
@@ -225,11 +230,12 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     }
 }
 
+// ------------------------------- apply zoom step ------------------------------
 void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus, RendererState& state) {
     (void)state;
     if (!frameCtx.shouldZoom) return;
 
-    double2 diff = { frameCtx.newOffset.x - frameCtx.offset.x, frameCtx.newOffset.y - frameCtx.offset.y };
+    const double2 diff = { frameCtx.newOffset.x - frameCtx.offset.x, frameCtx.newOffset.y - frameCtx.offset.y };
     frameCtx.offset = frameCtx.newOffset;
     frameCtx.zoom *= kZOOM_GAIN;
 
@@ -246,8 +252,9 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus, RendererState& stat
     frameCtx.timeSinceLastZoom = 0.0f;
 }
 
+// ------------------------------ draw (GL upload + FSQ) -----------------------
 void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
-    // 🦦 Otter: texMs misst nur das PBO->Texture-Update + FSQ draw, getrennt von Overlays.
+    // texMs measures only PBO->Texture upload + FSQ draw, separate from overlays.
     auto tTex0 = Clock::now();
 
     OpenGLUtils::setGLResourceContext("frame");
@@ -257,19 +264,22 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     auto tTex1 = Clock::now();
     g_perfTexMs = std::chrono::duration_cast<msd>(tTex1 - tTex0).count();
 
-    // 🦦 Otter: overlaysMs misst Heatmap + Warzenschwein zusammen.
+    // overlaysMs measures Heatmap + Warzenschwein together.
     auto tOv0 = Clock::now();
 
     if (frameCtx.overlayActive)
         HeatmapOverlay::drawOverlay(frameCtx.h_entropy, frameCtx.h_contrast, frameCtx.width, frameCtx.height, frameCtx.tileSize, tex, state);
 
-    if (Settings::warzenschweinOverlayEnabled && !state.warzenschweinText.empty())
-        WarzenschweinOverlay::drawOverlay(state);
+    if constexpr (Settings::warzenschweinOverlayEnabled) {
+        if (!state.warzenschweinText.empty())
+            WarzenschweinOverlay::drawOverlay(state);
+    }
 
     auto tOv1 = Clock::now();
     g_perfOverlaysMs = std::chrono::duration_cast<msd>(tOv1 - tOv0).count();
 }
 
+// ---------------------------------- execute ----------------------------------
 void execute(RendererState& state) {
     auto tFrame0 = Clock::now();
 
@@ -289,7 +299,7 @@ void execute(RendererState& state) {
     state.offset = g_ctx.offset;
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
-    // 🐑 Schneefuchs: HUD-Text ohne iostream-Overhead – eine Reserve, snprintf-Linien (ASCII).
+    // HUD text (ASCII, no iostream overhead)
     std::string hud;
     hud.reserve(256);
     auto appendKV = [&](const char* label, const char* value) {
@@ -333,9 +343,9 @@ void execute(RendererState& state) {
     auto tFrame1 = Clock::now();
     g_perfFrameTotal = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
 
-    // 🐑 Schneefuchs: Kompakte, deterministische PERF-Zeile nur bei aktiviertem performanceLogging.
+    // Compact PERF line only when enabled.
     if (perfShouldLog(globalFrameCounter)) {
-        // Device-Log regelmäßig leeren, aber nur im Performance-Modus.
+        // Periodic device-log flush, only in performance mode.
         LuchsLogger::flushDeviceLogToHost(0);
 
         const int resX = g_ctx.width;
@@ -343,14 +353,12 @@ void execute(RendererState& state) {
         const int it   = g_ctx.maxIterations;
         const double fps = (g_ctx.frameTime > 0.0f) ? (1.0 / g_ctx.frameTime) : 0.0;
 
-        // Werte aus state.lastTimings (Interop/CUDA). Falls ungültig, 0.0 verwenden.
         const bool vt = state.lastTimings.valid;
         const double mapMs   = vt ? state.lastTimings.pboMap          : 0.0;
         const double mandMs  = vt ? state.lastTimings.mandelbrotTotal : 0.0;
         const double entMs   = vt ? state.lastTimings.entropy         : 0.0;
         const double conMs   = vt ? state.lastTimings.contrast        : 0.0;
 
-        // malloc/free/dflush: aktuell 0 (persistente Puffer, dflush durch uns gesteuert)
         const int mallocs = 0, frees = 0, dflush = 1;
 
         LUCHS_LOG_HOST(

@@ -96,7 +96,7 @@ namespace Settings {
     //   deterministisch, CSV-freundlich. Flush-Intervall zentral konfigurierbar.
     //   Schneefuchs-Prinzip: Messen, dann abschalten. (Bezug zu Schneefuchs)
     // ------------------------------------------------------------------------
-    inline constexpr bool performanceLogging = true;
+    inline constexpr bool performanceLogging = false;
 
     // ------------------------------------------------------------------------
     // capFramerate  (NEU)

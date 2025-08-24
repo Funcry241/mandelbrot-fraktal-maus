@@ -1,5 +1,5 @@
-// Datei: src/renderer_pipeline.cpp
-// 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean - HUD/Heatmap bleiben garantiert sichtbar.
+/////
+// 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean – HUD/Heatmap bleiben garantiert sichtbar.
 // 🦦 Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines. (Bezug zu Otter)
 // 🐑 Schneefuchs: Fehlerquellen mit glGetError sichtbar gemacht, Upload deterministisch. (Bezug zu Schneefuchs)
 // 🐑 Schneefuchs: State-Change-Diät + optionale GPU-Timer-Query; Binds nur bei Änderung, ASCII-Logs.
@@ -104,11 +104,13 @@ void init() {
         LUCHS_LOG_HOST("[PIPELINE] Fullscreen quad VAO=%u VBO=%u EBO=%u created", VAO, VBO, EBO);
     }
 
-    // GPU-Timer-Query optional anlegen
-    if ((Settings::performanceLogging || Settings::debugLogging) && s_timeQuery == 0) {
-        glGenQueries(1, &s_timeQuery);
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIPELINE] Created GL_TIME_ELAPSED query id=%u", s_timeQuery);
+    // GPU-Timer-Query optional anlegen (compile-time gated, vermeidet C4127)
+    if constexpr (Settings::performanceLogging || Settings::debugLogging) {
+        if (s_timeQuery == 0) {
+            glGenQueries(1, &s_timeQuery);
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[PIPELINE] Created GL_TIME_ELAPSED query id=%u", s_timeQuery);
+            }
         }
     }
 
@@ -160,20 +162,24 @@ void drawFullscreenQuad(GLuint tex) {
     bindTex2D(tex);
     bindVAO(VAO);
 
-    // Optional: GPU-Zeit messen
-    if (s_timeQuery && (Settings::performanceLogging || Settings::debugLogging)) {
-        glBeginQuery(GL_TIME_ELAPSED, s_timeQuery);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-        glEndQuery(GL_TIME_ELAPSED);
+    // Optional: GPU-Zeit messen (compile-time gated, vermeidet C4127)
+    if constexpr (Settings::performanceLogging || Settings::debugLogging) {
+        if (s_timeQuery) {
+            glBeginQuery(GL_TIME_ELAPSED, s_timeQuery);
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+            glEndQuery(GL_TIME_ELAPSED);
 
-        GLuint64 ns = 0;
-        glGetQueryObjectui64v(s_timeQuery, GL_QUERY_RESULT, &ns);
-        const double ms = (double)ns / 1.0e6;
+            GLuint64 ns = 0;
+            glGetQueryObjectui64v(s_timeQuery, GL_QUERY_RESULT, &ns);
+            const double ms = (double)ns / 1.0e6;
 
-        if constexpr (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[RENDER] gpu=%.3f ms", ms);
-        } else if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[TIME] FSQ gpu=%.3f ms", ms);
+            if constexpr (Settings::performanceLogging) {
+                LUCHS_LOG_HOST("[RENDER] gpu=%.3f ms", ms);
+            } else if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[TIME] FSQ gpu=%.3f ms", ms);
+            }
+        } else {
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
         }
     } else {
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
