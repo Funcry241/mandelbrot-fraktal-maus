@@ -1,10 +1,10 @@
 // MAUS:
-// Otter: Navigation-only; hide visual interest markers (green dots) by output contract.
-// Otter: Logs English/ASCII. Header/Source synchronized.
+// Otter: navigation-only; hide HUD markers by clearing bestIndex.
+// Otter: logs ASCII-only; minimal, math-first behavior.
 
 // =============================== src/zoom_logic.cpp ==========================
 // V3-lite + Pullback metric (center). Smooth direction changes, softmax target.
-// Otter: At the end we clear bestIndex so the HUD has nothing to draw.
+// NOTE: At the end we set out.bestIndex = -1 so external HUD draws no green dots.
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -249,26 +249,15 @@ ZoomResult evaluateZoomTarget(
     out.newOffset  = out.shouldZoom ? smoothed : previousOffset;
     out.distance   = std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y);
 
-    int finalBestIndex = (bestAdj >= 0) ? bestAdj : bestIdx;
-    out.bestIndex = finalBestIndex;
-    if (finalBestIndex >= 0) {
-        out.bestEntropy  = entropy[finalBestIndex];
-        out.bestContrast = contrast[finalBestIndex];
-    }
+    // Hide interest markers in HUD:
+    out.bestIndex = -1;
+    out.isNewTarget = false;
 
-    out.isNewTarget = (out.bestIndex >= 0 && out.bestIndex != state.lastAcceptedIndex && hasSignal);
-    if (out.isNewTarget) state.lastAcceptedIndex = out.bestIndex;
     state.lastOffset = out.newOffset; state.lastTilesX = tilesX; state.lastTilesY = tilesY; state.cooldownLeft = 0;
 
     if (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ZOOM-LITE] M0=%.3f fac=%.3f invEff=%.3g stdS=%.3f turnMax=%.3f len=%.3f dist=%.4f idx=%d",
-                       (float)M0, (float)metricFac, (float)invZoomEff, (float)stdS, (float)maxTurn, (float)lenScale, out.distance, out.bestIndex);
+        LUCHS_LOG_HOST("[ZOOM-LITE] invZoomEff=%.3g dist=%.4f", (float)invZoomEff, out.distance);
     }
-
-    // Otter: Hide visual interest markers in HUD:
-    // Keep internal state above, but provide no drawable index to the UI.
-    out.bestIndex = -1;
-
     return out;
 }
 
