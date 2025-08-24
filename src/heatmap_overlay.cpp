@@ -1,9 +1,11 @@
 // MAUS:
 // Datei: src/heatmap_overlay.cpp
 // Zweck: Diagnose der Koordinatenumrechnung zwischen Heatmap-Tiles, Screen-Pixeln und Fraktal.
-// Enthält: Mini-Overlay, Self-Check-Punkte, Max-Tile-Markierung im Hauptbild, Logging der Complex-Koordinate.
-// 🦊 Schneefuchs: Keine State-Leaks – Bindings & Blend-Status werden gesichert/restauriert. if constexpr gegen C4127. (Bezug zu Schneefuchs)
+// Enthält: Mini-Overlay (HUD oben rechts), optionaler Marker, optionaler Self-Check,
+//          robustes Logging der Complex-Koordinate. Alle Logs ASCII-only.
+// 🦊 Schneefuchs: Keine State-Leaks – Bindings & Blend-Status werden gesichert/restauriert. (Bezug zu Schneefuchs)
 // 🦦 Otter: Shader-Fehler führen zu 0-Programm (sauber abfangbar), Uniform-Locations gecached, weniger glGet* pro Frame. (Bezug zu Otter)
+// Otter: Default ohne Marker/Points → keinerlei grüne Punkte im Hauptbild oder im Overlay.
 
 #pragma warning(push)
 #pragma warning(disable: 4100)
@@ -17,6 +19,15 @@
 #include <algorithm>
 #include <cmath>
 #include <utility>
+
+// --- Build-time toggles -------------------------------------------------------
+// 0 = aus, 1 = an. Beide standardmäßig aus, damit keine Punkte gezeichnet werden.
+#ifndef HEATMAP_DRAW_MAX_MARKER
+#define HEATMAP_DRAW_MAX_MARKER 0   // Marker im Hauptbild am Zentrum der "besten" Kachel (grün/teal).  // Otter
+#endif
+#ifndef HEATMAP_DRAW_SELF_CHECK
+#define HEATMAP_DRAW_SELF_CHECK 0   // 5 Testpunkte im Mini-Overlay (nur für Diagnose).                // Otter
+#endif
 
 // Otter: always read from the *actual* context (no hidden fallbacks).
 // Schneefuchs: deterministic – overlay and zoom share the same source of truth.
@@ -33,12 +44,15 @@ static GLuint overlayShader = 0;
 static GLint  overlay_uScaleLoc  = -1;
 static GLint  overlay_uOffsetLoc = -1;
 
-static GLuint pointProg   = 0; // für Screen-/Overlay-Punkte
+#if HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
+// Punkt-Pipeline nur kompilieren, wenn mindestens eine Punkt-Option aktiv ist.
+static GLuint pointProg   = 0;
 static GLuint pointVAO    = 0;
 static GLuint pointVBO    = 0;
 static GLint  point_uScaleLoc   = -1;
 static GLint  point_uOffsetLoc  = -1;
 static GLint  point_uSizeLoc    = -1;
+#endif
 
 // ---------- Overlay Shader ----------
 static const char* vertexShaderSrc = R"GLSL(
@@ -66,30 +80,6 @@ vec3 colormap(float v) {
 void main() {
     FragColor = vec4(colormap(clamp(vValue, 0.0, 1.0)), 0.85);
 }
-)GLSL";
-
-// ---------- Minimaler Punkt-Shader (für Overlay- und Screen-Punkte) ----------
-static const char* pointVS = R"GLSL(
-#version 430 core
-layout(location=0) in vec2 aPos;   // generische Position (Einheit siehe uScale/uOffset)
-layout(location=1) in vec3 aColor;
-uniform vec2 uScale;               // wandelt aPos in NDC: pos_ndc = aPos*uScale + uOffset
-uniform vec2 uOffset;
-uniform float uPointSize;
-out vec3 vColor;
-void main(){
-    vec2 pos = aPos * uScale + uOffset;
-    gl_Position = vec4(pos, 0.0, 1.0);
-    gl_PointSize = uPointSize;
-    vColor = aColor;
-}
-)GLSL";
-
-static const char* pointFS = R"GLSL(
-#version 430 core
-in vec3 vColor;
-out vec4 FragColor;
-void main(){ FragColor = vec4(vColor, 1.0); }
 )GLSL";
 
 // ---------- Hilfen ----------
@@ -146,6 +136,31 @@ static GLuint createOverlayProgram() {
     return linkProgram(compile(GL_VERTEX_SHADER,   vertexShaderSrc),
                        compile(GL_FRAGMENT_SHADER, fragmentShaderSrc));
 }
+
+#if HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
+// ---------- Minimaler Punkt-Shader (für Overlay- und Screen-Punkte) ----------
+static const char* pointVS = R"GLSL(
+#version 430 core
+layout(location=0) in vec2 aPos;   // generische Position (Einheit siehe uScale/uOffset)
+layout(location=1) in vec3 aColor;
+uniform vec2 uScale;               // pos_ndc = aPos*uScale + uOffset
+uniform vec2 uOffset;
+uniform float uPointSize;
+out vec3 vColor;
+void main(){
+    vec2 pos = aPos * uScale + uOffset;
+    gl_Position = vec4(pos, 0.0, 1.0);
+    gl_PointSize = uPointSize;
+    vColor = aColor;
+}
+)GLSL";
+
+static const char* pointFS = R"GLSL(
+#version 430 core
+in vec3 vColor;
+out vec4 FragColor;
+void main(){ FragColor = vec4(vColor, 1.0); }
+)GLSL";
 
 static void ensurePointPipeline()
 {
@@ -212,28 +227,36 @@ static void DrawHeatmapSelfCheck_OverlaySpace(int tilesX, int tilesY,
                                               float scaleX, float scaleY,
                                               float offsetX, float offsetY)
 {
+#if HEATMAP_DRAW_SELF_CHECK
     const float pts[5][5] = {
-        { 0.5f,        0.5f,         0.0f, 0.0f, 1.0f }, // BL  - Blau
-        { tilesX-0.5f, 0.5f,         0.0f, 1.0f, 0.0f }, // BR  - Grün
-        { tilesX-0.5f, tilesY-0.5f,  1.0f, 1.0f, 0.0f }, // TR  - Gelb
+        { 0.5f,        0.5f,         0.0f, 0.0f, 1.0f }, // BL  - Blue
+        { tilesX-0.5f, 0.5f,         0.0f, 1.0f, 0.0f }, // BR  - Green
+        { tilesX-0.5f, tilesY-0.5f,  1.0f, 1.0f, 0.0f }, // TR  - Yellow
         { 0.5f,        tilesY-0.5f,  1.0f, 0.0f, 1.0f }, // TL  - Magenta
-        { tilesX*0.5f, tilesY*0.5f,  1.0f, 0.0f, 0.0f }, // CTR - Rot
+        { tilesX*0.5f, tilesY*0.5f,  1.0f, 0.0f, 0.0f }, // CTR - Red
     };
     drawPoints(&pts[0][0], 5, scaleX, scaleY, offsetX, offsetY, 10.0f);
+#else
+    (void)tilesX; (void)tilesY; (void)scaleX; (void)scaleY; (void)offsetX; (void)offsetY;
+#endif
 }
 
 // Zeichnet einen Punkt im HAUPTBILD an Pixelzentrum (px,py).
 static void DrawPoint_ScreenPixels(float px, float py, int width, int height, float r, float g, float b, float sizePx)
 {
+#if HEATMAP_DRAW_MAX_MARKER
     // NDC = ((px+0.5)/W*2-1, (py+0.5)/H*2-1)
     const float scaleX =  2.0f / float(width);
     const float scaleY =  2.0f / float(height);
     const float offX   = -1.0f;
     const float offY   = -1.0f;
-
     const float p[1][5] = { { px + 0.5f, py + 0.5f, r, g, b } };
     drawPoints(&p[0][0], 1, scaleX, scaleY, offX, offY, sizePx);
+#else
+    (void)px; (void)py; (void)width; (void)height; (void)r; (void)g; (void)b; (void)sizePx;
+#endif
 }
+#endif // HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
 
 // ---------- Mandelbrot/Fraktal: Bildschirm -> komplexe Ebene ----------
 static inline std::pair<double,double>
@@ -265,13 +288,15 @@ void cleanup() {
     if (overlayVAO) glDeleteVertexArrays(1, &overlayVAO);
     if (overlayVBO) glDeleteBuffers(1, &overlayVBO);
     if (overlayShader) glDeleteProgram(overlayShader);
+#if HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
     if (pointVAO) glDeleteVertexArrays(1, &pointVAO);
     if (pointVBO) glDeleteBuffers(1, &pointVBO);
     if (pointProg) glDeleteProgram(pointProg);
-    overlayVAO = overlayVBO = overlayShader = 0;
     pointVAO = pointVBO = pointProg = 0;
-    overlay_uScaleLoc = overlay_uOffsetLoc = -1;
     point_uScaleLoc = point_uOffsetLoc = point_uSizeLoc = -1;
+#endif
+    overlayVAO = overlayVBO = overlayShader = 0;
+    overlay_uScaleLoc = overlay_uOffsetLoc = -1;
 }
 
 // Hinweis: y=0 entspricht unterstem Bildschirmrand (FlipY = false)
@@ -356,7 +381,7 @@ void drawOverlay(const std::vector<float>& entropy,
 
     glUseProgram(overlayShader);
 
-    // Mini-Overlay Größe/Position (Pixel) -> NDC
+    // Mini-Overlay Größe/Position (Pixel) -> NDC (oben rechts)
     constexpr int overlayHeightPx = 100;
     const float overlayAspect = float(tilesX) / float(tilesY);
     const int overlayWidthPx = static_cast<int>(overlayHeightPx * overlayAspect);
@@ -392,27 +417,31 @@ void drawOverlay(const std::vector<float>& entropy,
         LUCHS_LOG_HOST("[HM] drawOverlay: verts=%zu  glErr=0x%x->0x%x", data.size()/3, errBefore, errAfter);
     }
 
-    // 3) Self-Check-Punkte im Overlay (gleiche Transform)
-    if constexpr (Settings::debugLogging) {
-        DrawHeatmapSelfCheck_OverlaySpace(tilesX, tilesY, scaleX, scaleY, offsetX, offsetY);
-    }
+#if HEATMAP_DRAW_SELF_CHECK
+    // 3) Self-Check-Punkte im Overlay (gleiche Transform) – optional
+    DrawHeatmapSelfCheck_OverlaySpace(tilesX, tilesY, scaleX, scaleY, offsetX, offsetY);
+#endif
 
-    // 4) Max-Tile im Hauptbild markieren + Koordinaten-Logging
+#if HEATMAP_DRAW_MAX_MARKER
+    // 4) Max-Tile im Hauptbild markieren (optional)
     auto [centerPx, centerPy] = tileIndexToPixelCenter(maxIdx, tilesX, tilesY, width, height);
     DrawPoint_ScreenPixels(static_cast<float>(centerPx), static_cast<float>(centerPy),
                            width, height, 0.0f, 1.0f, 0.5f, 10.0f);
+#endif
 
     if constexpr (Settings::debugLogging) {
+        // Logging nur, keine sichtbaren Marker erzwungen.
         int bx = maxIdx % tilesX;
         int by = maxIdx / tilesX;
-        const double ndcX = ((centerPx) / double(width)  - 0.5) * 2.0;
-        const double ndcY = ((centerPy) / double(height) - 0.5) * 2.0;
-        auto [reA, imA] = screenToComplex((int)std::floor(centerPx), (int)std::floor(centerPy),
+        auto [centerPxLog, centerPyLog] = tileIndexToPixelCenter(maxIdx, tilesX, tilesY, width, height);
+        const double ndcX = ((centerPxLog) / double(width)  - 0.5) * 2.0;
+        const double ndcY = ((centerPyLog) / double(height) - 0.5) * 2.0;
+        auto [reA, imA] = screenToComplex((int)std::floor(centerPxLog), (int)std::floor(centerPyLog),
                                           width, height, ctx, /*flipY=*/false);
-        auto [reB, imB] = screenToComplex((int)std::floor(centerPx), (int)std::floor(centerPy),
+        auto [reB, imB] = screenToComplex((int)std::floor(centerPxLog), (int)std::floor(centerPyLog),
                                           width, height, ctx, /*flipY=*/true);
         LUCHS_LOG_HOST("[HM] tiles=%dx%d ts=%d  maxIdx=%d -> (x=%d,y=%d)  centerPx=(%.1f,%.1f)  ndc=(%.5f, %.5f)",
-                       tilesX, tilesY, tileSize, maxIdx, bx, by, centerPx, centerPy, ndcX, ndcY);
+                       tilesX, tilesY, tileSize, maxIdx, bx, by, centerPxLog, centerPyLog, ndcX, ndcY);
         LUCHS_LOG_HOST("[HM] complex(noFlip)= %.9f + i*%.9f   |   complex(Yflip)= %.9f + i*%.9f",
                        reA, imA, reB, imB);
         LUCHS_LOG_HOST("[HM] camera zoom=%.6f  offset=(%.9f, %.9f)  aspect=%.6f",
