@@ -1,6 +1,7 @@
 // 🐭 Maus: Sichtbare Tile-/Buffer-Sanity, kein "malloc into the void", deterministische Logs.
 // 🦦 Otter: Only-Grow + Fast-Path ohne Memsets/Sync bei unveränderten Größen. (Bezug zu Otter)
 // 🦊 Schneefuchs: Host-Timings zentral (resetHostFrame), ASCII-only Logs, /WX-fest. (Bezug zu Schneefuchs)
+// 🐑 Schneefuchs: Teures vermeiden #2 – Host-Vectoren wachsen in Potenzen von 2 (weniger Realloc/Copy).
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -10,6 +11,7 @@
 #include "renderer_resources.hpp"
 #include "opengl_utils.hpp" // setGLResourceContext / PBO/Texture
 #include <algorithm>        // std::clamp
+#include <cstdint>
 
 // ---- Host-Timings: Definition der Methodik aus dem Header --------------------
 void RendererState::CudaPhaseTimings::resetHostFrame() noexcept {
@@ -24,6 +26,16 @@ static inline void computeTiles(int width, int height, int tileSize,
     tilesX   = (width  + tileSize - 1) / tileSize;
     tilesY   = (height + tileSize - 1) / tileSize;
     numTiles = tilesX * tilesY;
+}
+
+// 🐑 Schneefuchs: next power-of-two (32-bit) – reduziert Reallocs beim Zoom
+static inline size_t nextPow2_u32(size_t v) {
+    if (v <= 1) return 1;
+    v--; v |= v >> 1; v |= v >> 2; v |= v >> 4; v |= v >> 8; v |= v >> 16;
+#if SIZE_MAX > 0xFFFFFFFFu
+    v |= v >> 32; // 64-bit safety
+#endif
+    return v + 1;
 }
 
 RendererState::RendererState(int w, int h)
@@ -56,6 +68,8 @@ void RendererState::reset() {
     // Host analysis buffers
     h_entropy.clear();
     h_contrast.clear();
+    h_entropy.shrink_to_fit();
+    h_contrast.shrink_to_fit();
 
     // Zoom V2 state (explicit reset – no globals)
     zoomV2State = ZoomLogic::ZoomState{};
@@ -102,9 +116,14 @@ void RendererState::setupCudaBuffers(int tileSize) {
                        width, height, zoom, tileSize, numTiles, tilesX, tilesY, totalPixels);
     }
 
-    CUDA_CHECK(cudaSetDevice(0));
-    if constexpr (Settings::debugLogging) {
-        CudaInterop::logCudaDeviceContext("setupCudaBuffers");
+    // 🐑 Schneefuchs: Device nur einmal setzen (teuren Call nicht jede Frame)
+    static bool s_deviceBound = false;
+    if (!s_deviceBound) {
+        CUDA_CHECK(cudaSetDevice(0));
+        s_deviceBound = true;
+        if constexpr (Settings::debugLogging) {
+            CudaInterop::logCudaDeviceContext("setupCudaBuffers");
+        }
     }
 
     // --- iterations buffer (only-grow policy) ---
@@ -131,15 +150,6 @@ void RendererState::setupCudaBuffers(int tileSize) {
         LUCHS_LOG_HOST("[ALLOC] d_entropy ok: have=%zu need=%zu (tiles %d, no realloc)", have_entropy, entropy_bytes, numTiles);
     }
 
-    // Diagnostics: pointer attributes (ASCII only, optional)
-    if constexpr (Settings::debugLogging) {
-        cudaPointerAttributes attr = {};
-        cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_entropy.get());
-        LUCHS_LOG_HOST("[CHECK] d_entropy attr: err=%d type=%d device=%d hostPtr=%p devicePtr=%p",
-                       (int)attrErr, (int)attr.type, (int)attr.device,
-                       (void*)attr.hostPointer, (void*)attr.devicePointer);
-    }
-
     // --- contrast buffer (only-grow policy) ---
     const size_t have_contrast = d_contrast.size();
     const bool   grow_contrast = have_contrast < contrast_bytes;
@@ -161,16 +171,27 @@ void RendererState::setupCudaBuffers(int tileSize) {
     if (clearEntropy)    CUDA_CHECK(cudaMemset(d_entropy.get(),    0, entropy_bytes));
     if (clearContrast)   CUDA_CHECK(cudaMemset(d_contrast.get(),   0, contrast_bytes));
 
-    // 🦊 Schneefuchs: optionaler Debug-Sync zur klaren Fehlerlokalisierung
+    // 🐑 Schneefuchs: optionaler Debug-Sync zur klaren Fehlerlokalisierung
     if constexpr (Settings::debugLogging) {
         CUDA_CHECK(cudaDeviceSynchronize());
         cudaError_t syncErr = cudaGetLastError();
         LUCHS_LOG_HOST("[CHECK] post-alloc sync: err=%d", (int)syncErr);
     }
 
-    // --- host mirror sizes ---
-    h_entropy.resize(numTiles);
-    h_contrast.resize(numTiles);
+    // --- host mirror sizes (POT-capacity -> weniger teure Realloc/Copy bei Zoom-Drift) ---
+    auto ensureHostVec = [&](auto& vec) {
+        const size_t need = static_cast<size_t>(numTiles);
+        if (vec.capacity() < need) {
+            const size_t newCap = nextPow2_u32(need);
+            vec.reserve(newCap);
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ALLOC] host reserve: cap=%zu -> %zu (need=%zu)", vec.capacity(), newCap, need);
+            }
+        }
+        vec.resize(need);
+    };
+    ensureHostVec(h_entropy);
+    ensureHostVec(h_contrast);
 
     // --- summary ---
     if constexpr (Settings::debugLogging) {
