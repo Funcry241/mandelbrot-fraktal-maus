@@ -18,8 +18,8 @@ std::string build(const FrameContext& ctx, const RendererState& state) {
 
     { char v[64]; std::snprintf(v, sizeof(v), "%.6e", (double)ctx.zoom); appendKV(hud, "zoom", v); }
     { char v[64]; std::snprintf(v, sizeof(v), "%.4f, %.4f", (double)ctx.offset.x, (double)ctx.offset.y); appendKV(hud, "offset", v); }
-    { char v[64]; std::snprintf(v, sizeof(v), "%.3f", (double)ctx.lastEntropy); appendKV(hud, "entropy", v); }
-    { char v[64]; std::snprintf(v, sizeof(v), "%.3f", (double)ctx.lastContrast); appendKV(hud, "contrast", v); }
+    // { char v[64]; std::snprintf(v, sizeof(v), "%.3f", (double)ctx.lastEntropy); appendKV(hud, "entropy", v); }
+    // { char v[64]; std::snprintf(v, sizeof(v), "%.3f", (double)ctx.lastContrast); appendKV(hud, "contrast", v); }
 
     // fps actual (max) – Klammern sicher vorhanden (Font ergänzt)
     {
