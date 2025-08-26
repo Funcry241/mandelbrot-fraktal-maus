@@ -7,6 +7,7 @@
 #include <vector_types.h>
 #include <chrono>   // timing
 #include <cstdio>   // snprintf (ASCII only)
+#include <cmath>
 #include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
 #include "frame_context.hpp"
@@ -20,7 +21,7 @@
 #include "common.hpp"
 #include "zoom_logic.hpp"
 #include "fps_meter.hpp"
-#include "hud_text.hpp"  // 🐭 Maus: zentraler HUD-Builder
+#include "hud_text.hpp"
 
 namespace FramePipeline {
 
@@ -46,8 +47,6 @@ namespace {
     double g_perfOverlaysMs  = 0.0;
     double g_perfFrameTotal  = 0.0;
 
-    // NOTE: Implemented without an unconditional early return in the same branch
-    // to avoid MSVC C4702 "unreachable code" under /WX.
     inline bool perfShouldLog(int frameIdx) {
         if constexpr (Settings::performanceLogging) {
             if (frameIdx <= PERF_WARMUP_FRAMES) return false;
@@ -106,7 +105,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
                        state.d_iterations.size(), state.d_entropy.size(), state.d_contrast.size());
     }
 
-    // Host-side timing gated at compile-time (no constant-if warning).
+    // Host-side timing gated at compile-time.
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         auto t0 = Clock::now();
 
@@ -301,22 +300,7 @@ void execute(RendererState& state) {
     state.offset = g_ctx.offset;
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
-    // --- feed FpsMeter with uncapped core time (ms) ---
-    {
-        double coreMs = 0.0;
-        if (state.lastTimings.valid) {
-            // Pure compute: Mandelbrot + Entropy + Contrast (no PBO, no overlays, no upload)
-            coreMs = state.lastTimings.mandelbrotTotal
-                   + state.lastTimings.entropy
-                   + state.lastTimings.contrast;
-        }
-        if (coreMs > 0.0) {
-            FpsMeter::updateCoreMs(coreMs);
-        }
-    }
-    // --- end: FpsMeter feed ---
-
-    // HUD text (ASCII, zentraler Builder)
+    // HUD text (ASCII, zentraler Builder) – nutzt MaxFPS vom *vorigen* Frame
     state.warzenschweinText = HudText::build(g_ctx, state);
     WarzenschweinOverlay::setText(state.warzenschweinText);
 
@@ -324,6 +308,9 @@ void execute(RendererState& state) {
 
     auto tFrame1 = Clock::now();
     g_perfFrameTotal = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
+
+    // Exakte uncapped Framezeit -> FpsMeter (zeigt im nächsten Frame)
+    FpsMeter::updateCoreMs(g_perfFrameTotal);
 
     // Compact PERF line only when enabled.
     if (perfShouldLog(globalFrameCounter)) {
