@@ -19,6 +19,7 @@
 #include "luchs_cuda_log_buffer.hpp"
 #include "common.hpp"
 #include "zoom_logic.hpp"
+#include "fps_meter.hpp"
 
 namespace FramePipeline {
 
@@ -299,6 +300,21 @@ void execute(RendererState& state) {
     state.offset = g_ctx.offset;
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
+    // --- feed FpsMeter with uncapped core time (ms) ---
+    {
+        double coreMs = 0.0;
+        if (state.lastTimings.valid) {
+            // Pure compute: Mandelbrot + Entropy + Contrast (no PBO, no overlays, no upload)
+            coreMs = state.lastTimings.mandelbrotTotal
+                   + state.lastTimings.entropy
+                   + state.lastTimings.contrast;
+        }
+        if (coreMs > 0.0) {
+            FpsMeter::updateCoreMs(coreMs);
+        }
+    }
+    // --- end: FpsMeter feed ---
+
     // HUD text (ASCII, no iostream overhead)
     std::string hud;
     hud.reserve(256);
@@ -330,9 +346,19 @@ void execute(RendererState& state) {
     }
     {
         const double fps = (g_ctx.frameTime > 0.0f) ? (1.0 / g_ctx.frameTime) : 0.0;
+        const int    maxFpsInt = FpsMeter::currentMaxFpsInt();
         char v[64];
-        std::snprintf(v, sizeof(v), "%.1f", fps);
+        // ASCII only: actual FPS with one decimal, max FPS as integer in parentheses
+        std::snprintf(v, sizeof(v), "%.1f (%d)", fps, maxFpsInt);
         appendKV("fps", v);
+    }
+    {
+        const int tilesX   = (g_ctx.width  + g_ctx.tileSize - 1) / g_ctx.tileSize;
+        const int tilesY   = (g_ctx.height + g_ctx.tileSize - 1) / g_ctx.tileSize;
+        const int numTiles = tilesX * tilesY;
+        char v[64];
+        std::snprintf(v, sizeof(v), "%d x %d (%d)", tilesX, tilesY, numTiles);
+        appendKV("tiles", v);
     }
 
     state.warzenschweinText = hud;
@@ -360,14 +386,15 @@ void execute(RendererState& state) {
         const double conMs   = vt ? state.lastTimings.contrast        : 0.0;
 
         const int mallocs = 0, frees = 0, dflush = 1;
+        const int maxfps  = FpsMeter::currentMaxFpsInt();
 
         LUCHS_LOG_HOST(
             "[PERF] f=%d res=%dx%d zoom=%.6f it=%d "
             "map=%.2f mandel=%.2f ent=%.2f con=%.2f tex=%.2f overlays=%.2f total=%.2f "
-            "fps=%.1f malloc=%d free=%d dflush=%d e0=%.4f c0=%.4f",
+            "fps=%.1f maxfps=%d malloc=%d free=%d dflush=%d e0=%.4f c0=%.4f",
             globalFrameCounter, resX, resY, (double)g_ctx.zoom, it,
             mapMs, mandMs, entMs, conMs, g_perfTexMs, g_perfOverlaysMs, g_perfFrameTotal,
-            fps, mallocs, frees, dflush, (double)g_ctx.lastEntropy, (double)g_ctx.lastContrast
+            fps, maxfps, mallocs, frees, dflush, (double)g_ctx.lastEntropy, (double)g_ctx.lastContrast
         );
     }
 }

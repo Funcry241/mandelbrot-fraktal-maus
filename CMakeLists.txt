@@ -88,6 +88,7 @@ add_executable(mandelbrot_otterdream
     src/hermelin_buffer.cpp
     src/bear_CudaPBOResource.cpp
     src/frame_capture.cpp
+    src/fps_meter.cpp
 )
 
 # 🛡️ GLEW: Imaging-Fehler verhindern durch explizite Compile-Definitionen
