@@ -1,4 +1,3 @@
-/////
 // 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean – HUD/Heatmap bleiben garantiert sichtbar.
 // 🦦 Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines. (Bezug zu Otter)
 // 🐑 Schneefuchs: Fehlerquellen mit glGetError sichtbar gemacht, Upload deterministisch. (Bezug zu Schneefuchs)
@@ -155,28 +154,35 @@ void drawFullscreenQuad(GLuint tex) {
     }
 
     bindProgram(program);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
+
+    // 🐑 Schneefuchs: Vorherigen State sichern und nach dem Draw wiederherstellen.
+    GLboolean wasDepth = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean wasCull  = glIsEnabled(GL_CULL_FACE);
+    if (wasDepth) glDisable(GL_DEPTH_TEST);
+    if (wasCull)  glDisable(GL_CULL_FACE);
 
     glActiveTexture(GL_TEXTURE0);
     bindTex2D(tex);
     bindVAO(VAO);
 
-    // Optional: GPU-Zeit messen (compile-time gated, vermeidet C4127)
+    // Optional: GPU-Zeit messen ohne harte Stall – erst availability pruefen.
     if constexpr (Settings::performanceLogging || Settings::debugLogging) {
         if (s_timeQuery) {
             glBeginQuery(GL_TIME_ELAPSED, s_timeQuery);
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
             glEndQuery(GL_TIME_ELAPSED);
 
-            GLuint64 ns = 0;
-            glGetQueryObjectui64v(s_timeQuery, GL_QUERY_RESULT, &ns);
-            const double ms = (double)ns / 1.0e6;
-
-            if constexpr (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[RENDER] gpu=%.3f ms", ms);
-            } else if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[TIME] FSQ gpu=%.3f ms", ms);
+            GLint available = 0;
+            glGetQueryObjectiv(s_timeQuery, GL_QUERY_RESULT_AVAILABLE, &available);
+            if (available) {
+                GLuint64 ns = 0;
+                glGetQueryObjectui64v(s_timeQuery, GL_QUERY_RESULT, &ns);
+                const double ms = (double)ns / 1.0e6;
+                if constexpr (Settings::performanceLogging) {
+                    LUCHS_LOG_HOST("[RENDER] gpu=%.3f ms", ms);
+                } else if constexpr (Settings::debugLogging) {
+                    LUCHS_LOG_HOST("[TIME] FSQ gpu=%.3f ms", ms);
+                }
             }
         } else {
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -190,10 +196,12 @@ void drawFullscreenQuad(GLuint tex) {
         LUCHS_LOG_HOST("[DRAW] glDrawElements glGetError() = 0x%04X", err);
     }
 
-    // State wieder freigeben (wie zuvor), Cache entsprechend setzen
+    // State wiederherstellen
     bindVAO(0);
     bindTex2D(0);
     bindProgram(0);
+    if (wasCull)  glEnable(GL_CULL_FACE);
+    if (wasDepth) glEnable(GL_DEPTH_TEST);
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DRAW] Fullscreen quad drawn");
