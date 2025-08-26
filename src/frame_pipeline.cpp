@@ -59,7 +59,10 @@ namespace {
 }
 
 // --------------------------------- frame begin --------------------------------
-void beginFrame(FrameContext& frameCtx) {
+void beginFrame(FrameContext& frameCtx, RendererState& state) {
+    // 🐑 Schneefuchs: Host-Timings pro Frame auf Null (eine Quelle, falls genutzt)
+    state.lastTimings.resetHostFrame();
+
     const double now = glfwGetTime();
     if constexpr (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] beginFrame: time=%.4f, totalFrames=%d", now, globalFrameCounter);
@@ -264,6 +267,8 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
 
     auto tTex1 = Clock::now();
     g_perfTexMs = std::chrono::duration_cast<msd>(tTex1 - tTex0).count();
+    // optional: zentral ablegen (tut nix kaputt, wird nur befüllt)
+    state.lastTimings.uploadMs = g_perfTexMs;
 
     // overlaysMs measures Heatmap + Warzenschwein together.
     auto tOv0 = Clock::now();
@@ -278,13 +283,14 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
 
     auto tOv1 = Clock::now();
     g_perfOverlaysMs = std::chrono::duration_cast<msd>(tOv1 - tOv0).count();
+    state.lastTimings.overlaysMs = g_perfOverlaysMs;
 }
 
 // ---------------------------------- execute ----------------------------------
 void execute(RendererState& state) {
     auto tFrame0 = Clock::now();
 
-    beginFrame(g_ctx);
+    beginFrame(g_ctx, state);
 
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
@@ -308,6 +314,7 @@ void execute(RendererState& state) {
 
     auto tFrame1 = Clock::now();
     g_perfFrameTotal = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
+    state.lastTimings.frameTotalMs = g_perfFrameTotal;
 
     // Exakte uncapped Framezeit -> FpsMeter (zeigt im nächsten Frame)
     FpsMeter::updateCoreMs(g_perfFrameTotal);

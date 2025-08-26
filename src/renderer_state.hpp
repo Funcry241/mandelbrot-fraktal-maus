@@ -1,6 +1,5 @@
-// Datei: src/renderer_state.hpp
 // 🦦 Otter: Einheitliche, klare Struktur – nur aktive Zustände. (Bezug zu Otter)
-// 🦊 Schneefuchs: Speicher & Buffer exakt definiert, keine verwaisten Zoom-Felder mehr. (Bezug zu Schneefuchs)
+// 🦊 Schneefuchs: Speicher & Buffer exakt definiert, Host-Timings zentral – eine Quelle. (Bezug zu Schneefuchs)
 // 🐜 Rote Ameise: tileSize explizit in Pipelines, hier nur Zustand & Ressourcen.
 
 #pragma once
@@ -58,16 +57,25 @@ public:
     // 📝 HUD-Text
     std::string warzenschweinText;
 
-    // ⏱️ CUDA-Laufzeit-Timings – gesetzt von renderCudaFrame
+    // ⏱️ Timings – CUDA + HOST konsolidiert (eine Quelle)
     struct CudaPhaseTimings {
-        bool valid = false;
-        double mandelbrotTotal = 0.0;
+        // CUDA / Interop (gesetzt von renderCudaFrame)
+        bool   valid = false;
+        double mandelbrotTotal  = 0.0;
         double mandelbrotLaunch = 0.0;
-        double mandelbrotSync = 0.0;
-        double entropy = 0.0;
-        double contrast = 0.0;
-        double deviceLogFlush = 0.0;
-        double pboMap = 0.0;
+        double mandelbrotSync   = 0.0;
+        double entropy          = 0.0;
+        double contrast         = 0.0;
+        double deviceLogFlush   = 0.0;
+        double pboMap           = 0.0;
+
+        // HOST (gesetzt in frame_pipeline)
+        double uploadMs         = 0.0; // PBO->Texture + FSQ
+        double overlaysMs       = 0.0; // Heatmap + Warzenschwein
+        double frameTotalMs     = 0.0; // beginFrame->Ende execute (ohne Swap)
+
+        // 🐑 Schneefuchs: Pro-Frame-Reset nur für Host-Anteile. (Bezug zu Schneefuchs)
+        void resetHostFrame() noexcept;
     };
     CudaPhaseTimings lastTimings;
 

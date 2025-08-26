@@ -1,8 +1,7 @@
-// MAUS:
 // Datei: src/renderer_state.cpp
-// 🐭 Maus: Sichtbare Tile-/Buffer-Sanity, kein „malloc into the void“, deterministische Logs.
+// 🐭 Maus: Sichtbare Tile-/Buffer-Sanity, kein "malloc into the void", deterministische Logs.
 // 🦦 Otter: Explizite Realloc-Policy (only-grow) und klare Lebenszyklen von CUDA/GL-Ressourcen. (Bezug zu Otter)
-// 🦊 Schneefuchs: Keine impliziten Seiteneffekte, Header/Source konsistent, ASCII-only Logs. (Bezug zu Schneefuchs)
+// 🦊 Schneefuchs: Host-Timings zentral: resetHostFrame() definiert; Header/Source konsistent, ASCII-only Logs. (Bezug zu Schneefuchs)
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -10,8 +9,15 @@
 #include "cuda_interop.hpp"
 #include "common.hpp"
 #include "renderer_resources.hpp"
-#include "opengl_utils.hpp" // Schneefuchs: explizit, da setGLResourceContext / PBO/Texture genutzt
+#include "opengl_utils.hpp" // setGLResourceContext / PBO/Texture
 #include <algorithm>        // std::clamp
+
+// ---- Host-Timings: Definition der Methodik aus dem Header --------------------
+void RendererState::CudaPhaseTimings::resetHostFrame() noexcept {
+    uploadMs     = 0.0;
+    overlaysMs   = 0.0;
+    frameTotalMs = 0.0;
+}
 
 // Helper: compute tile layout for given tileSize
 static inline void computeTiles(int width, int height, int tileSize,
@@ -55,7 +61,7 @@ void RendererState::reset() {
     // Zoom V2 state (explicit reset – no globals)
     zoomV2State = ZoomLogic::ZoomState{};
 
-    // CUDA timings reset
+    // Timings reset (CUDA + HOST auf Default)
     lastTimings = CudaPhaseTimings{}; // valid=false by default
 }
 
@@ -211,7 +217,10 @@ void RendererState::resize(int newWidth, int newHeight) {
 
     setupCudaBuffers(lastTileSize);
 
+    // Host-Timings fuer neues Frame auf Null
+    lastTimings.resetHostFrame();
+
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[Resize] %d x %d buffers reallocated", width, height);
+        LUCHS_LOG_HOST("[RESIZE] %d x %d buffers reallocated", width, height);
     }
 }
