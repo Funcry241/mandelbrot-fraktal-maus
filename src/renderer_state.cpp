@@ -1,7 +1,6 @@
-// Datei: src/renderer_state.cpp
 // 🐭 Maus: Sichtbare Tile-/Buffer-Sanity, kein "malloc into the void", deterministische Logs.
-// 🦦 Otter: Explizite Realloc-Policy (only-grow) und klare Lebenszyklen von CUDA/GL-Ressourcen. (Bezug zu Otter)
-// 🦊 Schneefuchs: Host-Timings zentral: resetHostFrame() definiert; Header/Source konsistent, ASCII-only Logs. (Bezug zu Schneefuchs)
+// 🦦 Otter: Only-Grow + Fast-Path ohne Memsets/Sync bei unveränderten Größen. (Bezug zu Otter)
+// 🦊 Schneefuchs: Host-Timings zentral (resetHostFrame), ASCII-only Logs, /WX-fest. (Bezug zu Schneefuchs)
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -19,7 +18,7 @@ void RendererState::CudaPhaseTimings::resetHostFrame() noexcept {
     frameTotalMs = 0.0;
 }
 
-// Helper: compute tile layout for given tileSize
+// Helper: compute tile layout for given tileSize (header-local, ODR-safe)
 static inline void computeTiles(int width, int height, int tileSize,
                                 int& tilesX, int& tilesY, int& numTiles) {
     tilesX   = (width  + tileSize - 1) / tileSize;
@@ -85,6 +84,19 @@ void RendererState::setupCudaBuffers(int tileSize) {
     const size_t entropy_bytes  = static_cast<size_t>(numTiles)    * sizeof(float);
     const size_t contrast_bytes = static_cast<size_t>(numTiles)    * sizeof(float);
 
+    // 🦦 Otter: Fast-Path – wenn alles schon passt, sofort raus (keine Memsets/Sync)
+    const bool sizesOk =
+        d_iterations.size() >= it_bytes   &&
+        d_entropy.size()    >= entropy_bytes &&
+        d_contrast.size()   >= contrast_bytes &&
+        h_entropy.size()    == static_cast<size_t>(numTiles) &&
+        h_contrast.size()   == static_cast<size_t>(numTiles) &&
+        lastTileSize        == tileSize;
+
+    if (sizesOk) {
+        return;
+    }
+
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] setupCudaBuffers: w=%d h=%d zoom=%.5f tileSize=%d tiles=%d (%d x %d) pixels=%d",
                        width, height, zoom, tileSize, numTiles, tilesX, tilesY, totalPixels);
@@ -97,7 +109,8 @@ void RendererState::setupCudaBuffers(int tileSize) {
 
     // --- iterations buffer (only-grow policy) ---
     const size_t have_it = d_iterations.size();
-    if (have_it < it_bytes) {
+    const bool   grow_it = have_it < it_bytes;
+    if (grow_it) {
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_iterations grow: have=%zu -> need=%zu", have_it, it_bytes);
         }
@@ -105,14 +118,11 @@ void RendererState::setupCudaBuffers(int tileSize) {
     } else if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[ALLOC] d_iterations ok: have=%zu need=%zu (no realloc)", have_it, it_bytes);
     }
-    CUDA_CHECK(cudaMemset(d_iterations.get(), 0, it_bytes));
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[CHECK] cudaMemset d_iterations ok (bytes=%zu)", it_bytes);
-    }
 
     // --- entropy buffer (only-grow policy) ---
     const size_t have_entropy = d_entropy.size();
-    if (have_entropy < entropy_bytes) {
+    const bool   grow_entropy = have_entropy < entropy_bytes;
+    if (grow_entropy) {
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_entropy grow: have=%zu -> need=%zu (tiles %d)", have_entropy, entropy_bytes, numTiles);
         }
@@ -121,7 +131,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
         LUCHS_LOG_HOST("[ALLOC] d_entropy ok: have=%zu need=%zu (tiles %d, no realloc)", have_entropy, entropy_bytes, numTiles);
     }
 
-    // Diagnostics: pointer attributes (ASCII only)
+    // Diagnostics: pointer attributes (ASCII only, optional)
     if constexpr (Settings::debugLogging) {
         cudaPointerAttributes attr = {};
         cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_entropy.get());
@@ -130,24 +140,10 @@ void RendererState::setupCudaBuffers(int tileSize) {
                        (void*)attr.hostPointer, (void*)attr.devicePointer);
     }
 
-    CUDA_CHECK(cudaMemset(d_entropy.get(), 0, entropy_bytes));
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[CHECK] cudaMemset d_entropy ok (bytes=%zu)", entropy_bytes);
-    }
-
-    CUDA_CHECK(cudaDeviceSynchronize());
-    {
-        cudaError_t syncErr = cudaGetLastError();
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[CHECK] post-entropy sync: err=%d", (int)syncErr);
-        }
-        if (syncErr != cudaSuccess)
-            throw std::runtime_error("cudaMemset d_entropy failed (post-sync)");
-    }
-
     // --- contrast buffer (only-grow policy) ---
     const size_t have_contrast = d_contrast.size();
-    if (have_contrast < contrast_bytes) {
+    const bool   grow_contrast = have_contrast < contrast_bytes;
+    if (grow_contrast) {
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ALLOC] d_contrast grow: have=%zu -> need=%zu (tiles %d)", have_contrast, contrast_bytes, numTiles);
         }
@@ -155,9 +151,21 @@ void RendererState::setupCudaBuffers(int tileSize) {
     } else if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[ALLOC] d_contrast ok: have=%zu need=%zu (tiles %d, no realloc)", have_contrast, contrast_bytes, numTiles);
     }
-    CUDA_CHECK(cudaMemset(d_contrast.get(), 0, contrast_bytes));
+
+    // 🐭 Maus: Zeroing nur bei NEU-Allocation (oder in Debug immer) → spart Bandbreite & Stalls
+    const bool clearIterations = grow_it       || Settings::debugLogging;
+    const bool clearEntropy    = grow_entropy  || Settings::debugLogging;
+    const bool clearContrast   = grow_contrast || Settings::debugLogging;
+
+    if (clearIterations) CUDA_CHECK(cudaMemset(d_iterations.get(), 0, it_bytes));
+    if (clearEntropy)    CUDA_CHECK(cudaMemset(d_entropy.get(),    0, entropy_bytes));
+    if (clearContrast)   CUDA_CHECK(cudaMemset(d_contrast.get(),   0, contrast_bytes));
+
+    // 🦊 Schneefuchs: optionaler Debug-Sync zur klaren Fehlerlokalisierung
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[CHECK] cudaMemset d_contrast ok (bytes=%zu)", contrast_bytes);
+        CUDA_CHECK(cudaDeviceSynchronize());
+        cudaError_t syncErr = cudaGetLastError();
+        LUCHS_LOG_HOST("[CHECK] post-alloc sync: err=%d", (int)syncErr);
     }
 
     // --- host mirror sizes ---
