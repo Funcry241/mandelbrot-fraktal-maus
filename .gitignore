@@ -2,7 +2,13 @@
 # 🛠️ Build-Ordner & Distribution
 /build/
 /build-*/
-/dist/
+
+# ⚠️ Wichtig: Verzeichnis 'dist' nicht pauschal ignorieren,
+# damit einzelne Dateien via "!" re-includiert werden koennen.
+/dist/*
+!/dist/frame_0100.bmp   # 🦦 Otter: explizit freigeben (Bezug zu Otter)
+# (Optional: falls du das Verzeichnis immer im Repo haben willst)
+# !/dist/.gitkeep
 
 # ----------------------------------------------------------------------
 # 📁 Visual Studio
@@ -39,6 +45,7 @@ Desktop.ini
 *.exe
 *.pdb
 *.dmp
+*.ilk
 
 # ----------------------------------------------------------------------
 # ⚙️ CMake & Generator-Dateien
@@ -71,6 +78,12 @@ OtterDream_Project.zip
 
 # ----------------------------------------------------------------------
 # 🚫 CI-Output-Artefakte sicher ignorieren
+# (Hier erneut, aber so, dass Re-Includes wie oben funktionieren.)
 /dist/*
 
+# ----------------------------------------------------------------------
+# 🎯 Einzelne, projektbezogene Ignorierer
 wupp.txt
+
+# 🐑 Schneefuchs: Re-Includes muessen NACH dem Ignore stehen. (Bezug zu Schneefuchs)
+#                 Deshalb kein blankes "/dist/" weiter oben – sonst greift "!/dist/frame_0100.bmp" nicht.

@@ -1,16 +1,21 @@
-# 🧠 Maus-Kommentar: Einheitliche Line Endings, Syntax-Hervorhebung, saubere Diffs - für Mandelbrot-Otterdream
+# 🧠 Maus-Kommentar: Einheitliche Line Endings, saubere Diffs – Mandelbrot-Otterdream
+# 🦊 Schneefuchs: Spezifische Regeln kommen NACH allgemeinen; keine CRLF/LF-Warnflut. (Bezug zu Schneefuchs)
+# 🦦 Otter: PowerShell/Batch bewusst CRLF, Quellcode strikt LF. (Bezug zu Otter)
 
 # --------------------------------------------------------
-# Standardtextdateien: automatisch LF
+# Standardtextdateien: global LF als Default
 * text=auto eol=lf
 
 # --------------------------------------------------------
-# Quellcode - explizit Unix-LF, unabhängig vom OS
+# Quellcode – strikt Unix LF, unabhängig vom OS
 *.cpp     text eol=lf
 *.c       text eol=lf
 *.cu      text eol=lf
+*.cuh     text eol=lf
 *.hpp     text eol=lf
 *.h       text eol=lf
+*.inl     text eol=lf
+*.ipp     text eol=lf
 *.glsl    text eol=lf
 *.vert    text eol=lf
 *.frag    text eol=lf
@@ -18,31 +23,41 @@
 CMakeLists.txt text eol=lf
 
 # --------------------------------------------------------
-# Batch- und Shell-Skripte
-*.sh      text eol=lf
+# Batch-/Shell-/PowerShell – bewusst CRLF für bessere Win-Editor-Kompatibilität
 *.bat     text eol=crlf
+*.cmd     text eol=crlf
 *.ps1     text eol=crlf
+*.psm1    text eol=crlf
+*.psd1    text eol=crlf
+*.sh      text eol=lf
 
 # --------------------------------------------------------
-# Markdown und Doku
+# Markdown / Doku / Konfig
 *.md      text eol=lf
 *.txt     text eol=lf
-
-# --------------------------------------------------------
-# Binary files - nicht diffbar
-*.exe     binary
-*.dll     binary
-*.lib     binary
-*.pdb     binary
-*.obj     binary
-*.zip     binary
-*.png     binary
-*.jpg     binary
-
-# --------------------------------------------------------
-# VS Code settings (json = normal text)
 *.json    text eol=lf
+*.jsonc   text eol=lf
+*.ini     text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+.vscode/*       text eol=lf
 
 # --------------------------------------------------------
-# Unicode safe fallback (z. B. für UTF-8-BOM-Warnungen)
-*.ini     text eol=lf
+# Binärformate – niemals als Text behandeln
+*.exe     -text
+*.dll     -text
+*.lib     -text
+*.pdb     -text
+*.obj     -text
+*.zip     -text
+*.7z      -text
+*.png     -text
+*.jpg     -text
+*.jpeg    -text
+*.bmp     -text
+*.ico     -text
+*.ttf     -text
+*.otf     -text
+*.pdf     -text
