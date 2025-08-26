@@ -87,11 +87,9 @@ add_executable(mandelbrot_otterdream
     src/frame_context.cpp
     src/hermelin_buffer.cpp
     src/bear_CudaPBOResource.cpp
-    src/frame_capture.cpp
-    # 🦦 Otter: Max-FPS HUD (uncapped) – basiert auf Core-Zeit (Mandel/Entropy/Contrast). (Bezug zu Otter)
-    src/fps_meter.cpp
-    # (Header wird für IDE-Komfort mitgeführt; nicht zwingend)
-    src/fps_meter.hpp
+    src/frame_capture.cpp    
+    src/fps_meter.cpp        
+    src/hud_text.cpp
 )
 
 # 🛡️ GLEW: Imaging-Fehler verhindern durch explizite Compile-Definitionen

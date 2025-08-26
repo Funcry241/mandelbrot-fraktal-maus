@@ -20,6 +20,7 @@
 #include "common.hpp"
 #include "zoom_logic.hpp"
 #include "fps_meter.hpp"
+#include "hud_text.hpp"  // 🐭 Maus: zentraler HUD-Builder
 
 namespace FramePipeline {
 
@@ -315,53 +316,8 @@ void execute(RendererState& state) {
     }
     // --- end: FpsMeter feed ---
 
-    // HUD text (ASCII, no iostream overhead)
-    std::string hud;
-    hud.reserve(256);
-    auto appendKV = [&](const char* label, const char* value) {
-        char line[96];
-        const int n = std::snprintf(line, sizeof(line), "%10s  %-18s\n", label, value);
-        if (n > 0) hud.append(line, (size_t)std::min(n, (int)sizeof(line)));
-    };
-
-    {
-        char v[64];
-        std::snprintf(v, sizeof(v), "%.6e", (double)g_ctx.zoom);
-        appendKV("zoom", v);
-    }
-    {
-        char v[64];
-        std::snprintf(v, sizeof(v), "%.4f, %.4f", (double)g_ctx.offset.x, (double)g_ctx.offset.y);
-        appendKV("offset", v);
-    }
-    {
-        char v[64];
-        std::snprintf(v, sizeof(v), "%.3f", (double)g_ctx.lastEntropy);
-        appendKV("entropy", v);
-    }
-    {
-        char v[64];
-        std::snprintf(v, sizeof(v), "%.3f", (double)g_ctx.lastContrast);
-        appendKV("contrast", v);
-    }
-    {
-        const double fps = (g_ctx.frameTime > 0.0f) ? (1.0 / g_ctx.frameTime) : 0.0;
-        const int    maxFpsInt = FpsMeter::currentMaxFpsInt();
-        char v[64];
-        // ASCII only: actual FPS with one decimal, max FPS as integer in parentheses
-        std::snprintf(v, sizeof(v), "%.1f (%d)", fps, maxFpsInt);
-        appendKV("fps", v);
-    }
-    {
-        const int tilesX   = (g_ctx.width  + g_ctx.tileSize - 1) / g_ctx.tileSize;
-        const int tilesY   = (g_ctx.height + g_ctx.tileSize - 1) / g_ctx.tileSize;
-        const int numTiles = tilesX * tilesY;
-        char v[64];
-        std::snprintf(v, sizeof(v), "%d x %d (%d)", tilesX, tilesY, numTiles);
-        appendKV("tiles", v);
-    }
-
-    state.warzenschweinText = hud;
+    // HUD text (ASCII, zentraler Builder)
+    state.warzenschweinText = HudText::build(g_ctx, state);
     WarzenschweinOverlay::setText(state.warzenschweinText);
 
     drawFrame(g_ctx, state.tex.id(), state);
