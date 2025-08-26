@@ -1,6 +1,6 @@
 // 🐭 Maus: Eine Quelle für Tiles pro Frame. Vor Render: Buffer-Sync via setupCudaBuffers(...).
 // 🦦 Otter: Sanity-Logs, deterministische Reihenfolge; Zoom V2 außerhalb der CUDA-Interop. (Bezug zu Otter)
-// 🐑 Schneefuchs: Entropy/Contrast nur aus *RendererState* (eine Quelle) – keine Duplikate mehr. (Bezug zu Schneefuchs)
+// 🐑 Schneefuchs: Kein doppeltes Sizing, keine Alt-Settings. (Bezug zu Schneefuchs)
 // 🐑 Schneefuchs: /WX-fest – keine konstanten ifs (C4127) und keine C4702 mehr; Debug/Perf via if constexpr. ASCII logs only.
 
 #include "pch.hpp"
@@ -60,7 +60,7 @@ namespace {
 
 // --------------------------------- frame begin --------------------------------
 void beginFrame(FrameContext& frameCtx, RendererState& state) {
-    // 🐑 Schneefuchs: Host-Timings pro Frame auf Null (eine Quelle)
+    // 🐑 Schneefuchs: Host-Timings pro Frame auf Null (eine Quelle, falls genutzt)
     state.lastTimings.resetHostFrame();
 
     const double now = glfwGetTime();
@@ -121,8 +121,8 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
             frameCtx.zoom,
             gpuOffset,
             frameCtx.maxIterations,
-            /* 🐑 Schneefuchs: HOST-Analysepuffer – EINZIGE Quelle */ state.h_entropy,
-            state.h_contrast,
+            frameCtx.h_entropy,
+            frameCtx.h_contrast,
             gpuNewOffset,
             frameCtx.shouldZoom,
             frameCtx.tileSize,
@@ -151,7 +151,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
             }
         }
     } else {
-        // Hot path ohne Host-Timing
+        // Hot path without host timing
         CudaInterop::renderCudaFrame(
             state.d_iterations,
             state.d_entropy,
@@ -161,22 +161,14 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
             frameCtx.zoom,
             gpuOffset,
             frameCtx.maxIterations,
-            /* 🐑 Schneefuchs */ state.h_entropy,
-            state.h_contrast,
+            frameCtx.h_entropy,
+            frameCtx.h_contrast,
             gpuNewOffset,
             frameCtx.shouldZoom,
             frameCtx.tileSize,
             state
         );
         CUDA_CHECK(cudaDeviceSynchronize());
-    }
-
-    // 🧪 Sanity: Haben wir echte Daten in den Host-Puffern?
-    if constexpr (Settings::debugLogging) {
-        double sumE = 0.0, sumC = 0.0;
-        const size_t N = std::min(state.h_entropy.size(), state.h_contrast.size());
-        for (size_t i = 0; i < N; ++i) { sumE += state.h_entropy[i]; sumC += state.h_contrast[i]; }
-        LUCHS_LOG_HOST("[CHECK] host arrays: N=%zu sumE=%.6f sumC=%.6f", N, sumE, sumC);
     }
 
     // Deterministic, modular device-log flush; immediate flush on error.
@@ -192,8 +184,8 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     const float2 prevOff = currOff;
 
     auto zr = ZoomLogic::evaluateZoomTarget(
-        /* 🐑 Schneefuchs: immer STATE-Daten */ state.h_entropy,
-        state.h_contrast,
+        frameCtx.h_entropy,
+        frameCtx.h_contrast,
         tilesX, tilesY,
         frameCtx.width, frameCtx.height,
         currOff, frameCtx.zoom,
@@ -206,32 +198,29 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         frameCtx.lastEntropy  = zr.bestEntropy;
         frameCtx.lastContrast = zr.bestContrast;
     } else {
-        // Kein valider Kandidat: zeige Mittelwert als Feedback statt stur 0
-        double meanE = 0.0, meanC = 0.0;
-        const size_t N = std::min(state.h_entropy.size(), state.h_contrast.size());
-        if (N > 0) {
-            for (size_t i = 0; i < N; ++i) { meanE += state.h_entropy[i]; meanC += state.h_contrast[i]; }
-            meanE /= (double)N; meanC /= (double)N;
-        }
-        frameCtx.lastEntropy  = (float)meanE;
-        frameCtx.lastContrast = (float)meanC;
+        frameCtx.lastEntropy  = 0.0f;
+        frameCtx.lastContrast = 0.0f;
+    }
+
+    frameCtx.shouldZoom = zr.shouldZoom;
+    if (zr.shouldZoom) {
+        frameCtx.newOffset = { zr.newOffset.x, zr.newOffset.y };
     }
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PIPE] ZOOMV2: best=%d score=%.3f accept=%d newOff=(%.6f,%.6f) e=%.4f c=%.4f",
+        LUCHS_LOG_HOST("[PIPE] ZOOMV2: best=%d score=%.3f accept=%d newOff=(%.6f,%.6f)",
                        zr.bestIndex, zr.bestScore, zr.shouldZoom ? 1 : 0,
-                       zr.newOffset.x, zr.newOffset.y,
-                       (double)frameCtx.lastEntropy, (double)frameCtx.lastContrast);
+                       zr.newOffset.x, zr.newOffset.y);
     }
 
     if constexpr (Settings::debugLogging) {
-        if (!state.h_entropy.empty() && !state.h_contrast.empty()) {
+        if (!frameCtx.h_entropy.empty() && !frameCtx.h_contrast.empty()) {
             float minE =  1e9f, maxE = -1e9f;
             float minC =  1e9f, maxC = -1e9f;
-            const size_t N = std::min(state.h_entropy.size(), state.h_contrast.size());
+            const size_t N = std::min(frameCtx.h_entropy.size(), frameCtx.h_contrast.size());
             for (size_t i = 0; i < N; ++i) {
-                const float e = state.h_entropy[i];
-                const float c = state.h_contrast[i];
+                const float e = frameCtx.h_entropy[i];
+                const float c = frameCtx.h_contrast[i];
                 minE = std::min(minE, e);
                 maxE = std::max(maxE, e);
                 minC = std::min(minC, c);
@@ -241,9 +230,6 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
                            frameCtx.zoom, frameCtx.offset.x, frameCtx.offset.y, frameCtx.tileSize);
             LUCHS_LOG_HOST("[HEAT] Entropy: min=%.5f  max=%.5f | Contrast: min=%.5f  max=%.5f",
                            minE, maxE, minC, maxC);
-        } else {
-            LUCHS_LOG_HOST("[HEAT] host arrays empty (entropy=%zu contrast=%zu)",
-                           state.h_entropy.size(), state.h_contrast.size());
         }
     }
 }
@@ -272,6 +258,7 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus, RendererState& stat
 
 // ------------------------------ draw (GL upload + FSQ) -----------------------
 void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
+    // texMs measures only PBO->Texture upload + FSQ draw, separate from overlays.
     auto tTex0 = Clock::now();
 
     OpenGLUtils::setGLResourceContext("frame");
@@ -280,16 +267,14 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
 
     auto tTex1 = Clock::now();
     g_perfTexMs = std::chrono::duration_cast<msd>(tTex1 - tTex0).count();
+    // optional: zentral ablegen (tut nix kaputt, wird nur befüllt)
     state.lastTimings.uploadMs = g_perfTexMs;
 
     // overlaysMs measures Heatmap + Warzenschwein together.
     auto tOv0 = Clock::now();
 
     if (frameCtx.overlayActive)
-        HeatmapOverlay::drawOverlay(
-            /* 🐑 Schneefuchs */ state.h_entropy,
-            state.h_contrast,
-            frameCtx.width, frameCtx.height, frameCtx.tileSize, tex, state);
+        HeatmapOverlay::drawOverlay(frameCtx.h_entropy, frameCtx.h_contrast, frameCtx.width, frameCtx.height, frameCtx.tileSize, tex, state);
 
     if constexpr (Settings::warzenschweinOverlayEnabled) {
         if (!state.warzenschweinText.empty())
@@ -336,6 +321,7 @@ void execute(RendererState& state) {
 
     // Compact PERF line only when enabled.
     if (perfShouldLog(globalFrameCounter)) {
+        // Periodic device-log flush, only in performance mode.
         LuchsLogger::flushDeviceLogToHost(0);
 
         const int resX = g_ctx.width;
