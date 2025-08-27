@@ -352,10 +352,8 @@ void renderCudaFrame(
 
 #ifndef CUDA_ARCH
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST(
-            "[PERF] map=%.3f ms | mandel=%.3f ms | ent=%.3f ms | con=%.3f ms | flush=%.3f ms | total=%.3f ms",
-            mapMs, mandelbrotMs, entMs, conMs, flushMs, totalMs
-        );
+        LUCHS_LOG_HOST("[PERF] mp=%.2f md=%.2f en=%.2f ct=%.2f fl=%.2f tt=%.2f",
+               mapMs,    mandelbrotMs, entMs,   conMs,   flushMs, totalMs);
     }
 #endif
 }

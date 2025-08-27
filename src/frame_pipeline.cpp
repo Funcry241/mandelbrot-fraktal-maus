@@ -339,9 +339,7 @@ void execute(RendererState& state) {
         const int maxfps  = FpsMeter::currentMaxFpsInt();
 
         LUCHS_LOG_HOST(
-            "[PERF] f=%d res=%dx%d zoom=%.6f it=%d "
-            "map=%.2f mandel=%.2f ent=%.2f con=%.2f tex=%.2f overlays=%.2f total=%.2f "
-            "fps=%.1f maxfps=%d malloc=%d free=%d dflush=%d e0=%.4f c0=%.4f",
+            "[PERF] f=%d r=%dx%d zm=%.4g it=%d mp=%.2f md=%.2f en=%.2f ct=%.2f tx=%.2f ov=%.2f tt=%.2f fp=%.1f mx=%d ma=%d fr=%d df=%d e0=%.4f c0=%.4f",
             globalFrameCounter, resX, resY, (double)g_ctx.zoom, it,
             mapMs, mandMs, entMs, conMs, g_perfTexMs, g_perfOverlaysMs, g_perfFrameTotal,
             fps, maxfps, mallocs, frees, dflush, (double)g_ctx.lastEntropy, (double)g_ctx.lastContrast

@@ -1,4 +1,3 @@
-// MAUS:
 // Otter: pure-math rendering, no sprites/overlays; brighter tone mapping.
 // Otter: AA uses DE with high floor; analytic gold ramp; logs ASCII-only.
 
@@ -16,7 +15,7 @@
 #include <cmath>
 #include <chrono>
 #include <algorithm>
-#include <ctime>            // Otter: ensure std::time_t visible for common.hpp
+#include <ctime>            // ensure std::time_t visible for common.hpp
 #include "common.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
@@ -500,9 +499,10 @@ void computeCudaEntropyContrast(
         cudaEventElapsedTime(&ms2, evMid, evEnd);
 
         if (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[PERF] entropy=%.3f ms contrast=%.3f ms", ms1, ms2);
+            // compact: entropy/contrast in ms
+            LUCHS_LOG_HOST("[PERF] en=%.2f ct=%.2f", ms1, ms2);
         } else {
-            LUCHS_LOG_HOST("[TIME] Entropy %.3f ms | Contrast %.3f ms", ms1, ms2);
+            LUCHS_LOG_HOST("[TIME] en=%.2f | ct=%.2f", ms1, ms2);
         }
 
         cudaEventDestroy(evStart); cudaEventDestroy(evMid); cudaEventDestroy(evEnd);
@@ -580,7 +580,7 @@ void launch_mandelbrotHybrid(
     cudaMemcpyToSymbol(d_warmup_it, &warmupIt, sizeof(int), 0, cudaMemcpyHostToDevice);
 
     if (Settings::performanceLogging) {
-        LUCHS_LOG_HOST("[PERF] warmup_it=%d prev_survivors=%.2f%%", warmupIt, g_prevSurvivorsPct);
+        LUCHS_LOG_HOST("[PERF] wu=%d surv=%.2f%%", warmupIt, g_prevSurvivorsPct);
     }
 
     cudaFuncSetCacheConfig(mandelbrotPass1Warmup, cudaFuncCachePreferL1);
@@ -599,21 +599,21 @@ void launch_mandelbrotHybrid(
     cudaMemcpy(&h_survA, g_pools.cntA, sizeof(int), cudaMemcpyDeviceToHost); // waits for P1
     const double survPct = (double)h_survA * 100.0 / (double(w) * double(h));
     if (Settings::performanceLogging) {
-        LUCHS_LOG_HOST("[PERF] survivors=%d (%.2f%% of %d)", h_survA, survPct, w*h);
+        LUCHS_LOG_HOST("[PERF] surv=%d (%.2f%% of %d)", h_survA, survPct, w*h);
     }
     g_prevSurvivorsPct = survPct;
 
     double p1Ms = duration<double, std::milli>(clk::now() - hostStart).count();
     if (h_survA <= 0) {
         if (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[PERF] mandelbrot (hybrid-sliced): total=%.3f ms", p1Ms);
+            LUCHS_LOG_HOST("[PERF] total=%.2f b=%.2f (p1-only)", p1Ms, kernelBudgetMs);
         } else if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[TIME] Mandelbrot Sliced | Total %.3f ms", p1Ms);
+            LUCHS_LOG_HOST("[TIME] total %.2f (p1-only)", p1Ms);
         }
         return;
     }
     if (p1Ms > kernelBudgetMs && Settings::performanceLogging) {
-        LUCHS_LOG_HOST("[PERF] budget_hit after P1: p1=%.3f ms budget=%.3f ms -> defer P2", p1Ms, kernelBudgetMs);
+        LUCHS_LOG_HOST("[PERF] budget_p1 p1=%.2f b=%.2f defer", p1Ms, kernelBudgetMs);
     }
 
     // pass 2 (sliced, budget-aware)
@@ -633,7 +633,7 @@ void launch_mandelbrotHybrid(
         double elapsedMs = duration<double, std::milli>(clk::now() - hostStart).count();
         if (elapsedMs >= kernelBudgetMs) {
             if (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[PERF] budget_exhausted before slice %d: elapsed=%.3f ms budget=%.3f ms",
+                LUCHS_LOG_HOST("[PERF] budget pre sl=%d el=%.2f b=%.2f",
                                slice, elapsedMs, kernelBudgetMs);
             }
             break;
@@ -650,12 +650,12 @@ void launch_mandelbrotHybrid(
 
         elapsedMs = duration<double, std::milli>(clk::now() - hostStart).count();
         if (Settings::performanceLogging || Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PERF] slice=%d steps=%d survivors_in=%d survivors_out=%d elapsed=%.3f ms (budget=%.3f)",
+            LUCHS_LOG_HOST("[PERF] sl=%d st=%d in=%d out=%d el=%.2f b=%.2f",
                            slice, sliceIt, h_cur, h_next, elapsedMs, kernelBudgetMs);
         }
         if (elapsedMs >= kernelBudgetMs) {
             if (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[PERF] budget_stop at slice %d", slice);
+                LUCHS_LOG_HOST("[PERF] budget stop at sl=%d", slice);
             }
             std::swap(curBuf, nxtBuf); std::swap(curCnt, nxtCnt); h_cur = h_next; ++slice;
             break;
@@ -669,12 +669,12 @@ void launch_mandelbrotHybrid(
         if (emaDrop < DROP_LOWER_ACCEL && sliceIt < (maxIter / 2)) {
             sliceIt = std::min(sliceIt * 2, maxIter / 2);
             if (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[PERF] adapt_slice_it=%d (emaDrop=%.4f)", sliceIt, emaDrop);
+                LUCHS_LOG_HOST("[PERF] adapt st=%d ema=%.3f", sliceIt, emaDrop);
             }
         } else if (emaDrop > DROP_UPPER_BACKOFF && sliceIt > FINISH_SLICE_IT) {
             sliceIt = std::max(sliceIt / 2, FINISH_SLICE_IT);
             if (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[PERF] backoff_slice_it=%d (emaDrop=%.4f)", sliceIt, emaDrop);
+                LUCHS_LOG_HOST("[PERF] backoff st=%d ema=%.3f", sliceIt, emaDrop);
             }
         }
 
@@ -687,10 +687,9 @@ void launch_mandelbrotHybrid(
     if (Settings::performanceLogging || Settings::debugLogging) {
         double totalMs = duration<double, std::milli>(clk::now() - hostStart).count();
         if (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[PERF] mandelbrot (hybrid-sliced): total=%.3f ms (budget=%.3f ms)",
-                           totalMs, kernelBudgetMs);
+            LUCHS_LOG_HOST("[PERF] total=%.2f b=%.2f", totalMs, kernelBudgetMs);
         } else {
-            LUCHS_LOG_HOST("[TIME] Mandelbrot Sliced | Total %.3f ms", totalMs);
+            LUCHS_LOG_HOST("[TIME] total %.2f", totalMs);
         }
     }
 }
