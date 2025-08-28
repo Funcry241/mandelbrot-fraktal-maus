@@ -1,11 +1,9 @@
-// MAUS:
 // Datei: src/luchs_log_host.cpp
 // 🐭 Maus-Kommentar: Host-Logging – präzise Zeitstempel, ASCII-only.
 // 🦦 Otter: Konsistentes Format Host/Device.
 // 🦊 Schneefuchs: Thread-safe, /WX-fest, kein strncat.
 
 #include "luchs_log_host.hpp"
-#include "common.hpp" // getLocalTime(...)
 #include <chrono>
 #include <mutex>
 #include <cstdarg>
@@ -39,21 +37,14 @@ namespace LuchsLogger {
         if (!base) base = std::strrchr(file, '/');
         base = base ? base + 1 : file;
 
-        // Timestamp (YYYY-MM-DD HH:MM:SS.mmm)
-        const auto now = std::chrono::system_clock::now();
-        const auto t   = std::chrono::system_clock::to_time_t(now);
-        const auto ms  = std::chrono::duration_cast<std::chrono::milliseconds>(
-                             now.time_since_epoch()) % 1000;
-
-        std::tm tm{};
-        getLocalTime(tm, t);
-
-        char ts[32];
-        std::strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &tm);
+        // Timestamp: Epoch-Milliseconds
+        const auto now          = std::chrono::system_clock::now();
+        const auto ms_since_epo = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        const long long epochMs = static_cast<long long>(ms_since_epo);
 
         // ----- stdout pass -----
-        std::fprintf(stdout, "[%s.%03lld][%s][%d]: ",
-                     ts, static_cast<long long>(ms.count()), base, line);
+        std::fprintf(stdout, "[t=%lld][%s][%d]: ",
+                     epochMs, base, line);
 
         va_list a1;
         va_start(a1, fmt);
@@ -67,8 +58,8 @@ namespace LuchsLogger {
     #if defined(_WIN32)
         if (g_mirrorToDebugger) {
             char buf[2048];
-            int n = std::snprintf(buf, sizeof(buf), "[%s.%03lld][%s][%d]: ",
-                                  ts, static_cast<long long>(ms.count()), base, line);
+            int n = std::snprintf(buf, sizeof(buf), "[t=%lld][%s][%d]: ",
+                                  epochMs, base, line);
             if (n < 0) n = 0;
             if (n >= static_cast<int>(sizeof(buf))) n = static_cast<int>(sizeof(buf)) - 1;
 
