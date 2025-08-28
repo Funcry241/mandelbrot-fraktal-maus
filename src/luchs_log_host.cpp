@@ -43,7 +43,7 @@ namespace LuchsLogger {
         const long long epochMs = static_cast<long long>(ms_since_epo);
 
         // ----- stdout pass -----
-        std::fprintf(stdout, "[t=%lld][%s][%d]: ",
+        std::fprintf(stdout, "[%lld|%s|%d] ",
                      epochMs, base, line);
 
         va_list a1;
