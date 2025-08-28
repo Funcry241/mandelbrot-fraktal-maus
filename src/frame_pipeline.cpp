@@ -324,25 +324,33 @@ void execute(RendererState& state) {
         // Periodic device-log flush, only in performance mode.
         LuchsLogger::flushDeviceLogToHost(0);
 
-        const int resX = g_ctx.width;
-        const int resY = g_ctx.height;
-        const int it   = g_ctx.maxIterations;
-        const double fps = (g_ctx.frameTime > 0.0f) ? (1.0 / g_ctx.frameTime) : 0.0;
+        const int    resX = g_ctx.width;
+        const int    resY = g_ctx.height;
+        const int    it   = g_ctx.maxIterations;
+        const double fps  = (g_ctx.frameTime > 0.0f) ? (1.0 / g_ctx.frameTime) : 0.0;
 
-        const bool vt = state.lastTimings.valid;
-        const double mapMs   = vt ? state.lastTimings.pboMap          : 0.0;
-        const double mandMs  = vt ? state.lastTimings.mandelbrotTotal : 0.0;
-        const double entMs   = vt ? state.lastTimings.entropy         : 0.0;
-        const double conMs   = vt ? state.lastTimings.contrast        : 0.0;
+        const bool   vt   = state.lastTimings.valid;
+        const double mapMs  = vt ? state.lastTimings.pboMap          : 0.0;
+        const double mandMs = vt ? state.lastTimings.mandelbrotTotal : 0.0;
+        const double entMs  = vt ? state.lastTimings.entropy         : 0.0;
+        const double conMs  = vt ? state.lastTimings.contrast        : 0.0;
 
         const int mallocs = 0, frees = 0, dflush = 1;
         const int maxfps  = FpsMeter::currentMaxFpsInt();
 
+        // Zeile A: Meta + FPS
         LUCHS_LOG_HOST(
-            "[PERF] f=%d r=%dx%d zm=%.4g it=%d mp=%.2f md=%.2f en=%.2f ct=%.2f tx=%.2f ov=%.2f tt=%.2f fp=%.1f mx=%d ma=%d fr=%d df=%d e0=%.4f c0=%.4f",
+            "[PERF-A] f=%d r=%dx%d zm=%.4g it=%d fp=%.1f mx=%d ma=%d fr=%d df=%d",
             globalFrameCounter, resX, resY, (double)g_ctx.zoom, it,
+            fps, maxfps, mallocs, frees, dflush
+        );
+
+        // Zeile B: Zeiten + erste Metrikwerte
+        LUCHS_LOG_HOST(
+            "[PERF-B] f=%d mp=%.2f md=%.2f en=%.2f ct=%.2f tx=%.2f ov=%.2f tt=%.2f e0=%.4f c0=%.4f",
+            globalFrameCounter,
             mapMs, mandMs, entMs, conMs, g_perfTexMs, g_perfOverlaysMs, g_perfFrameTotal,
-            fps, maxfps, mallocs, frees, dflush, (double)g_ctx.lastEntropy, (double)g_ctx.lastContrast
+            (double)g_ctx.lastEntropy, (double)g_ctx.lastContrast
         );
     }
 }
