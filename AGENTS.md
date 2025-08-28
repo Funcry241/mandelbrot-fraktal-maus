@@ -1,85 +1,75 @@
 <!-- Datei: AGENTS.md -->
-<!-- 🐭 Maus-Kommentar: Dokumentiert Buildprozesse und Toolchains für OtterDream. Jetzt mit Hotkey-Doku, CUDA-Architektur-Hinweis, Frame-Budget-Pacing-Hinweis und Robbe-Regel für API-Synchronität. Schneefuchs flüstert: „Ein Agent kennt auch die versteckten Knöpfe und sorgt für saubere Übergänge.“ -->
+
+<!-- 🐭 Maus-Kommentar: Dokumentiert Buildprozesse und Toolchains für OtterDream. Jetzt mit Hotkey-Doku, CUDA-Architektur-Hinweis, Frame‑Budget‑Pacing‑Hinweis, Robbe‑Regel und kompakten PERF‑Logs (Epoch‑Millis). Schneefuchs flüstert: „Ein Agent kennt die versteckten Knöpfe und sorgt für saubere Übergänge.“ -->
 
 # 👩‍💻 OtterDream Build Agents
 
-Diese Datei dokumentiert die automatisierten Prozesse und Tools für den Build und die Pflege des OtterDream Mandelbrot-Renderers. **Ab Alpha 41 gilt das "Robbe-Prinzip": Alle Header-/Source-Schnittstellen werden IMMER synchron gepflegt. Kein Drift, kein API-Bruch.**
+Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln rund um Build, Logging und Pflege des **OtterDream Mandelbrot‑Renderers**.
 
-Seit **Alpha 81** zusätzlich relevant:
-
-* **Silk‑Lite Zoom** im Runtime‑Pfad (zeitstabile Drehraten, Längendämpfung)
-* **Frame‑Budget‑Pacing** im Kernel-Wrapping (CI geprüft)
-* **Logging ohne Seiteneffekte** (reine ASCII‑Logs; Verhalten der Pipelines bleibt unverändert)
+**Seit Alpha 41** gilt das **Robbe‑Prinzip**: *Header & Source bleiben synchron. Kein Drift, kein API‑Bruch.*
+**Seit Alpha 81** zusätzlich relevant: *Silk‑Lite Zoom*, *Frame‑Budget‑Pacing* und **ASCII‑only Logs** ohne Seiteneffekt.
 
 ---
 
 ## 🧑‍🔬 Overview
 
-Das Projekt verwendet folgende Agents und Werkzeuge:
+| Agent/Tool              | Zweck                         | Trigger         | Aktionen                                            |
+| ----------------------- | ----------------------------- | --------------- | --------------------------------------------------- |
+| **GitHub Actions (CI)** | Build-, Test-, Install‑Check  | Push auf `main` | CMake Configure → Ninja Build → `cmake --install`   |
+| **Dependabot**          | Abhängigkeits‑Updates (vcpkg) | Wöchentlich     | PRs für `vcpkg.json`, CI baut PR                    |
+| **Waschbär‑Watchdog**   | Hygiene & Auto‑Fixes (lokal)  | On‑Demand       | Räumt CMake‑Caches, fixt typische GLEW/vcpkg‑Fallen |
 
-| Agent               | Zweck                                  | Trigger         | Aktionen                                            |
-| ------------------- | -------------------------------------- | --------------- | --------------------------------------------------- |
-| GitHub Actions (CI) | Build-, Test- & Install-Check bei Push | Push auf `main` | CMake-Konfiguration, Ninja-Build, `cmake --install` |
-| Dependabot          | Abhängigkeits-Updates für vcpkg        | Wöchentlich     | Überwachung/PRs für `vcpkg.json`                    |
-| Waschbär-Watchdog   | Hygiene & Auto-Fixes (lokal)           | On-Demand       | Bereinigt vcpkg/GLEW-Fallen, räumt CMake-Caches auf |
-
-> CI erzeugt deterministische Artefakte und prüft zusätzlich, dass **Debug-/Perf-Logging keine Seiteneffekte** (z. B. Barrieren, Zustandsänderungen) hat.
+> CI stellt sicher, dass **Debug-/Perf‑Logging keine Seiteneffekte** erzeugt (keine erzwungenen Synchronisationen im Hot‑Path).
 
 ---
 
 ## 🧰 Tools & Versionen
 
-| Tool          | Mindestversion | Hinweise                                  |
-| ------------- | -------------- | ----------------------------------------- |
-| CUDA Toolkit  | 12.9+          | Erforderlich für GPU-Rendering            |
-| OpenGL        | 4.3+           | Benötigt Core Profile                     |
-| Visual Studio | 2022           | Inklusive C++- und CUDA-Support           |
-| CMake         | ≥3.28          | Install-Ziel via `--install`              |
-| Ninja         | 1.10+          | Für schnelle parallele Builds             |
-| vcpkg         | aktuell        | Verwaltung von Drittanbieter-Bibliotheken |
-
----
+| Tool          | Mindestversion | Hinweise                  |
+| ------------- | -------------- | ------------------------- |
+| CUDA Toolkit  | 12.9+          | `nvcc` lokal erforderlich |
+| OpenGL        | 4.3+           | Core Profile              |
+| Visual Studio | 2022           | C++ + CUDA                |
+| CMake         | ≥3.28          | Presets & `--install`     |
+| Ninja         | 1.10+          | Schneller Parallel‑Build  |
+| vcpkg         | aktuell        | Drittanbieter‑Libs        |
 
 ### ⚠️ CUDA erforderlich
 
-> ❗ **Hinweis:** Für den Build ist eine **lokal installierte CUDA-Toolchain (z. B. `nvcc`) zwingend erforderlich**.
-> Ohne CUDA kann der Buildprozess **nicht gestartet** werden.
+Ohne lokal installiertes CUDA (inkl. `nvcc`) startet der Build nicht.
 
 ---
 
-## ⌨️ Keyboard Controls
+## ⌨️ Hotkeys (Runtime)
 
-Diese Tastenkürzel sind während der Laufzeit verfügbar:
+| Taste   | Funktion                       |
+| ------- | ------------------------------ |
+| `P`     | Auto‑Zoom pausieren/fortsetzen |
+| `Space` | Alternativ zu `P`              |
+| `H`     | Heatmap‑Overlay toggeln        |
+| `T`     | HUD (Warzenschwein) toggeln    |
 
-| Taste   | Funktion                            |
-| ------- | ----------------------------------- |
-| `P`     | Auto-Zoom pausieren oder fortsetzen |
-| `Space` | Alternativ zu `P`                   |
-| `H`     | Heatmap-Overlay ein-/ausschalten    |
-| `T`     | HUD (WarzenschweinOverlay) toggeln  |
-
-> Hinweis: Die **Silk‑Lite**-Planung sorgt bei Richtungswechseln für sanfte Übergänge (Yaw‑Limiter + Dämpfung). Das Verhalten ist unabhängig von Debug‑Logs.
+> **Silk‑Lite** sorgt für sanfte Richtungswechsel (Yaw‑Limiter + Dämpfung), unabhängig vom Logging.
 
 ---
 
-## 🧠 CUDA Architekturen
+## 🧠 CUDA‑Architekturen
 
-Standardmäßig ist in den CMake-Presets die Architektur `80;86;89;90` gesetzt.
-Für andere GPUs kann diese wie folgt überschrieben werden:
+Standard: `80;86;89;90`. Abweichungen pro Preset überschreiben:
 
 ```bash
 cmake --preset windows-release -DCMAKE_CUDA_ARCHITECTURES=90
 ```
 
-Die passende Architektur für deine GPU findest du auf der offiziellen NVIDIA-Liste.
+Die passende CC deiner GPU findest du in NVIDIAs Übersicht.
 
 ---
 
 ## ⚙️ Lokaler Build
 
-### 🪟 Windows (zwei Wege)
+### 🪟 Windows
 
-**A) Komfortskript**
+**A) Komfort (optional, falls vorhanden)**
 
 ```powershell
 ./build.ps1
@@ -90,24 +80,25 @@ Die passende Architektur für deine GPU findest du auf der offiziellen NVIDIA-Li
 ```powershell
 cmake --preset windows-msvc
 cmake --build --preset windows-msvc
-cmake --install build/windows --prefix ./dist
+cmake --install build\windows --prefix .\dist
 ./dist/mandelbrot_otterdream.exe
 ```
 
-> Das Skript erkennt bekannte Fallstricke (z. B. `glew32d.lib`), bereinigt CMake-Caches und setzt die Pfade für CUDA automatisch.
+> Hinweis: In manchen Repos ist `build.ps1` absichtlich **nicht** eingecheckt. Dann bitte Weg **B)** verwenden.
 
 ### 🐧 Linux
 
-1. **Voraussetzungen installieren** (einmalig):
+1. Pakete (Beispiel Debian/Ubuntu):
 
 ```bash
 sudo apt update
-sudo apt install build-essential cmake git ninja-build libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config libcuda1-525
+sudo apt install build-essential cmake git ninja-build \
+  libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config libcuda1-525
 ```
 
-> *Hinweis:* Je nach Distribution kann die CUDA-Runtime-Bibliothek anders heißen (z. B. `libcuda1-545`).
+> Je nach Treiber: `libcuda1-545` o. ä.
 
-2. **Repository klonen & vcpkg initialisieren**:
+2. Klonen & vcpkg bootstrap:
 
 ```bash
 git clone --recurse-submodules https://github.com/Funcry241/otterdream-mandelbrot.git
@@ -115,69 +106,97 @@ cd otterdream-mandelbrot
 ./vcpkg/bootstrap-vcpkg.sh
 ```
 
-3. **Projekt konfigurieren & bauen**:
+3. Bauen & installieren:
 
 ```bash
 cmake --preset linux-build
 cmake --build --preset linux-build
 cmake --install build/linux --prefix ./dist
-```
-
-4. **Starten**:
-
-```bash
 ./dist/mandelbrot_otterdream
 ```
 
 ---
 
-## 🌊 Das Robbe-Prinzip (API-Synchronität)
+## 🌊 Robbe‑Prinzip (API‑Synchronität)
 
-Ab Alpha 41 gilt:
+> Jede Änderung an Signaturen/Interfaces wird **zeitgleich** in Header **und** Source umgesetzt (und gemeinsam committed). Abweichungen sind Build‑Fehler – Robbe sagt **OOU‑OOU**.
 
-> **Jede Änderung an Funktionssignaturen, Headern oder APIs wird immer gleichzeitig in Header- und Source-Dateien umgesetzt und committed. Kein Drift!**
-
-* Nie wieder schleichende Bugs durch asynchrone Schnittstellen.
-* Funktionsänderungen, die Robbe nicht sieht, werden nicht gebaut.
-
-Robbe wacht über jede Funktion. Wenn Header und Source abweichen, watschelt sie quer durch den Commit und macht lautstark **OOU‑OOU!**
+* Kein schleichender Drift
+* Saubere öffentliche API
 
 ---
 
-## 🧪 Logging-Regeln (seit Alpha 81)
+## 🧪 Logging‑Regeln & Formate (Alpha 81)
 
-* **ASCII‑only** – keine binären Dumps im Hot‑Path.
-* **Zero Side‑Effects** – Logs dürfen **keine** Zustände verändern, keine Synchronisationspunkte erzwingen und sind klar hinter Performance‑kritischen Pfaden platziert.
-* **Performance‑Logging** und **Debug‑Logging** sind strikt getrennt und können unabhängig voneinander aktiviert werden.
+* **ASCII‑only**, keine binären Dumps, **eine Zeile pro Logeintrag**.
+* **Keine Seiteneffekte**: Logs verändern keinen Zustand und erzwingen keine Synchronisationen im Hot‑Path.
+* **Zwei Schalter** (in `Settings`):
+
+  * `performanceLogging` → kompakte Messwerte via CUDA‑Events
+  * `debugLogging` → detailliertere Diagnose (zur Not langsamer)
+
+### Zeitstempel
+
+* **Epoch‑Millis** (UTC/Local egal für Parsing) statt Langformat.
+* Beispiel‑Prefix: `\[1693243285061][core_kernel.cu][676]: ...`
+
+### Kompakte PERF‑Zeilen (Kern)
+
+Ein Eintrag bündelt das Wesentliche pro Frame:
+
+```
+[<epoch-ms>][core_kernel.cu][line]: [PERF] k=<ms> b=<budget-ms> wu=<it> sv=<n>(<%>) sl=<slices> st0=<it0> stN=<itN> stMax=<itMax> ch=<n> rem=<n> ema=<x.xxx> bh=<0/1>
+```
+
+**Legende (Kurz):**
+
+* `k` Kernel‑Gesamtzeit (ms), `b` Kernel‑Budget (ms)
+* `wu` Warmup‑Iterationen
+* `sv` Survivor nach Pass 1 (Anzahl & Anteil)
+* `sl` Slices ausgeführt
+* `st0` Start‑SliceIt, `stN` letztes SliceIt, `stMax` höchstes SliceIt
+* `ch` Anzahl SliceIt‑Anpassungen
+* `rem` verbleibende Survivors nach letzter Slice
+* `ema` geglättete Drop‑Rate
+* `bh` Budget‑Hit (1 = Budget erschöpft)
+
+### Entropie/Kontrast (GPU‑Metriken)
+
+Separat und knapp:
+
+```
+[<epoch-ms>][core_kernel.cu][line]: [PERF] en=<ms> ct=<ms>
+```
+
+> Tipp: Für Volumen‑Reduktion **Sampling‑Rate** des Perf‑Loggers anheben (z. B. jede n‑te Frame‑Zeile), Debug‑Logs aus.
 
 ---
 
 ## 🌐 CI/CD Pipelines
 
-**GitHub Actions**
+**GitHub Actions** (`.github/workflows/ci.yml`)
 
-* Workflow: `.github/workflows/ci.yml`
-* Schritte: Configure → Build (Ninja) → Install
+* Configure → Build (Ninja) → Install
 * Artefakte: Install‑Tree unter `dist/`
-* Prüft zusätzlich:
+* Prüfungen:
 
-  * erfolgreiche CUDA‑Kompilation für Presets
+  * CUDA‑Kompilation für Presets
   * konsistente CMake‑Presets
   * deterministische Builds (gleiche Inputs → gleiche Outputs)
 
 **Dependabot**
 
-* Automatisches Update der vcpkg‑Abhängigkeiten (wöchentlich)
-* PRs werden vom CI‑Workflow gebaut
+* PRs für `vcpkg.json` (wöchentlich)
+* CI baut und verifiziert
 
 ---
 
 ## ❓ Troubleshooting (Kurz)
 
-* **nvcc nicht gefunden** → CUDA 12.9 installieren und PATH prüfen.
-* **Linker findet `glew32d.lib`** → vcpkg‑Triplet auf Release prüfen; im Zweifel `build.ps1` nutzen (räumt auf).
-* **Schwarze Frames bei extremer Kamerabewegung** → sicherstellen, dass Runtime‑Einstellungen (Silk‑Lite/Anti‑Black‑Guard) aktiv sind; Logging muss aus sein bei Performance‑Messungen.
+* **`nvcc` fehlt** → CUDA 12.9 installieren, PATH prüfen
+* **`glew32d.lib` verlinkt** → Triplet prüfen; notfalls Build‑Cache löschen (Preset neu)
+* **Schwarze Frames** bei extremem Pan/Zoom → Silk‑Lite/Anti‑Black‑Guard aktiv lassen; Messläufe ohne Debug‑Logs
 
 ---
 
-**Agenten‑Motto:** Maus sorgt für Fokus, Schneefuchs für Präzision, Robbe für API‑Disziplin, Waschbär für Hygiene. 💫
+**Agenten‑Motto:** Maus bringt Fokus 🐭, Schneefuchs Präzision 🦊, Robbe API‑Disziplin 🦭, Waschbär Hygiene 🦝. 💫
