@@ -5,10 +5,16 @@
 
 # ⚠️ Wichtig: Verzeichnis 'dist' nicht pauschal ignorieren,
 # damit einzelne Dateien via "!" re-includiert werden koennen.
+# → zuerst ignorieren, dann unten die Ausnahmen freigeben!
 /dist/*
 !/dist/frame_0100.bmp   # 🦦 Otter: explizit freigeben (Bezug zu Otter)
 # (Optional: falls du das Verzeichnis immer im Repo haben willst)
 # !/dist/.gitkeep
+
+# ----------------------------------------------------------------------
+# 🧰 Lokale Build-Skripte nicht veröffentlichen
+build.ps1
+/ps1supporter/
 
 # ----------------------------------------------------------------------
 # 📁 Visual Studio
@@ -77,13 +83,8 @@ OtterDream_Project.zip
 /imgui.ini
 
 # ----------------------------------------------------------------------
-# 🚫 CI-Output-Artefakte sicher ignorieren
-# (Hier erneut, aber so, dass Re-Includes wie oben funktionieren.)
-/dist/*
-
-# ----------------------------------------------------------------------
 # 🎯 Einzelne, projektbezogene Ignorierer
 wupp.txt
 
-# 🐑 Schneefuchs: Re-Includes muessen NACH dem Ignore stehen. (Bezug zu Schneefuchs)
-#                 Deshalb kein blankes "/dist/" weiter oben – sonst greift "!/dist/frame_0100.bmp" nicht.
+# 🐑 Schneefuchs: Re-Includes müssen NACH dem Ignore stehen. (Bezug zu Schneefuchs)
+#                 Keine zweite /dist/*-Regel weiter unten, damit die Ausnahme greift.
