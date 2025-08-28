@@ -15,7 +15,8 @@
 #include <cmath>
 #include <chrono>
 #include <algorithm>
-#include <ctime>            // ensure std::time_t visible for common.hpp
+#include <utility>        // std::swap
+#include <ctime>          // ensure std::time_t visible for common.hpp
 #include "common.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
@@ -516,13 +517,13 @@ void computeCudaEntropyContrast(
 namespace {
     using clk = std::chrono::high_resolution_clock;
 
-    struct Survivor; // fwd
+    // IMPORTANT: Use the *same* Survivor type as kernels (global ::Survivor)
     struct DevicePools {
-        Survivor* A = nullptr;
-        Survivor* B = nullptr;
-        int*      cntA = nullptr;
-        int*      cntB = nullptr;
-        size_t    cap = 0;
+        ::Survivor* A = nullptr;
+        ::Survivor* B = nullptr;
+        int*        cntA = nullptr;
+        int*        cntB = nullptr;
+        size_t      cap = 0;
     };
     DevicePools g_pools;
     double      g_prevSurvivorsPct = -1.0;
@@ -533,8 +534,8 @@ namespace {
         if (g_pools.B)    cudaFree(g_pools.B);
         if (g_pools.cntA) cudaFree(g_pools.cntA);
         if (g_pools.cntB) cudaFree(g_pools.cntB);
-        cudaMalloc(&g_pools.A,    need * sizeof(Survivor));
-        cudaMalloc(&g_pools.B,    need * sizeof(Survivor));
+        cudaMalloc(&g_pools.A,    need * sizeof(::Survivor));
+        cudaMalloc(&g_pools.B,    need * sizeof(::Survivor));
         cudaMalloc(&g_pools.cntA, sizeof(int));
         cudaMalloc(&g_pools.cntB, sizeof(int));
         g_pools.cap = need;
@@ -606,11 +607,11 @@ void launch_mandelbrotHybrid(
     int sliceChanges = 0;
     bool budgetHit = false;
 
-    Survivor* curBuf = g_pools.A;
-    Survivor* nxtBuf = g_pools.B;
-    int*      curCnt = g_pools.cntA;
-    int*      nxtCnt = g_pools.cntB;
-    int       h_cur  = h_survA;
+    ::Survivor* curBuf = g_pools.A;
+    ::Survivor* nxtBuf = g_pools.B;
+    int*        curCnt = g_pools.cntA;
+    int*        nxtCnt = g_pools.cntB;
+    int         h_cur  = h_survA;
 
     float emaDrop = 0.2f;
 
