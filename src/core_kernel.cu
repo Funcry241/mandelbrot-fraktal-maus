@@ -482,8 +482,7 @@ void computeCudaEntropyContrast(
 
     cudaMemset(d_e, 0, tilesTotal * sizeof(float));
 
-    // Keine [PERF]-Logs mehr hier; nur noch DEBUG-zeitnahmen bei Bedarf.
-    if constexpr (Settings::debugLogging) {
+    if (Settings::performanceLogging || Settings::debugLogging) {
         cudaEvent_t evStart, evMid, evEnd;
         cudaEventCreate(&evStart); cudaEventCreate(&evMid); cudaEventCreate(&evEnd);
 
@@ -499,7 +498,12 @@ void computeCudaEntropyContrast(
         cudaEventElapsedTime(&ms1, evStart, evMid);
         cudaEventElapsedTime(&ms2, evMid, evEnd);
 
-        LUCHS_LOG_HOST("[TIME] en=%.2f | ct=%.2f", ms1, ms2);
+        if (Settings::performanceLogging) {
+            // compact: entropy/contrast in ms
+            LUCHS_LOG_HOST("[PERF] en=%.2f ct=%.2f", ms1, ms2);
+        } else {
+            LUCHS_LOG_HOST("[TIME] en=%.2f | ct=%.2f", ms1, ms2);
+        }
 
         cudaEventDestroy(evStart); cudaEventDestroy(evMid); cudaEventDestroy(evEnd);
     } else {
@@ -591,29 +595,16 @@ void launch_mandelbrotHybrid(
     cudaMemcpy(&h_survA, g_pools.cntA, sizeof(int), cudaMemcpyDeviceToHost); // waits for P1
     const double survPct = (double)h_survA * 100.0 / (double(w) * double(h));
 
-    if (Settings::performanceLogging) {
-        // kompakt: Survivors + eingesetztes Warmup
-        LUCHS_LOG_HOST("[PERF] surv=%d (%.2f%% of %d) wu=%d", h_survA, survPct, w*h, warmupIt);
-    }
-    g_prevSurvivorsPct = survPct;
-
     double p1Ms = duration<double, std::milli>(clk::now() - hostStart).count();
-    if (h_survA <= 0) {
-        if (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[PERF] total=%.2f b=%.2f (p1-only)", p1Ms, kernelBudgetMs);
-        } else if (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[TIME] total %.2f (p1-only)", p1Ms);
-        }
-        return;
-    }
-    if (p1Ms > kernelBudgetMs && Settings::performanceLogging) {
-        LUCHS_LOG_HOST("[PERF] budget_p1 p1=%.2f b=%.2f", p1Ms, kernelBudgetMs);
-    }
 
     // pass 2 (sliced, budget-aware)
     int threads = 128;
     int slice   = 0;
     int sliceIt = FINISH_SLICE_IT;
+    const int sliceIt0 = sliceIt;
+    int sliceItMax = sliceIt0;
+    int sliceChanges = 0;
+    bool budgetHit = false;
 
     Survivor* curBuf = g_pools.A;
     Survivor* nxtBuf = g_pools.B;
@@ -623,14 +614,26 @@ void launch_mandelbrotHybrid(
 
     float emaDrop = 0.2f;
 
+    // if no survivors after P1, finalize summary and return
+    if (h_cur <= 0) {
+        double totalMs = p1Ms;
+        g_prevSurvivorsPct = survPct;
+
+        if (Settings::performanceLogging || Settings::debugLogging) {
+            if (Settings::performanceLogging) {
+                LUCHS_LOG_HOST("[PERF] k=%.2f b=%.2f wu=%d sv=%d(%.1f%%) sl=%d st0=%d stN=%d stMax=%d ch=%d rem=%d ema=%.3f bh=%d",
+                               totalMs, kernelBudgetMs, warmupIt, h_survA, survPct,
+                               0, sliceIt0, sliceIt, sliceItMax, 0, 0, emaDrop, 0);
+            } else {
+                LUCHS_LOG_HOST("[TIME] kern=%.2f", totalMs);
+            }
+        }
+        return;
+    }
+
     while (h_cur > 0 && slice < MAX_SLICES) {
         double elapsedMs = duration<double, std::milli>(clk::now() - hostStart).count();
-        if (elapsedMs >= kernelBudgetMs) {
-            if (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[PERF] budget stop at sl=%d", slice);
-            }
-            break;
-        }
+        if (elapsedMs >= kernelBudgetMs) { budgetHit = true; break; }
 
         cudaMemset(nxtCnt, 0, sizeof(int));
         int blocks = (h_cur + threads - 1) / threads;
@@ -641,23 +644,18 @@ void launch_mandelbrotHybrid(
         int h_next = 0;
         cudaMemcpy(&h_next, nxtCnt, sizeof(int), cudaMemcpyDeviceToHost);
 
-        // Nur noch *wichtige* Ereignisse loggen:
-        const int   drop    = h_cur - h_next;
+        // adapt slice length (no per-step logging; just track stats)
+        const int drop = h_cur - h_next;
         const float dropPct = (h_cur > 0) ? float(drop) / float(h_cur) : 1.0f;
         emaDrop = (1.0f - DROP_EMA_ALPHA) * emaDrop + DROP_EMA_ALPHA * dropPct;
 
-        // adapt slice length
+        int prev = sliceIt;
         if (emaDrop < DROP_LOWER_ACCEL && sliceIt < (maxIter / 2)) {
             sliceIt = std::min(sliceIt * 2, maxIter / 2);
-            if (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[PERF] adapt st=%d ema=%.3f", sliceIt, emaDrop);
-            }
         } else if (emaDrop > DROP_UPPER_BACKOFF && sliceIt > FINISH_SLICE_IT) {
             sliceIt = std::max(sliceIt / 2, FINISH_SLICE_IT);
-            if (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[PERF] backoff st=%d ema=%.3f", sliceIt, emaDrop);
-            }
         }
+        if (sliceIt != prev) { ++sliceChanges; sliceItMax = std::max(sliceItMax, sliceIt); }
 
         std::swap(curBuf, nxtBuf);
         std::swap(curCnt, nxtCnt);
@@ -665,12 +663,19 @@ void launch_mandelbrotHybrid(
         ++slice;
     }
 
+    g_prevSurvivorsPct = survPct;
+    const int survivorsOut = h_cur;
+    const int slicesDone   = slice;
+
     if (Settings::performanceLogging || Settings::debugLogging) {
         double totalMs = duration<double, std::milli>(clk::now() - hostStart).count();
         if (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[PERF] total=%.2f b=%.2f", totalMs, kernelBudgetMs);
+            // single compact PERF line per frame from kernel path
+            LUCHS_LOG_HOST("[PERF] k=%.2f b=%.2f wu=%d sv=%d(%.1f%%) sl=%d st0=%d stN=%d stMax=%d ch=%d rem=%d ema=%.3f bh=%d",
+                           totalMs, kernelBudgetMs, warmupIt, h_survA, survPct,
+                           slicesDone, sliceIt0, sliceIt, sliceItMax, sliceChanges, survivorsOut, emaDrop, budgetHit ? 1 : 0);
         } else {
-            LUCHS_LOG_HOST("[TIME] total %.2f", totalMs);
+            LUCHS_LOG_HOST("[TIME] kern=%.2f", totalMs);
         }
     }
 }
