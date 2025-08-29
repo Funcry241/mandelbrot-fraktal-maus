@@ -1,5 +1,4 @@
-// MAUS:
-// Otter
+///// MAUS: OpenGL PBO/Texture utils — deterministic upload & ASCII logs
 // Datei: src/renderer_resources.cpp
 // 🐭 Maus-Kommentar: Kontextsensitives Logging – Debug nur bei Settings::debugLogging.
 // 🦦 Otter: Immutable Texture-Storage + sauberes PixelStore-Handling. Upload deterministisch. (Bezug zu Otter)
@@ -95,15 +94,16 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevAlign);
     glGetIntegerv(GL_UNPACK_ROW_LENGTH, &prevRowLen);
 
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+    // **Wichtig**: Einheit wählen, dann Textur binden (robust gegen Fremdstate)
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
 
-    // Subimage-Update aus PBO
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // sicher für beliebige Breiten
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
-                    GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+                    GL_RGBA, GL_UNSIGNED_BYTE, nullptr); // liest aus PBO offset 0
 
     GLenum err = glGetError();
     if (Settings::debugLogging) {
@@ -111,8 +111,8 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
     }
 
     // State restaurieren
-    glBindTexture(GL_TEXTURE_2D, 0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, prevAlign);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, prevRowLen);
 
