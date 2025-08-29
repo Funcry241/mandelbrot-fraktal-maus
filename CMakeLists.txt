@@ -8,7 +8,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # 🏗️ Architektur
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES 86 CACHE STRING "Default architecture if none provided")
+  # 🐭 MAUS: Multi-Arch wie im bisherigen Build (80/86/89/90), statt nur 86.
+  set(CMAKE_CUDA_ARCHITECTURES 80;86;89;90 CACHE STRING "Default architectures if none provided")
 endif()
 
 # 🧩 Vcpkg Triplet – dynamisch nach Plattform
@@ -44,6 +45,8 @@ find_package(glew CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
+# ➕ Boost.Multiprecision (Header-only, aber sauber über vcpkg/CONFIG einbinden)
+find_package(Boost CONFIG REQUIRED COMPONENTS multiprecision)
 
 # ---------------------------------------------------------
 # 🩹 Fix: Suche nach cuda_gl_interop.h
@@ -89,7 +92,13 @@ add_executable(mandelbrot_otterdream
     src/bear_CudaPBOResource.cpp
     src/frame_capture.cpp    
     src/fps_meter.cpp        
-    src/hud_text.cpp
+    src/hud_text.cpp    
+    src/nacktmull.cu
+    src/nacktmull_anchor.cpp
+    src/nacktmull_engine.cpp
+    src/nacktmull_shade.cu
+    src/nacktmull_host.cpp
+
 )
 
 # 🛡️ GLEW: Imaging-Fehler verhindern durch explizite Compile-Definitionen
@@ -123,6 +132,7 @@ endif()
 # 🔧 CUDA-separat builden (erfordert Device-Link)
 set_target_properties(mandelbrot_otterdream PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON  # 🐭 MAUS: stabiler Device-Link über mehrere .cu-TUs
 )
 
 # ✅ explizit: CUDA bekommt --std=c++20, auch wenn CMake das Label nicht kennt
@@ -150,6 +160,7 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
     glfw
     CUDA::cudart
     Threads::Threads
+    Boost::multiprecision   # ➕ für nacktmull_anchor.cpp (Header-only Target)
 )
 
 # 🧠 CUDA-Dateien explizit markieren
@@ -158,6 +169,8 @@ set_source_files_properties(
     src/cuda_interop.cu
     src/core_kernel.cu
     src/luchs_cuda_log_buffer.cu
+    src/nacktmull.cu
+    src/nacktmull_shade.cu
     PROPERTIES LANGUAGE CUDA
 )
 
