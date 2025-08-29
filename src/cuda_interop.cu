@@ -1,6 +1,6 @@
 // Datei: src/cuda_interop.cu
 // 🐜 Schwarze Ameise: Klare Parametrisierung, deterministisches Logging, robustes Ressourcenhandling.
-// 🦦 Otter → Nacktmull-only: Host-Iters + GPU-Shade, kein Legacy-GPU-Path mehr.
+// 🦦 Otter → Nacktmull-only (JETZT mit schnellem GPU-Iter-Pfad): Iterationen auf der GPU + GPU-Shade.
 // 🦊 Schneefuchs: Transparente Speicher-/Fehlerprüfung. Null Seiteneffekte in Hot-Paths.
 
 #include "pch.hpp"
@@ -12,23 +12,18 @@
 #include "renderer_state.hpp"
 #include "hermelin_buffer.hpp"
 #include "bear_CudaPBOResource.hpp"
-#include "nacktmull_shade.cuh"
+#include "nacktmull_shade.cuh"     // shade_from_iterations(...)
+#include "nacktmull_math.cuh"      // pixelToComplex(...)
 
 #include <cuda_gl_interop.h>
-#include <cuda_runtime.h>   // MAUS: minimal required for events/memcpy/host register (explicit)
-#include <vector_types.h>   // MAUS: explicit uchar4 (no transitive dependence)
+#include <cuda_runtime.h>
+#include <vector_types.h>
 #include <vector>
 #include <stdexcept>
 
 #ifndef CUDA_ARCH
   #include <chrono>
 #endif
-
-// --------------------------- Nacktmull (immer aktiv) -------------------------
-// 🦊 Schneefuchs: Nur Host-Iters deklarieren; Kernel kommt aus nacktmull_shade.cuh. (Bezug zu Schneefuchs)
-#include "nacktmull_anchor.hpp"    // Nacktmull::compute_host_iterations(...)
-#include "nacktmull_host.hpp"  // MAUS: provides Nacktmull::compute_host_iterations(...)
-// #include "nacktmull.hpp"        // ❌ entfernt: Kernel-Deklaration doppelt; wir nutzen nacktmull_shade.cuh
 
 namespace CudaInterop {
 
@@ -95,6 +90,40 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
     pboResource = new bear_CudaPBOResource(pbo.id());
 }
 
+// -----------------------------------------------------------------------------
+// 🐭 Maus FastPath: GPU-Iterationskernel (schnell, blockiert den Host nicht)
+//    Füllt d_iterations direkt auf der GPU. Farbgebung erfolgt via shade_from_iterations.
+// -----------------------------------------------------------------------------
+__device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y){
+    float xm = x - 0.25f; float q = xm*xm + y*y;
+    if (q*(q + xm) <= 0.25f*y*y) return true;         // main cardioid
+    float xp = x + 1.0f; if (xp*xp + y*y <= 0.0625f) return true; // period-2 bulb
+    return false;
+}
+
+__global__ void maus_iter_kernel(int* __restrict__ itOut,
+                                 int w,int h, float zoom, float2 offset, int maxIter)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x>=w || y>=h) return;
+    const int idx = y*w + x;
+
+    const float spanX = 3.5f * (1.0f / zoom);
+    const float spanY = spanX * (float)h / (float)w;
+    float2 c = pixelToComplex(x + 0.5f, y + 0.5f, w, h, spanX, spanY, offset);
+
+    if (insideMainCardioidOrBulb(c.x, c.y)) { itOut[idx] = maxIter; return; }
+
+    float zx = 0.f, zy = 0.f; int it = 0;
+    for (; it < maxIter; ++it){
+        float x2 = zx*zx, y2 = zy*zy;
+        if (x2 + y2 > 4.f) break;
+        float xt = x2 - y2 + c.x; zy = 2.f*zx*zy + c.y; zx = xt;
+    }
+    itOut[idx] = it;
+}
+
 void renderCudaFrame(
     Hermelin::CudaDeviceBuffer& d_iterations,
     Hermelin::CudaDeviceBuffer& d_entropy,
@@ -113,7 +142,7 @@ void renderCudaFrame(
 ) {
 #ifndef CUDA_ARCH
     const auto t0 = std::chrono::high_resolution_clock::now();
-    double mapMs = 0.0, entMs = 0.0, conMs = 0.0, hostItMs = 0.0, shadeMs = 0.0;
+    double mapMs = 0.0, entMs = 0.0, conMs = 0.0, iterMs = 0.0, shadeMs = 0.0;
 #endif
 
     if (!pboResource)
@@ -145,32 +174,34 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemset(d_entropy.get(),    0, d_entropy.size()));
     CUDA_CHECK(cudaMemset(d_contrast.get(),   0, d_contrast.size()));
 
-    // ---------------------------------- NACKTMULL: Host-Iters ----------------------------------
-    std::vector<int> h_iters;
-    h_iters.resize(static_cast<size_t>(totalPixels));
+    // --------------------------- GPU-Iterations (Fast Path) ---------------------------
+    cudaEvent_t evI0 = nullptr, evI1 = nullptr; float iterMsEv = 0.0f;
+    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
+        CUDA_CHECK(cudaEventCreate(&evI0));
+        CUDA_CHECK(cudaEventCreate(&evI1));
+        CUDA_CHECK(cudaEventRecord(evI0, 0));
+    }
 
-#ifndef CUDA_ARCH
-    hostItMs = Nacktmull::compute_host_iterations(
-        width, height,
-        static_cast<double>(zoom),
-        static_cast<double>(offset.x),
-        static_cast<double>(offset.y),
-        maxIterations,
-        h_iters
-    );
-#else
-    (void)Nacktmull::compute_host_iterations(
-        width, height,
-        static_cast<double>(zoom),
-        static_cast<double>(offset.x),
-        static_cast<double>(offset.y),
-        maxIterations,
-        h_iters
-    );
-#endif
+    {
+        dim3 block(32, 8);
+        dim3 grid((width + block.x - 1)/block.x, (height + block.y - 1)/block.y);
+        maus_iter_kernel<<<grid, block>>>(
+            static_cast<int*>(d_iterations.get()),
+            width, height, zoom, offset, maxIterations
+        );
+        CUDA_CHECK(cudaGetLastError());
+    }
 
-    // Host → Device (Iterationsbild)
-    CUDA_CHECK(cudaMemcpy(d_iterations.get(), h_iters.data(), it_bytes, cudaMemcpyHostToDevice));
+    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
+        CUDA_CHECK(cudaEventRecord(evI1, 0));
+        CUDA_CHECK(cudaEventSynchronize(evI1));
+        CUDA_CHECK(cudaEventElapsedTime(&iterMsEv, evI0, evI1));
+        CUDA_CHECK(cudaEventDestroy(evI0));
+        CUDA_CHECK(cudaEventDestroy(evI1));
+      #ifndef CUDA_ARCH
+        iterMs = static_cast<double>(iterMsEv);
+      #endif
+    }
 
     // ---------------------------------- PBO map & GPU-Shade ------------------------------------
 #ifndef CUDA_ARCH
@@ -195,24 +226,23 @@ void renderCudaFrame(
     }
 
     // Shade aus Iterationsbild
-    float shadeMsEv = 0.0f;
-    cudaEvent_t evS0 = nullptr, evS1 = nullptr;
+    float shadeMsEv = 0.0f; cudaEvent_t evS0 = nullptr, evS1 = nullptr;
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         CUDA_CHECK(cudaEventCreate(&evS0));
         CUDA_CHECK(cudaEventCreate(&evS1));
         CUDA_CHECK(cudaEventRecord(evS0, 0));
     }
 
-    dim3 block(32, 8);
-    dim3 grid((width + block.x - 1)/block.x, (height + block.y - 1)/block.y);
-
-    // 🦊 Schneefuchs: Argumentreihenfolge korrigiert (RGBA zuerst, dann Iterationen). (Bezug zu Schneefuchs)
-    shade_from_iterations<<<grid, block>>>(
-        devSurface,
-        static_cast<const int*>(d_iterations.get()),
-        width, height, maxIterations
-    );
-    CUDA_CHECK(cudaGetLastError());  // MAUS: minimal safety net for silent launch errors
+    {
+        dim3 block(32, 8);
+        dim3 grid((width + block.x - 1)/block.x, (height + block.y - 1)/block.y);
+        shade_from_iterations<<<grid, block>>>(
+            devSurface,
+            static_cast<const int*>(d_iterations.get()),
+            width, height, maxIterations
+        );
+        CUDA_CHECK(cudaGetLastError());
+    }
 
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         CUDA_CHECK(cudaEventRecord(evS1, 0));
@@ -220,9 +250,9 @@ void renderCudaFrame(
         CUDA_CHECK(cudaEventElapsedTime(&shadeMsEv, evS0, evS1));
         CUDA_CHECK(cudaEventDestroy(evS0));
         CUDA_CHECK(cudaEventDestroy(evS1));
-#ifndef CUDA_ARCH
+      #ifndef CUDA_ARCH
         shadeMs = static_cast<double>(shadeMsEv);
-#endif
+      #endif
     }
 
     // ---------------------------------- Entropie/Kontrast --------------------------------------
@@ -238,7 +268,7 @@ void renderCudaFrame(
 #ifndef CUDA_ARCH
     const auto tEC1 = std::chrono::high_resolution_clock::now();
     const double ecMs = std::chrono::duration<double, std::milli>(tEC1 - tEC0).count();
-    entMs = ecMs * 0.5;
+    entMs = ecMs * 0.5;  // grobe Aufteilung für Log-Zwecke
     conMs = ecMs * 0.5;
 #endif
 
@@ -265,11 +295,11 @@ void renderCudaFrame(
     const double totalMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
 #endif
 
-    // Timings an RendererState (GPU-Anteil = Shade)
+    // Timings an RendererState (GPU-Anteil = Iter + Shade)
     state.lastTimings.valid            = true;
 #ifndef CUDA_ARCH
     state.lastTimings.pboMap           = mapMs;
-    state.lastTimings.mandelbrotTotal  = shadeMs;
+    state.lastTimings.mandelbrotTotal  = iterMs + shadeMs;
     state.lastTimings.mandelbrotLaunch = 0.0;
     state.lastTimings.mandelbrotSync   = 0.0;
     state.lastTimings.entropy          = entMs;
@@ -287,9 +317,8 @@ void renderCudaFrame(
 
 #ifndef CUDA_ARCH
     if constexpr (Settings::performanceLogging) {
-        // Ein kompakter Frame-Summary-Log (eine Zeile)
-        LUCHS_LOG_HOST("[PERF] path=nm mp=%.2f hostIt=%.2f shade=%.2f en=%.2f ct=%.2f tt=%.2f",
-                       mapMs, hostItMs, shadeMs, entMs, conMs, totalMs);
+        LUCHS_LOG_HOST("[PERF] path=nm mp=%.2f iterGPU=%.2f shade=%.2f en=%.2f ct=%.2f tt=%.2f",
+                       mapMs, iterMs, shadeMs, entMs, conMs, totalMs);
     } else if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[TIME] total=%.2f", totalMs);
     }
