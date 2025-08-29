@@ -1,29 +1,34 @@
 // Datei: src/renderer_window.cpp
-// 🐭 Maus-Kommentar: Fixed-Function raus, moderner Kontext rein - für Warzenschwein wird OpenGL 4.3 erzwungen. Keine Kompromisse mehr, Otter-Style.
-// 🦦 Otter: LUCHS_LOG_HOST für GLFW-Fehler. Schneefuchs: Klarer Host-Kontext.
-// 🐑 Schneefuchs: Debug-Kontext optional (nur bei Debug/Perf), VSync abhängig vom Perf-Modus, zentrierte Fensterposition fallback.
+// 🐭 Maus-Kommentar: Moderner GL-Kontext (4.3 Core), ASCII-Logs, keine C4127-Warnungen.
+// 🦦 Otter: Fehler-Logging früh, deterministischer Setup-Flow.
+// 🐑 Schneefuchs: Debug-Kontext nur bei Debug/Perf, Fensterposition compile-time sauber.
 
 #include "pch.hpp"
 #include "renderer_window.hpp"
 #include "renderer_core.hpp"
 #include "settings.hpp"
-#include "renderer_loop.hpp" // für RendererLoop::keyCallback
+#include "renderer_loop.hpp"   // RendererLoop::keyCallback
 #include "luchs_log_host.hpp"
 #include <GLFW/glfw3.h>
-#include <cstdio>
 
 namespace RendererInternals {
 
-// 🔔 Otter: GLFW-Error-Callback für robustes Fehler-Logging (ASCII)
+// GLFW-Error-Callback (ASCII only)
 static void glfwErrorCallback(int code, const char* description) {
-    LUCHS_LOG_HOST("[GLFW-ERROR] Code=%d | %s", code, description ? description : "(null)");
+    LUCHS_LOG_HOST("[GLFW-ERROR] code=%d desc=%s", code, description ? description : "(null)");
 }
 
-// 🐑 Schneefuchs: Fallback – Fenster zentrieren, wenn Settings-Position invalid (<0)
-// NOTE: if constexpr entfernt MSVC C4127 (constant conditional).
+// Fenster zentrieren ODER feste Position setzen.
+// Hinweis: Die Entscheidung, ob feste Position genutzt wird, wird hier bewusst
+// als compile-time Branch geschrieben, um C4127 zu vermeiden.
 static void centerWindowIfRequested(GLFWwindow* window, int w, int h) {
     if (!window) return;
-    if constexpr ((Settings::windowPosX >= 0) && (Settings::windowPosY >= 0)) {
+
+    // compile-time Flag für feste Position
+    constexpr bool kHasFixedPos =
+        (Settings::windowPosX >= 0) && (Settings::windowPosY >= 0);
+
+    if constexpr (kHasFixedPos) {
         glfwSetWindowPos(window, Settings::windowPosX, Settings::windowPosY);
         return;
     } else {
@@ -37,9 +42,9 @@ static void centerWindowIfRequested(GLFWwindow* window, int w, int h) {
     }
 }
 
-// Erstellt GLFW-Fenster, setzt OpenGL-Kontext & VSync, Position aus Settings
+// Erstellt Fenster, setzt GL-Kontext & VSync
 GLFWwindow* createGLFWWindow(int width, int height) {
-    // Setze Error-Callback bevor glfwInit()
+    // Error-Callback VOR glfwInit()
     glfwSetErrorCallback(glfwErrorCallback);
 
     if (!glfwInit()) {
@@ -47,16 +52,15 @@ GLFWwindow* createGLFWWindow(int width, int height) {
         return nullptr;
     }
 
-    // 🐭 MAUS: Default-Hints nach erfolgreichem Init (sauberer Startzustand)
     glfwDefaultWindowHints();
 
-    // OpenGL 4.3 Core - nötig für Debug/KHR und unsere Pipelines
+    // OpenGL 4.3 Core (Forward-Compatible für macOS/striktes Core)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE); // FIX: use GLFW_TRUE (nicht GL_TRUE)
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 
-    // 🐑 Schneefuchs: Debug-Kontext nur, wenn wir Logs messen (kein Overhead im Release)
+    // Debug-Kontext nur, wenn wir tatsächlich debuggen/profilen (compile-time)
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
     } else {
@@ -76,16 +80,14 @@ GLFWwindow* createGLFWWindow(int width, int height) {
 
     glfwMakeContextCurrent(window);
 
-    // 🐑 Schneefuchs: VSync aus im Perf-Modus, sonst an (stabilere Frametime im Normalbetrieb)
+    // VSync: im Perf-Logging-Modus aus, sonst an (kein C4127, da ?:)
     glfwSwapInterval(Settings::performanceLogging ? 0 : 1);
 
-    // 🐭 Maus: Position setzen/zentrieren
     centerWindowIfRequested(window, width, height);
-
     return window;
 }
 
-// Registriert Callbacks (Größe, Taste) am Fenster - UserPointer ist Renderer*
+// Callbacks registrieren (Größe, Tasten)
 void configureWindowCallbacks(GLFWwindow* window, void* userPointer) {
     glfwSetWindowUserPointer(window, userPointer);
 
@@ -95,7 +97,6 @@ void configureWindowCallbacks(GLFWwindow* window, void* userPointer) {
         }
     });
 
-    // KeyCallback aus RendererLoop - so hat man Zugriff auf RendererState
     glfwSetKeyCallback(window, RendererLoop::keyCallback);
 }
 
@@ -103,7 +104,6 @@ void configureWindowCallbacks(GLFWwindow* window, void* userPointer) {
 
 namespace RendererWindow {
 
-// Erstellt Fenster und konfiguriert alle Callbacks
 GLFWwindow* createWindow(int width, int height, Renderer* instance) {
     GLFWwindow* window = RendererInternals::createGLFWWindow(width, height);
     if (!window) return nullptr;
@@ -119,7 +119,7 @@ void destroyWindow(GLFWwindow* window) {
     if (window) {
         glfwDestroyWindow(window);
     }
-    // glfwTerminate() erfolgt im Renderer-Cleanup (zentral), nicht hier.
+    // glfwTerminate() erfolgt zentral im Renderer/Programmende.
 }
 
 } // namespace RendererWindow
