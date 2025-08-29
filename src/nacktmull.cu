@@ -9,11 +9,11 @@
 //   * Schlanke, ASCII-only PERF-Logs (Zeit in ms; Host logger liefert EPOCH-MILLIS).
 //
 // Hinweise:
-//   * Erste lauffähige Stufe: Referenz in Double‑Double (software) → nach float2
+//   * Erste lauffähige Stufe: Referenz in Double-Double (software) → nach float2
 //     komprimiert und an GPU übergeben. Später austauschbar gegen echtes MP.
 //   * Kernel besitzt Fallback auf direkte Iteration, wenn Δ zu groß wird.
 //   * API bleibt kompatibel: exportierte Funktion heißt launch_mandelbrotHybrid(...)
-//     und ersetzt die alte Implementierung – Call‑Sites bleiben unverändert.
+//     und ersetzt die alte Implementierung – Call-Sites bleiben unverändert.
 // =============================================================================
 
 #include <cuda_runtime.h>
@@ -25,50 +25,31 @@
 
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
-#include "nacktmull_math.cuh"
+#include "nacktmull_math.cuh"  // pixelToComplex(...), evtl. weitere Math-Utils
 #include "common.hpp"
 
 // ------------------------------------------------------------
-// Lokale Helpers (unabhängig von core_kernel)
+// Nur benötigter Helper: Cardioid/Bulb-Test (wird verwendet)
+// (Host/Device, inline, ASCII-only.)
 // ------------------------------------------------------------
-namespace {
-    struct float2x { float x, y; };
-
-    __host__ __device__ inline float2x make_f2(float x, float y){ return {x,y}; }
-
-    __host__ __device__ inline float2x cadd(const float2x&a,const float2x&b){return {a.x+b.x,a.y+b.y};}
-    __host__ __device__ inline float2x cmul(const float2x&a,const float2x&b){return {a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x};}
-    __host__ __device__ inline float  cabs2(const float2x&a){return a.x*a.x + a.y*a.y;}
-
-    // Mapping Pixel → C (wie zuvor)
-    __host__ __device__ inline float2x pixelToC(int ix,int iy,int w,int h,float zoom, float2x offset){
-        float scale = 1.0f / zoom;
-        float spanX = 3.5f * scale;
-        float spanY = spanX * (float)h / (float)w;
-        float cx = ((ix + 0.5f) / (float)w - 0.5f) * spanX + offset.x;
-        float cy = ((iy + 0.5f) / (float)h - 0.5f) * spanY + offset.y;
-        return {cx, cy};
-    }
-
-    __host__ __device__ inline bool insideMainCardioidOrBulb(float x, float y){
-        float xm = x - 0.25f;
-        float q  = xm * xm + y * y;
-        if (q * (q + xm) <= 0.25f * y * y) return true; // main cardioid
-        float xp = x + 1.0f;
-        if (xp * xp + y * y <= 0.0625f) return true;    // period-2 bulb
-        return false;
-    }
+static __host__ __device__ inline bool insideMainCardioidOrBulb(float x, float y){
+    float xm = x - 0.25f;
+    float q  = xm * xm + y * y;
+    if (q * (q + xm) <= 0.25f * y * y) return true; // main cardioid
+    float xp = x + 1.0f;
+    if (xp * xp + y * y <= 0.0625f)   return true;  // period-2 bulb
+    return false;
 }
 
 // ------------------------------------------------------------
-// Double‑Double – minimal (nur add/mul) für Referenz‑Orbit am Host
+// Double-Double – minimal (nur add/mul) für Referenz-Orbit am Host
 // ------------------------------------------------------------
 namespace dd {
     struct dd { double hi, lo; }; // hi+lo mit |lo| << |hi|
 
     inline dd make(double x){ return {x, 0.0}; }
 
-    // Dekker/Veltkamp‑basics
+    // Dekker/Veltkamp-basics
     inline dd two_sum(double a, double b){
         double s = a + b;
         double bb = s - a;
@@ -86,7 +67,7 @@ namespace dd {
         return quick_two_sum(s.hi, t);
     }
     inline dd mul(dd a, dd b){
-        // FMA verbessert Genauigkeit, wenn vorhanden
+        // FMA verbessert Genauigkeit, wenn vorhanden (hostseitig)
         double p = a.hi * b.hi;
         double e = std::fma(a.hi, b.hi, -p);
         e += a.hi * b.lo + a.lo * b.hi;
@@ -95,7 +76,7 @@ namespace dd {
 }
 
 // ------------------------------------------------------------
-// Referenz‑Orbit: z_{n+1} = z_n^2 + c_ref  (Host, DD)
+// Referenz-Orbit: z_{n+1} = z_n^2 + c_ref  (Host, DD)
 // Ergebnis als float2 gespeichert (kompakt), Länge = maxIter
 // ------------------------------------------------------------
 static void buildReferenceOrbitDD(std::vector<float2>& out, int maxIter, double cref_x, double cref_y){
@@ -108,15 +89,17 @@ static void buildReferenceOrbitDD(std::vector<float2>& out, int maxIter, double 
         dd::dd x2 = dd::mul(zx, zx);
         dd::dd y2 = dd::mul(zy, zy);
         dd::dd xy = dd::mul(zx, zy);
-        dd::dd zr = dd::add(dd::add(x2, dd::make(-y2.hi)), cr); // (x^2 - y^2) + cr  (lo grob vernachlässigt)
-        dd::dd zi = dd::add(dd::add(dd::make(2.0*xy.hi), dd::make(0.0)), ci);
+        // (x^2 - y^2) + cr  und  2*x*y + ci
+        dd::dd zr = dd::add(dd::add(x2, dd::make(-y2.hi)), cr);
+        dd::dd zi = dd::add(dd::make(2.0*xy.hi), ci);
+
         zx = zr; zy = zi;
         out[(size_t)i] = make_float2((float)zx.hi, (float)zy.hi);
     }
 }
 
 // ------------------------------------------------------------
-// GPU‑Kernel: Perturbation
+// GPU-Kernel: Perturbation
 // δ_{n+1} = 2*z_ref[n]*δ_n + Δc;   z ≈ z_ref[n] + δ
 // Escape, wenn |z|^2 > 4.
 // Fallback: direkte Iteration ab aktuellem Zustand, falls |δ| zu groß.
@@ -161,7 +144,7 @@ namespace {
             return;
         }
 
-        // linearisierte Δ‑Rekurrenz
+        // linearisierte Δ-Rekurrenz
         float2 delta = make_float2(0.f,0.f);
         int it = 0;
         const float esc2 = 4.0f;
@@ -204,7 +187,7 @@ namespace {
 }
 
 // ============================================================
-// Öffentliche API – ersetzt alte Hybrid‑Funktion
+// Öffentliche API – ersetzt alte Hybrid-Funktion
 // Signatur bleibt identisch zu vorherigem launch_mandelbrotHybrid(...)
 // ============================================================
 extern "C" void launch_mandelbrotHybrid(
@@ -216,32 +199,37 @@ extern "C" void launch_mandelbrotHybrid(
     auto t0 = clk::now();
 
     // 1) Referenzpunkt = Bildschirmmitte
-    const float scale = 1.0f / zoom;
-    const float spanX = 3.5f * scale;
-    const float spanY = spanX * (float)h / (float)w;
+    const float  scale = 1.0f / zoom;
+    const float  spanX = 3.5f * scale;
+    const float  spanY = spanX * (float)h / (float)w;
     const double cref_x = ((w*0.5 + 0.5) / (double)w - 0.5) * (double)spanX + (double)offset.x;
     const double cref_y = ((h*0.5 + 0.5) / (double)h - 0.5) * (double)spanY + (double)offset.y;
 
-    // 2) Referenz‑Orbit (Host, DD)
+    // 2) Referenz-Orbit (Host, DD)
     static std::vector<float2> hRef;
     buildReferenceOrbitDD(hRef, maxIter, cref_x, cref_y);
 
-    // 3) Device‑Puffer verwalten (only‑grow)
+    // 3) Device-Puffer verwalten (only-grow)
     static float2* dRef = nullptr; static size_t dCap = 0;
     const size_t need = (size_t)maxIter * sizeof(float2);
-    if (need > dCap){ if (dRef) cudaFree(dRef); cudaMalloc(&dRef, need); dCap = need; }
-    cudaMemcpy(dRef, hRef.data(), need, cudaMemcpyHostToDevice);
+    if (need > dCap){
+        if (dRef) CUDA_CHECK(cudaFree(dRef));
+        CUDA_CHECK(cudaMalloc(&dRef, need));
+        dCap = need;
+    }
+    CUDA_CHECK(cudaMemcpy(dRef, hRef.data(), need, cudaMemcpyHostToDevice));
 
     // 4) Kernel starten
     dim3 block(32, 8);
     dim3 grid((w + block.x - 1)/block.x, (h + block.y - 1)/block.y);
-    const float deltaRelMax = 1e-3f; // Start‑Schranke, später adaptiv
+    const float deltaRelMax = 1e-3f; // Start-Schranke, später adaptiv
 
     perturbKernel<<<grid, block>>>(out, d_it, dRef, maxIter, w, h, zoom, offset, deltaRelMax);
+    CUDA_CHECK(cudaGetLastError());
 
-    // 5) (optionales) Budget/Perf‑Log – kompakt
+    // 5) (optionales) Budget/Perf-Log – kompakt
     if (Settings::performanceLogging){
-        cudaDeviceSynchronize();
+        CUDA_CHECK(cudaDeviceSynchronize());
         double ms = std::chrono::duration<double, std::milli>(clk::now()-t0).count();
         LUCHS_LOG_HOST("[PERF] nacktmull kern=%.2f ms it=%d", ms, maxIter);
     }
