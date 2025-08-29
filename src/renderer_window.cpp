@@ -1,4 +1,3 @@
-// MAUS:
 // Datei: src/renderer_window.cpp
 // 🐭 Maus-Kommentar: Fixed-Function raus, moderner Kontext rein - für Warzenschwein wird OpenGL 4.3 erzwungen. Keine Kompromisse mehr, Otter-Style.
 // 🦦 Otter: LUCHS_LOG_HOST für GLFW-Fehler. Schneefuchs: Klarer Host-Kontext.
@@ -48,11 +47,14 @@ GLFWwindow* createGLFWWindow(int width, int height) {
         return nullptr;
     }
 
+    // 🐭 MAUS: Default-Hints nach erfolgreichem Init (sauberer Startzustand)
+    glfwDefaultWindowHints();
+
     // OpenGL 4.3 Core - nötig für Debug/KHR und unsere Pipelines
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE); // FIX: use GLFW_TRUE (nicht GL_TRUE)
 
     // 🐑 Schneefuchs: Debug-Kontext nur, wenn wir Logs messen (kein Overhead im Release)
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {

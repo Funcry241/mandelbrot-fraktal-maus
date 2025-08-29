@@ -332,4 +332,32 @@ void unregisterPBO() {
     pboResource = nullptr;
 }
 
+void logCudaDeviceContext(const char* tag)
+{
+    int dev = -1;
+    cudaError_t e0 = cudaGetDevice(&dev);
+
+    cudaDeviceProp prop{};
+    cudaError_t e1 = (e0 == cudaSuccess && dev >= 0)
+                   ? cudaGetDeviceProperties(&prop, dev)
+                   : cudaErrorInvalidDevice;
+
+    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
+        if (e0 == cudaSuccess && e1 == cudaSuccess) {
+            // ASCII-only, deterministic
+            LUCHS_LOG_HOST("[CUDA] ctx tag=%s device=%d name=\"%s\" cc=%d.%d sms=%d vram=%lluMB",
+                (tag ? tag : "(null)"),
+                dev,
+                prop.name,
+                prop.major, prop.minor,
+                prop.multiProcessorCount,
+                static_cast<unsigned long long>(prop.totalGlobalMem / (1024ull*1024ull))
+            );
+        } else {
+            LUCHS_LOG_HOST("[CUDA] ctx tag=%s deviceQuery failed e0=%d e1=%d dev=%d",
+                (tag ? tag : "(null)"), (int)e0, (int)e1, dev);
+        }
+    }
+}
+
 } // namespace CudaInterop

@@ -1,6 +1,7 @@
+##### MAUS: Alpha 81 — unified /MT CRT, static cudart, hardening host-only
 # Datei: CMakeLists.txt
 # 🐭 Maus-Kommentar: Alpha 81 – vcpkg Triplet dynamisch; **Windows-Hardening nur im HOST_LINK**.
-# Fix: /HIGHENTROPYVA & Co. werden NICHT dem NVCC Device-Link/Compiler übergeben (D8021 behoben).
+# Fixes: konsistente /MT-CRT pro Target (inkl. PCH & NVCC-Host), `CUDA::cudart_static`, Multi-Arch (80/86/89/90).
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
@@ -98,7 +99,24 @@ add_executable(mandelbrot_otterdream
     src/nacktmull_engine.cpp
     src/nacktmull_shade.cu
     src/nacktmull_host.cpp
+)
 
+# MAUS: unify CRT to /MT so PCH and NVCC host compiler match (fixes LNK2038)
+if(MSVC)
+  set_property(TARGET mandelbrot_otterdream PROPERTY
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  target_compile_options(mandelbrot_otterdream PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/MT$<$<CONFIG:Debug>:d>>)
+endif()
+
+# MAUS: prefer static cudart to match /MT
+target_link_libraries(mandelbrot_otterdream PRIVATE
+    OpenGL::GL
+    GLEW::GLEW
+    glfw
+    CUDA::cudart_static
+    Threads::Threads
+    Boost::multiprecision
 )
 
 # 🛡️ GLEW: Imaging-Fehler verhindern durch explizite Compile-Definitionen
@@ -150,17 +168,6 @@ target_compile_options(mandelbrot_otterdream PRIVATE
 #   (NVCC würde /guard:cf beim Device-Link nicht verstehen.)
 target_compile_options(mandelbrot_otterdream PRIVATE
   $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<COMPILE_LANGUAGE:CXX>>:/guard:cf>
-)
-
-# 🚀 Projekt Phönix: Keine Abhängigkeit mehr zu Freetype
-# (Nur notwendige Libs, Windows-Standard-Libs via CMake verlinkt.)
-target_link_libraries(mandelbrot_otterdream PRIVATE
-    OpenGL::GL
-    GLEW::GLEW
-    glfw
-    CUDA::cudart
-    Threads::Threads
-    Boost::multiprecision   # ➕ für nacktmull_anchor.cpp (Header-only Target)
 )
 
 # 🧠 CUDA-Dateien explizit markieren
