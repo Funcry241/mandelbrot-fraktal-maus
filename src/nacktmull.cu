@@ -25,8 +25,8 @@
 
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
-#include "nacktmull_math.cuh"  // pixelToComplex(...), evtl. weitere Math-Utils
-#include "common.hpp"
+#include "nacktmull_math.cuh"  // pixelToComplex(...)
+#include "common.hpp"          // (nur für Projektkonstanz; keine CUDA_CHECK-Nutzung hier!)
 
 // ------------------------------------------------------------
 // Nur benötigter Helper: Cardioid/Bulb-Test (wird verwendet)
@@ -189,12 +189,22 @@ namespace {
 // ============================================================
 // Öffentliche API – ersetzt alte Hybrid-Funktion
 // Signatur bleibt identisch zu vorherigem launch_mandelbrotHybrid(...)
+// → Wichtig: Keine Exceptions werfen (extern "C" + /EHc → C4297!),
+//   daher KEIN CUDA_CHECK hier, sondern eigene Fehlerprüfungen + early return.
 // ============================================================
 extern "C" void launch_mandelbrotHybrid(
     uchar4* out, int* d_it,
     int w, int h, float zoom, float2 offset,
     int maxIter, int /*tile*/)
 {
+    auto ok = [](cudaError_t e, const char* op)->bool {
+        if (e != cudaSuccess) {
+            LUCHS_LOG_HOST("[CUDA][ERR] %s failed: %d (%s)", op, int(e), cudaGetErrorString(e));
+            return false;
+        }
+        return true;
+    };
+
     using clk = std::chrono::high_resolution_clock;
     auto t0 = clk::now();
 
@@ -207,17 +217,23 @@ extern "C" void launch_mandelbrotHybrid(
 
     // 2) Referenz-Orbit (Host, DD)
     static std::vector<float2> hRef;
-    buildReferenceOrbitDD(hRef, maxIter, cref_x, cref_y);
+    try {
+        buildReferenceOrbitDD(hRef, maxIter, cref_x, cref_y);
+    } catch(...) {
+        // defensiv: keine Exceptions aus extern "C" herauslassen
+        LUCHS_LOG_HOST("[NACKTMULL][ERR] buildReferenceOrbitDD threw; aborting frame");
+        return;
+    }
 
     // 3) Device-Puffer verwalten (only-grow)
     static float2* dRef = nullptr; static size_t dCap = 0;
     const size_t need = (size_t)maxIter * sizeof(float2);
     if (need > dCap){
-        if (dRef) CUDA_CHECK(cudaFree(dRef));
-        CUDA_CHECK(cudaMalloc(&dRef, need));
+        if (dRef && !ok(cudaFree(dRef), "cudaFree(dRef)")) { dRef = nullptr; dCap = 0; return; }
+        if (!ok(cudaMalloc(&dRef, need), "cudaMalloc(dRef)")) return;
         dCap = need;
     }
-    CUDA_CHECK(cudaMemcpy(dRef, hRef.data(), need, cudaMemcpyHostToDevice));
+    if (!ok(cudaMemcpy(dRef, hRef.data(), need, cudaMemcpyHostToDevice), "cudaMemcpy H2D(ref)")) return;
 
     // 4) Kernel starten
     dim3 block(32, 8);
@@ -225,11 +241,11 @@ extern "C" void launch_mandelbrotHybrid(
     const float deltaRelMax = 1e-3f; // Start-Schranke, später adaptiv
 
     perturbKernel<<<grid, block>>>(out, d_it, dRef, maxIter, w, h, zoom, offset, deltaRelMax);
-    CUDA_CHECK(cudaGetLastError());
+    if (!ok(cudaGetLastError(), "perturbKernel launch")) return;
 
     // 5) (optionales) Budget/Perf-Log – kompakt
     if (Settings::performanceLogging){
-        CUDA_CHECK(cudaDeviceSynchronize());
+        if (!ok(cudaDeviceSynchronize(), "cudaDeviceSynchronize")) return;
         double ms = std::chrono::duration<double, std::milli>(clk::now()-t0).count();
         LUCHS_LOG_HOST("[PERF] nacktmull kern=%.2f ms it=%d", ms, maxIter);
     }
