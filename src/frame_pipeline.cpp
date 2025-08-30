@@ -267,6 +267,13 @@ void applyZoomLogic(FrameContext& frameCtx, CommandBus& bus, RendererState& stat
 
 // ------------------------------ draw (GL upload + FSQ) -----------------------
 void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[PIPE] drawFrame begin: tex=%u pbo=%u %dx%d",
+                       static_cast<unsigned>(tex),
+                       static_cast<unsigned>(state.pbo.id()),
+                       frameCtx.width, frameCtx.height);
+    }
+
     // texMs measures only PBO->Texture upload + FSQ draw, separate from overlays.
     auto tTex0 = Clock::now();
 
@@ -335,6 +342,10 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     auto tOv1 = Clock::now();
     g_perfOverlaysMs = std::chrono::duration_cast<msd>(tOv1 - tOv0).count();
     state.lastTimings.overlaysMs = g_perfOverlaysMs;
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[PIPE] drawFrame end: texMs=%.3f ovMs=%.3f", g_perfTexMs, g_perfOverlaysMs);
+    }
 }
 
 // ---------------------------------- execute ----------------------------------
