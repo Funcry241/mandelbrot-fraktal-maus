@@ -20,6 +20,7 @@
 #include <vector_functions.h>
 #include <vector>
 #include <stdexcept>
+#include <cstdint>
 
 #ifndef CUDA_ARCH
   #include <chrono>
@@ -176,6 +177,12 @@ void renderCudaFrame(
     );
 #endif
 
+    // Prüfen, ob überhaupt etwas "außerhalb" ist (sichtbarer Rand)
+    bool anyOutside = false;
+    for (size_t i = 0; i < h_iters.size(); ++i) {
+        if (h_iters[i] < maxIterations) { anyOutside = true; break; }
+    }
+
     // Host → Device (Iterationsbild)
     CUDA_CHECK(cudaMemcpy(d_iterations.get(), h_iters.data(), it_bytes, cudaMemcpyHostToDevice));
 
@@ -201,7 +208,7 @@ void renderCudaFrame(
         throw std::runtime_error("PBO byte size mismatch");
     }
 
-    // Shade aus Iterationsbild
+    // Shade aus Iterationsbild ODER Test-Pattern (Fallback)
     float shadeMsEv = 0.0f;
     cudaEvent_t evS0 = nullptr, evS1 = nullptr;
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
@@ -213,12 +220,27 @@ void renderCudaFrame(
     dim3 block(32, 8);
     dim3 grid((width + block.x - 1)/block.x, (height + block.y - 1)/block.y);
 
-    shade_from_iterations<<<grid, block>>>(
-        devSurface,
-        static_cast<const int*>(d_iterations.get()),
-        width, height, maxIterations
-    );
-    CUDA_CHECK(cudaGetLastError());
+    if (anyOutside) {
+        // Normale Färbung
+        shade_from_iterations<<<grid, block>>>(
+            devSurface,
+            static_cast<const int*>(d_iterations.get()),
+            width, height, maxIterations
+        );
+    } else {
+        // Sichtbarer Fallback (z.B. bei Start komplett „innen“)
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[FALLBACK] shade_test_pattern: all pixels reached maxIterations, showing debug pattern.");
+        }
+        shade_test_pattern<<<grid, block>>>(devSurface, width, height, 24);
+    }
+
+    cudaError_t shadeLaunchErr = cudaGetLastError();
+    if (shadeLaunchErr != cudaSuccess) {
+        // Harte Absicherung: alles weiß, gut sichtbar + Diagnose
+        LUCHS_LOG_HOST("[FATAL] shade kernel failed err=%d -> clearing PBO to white", (int)shadeLaunchErr);
+        CUDA_CHECK(cudaMemset(devSurface, 0xFF, expected)); // RGBA = 255/255/255/255
+    }
 
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         CUDA_CHECK(cudaEventRecord(evS1, 0));
