@@ -1,10 +1,14 @@
 ///// Otter: Feste Aufrufreihenfolge – updateTextureFromPBO(PBO, TEX, W, H); ASCII-Logs; keine Compat-Wrapper.
-///// Schneefuchs: /WX-fest; keine getenv-Warnungen; RAII & deterministische Logs; Header-Sync gewahrt.
+///// Schneefuchs: /WX-fest; zusätzliche Diagnose (PBO-PEEK) vor Upload; RAII & deterministische Logs.
 ///// Maus: Eine Quelle für Tiles/Upload; Zoom-V2 außerhalb der CUDA-Interop bleibt unverändert.
 
 #include "pch.hpp"
 #include <chrono>
 #include <cmath>
+#include <cstring>
+#include <vector_types.h>
+#include <vector_functions.h> // make_float2
+
 #include "renderer_resources.hpp"    // setGLResourceContext(const char*), updateTextureFromPBO(GLuint pbo, GLuint tex, int w, int h)
 #include "renderer_pipeline.hpp"     // drawFullscreenQuad(...)
 #include "cuda_interop.hpp"          // CudaInterop::renderCudaFrame(...)
@@ -19,8 +23,6 @@
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
 #include "common.hpp"
-#include <vector_types.h>
-#include <vector_functions.h> // make_float2
 
 namespace FramePipeline {
 
@@ -52,6 +54,30 @@ namespace {
             (void)frameIdx;
             return false;
         }
+    }
+
+    // --- Diagnose: GL-PBO kurz mappen und die ersten Bytes prüfen ---
+    static void peekPBO(GLuint pbo) {
+        GLint prev = 0;
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prev);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+
+        // Wir lesen nur einen winzigen Bereich, kein Risiko für Performance.
+        const GLsizeiptr N = 64; // erste 64 Bytes
+        void* ptr = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, N, GL_MAP_READ_BIT);
+        if (ptr) {
+            const unsigned char* b = static_cast<const unsigned char*>(ptr);
+            unsigned sum16 = 0;
+            for (int i = 0; i < 16 && i < N; ++i) sum16 += b[i];
+            // erste vier Bytes getrennt loggen
+            unsigned b0=b[0], b1=b[1], b2=b[2], b3=b[3];
+            LUCHS_LOG_HOST("[PBO-PEEK] pbo=%u first4=%u,%u,%u,%u sum16=%u", pbo, b0, b1, b2, b3, sum16);
+            glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+        } else {
+            const GLenum err = glGetError();
+            LUCHS_LOG_HOST("[PBO-PEEK][WARN] map failed for pbo=%u (glError=0x%04X)", pbo, err);
+        }
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prev));
     }
 }
 
@@ -105,7 +131,7 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
     }
 
     // Device-Render (Iterations -> Shade) + E/C-Analyse (erzeugt Host-Arrays)
-    {
+    try {
         auto t0 = Clock::now();
 
         float2 gpuOffset    = make_float2((float)fctx.offset.x, (float)fctx.offset.y);
@@ -148,6 +174,10 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
                 LUCHS_LOG_HOST("[TIME] CUDA kernel + sync: %.3f ms", ms);
             }
         }
+    } catch (const std::exception& ex) {
+        // Weiterlaufen und später trotzdem versuchen zu zeichnen (PBO-PEEK hilft)
+        LUCHS_LOG_HOST("[ERROR] renderCudaFrame threw: %s", ex.what());
+        LuchsLogger::flushDeviceLogToHost(0);
     }
 
     // Device-Logs periodisch spülen
@@ -228,12 +258,15 @@ static void applyZoomStep(FrameContext& fctx, CommandBus& bus) {
 static void drawFrame(FrameContext& fctx, RendererState& state) {
     const auto t0 = Clock::now();
 
+    // Diagnose: Einmal vor dem Upload ins PBO schauen
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[PIPE] drawFrame begin: tex=%u pbo=%u %dx%d",
+                       state.tex.id(), state.pbo.id(), fctx.width, fctx.height);
+        peekPBO(state.pbo.id());
+    }
+
     // **WICHTIG**: Stabile API & richtige Reihenfolge -> PBO vor Texture
     OpenGLUtils::setGLResourceContext("draw");
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PIPE][UPLOAD] tex=%u pbo=%u %dx%d",
-                       state.tex.id(), state.pbo.id(), fctx.width, fctx.height);
-    }
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), state.tex.id(), fctx.width, fctx.height);
 
     RendererPipeline::drawFullscreenQuad(state.tex.id());
