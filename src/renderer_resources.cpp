@@ -1,7 +1,6 @@
-// Datei: src/renderer_resources.cpp
-///// MAUS: OpenGL PBO/Texture utils — deterministic upload & ASCII logs
-///// Otter: Immutable Texture-Storage + sauberes PixelStore-Handling. Upload deterministisch.
-///// Schneefuchs: State sauber sichern/wiederherstellen; eindeutige Fehlerpfade. ASCII-Logs.
+///// Otter: Immutable Texture-Storage; deterministischer Upload; sauberes PixelStore-Handling.
+///// Schneefuchs: State sichern/wiederherstellen; klare Fehlerpfade; ASCII-Logs.
+///// Maus: OpenGL PBO/Texture Utils – robuste Init/Upload-Reihenfolge; keine versteckten Seiteneffekte.
 
 #include "pch.hpp"
 #include "renderer_resources.hpp"
@@ -10,7 +9,6 @@
 
 #include <stdexcept>
 #include <limits>
-#include <GL/glew.h>
 
 namespace OpenGLUtils
 {
@@ -22,7 +20,7 @@ void setGLResourceContext(const char* context) {
     resourceContext = context ? context : "unknown";
 }
 
-// Create Pixel Buffer Object
+// Create Pixel Buffer Object (for GL_PIXEL_UNPACK_BUFFER uploads)
 GLuint createPBO(int width, int height) {
     if (width <= 0 || height <= 0) {
         if constexpr (Settings::debugLogging) {
@@ -56,7 +54,7 @@ GLuint createPBO(int width, int height) {
     }
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, bytes, nullptr, GL_STREAM_DRAW); // orphan on (re)alloc
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, bytes, nullptr, GL_STREAM_DRAW); // upload path
 
     // verify real size
     GLint realSize = 0;
@@ -123,7 +121,7 @@ GLuint createTexture(int width, int height) {
     return tex;
 }
 
-// Upload PBO -> texture
+// Upload PBO -> texture (RGBA8), preserving global state
 void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[GL-UPLOAD] Binding PBO=%u and Texture=%u (ctx=%s, %dx%d)",
@@ -231,7 +229,6 @@ void updateTextureFromPBO(GLuint textureId, GLsizei width, GLsizei height) noexc
 }
 
 void updateTextureFromPBO(GLuint textureId, GLuint pboId, int width, int height) noexcept {
-    // Observed today: call site passes (texture, pbo, w, h)
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[GL] compat updateTextureFromPBO(4): texture=%u, pbo=%u, %dx%d",
                        static_cast<unsigned>(textureId),

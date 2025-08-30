@@ -1,8 +1,8 @@
-// LUCHS
+///// Otter: FPS-Meter-API – glättet Core-Zeit zu stabiler Max-FPS-Anzeige.
+///// Schneefuchs: Header/Source strikt getrennt; ABI stabil; ASCII-only.
+///// Maus: Keine iostreams; Thread-safety via Atomics in .cpp; API minimal.
+
 #pragma once
-// 🦦 Otter: Simple, deterministic estimator for "max FPS" based on core GPU time (uncapped). (Bezug zu Otter)
-// 🦊 Schneefuchs: Header/Source strikt getrennt, API minimal, keine ABI-Überraschungen. (Bezug zu Schneefuchs)
-// Logs/Strings: ASCII only.
 
 namespace FpsMeter {
 

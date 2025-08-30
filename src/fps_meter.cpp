@@ -1,20 +1,24 @@
+///// Otter: FPS-Meter – glättet Framezeiten per EMA für stabile HUD-Anzeige.
+///// Schneefuchs: Lock-free Atomics, ASCII-only; keine iostreams; deterministisch.
+///// Maus: Keine API-Änderungen; Header/Source synchron; nur minimal nötige Includes.
+
 #include "fps_meter.hpp"
 #include <atomic>
 #include <algorithm>
 #include <cmath>
 
-// 🦦 Otter: EMA smoothing keeps HUD stable without lag. (Bezug zu Otter)
-// 🦊 Schneefuchs: atomics for lock-free snapshots; no iostream, ASCII-only. (Bezug zu Schneefuchs)
+// 🦦 Otter: EMA smoothing keeps HUD stable without lag.
+// 🦊 Schneefuchs: atomics for lock-free snapshots; no iostream, ASCII-only.
 
 namespace {
     // Exponential moving average of core-ms
     static std::atomic<double> gEmaCoreMs{0.0};
     static std::atomic<bool>   gInit{false};
 
-    constexpr double kAlpha = 0.20;     // smoothing factor
-    constexpr double kBeta  = 1.0 - kAlpha; // 🦊 Schneefuchs: precompute complement to avoid repeated subtractions.
-    constexpr double kEps   = 1e-6;     // avoid div-by-zero
-    constexpr int    kClamp = 9999;     // sanity clamp for HUD
+    constexpr double kAlpha = 0.20;          // smoothing factor
+    constexpr double kBeta  = 1.0 - kAlpha;  // 🦊 Schneefuchs: precompute complement to avoid repeated subtractions.
+    constexpr double kEps   = 1e-6;          // avoid div-by-zero
+    constexpr int    kClamp = 9999;          // sanity clamp for HUD
 }
 
 namespace FpsMeter {

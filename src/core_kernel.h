@@ -1,7 +1,6 @@
-///// MAUS: header sync — entropy/contrast only (render kernels removed)
-// Datei: src/core_kernel.h
-// 🐭 Maus: Header minimal, eindeutig und stabil – keine heimlichen ABI-Änderungen.
-// 🦊 Schneefuchs: Nur die tatsächlich implementierte API, C++-Linkage.
+///// Otter: Header minimal und stabil – nur E/C-API; keine versteckten Abhängigkeiten.
+///// Schneefuchs: C++-Linkage, /WX-fest, ASCII-only; Header/Source synchron.
+///// Maus: Render-Kernel entfernt; einzig verbleibende öffentliche Funktion dokumentiert.
 
 #pragma once
 #ifndef CORE_KERNEL_H
@@ -19,7 +18,6 @@
 //  - maxIterations: Iterationslimit (zur Histogramm-Normierung)
 //
 // Erwartet valide Größen/Allokationen gemäß width,height,tileSize.
-//
 void computeCudaEntropyContrast(
     const int* d_iterations,
     float*     d_entropyOut,

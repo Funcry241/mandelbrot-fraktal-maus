@@ -1,6 +1,6 @@
-// 🐭 Maus-Kommentar: Render-Loop, FPS, HUD, Auto-Zoom und Eingaben sauber gekapselt.
-// 🦦 Otter: minimale, stabile API; kein beginFrame-Export nötig. (Bezug zu Otter)
-// 🦊 Schneefuchs: Header schlank – keine schweren Includes, Forward-Decl für GLFWwindow. (Bezug zu Schneefuchs)
+///// Otter: Render-Loop API – minimal & stable; kein beginFrame-Export.
+///// Schneefuchs: Schlanker Header; GLFWwindow vorwärts deklariert; ASCII-only.
+///// Maus: FPS/HUD/Auto-Zoom/Eingaben sauber gekapselt; Source definiert Verhalten.
 
 #pragma once
 

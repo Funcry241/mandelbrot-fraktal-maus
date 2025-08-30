@@ -1,10 +1,6 @@
-// ============================================================================
-// Datei: src/frame_limiter.hpp
-// FrameLimiter — precise 60 FPS pacing (sleep+spin), ASCII logs only.
-// 🐭 Maus: deterministisch, jitterarm, header-only, keine versteckten Abhängigkeiten.
-// 🦦 Otter: sanftes Pacing mit fein granularer Spin-Phase für butterweiche Bewegung. (Bezug zu Otter)
-// 🦊 Schneefuchs: Kein Zeitkriechen — Driftkorrektur bei Overruns; Logs optional. (Bezug zu Schneefuchs)
-// ============================================================================
+///// Otter: Precise 60 FPS pacing (sleep+spin); ASCII logs gated via settings.
+///// Schneefuchs: Drift correction, /WX-fest; steady_clock only; header-only.
+///// Maus: Keine versteckten Abhängigkeiten; API minimal; deterministisch.
 
 #pragma once
 
@@ -57,8 +53,10 @@ public:
 
         if (remaining > kSpinThreshold) {
             const auto coarse = remaining - kSleepSlack;
+            const auto before = clock::now();
             std::this_thread::sleep_for(coarse);
-            sleptMs += std::chrono::duration<double, std::milli>(coarse).count();
+            const auto after  = clock::now();
+            sleptMs += std::chrono::duration<double, std::milli>(after - before).count();
         }
 
         // Fine spin — keeps jitter low without timeBeginPeriod.

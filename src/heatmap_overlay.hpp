@@ -1,10 +1,10 @@
-// Datei: src/heatmap_overlay.hpp
-/*
-Maus-Kommentar 🐭: Overlay ist jetzt vollständig zustandslos - kein interner bool mehr. Alle Kontrollfunktionen arbeiten direkt mit RendererState&. drawOverlay-API akzeptiert ctx. Schneefuchs: „Kein Schatten, nur Klarheit.“ Otter: Kein struct/class-Konflikt mehr.
-*/
+///// Otter: Heatmap-Overlay-API – zustandslos, exakt wie ZoomLogic (kein Y-Flip).
+///// Schneefuchs: Header/Source synchron, deterministisch, ASCII-only; keine verdeckten Pfade.
+///// Maus: Nur LUCHS_LOG_* im Hostpfad; klare Parameter (Tiles, Texture, State).
 
 #pragma once
 #include <vector>
+#include <GL/glew.h>  // für GLuint
 
 class RendererState;
 

@@ -1,5 +1,6 @@
-// 🐭 Maus-Kommentar: PCH für dynamisches GLEW überall. Otter: DLL wird automatisch kopiert.
-// 🦊 Schneefuchs: Keine Header-Reihenfolge-Fallen; keine impliziten GL-Includes.
+///// Otter: PCH für dynamisches GLEW; stabile Include-Reihenfolge; DLL-Import unter Windows.
+///// Schneefuchs: Keine impliziten GL-Includes; deterministisch; ASCII-only.
+///// Maus: GLEW/GLFW nur hier; andere Header schlank halten; keine Seiteneffekte.
 
 #pragma once
 
@@ -27,10 +28,10 @@
 // ===============
 #ifdef _WIN32
   #ifndef WIN32_LEAN_AND_MEAN
-  #define WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
   #endif
   #ifndef NOMINMAX
-  #define NOMINMAX
+    #define NOMINMAX
   #endif
   #include <windows.h>
 #endif
@@ -46,7 +47,7 @@
 #ifndef GL_DO_NOT_INCLUDE_GL_H
   #define GL_DO_NOT_INCLUDE_GL_H
 #endif
-// GLEW ohne GLU/Imaging (wir nutzen beides nicht):
+// GLEW ohne GLU/Imaging (wird nicht benötigt):
 #ifndef GLEW_NO_GLU
   #define GLEW_NO_GLU
 #endif
@@ -54,7 +55,7 @@
   #define GLEW_NO_IMAGING
 #endif
 
-// 🦊 Schneefuchs: Erzwinge saubere DLL-Imports, wenn dynamisches GLEW genutzt wird (Windows).
+// Erzwinge saubere DLL-Imports, wenn dynamisches GLEW genutzt wird (Windows).
 #if defined(_WIN32) && !defined(GLEW_STATIC)
   #ifndef GLEW_DLL
     #define GLEW_DLL

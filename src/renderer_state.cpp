@@ -1,6 +1,6 @@
-// 🐭 Maus: Sichtbare Tile-/Buffer-Sanity, kein "malloc into the void", deterministische Logs.
-// 🦦 Otter: Only-Grow + Fast-Path ohne Memsets/Sync bei unveränderten Größen. (Bezug zu Otter)
-// 🦊 Schneefuchs: Host-Timings zentral (resetHostFrame), ASCII-only Logs, /WX-fest. (Bezug zu Schneefuchs)
+///// Otter: Visible tile/buffer sanity; only-grow fast path; deterministic ASCII logs.
+///// Schneefuchs: Host-timings zentral (/WX-fest); RAII & bounds clamp; keine State-Leaks.
+///// Maus: Keine Mallocs ins Leere; eindeutige Resize-Pfade; GL/CUDA-Cleanup geordnet.
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -8,7 +8,6 @@
 #include "cuda_interop.hpp"
 #include "common.hpp"
 #include "renderer_resources.hpp"
-#include "opengl_utils.hpp" // setGLResourceContext / PBO/Texture
 #include <algorithm>        // std::clamp
 
 // ---- Host-Timings: Definition der Methodik aus dem Header --------------------
@@ -18,7 +17,7 @@ void RendererState::CudaPhaseTimings::resetHostFrame() noexcept {
     frameTotalMs = 0.0;
 }
 
-// 🦊 Schneefuchs: interne Helfer in anonymer NS, noexcept – kein ODR-Risiko, klarer Scope. (Bezug zu Schneefuchs)
+// 🦊 Schneefuchs: interne Helfer in anonymer NS, noexcept – klarer Scope.
 namespace {
     inline void computeTiles(int width, int height, int tileSize,
                              int& tilesX, int& tilesY, int& numTiles) noexcept {
@@ -78,7 +77,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
     tileSize = std::clamp(tileSize, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
 
     // --- derive sizes ---
-    const size_t totalPixels    = size_t(width) * size_t(height); // 🦊 Schneefuchs: size_t-Multiplikation gegen int-Overflow.
+    const size_t totalPixels    = size_t(width) * size_t(height); // 🦊 Schneefuchs: size_t gegen int-Overflow.
     int tilesX = 0, tilesY = 0, numTiles = 0;
     computeTiles(width, height, tileSize, tilesX, tilesY, numTiles);
 

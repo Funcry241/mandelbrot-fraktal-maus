@@ -1,39 +1,48 @@
-// 🦦 Otter: Einheitliche, klare Struktur – nur aktive Zustände. (Bezug zu Otter)
-// 🦊 Schneefuchs: Speicher & Buffer exakt definiert, Host-Timings zentral – eine Quelle. (Bezug zu Schneefuchs)
-// 🐜 Rote Ameise: tileSize explizit in Pipelines, hier nur Zustand & Ressourcen.
+///// Otter: Einheitliche, klare Struktur – nur aktive Zustände; Header schlank, keine PCH.
+///// Schneefuchs: Speicher/Buffer exakt definiert; Host-Timings zentral – eine Quelle; /WX-fest.
+///// Maus: tileSize bleibt in Pipelines explizit; hier nur Zustand & Ressourcen.
 
 #pragma once
 
-#include "pch.hpp"
-#include "zoom_logic.hpp"        // Zoom V2: ZoomState
+// Keine schweren Includes im Header
 #include <vector>
-#include <string>                // HUD-Text
-#include "hermelin_buffer.hpp"   // RAII-Wrapper
-#include <vector_types.h>        // float2
+#include <string>
+#include <vector_types.h>        // float2 (CUDA); kann C4324 auf MSVC auslösen
+#include "zoom_logic.hpp"        // Zoom V2: ZoomState
+#include "hermelin_buffer.hpp"   // RAII-Wrapper für GL/CUDA-Buffer
+
+// Vorwärtsdeklaration statt GLFW-Header
+struct GLFWwindow;
+
+// MSVC: float2 ist __align__(8) → C4324 (Padding). Lokal und gezielt unterdrücken.
+#if defined(_MSC_VER)
+  #pragma warning(push)
+  #pragma warning(disable : 4324)
+#endif
 
 class RendererState {
 public:
     // 🖼️ Fensterdimensionen (OpenGL-Viewport & Framebuffer-Größe)
-    int width;
-    int height;
+    int         width;
+    int         height;
     GLFWwindow* window = nullptr;
 
     // 🔍 Kamera (Fraktalraum)
-    double zoom = 1.0;
-    float2 offset = { 0.0f, 0.0f };
+    double zoom  = 1.0;
+    float2 offset{0.0f, 0.0f};
 
     // 🧮 Iterationsparameter
     int baseIterations = 100;   // Ausgangswert
     int maxIterations  = 1000;  // aktuell verwendeter Maximalwert
 
     // 📈 Anzeige-Feedback
-    float fps = 0.0f;
-    float deltaTime  = 0.0f;
+    float  fps       = 0.0f;
+    float  deltaTime = 0.0f;
 
     // 🧩 Analysepuffer (Host)
-    int lastTileSize = 0;
-    std::vector<float> h_entropy;
-    std::vector<float> h_contrast;
+    int                 lastTileSize = 0;
+    std::vector<float>  h_entropy;
+    std::vector<float>  h_contrast;
 
     // 🔗 Analysepuffer (Device) mit RAII
     Hermelin::CudaDeviceBuffer d_iterations;
@@ -45,14 +54,14 @@ public:
     Hermelin::GLBuffer tex;
 
     // 🕒 Zeitsteuerung pro Frame
-    int frameCount = 0;
-    double lastTime = 0.0;
+    int    frameCount = 0;
+    double lastTime   = 0.0;
 
     // 🌀 Zoom V2: Persistenter Zustand (keine Globals)
     ZoomLogic::ZoomState zoomV2State;
 
     // 🔥 Heatmap-/HUD-Overlay-Zustand
-    bool heatmapOverlayEnabled = false;
+    bool heatmapOverlayEnabled       = false;
     bool warzenschweinOverlayEnabled = false;
 
     // 📝 HUD-Text
@@ -61,7 +70,7 @@ public:
     // ⏱️ Timings – CUDA + HOST konsolidiert (eine Quelle)
     struct CudaPhaseTimings {
         // CUDA / Interop (gesetzt von renderCudaFrame)
-        bool   valid = false;
+        bool   valid            = false;
         double mandelbrotTotal  = 0.0;
         double mandelbrotLaunch = 0.0;
         double mandelbrotSync   = 0.0;
@@ -75,7 +84,7 @@ public:
         double overlaysMs       = 0.0; // Heatmap + Warzenschwein
         double frameTotalMs     = 0.0; // beginFrame->Ende execute (ohne Swap)
 
-        // 🐑 Schneefuchs: Pro-Frame-Reset nur für Host-Anteile. (Bezug zu Schneefuchs)
+        // Pro-Frame-Reset nur für Host-Anteile.
         void resetHostFrame() noexcept;
     };
     CudaPhaseTimings lastTimings;
@@ -83,6 +92,10 @@ public:
     // 🧽 Setup & Verwaltung
     RendererState(int w, int h);
     void reset();                             // stellt Initialzustand her
-    void setupCudaBuffers(int tileSize);      // allokiert/verifiziert Device-Buffer – tileSize explizit (🐜)
+    void setupCudaBuffers(int tileSize);      // allokiert/verifiziert Device-Buffer – tileSize explizit
     void resize(int newWidth, int newHeight); // Fenstergröße ändern
 };
+
+#if defined(_MSC_VER)
+  #pragma warning(pop)
+#endif

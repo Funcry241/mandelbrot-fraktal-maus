@@ -1,6 +1,6 @@
-// 🐭 Maus-Kommentar: Header für das Rendering-Modul. Keine überflüssigen Parameter mehr - volle Synchronität zur Source. Otter und Schneefuchs sind stolz.
-// 🦦 Otter: Kontextlogik korrekt einkapsuliert - keine Frühregistrierung möglich.
-// 🦊 Schneefuchs: Header synchron zur Source. Keine Schattenvariablen. Keine Lücken.
+///// Otter: Rendering-Modul (Header) – Kontext sauber gekapselt; keine Frühregistrierung.
+///// Schneefuchs: Header/Source synchron; keine Schattenvariablen; deterministische API.
+///// Maus: Keine überflüssigen Parameter; exakt passend zur Implementation.
 
 #pragma once
 

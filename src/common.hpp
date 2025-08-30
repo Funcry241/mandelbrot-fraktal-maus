@@ -1,4 +1,7 @@
-// Datei: src/common.hpp
+///// Otter: Zentrale Helfer & Konstanten; präzise Tilegröße via log1p, keine eigenen CHECK-Makros.
+///// Schneefuchs: Deterministisch, ASCII-only; Header/Source synchron; keine verdeckten Funktionswechsel.
+///// Maus: Nur LUCHS_LOG_* fürs Logging; Settings steuern Verhalten; keine Supersampling-Pfade.
+
 #pragma once
 
 #ifdef _WIN32
@@ -35,17 +38,19 @@
 
 // --- KEIN eigenes CUDA_CHECK mehr hier ---
 
-// 🦊 Schneefuchs: Nutze std::log2 (C++-konform) statt std::log2f; gleiche Semantik, bessere Portabilität.
-// 🦦 Otter: Pfad bleibt numerisch stabil; Clamp nach Rundung sichert Grenzen.
-inline int computeTileSizeFromZoom(float zoom) noexcept {
+// 🦊 Schneefuchs: numerisch stabiler mit log1p für kleine zoom-Werte; deterministisch geklemmt.
+// 🦦 Otter: INV_LN2 als constexpr vermeidet wiederholte std::log(2.0)-Aufrufe.
+[[nodiscard]] inline int computeTileSizeFromZoom(float zoom) noexcept {
     const float base = static_cast<float>(Settings::BASE_TILE_SIZE);
-    const float raw  = base - std::log2(std::max(0.0f, zoom) + 1.0f);
+    const float z    = std::max(0.0f, zoom);
+    constexpr float INV_LN2 = 1.4426950408889634f; // 1 / ln(2)
+    const float raw  = base - std::log1p(z) * INV_LN2; // ≈ base - log2(1+z)
     int t = static_cast<int>(std::lround(raw));
     t = std::clamp(t, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
     return t;
 }
 
-inline bool getLocalTime(std::tm& outTm, std::time_t t) noexcept {
+[[nodiscard]] inline bool getLocalTime(std::tm& outTm, std::time_t t) noexcept {
 #if defined(_WIN32)
     return localtime_s(&outTm, &t) == 0;
 #else

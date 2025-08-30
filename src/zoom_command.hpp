@@ -1,13 +1,16 @@
 // Datei: src/zoom_command.hpp
 // 🐭 Maus: deterministische, replayfähige Kommandos; CSV stabil.
-// 🦦 Otter: keine impliziten Makros; Logging via Host-Layer. (Bezug zu Otter)
-// 🦊 Schneefuchs: trivially-copyable, keine heimlichen ABI-Fallen. (Bezug zu Schneefuchs)
+// 🦦 Otter: keine impliziten Makros; Logging via Host-Layer.
+// 🦊 Schneefuchs: trivially-copyable, keine heimlichen ABI-Fallen.
+// ➕ Bonus: rvalue-push & dumpCSV(FILE*) für direkte Ausgabe ohne Extras.
 
 #pragma once
+
 #include <vector>
 #include <string>
 #include <cstdio>
 #include <type_traits>
+#include <utility>        // std::move
 #include <vector_types.h> // float2
 
 #ifdef _MSC_VER
@@ -40,7 +43,6 @@ public:
     }
 
     [[nodiscard]] static std::string csvHeader() {
-        // Konstant, aber als std::string zurückgegeben für bequeme Nutzung.
         return "Frame,X,Y,ZoomBefore,ZoomAfter,Entropy,Contrast";
     }
 };
@@ -51,11 +53,27 @@ static_assert(std::is_trivially_copyable<ZoomCommand>::value,
 class CommandBus {
 public:
     void push(const ZoomCommand& cmd)            { commands.push_back(cmd); }
+    void push(ZoomCommand&& cmd)                 { commands.emplace_back(std::move(cmd)); }
+
     [[nodiscard]] const std::vector<ZoomCommand>& getHistory() const { return commands; }
     void clear()                                 { commands.clear(); }
     [[nodiscard]] std::size_t size() const       { return commands.size(); }
     void reserve(std::size_t n)                  { commands.reserve(n); }
     [[nodiscard]] std::size_t capacity() const   { return commands.capacity(); }
+
+    // Direkte CSV-Ausgabe (Header + alle Zeilen) in einen geöffneten FILE*.
+    // Rückgabe true bei Erfolg (fflush==0).
+    [[nodiscard]] bool dumpCSV(std::FILE* f) const {
+        if (!f) return false;
+        std::fputs(ZoomCommand::csvHeader().c_str(), f);
+        std::fputc('\n', f);
+        for (const auto& c : commands) {
+            const std::string line = c.toCSV();
+            std::fputs(line.c_str(), f);
+            std::fputc('\n', f);
+        }
+        return std::fflush(f) == 0;
+    }
 
 private:
     std::vector<ZoomCommand> commands;

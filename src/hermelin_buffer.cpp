@@ -1,8 +1,6 @@
-// ============================================================================
-// Datei: src/hermelin_buffer.cpp
-// 🐜 Hermelin: Implementation der RAII-Buffer für CUDA- und OpenGL-Ressourcen.
-// 🦦 Otter: Trennung von Interface und Logik. Fehler-Logging explizit, Speichergrößen sichtbar.
-// 🦊 Schneefuchs: Keine Logik im Header. Alles klar nachvollziehbar.
+///// Otter: RAII für CUDA/GL-Buffer; deterministische ASCII-Logs; Only-Grow-Semantik.
+///// Schneefuchs: State-Restore um GL-Binds; /WX-fest; Header/Source synchron – keine Drift.
+///// Maus: Implementierung klar getrennt vom Interface; keine versteckten Allokationen.
 
 #include "hermelin_buffer.hpp"
 #include "luchs_log_host.hpp"
@@ -16,7 +14,7 @@
 
 namespace Hermelin {
 
-// --- CUDA-Device-Buffer ---
+// ----------------------------- CUDA-Device-Buffer ----------------------------
 
 CudaDeviceBuffer::CudaDeviceBuffer() : ptr_(nullptr), sizeBytes_(0) {}
 
@@ -59,7 +57,7 @@ void CudaDeviceBuffer::allocate(size_t sizeBytes) {
 }
 
 void CudaDeviceBuffer::resize(size_t sizeBytes) {
-    // exakt wie allocate (wir kopieren bewusst nichts)
+    // exakt wie allocate (bewusst kein Copy)
     if (sizeBytes_ == sizeBytes && ptr_ != nullptr) return; // no-op
     allocate(sizeBytes);
 }
@@ -72,7 +70,7 @@ void CudaDeviceBuffer::ensure(size_t minBytes) {
 
 void CudaDeviceBuffer::free() {
     if (ptr_) {
-        const void* p = ptr_;
+        const void*  p  = ptr_;
         const size_t sz = sizeBytes_;
         const cudaError_t err = cudaFree(ptr_);
         ptr_ = nullptr;
@@ -91,7 +89,7 @@ size_t CudaDeviceBuffer::size() const {
     return sizeBytes_;
 }
 
-// --- OpenGL-Buffer ---
+// --------------------------------- GL-Buffer ---------------------------------
 
 GLBuffer::GLBuffer() : id_(0) {}
 

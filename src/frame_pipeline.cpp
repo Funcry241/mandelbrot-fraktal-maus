@@ -1,7 +1,6 @@
-// Datei: src/frame_pipeline.cpp
 ///// Otter: Feste Aufrufreihenfolge – updateTextureFromPBO(PBO, TEX, W, H); ASCII-Logs; keine Compat-Wrapper.
-///// Schneefuchs: /WX-fest; zusätzliche Diagnose (PBO-PEEK) vor Upload; RAII & deterministische Logs.
-///// Maus: Eine Quelle für Tiles/Upload; Zoom-V2 außerhalb der CUDA-Interop bleibt unverändert.
+///// Schneefuchs: /WX-fest; keine toten TU-scope-Symbole bei deaktiviertem Progressive-Pfad.
+///// Maus: Progressive-Code nur bauen, wenn SETTINGS_PROGRESSIVE_ENABLED=1.
 
 #include "pch.hpp"
 #include <chrono>
@@ -26,6 +25,23 @@
 #include "luchs_cuda_log_buffer.hpp"
 #include "common.hpp"
 #include "settings.hpp"
+
+// Progressive-Iteration (Resume) – additiv, kein API-Bruch
+#include "progressive_iteration.cuh"
+#include "progressive_shade.cuh"
+#include "progressive_controller.hpp"
+#include "bear_CudaPBOResource.hpp"
+
+// -----------------------------------------------------------------------------
+// Compile-time Switches
+// -----------------------------------------------------------------------------
+#ifndef SETTINGS_PROGRESSIVE_ENABLED
+#define SETTINGS_PROGRESSIVE_ENABLED 0
+#endif
+
+#ifndef OTTER_ENABLE_PBO_MAP_AND_LOG
+#define OTTER_ENABLE_PBO_MAP_AND_LOG 0
+#endif
 
 namespace FramePipeline
 {
@@ -70,14 +86,12 @@ namespace {
         glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prev);
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 
-        // Wir lesen nur einen winzigen Bereich, kein Risiko für Performance.
         const GLsizeiptr N = 64; // erste 64 Bytes
         void* ptr = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, N, GL_MAP_READ_BIT);
         if (ptr) {
             const unsigned char* b = static_cast<const unsigned char*>(ptr);
             unsigned sum16 = 0;
             for (int i = 0; i < 16 && i < N; ++i) sum16 += b[i];
-            // erste vier Bytes getrennt loggen
             unsigned b0=b[0], b1=b[1], b2=b[2], b3=b[3];
             LUCHS_LOG_HOST("[PBO-PEEK] pbo=%u first4=%u,%u,%u,%u sum16=%u", pbo, b0, b1, b2, b3, sum16);
             glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
@@ -87,6 +101,19 @@ namespace {
         }
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prev));
     }
+
+#if SETTINGS_PROGRESSIVE_ENABLED
+    // ---------------- Progressive: TU-lokaler Zustand & Helpers ----------------
+    static prog::CudaProgressiveState g_progState;
+    static prog::ProgressivePI        g_progPI;      // Ziel ~160 ms (Default)
+    static uint32_t                   g_progChunk = 512; // Startwert
+
+    // Mapping-Helfer: height-based scale; deterministisch
+    static inline double scaleFromZoom(double zoom) {
+        constexpr double BASE_HEIGHT_SPAN = 3.0;
+        return BASE_HEIGHT_SPAN / (zoom > 0.0 ? zoom : 1.0);
+    }
+#endif // SETTINGS_PROGRESSIVE_ENABLED
 }
 
 // --------------------------------- frame begin --------------------------------
@@ -183,7 +210,6 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
             }
         }
     } catch (const std::exception& ex) {
-        // Weiterlaufen und später trotzdem versuchen zu zeichnen (PBO-PEEK hilft)
         LUCHS_LOG_HOST("[ERROR] renderCudaFrame threw: %s", ex.what());
         LuchsLogger::flushDeviceLogToHost(0);
     }
@@ -239,6 +265,95 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
     }
 }
 
+#if SETTINGS_PROGRESSIVE_ENABLED
+// ------------------------ CUDA + analysis (Progressive) -----------------------
+static void computeCudaFrame_progressive(FrameContext& fctx, RendererState& state) {
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[PIPE][PROG] computeCudaFrame_progressive: %dx%d zoom=%.5f tilesz=%d chunk=%u",
+                       fctx.width, fctx.height, fctx.zoom, fctx.tileSize, (unsigned)g_progChunk);
+    }
+
+    const int tilesX   = (fctx.width  + fctx.tileSize - 1) / fctx.tileSize;
+    const int tilesY   = (fctx.height + fctx.tileSize - 1) / fctx.tileSize;
+    const int numTiles = tilesX * tilesY;
+
+    if (fctx.tileSize <= 0 || numTiles <= 0) {
+        LUCHS_LOG_HOST("[FATAL][PROG] invalid tileSize=%d or numTiles=%d", fctx.tileSize, numTiles);
+        return;
+    }
+
+    // Stelle sicher, dass Analysepuffer existieren (Overlay/HUD erwartet Größen)
+    state.setupCudaBuffers(fctx.tileSize);
+    if ((int)fctx.h_entropy.size() != numTiles) fctx.h_entropy.assign((size_t)numTiles, 0.0f);
+    if ((int)fctx.h_contrast.size() != numTiles) fctx.h_contrast.assign((size_t)numTiles, 0.0f);
+
+    // 1) Progressive Step (Iterationsbudget hinzufügen)
+    auto scaleFromZoom = [](double zoom) {
+        constexpr double BASE_HEIGHT_SPAN = 3.0;
+        return BASE_HEIGHT_SPAN / (zoom > 0.0 ? zoom : 1.0);
+    };
+
+    prog::ViewportParams vp;
+    vp.centerX = (double)fctx.offset.x;
+    vp.centerY = (double)fctx.offset.y;
+    vp.scale   = scaleFromZoom((double)fctx.zoom); // height-based
+    vp.width   = fctx.width;
+    vp.height  = fctx.height;
+
+    prog::ProgressiveConfig cfg;
+    cfg.maxIterCap    = (uint32_t)fctx.maxIterations;
+    cfg.chunkIter     = g_progChunk;
+    cfg.bailout2      = 4.0f;
+    cfg.resetOnChange = true;
+    cfg.debugDevice   = Settings::debugLogging ? true : false;
+
+    const auto met = g_progState.step(vp, cfg, /*stream=*/0);
+
+    // 2) Shade in den PBO (CUDA-Interop)
+#if OTTER_ENABLE_PBO_MAP_AND_LOG
+    {
+        uchar4* d_pixels = state.pbo.mapAndLog();
+        if (!d_pixels) {
+            LUCHS_LOG_HOST("[ERROR][PROG] PBO map returned null; skipping shade");
+        } else {
+            prog::shade_progressive_to_rgba(g_progState, d_pixels, fctx.width, fctx.height, cfg.maxIterCap, /*stream=*/0);
+        }
+        state.pbo.unmapAndLog();
+    }
+#else
+    LUCHS_LOG_HOST("[PROG] PBO map/unmap path disabled (OTTER_ENABLE_PBO_MAP_AND_LOG=0)");
+#endif
+
+    // 3) Budgetregelung (PI)
+    g_progChunk = g_progPI.suggest(g_progChunk, met.kernel_ms);
+
+    // 4) Device-Logs periodisch spülen (identisch zur klassischen Pipeline)
+    {
+        const cudaError_t err = cudaPeekAtLastError();
+        if constexpr (Settings::debugLogging) {
+            if (err != cudaSuccess || (g_frame % 30 == 0)) {
+                LUCHS_LOG_HOST("[PIPE][PROG] Flushing device logs (err=%d, frame=%d)", (int)err, g_frame);
+                LuchsLogger::flushDeviceLogToHost(0);
+            }
+        } else {
+            if (err != cudaSuccess) {
+                LuchsLogger::flushDeviceLogToHost(0);
+            }
+        }
+    }
+
+    // 5) Zoom-Analyse (vorerst neutral: keine Zielauswahl ohne E/C)
+    fctx.shouldZoom = false;
+    fctx.lastEntropy = 0.0f;
+    fctx.lastContrast = 0.0f;
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[PROG] step addIter=%u ms=%.3f survivors=%u scale=%.17g",
+                       (unsigned)met.addIterApplied, met.kernel_ms, (unsigned)met.stillActive, vp.scale);
+    }
+}
+#endif // SETTINGS_PROGRESSIVE_ENABLED
+
 // ------------------------------- apply zoom step ------------------------------
 static void applyZoomStep(FrameContext& fctx, CommandBus& bus) {
     if (!fctx.shouldZoom) return;
@@ -266,37 +381,30 @@ static void applyZoomStep(FrameContext& fctx, CommandBus& bus) {
 static void drawFrame(FrameContext& fctx, RendererState& state) {
     const auto t0 = Clock::now();
 
-    // Früh raus bei 0er-Größe (sicherheits-/perf-optimal)
     if (fctx.width <= 0 || fctx.height <= 0) return;
 
-    // **Viewport sicher setzen** (einmal pro Frame, ohne Restore – Ziel ist Fenstergröße)
     glViewport(0, 0, fctx.width, fctx.height);
 
-    // Scissor während Upload/Draw deaktivieren (Zustand danach wiederherstellen)
     const GLboolean hadScissor = glIsEnabled(GL_SCISSOR_TEST);
     if (hadScissor) glDisable(GL_SCISSOR_TEST);
 
-    // Diagnose: Einmal vor dem Upload ins PBO schauen (nur Debug)
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] drawFrame begin: tex=%u pbo=%u %dx%d",
                        state.tex.id(), state.pbo.id(), fctx.width, fctx.height);
         peekPBO(state.pbo.id());
     }
 
-    // **WICHTIG**: Stabile API & richtige Reihenfolge -> PBO vor Texture
     OpenGLUtils::setGLResourceContext("draw");
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), state.tex.id(), fctx.width, fctx.height);
 
     RendererPipeline::drawFullscreenQuad(state.tex.id());
 
-    // Scissor-State wiederherstellen
     if (hadScissor) glEnable(GL_SCISSOR_TEST);
 
     const auto t1 = Clock::now();
     g_texMs = std::chrono::duration_cast<msd>(t1 - t0).count();
     state.lastTimings.uploadMs = g_texMs;
 
-    // Overlays separat messen
     const auto tOv0 = Clock::now();
 
     if (fctx.overlayActive) {
@@ -335,7 +443,13 @@ void execute(RendererState& state) {
     g_ctx.tileSize      = computeTileSizeFromZoom(g_ctx.zoom);
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
+    // Pfadwahl: Klassisch vs. Progressive-Resume (compile-time Flag)
+#if SETTINGS_PROGRESSIVE_ENABLED
+    computeCudaFrame_progressive(g_ctx, state);
+#else
     computeCudaFrame(g_ctx, state);
+#endif
+
     applyZoomStep(g_ctx, g_zoomBus);
 
     // Ergebnisse zurück nach State
@@ -356,7 +470,6 @@ void execute(RendererState& state) {
     FpsMeter::updateCoreMs(g_frameTotal);
 
     if (perfShouldLog(g_frame)) {
-        // Periodisches Device-Log im Perf-Modus
         LuchsLogger::flushDeviceLogToHost(0);
 
         const int    resX = g_ctx.width;

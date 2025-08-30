@@ -1,15 +1,18 @@
-// ============================================================================
-// Datei: src/settings.hpp
-// Central project settings — fully documented.
-// Policy: All runtime LOG/DEBUG output must be English and ASCII-only.
-// Comments hier dürfen Deutsch sein. Referenzen:
-//   – Otter = vom User inspiriert (Bezug zu Otter)
-//   – Schneefuchs = von Schwester inspiriert (Bezug zu Schneefuchs)
-// Keine Regressionen, keine versteckten Semantik-Änderungen. Werte bleiben identisch.
-// Neu (Otter/Schneefuchs): Framerate-Cap (60 FPS) + optionales VSync.
-// ============================================================================
+///// Otter: settings.hpp – vollständig dokumentierte Toggles; ASCII-only, deterministisch.
+//*** Schneefuchs: Keine versteckten Semantikänderungen; Defaults stabil, /WX-fest.
+//*** Maus: Kein Logging hier; nur Konstanten & Doku, Header-only.
 
 #pragma once
+
+// ============================================================================
+// Central project settings — fully documented.
+// Policy: All runtime LOG/DEBUG output must be English and ASCII-only.
+// Kommentare dürfen Deutsch sein. Referenzen:
+//   – Otter = vom User inspiriert (Bezug zu Otter)
+//   – Schneefuchs = von Schwester inspiriert (Bezug zu Schneefuchs)
+// Keine Regressionen, keine versteckten Semantik-Änderungen. Werte stabil.
+// Neu (Otter/Schneefuchs): Framerate-Cap (60 FPS) + optionales VSync.
+// ============================================================================
 
 namespace Settings {
 
@@ -96,6 +99,25 @@ namespace Settings {
     //   Schneefuchs-Prinzip: Messen, dann abschalten. (Bezug zu Schneefuchs)
     // ------------------------------------------------------------------------
     inline constexpr bool performanceLogging = true;
+
+    // ------------------------------------------------------------------------
+    // progressiveEnabled  (NEU)
+    // Wirkung:
+    //   Aktiviert die Progressive Iteration + Resume Pipeline
+    //   (per-Pixel persistent state; zeitbudgetierte Iterationsslices).
+    //
+    // Empfehlung (Min..Max):
+    //   false .. true (bool)
+    //
+    // Erhöhung/Reduzierung:
+    //   • true: Progressive-Pfad in frame_pipeline wird genutzt (weitere Kernel/States).
+    //   • false: Klassischer Single-Pass-Renderpfad bleibt aktiv.
+    //
+    // Hinweis:
+    //   Konservativ standardmäßig aus, um Verhalten stabil zu halten.
+    //   Bei Aktivierung Budget (chunkIter) via PI regeln. (Bezug zu Schneefuchs)
+    // ------------------------------------------------------------------------
+    inline constexpr bool progressiveEnabled = false;
 
     // ------------------------------------------------------------------------
     // capFramerate  (NEU)

@@ -1,5 +1,6 @@
-// Datei: src/cuda_interop.hpp
-// 🐻 Bär: RAII-Integration für CUDA-PBO im Projekt „Bär“.
+///// Otter: CUDA-Interop-API für PBO-RAII und Renderpfad; sauberer Forwarder für E/C.
+///// Schneefuchs: Deterministische Signaturen; nur Deklarationen hier; Header/Source synchron halten.
+///// Maus: Keine neuen CHECK-Makros; Logging bleibt im Hostpfad (LUCHS_LOG_*), ASCII-only.
 
 #pragma once
 #ifndef CUDA_INTEROP_HPP
@@ -7,6 +8,7 @@
 
 #include <vector>
 #include <vector_types.h>         // float2
+
 #include "core_kernel.h"          // computeCudaEntropyContrast(...)
 #include "hermelin_buffer.hpp"    // Hermelin::CudaDeviceBuffer, Hermelin::GLBuffer
 
@@ -14,13 +16,13 @@ class RendererState;
 
 namespace CudaInterop {
 
-// 🐻 Bär: Registriert den PBO als CUDA-Resource (RAII-Wrapper intern)
+// Registriert den PBO als CUDA-Resource (RAII-Wrapper intern)
 void registerPBO(const Hermelin::GLBuffer& pbo);
 
 // (unregister erfolgt automatisch über RAII in bear_CudaPBOResource, hier nur Cleanup-Funktion:)
 void unregisterPBO();
 
-// 🐻 Bär: Haupt-Renderfunktion …
+// Haupt-Renderfunktion …
 void renderCudaFrame(
     Hermelin::CudaDeviceBuffer& d_iterations,
     Hermelin::CudaDeviceBuffer& d_entropy,
@@ -38,6 +40,7 @@ void renderCudaFrame(
     RendererState& state
 );
 
+// Steuerfunktionen / Diagnose
 void setPauseZoom(bool pause);
 [[nodiscard]] bool getPauseZoom();
 [[nodiscard]] bool precheckCudaRuntime();

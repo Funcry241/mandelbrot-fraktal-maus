@@ -1,10 +1,6 @@
-// Datei: src/heatmap_overlay.cpp
-// Zweck: Diagnose der Koordinatenumrechnung zwischen Heatmap-Tiles, Screen-Pixeln und Fraktal.
-// Enthält: Mini-Overlay (HUD oben rechts), optionaler Marker, optionaler Self-Check,
-//          robustes Logging der Complex-Koordinate. Alle Logs ASCII-only.
-// 🦊 Schneefuchs: Keine State-Leaks – Bindings & Blend-Status werden gesichert/restauriert. (Bezug zu Schneefuchs)
-// 🦦 Otter: Shader-Fehler führen zu 0-Programm (sauber abfangbar), Uniform-Locations gecached, weniger glGet* pro Frame. (Bezug zu Otter)
-// Otter: Default ohne Marker/Points → keinerlei grüne Punkte im Hauptbild oder im Overlay.
+///// Otter: Heatmap-Overlay – Diagnose & Mini-HUD; Shader 0 on error; cached uniforms; no state leaks.
+///// Schneefuchs: Zustands-Restore (VAO/VBO/Program/Blend); ASCII-Logs; deterministisch; keine verdeckten Pfade.
+///// Maus: Default ohne Marker/Points; Overlay y=0 unten; gleiche Datenquelle wie Zoom.
 
 #pragma warning(push)
 #pragma warning(disable: 4100)

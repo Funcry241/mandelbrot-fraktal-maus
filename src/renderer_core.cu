@@ -1,7 +1,7 @@
-// Datei: src/renderer_core.cu
-// 🐭 Maus-Kommentar: Alpha 80 – Kontextfix & klare Zuständigkeiten. Keine Zoom-Logik mehr hier.
-// 🦦 Otter: Renderer steuert nur Fenster/GL; Zoom/Analyse liegen in der Pipeline/Loop. (Bezug zu Otter)
-// 🦊 Schneefuchs: CUDA und OpenGL sauber getrennt, keine verwaisten Referenzen. (Bezug zu Schneefuchs)
+///// Otter: Renderer-Core – GL-Init/Window, Loop-Delegation; keine Zoom-Logik hier.
+///// Schneefuchs: CUDA/GL strikt getrennt; deterministische ASCII-Logs; Ressourcen klar besitzend.
+///// Maus: Alpha 80 – Pipeline/Loop entscheidet; Renderer zeichnet/tauscht nur, ohne DoppelpFad.
+
 #include "pch.hpp"
 
 #include "renderer_core.hpp"
@@ -58,6 +58,7 @@ bool Renderer::initGL() {
         }
     }
 
+    // GLEW (dynamisch laut PCH-Policy)
     if (glewInit() != GLEW_OK) {
         LUCHS_LOG_HOST("[ERROR] glewInit() failed");
         RendererWindow::destroyWindow(state.window);
@@ -77,14 +78,16 @@ bool Renderer::initGL() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[CHECK] glPixelStorei set GL_UNPACK_ALIGNMENT = 1");
 
+    // Low-level Pipeline (FSQ/Shader etc.)
     RendererPipeline::init();
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] RendererPipeline initialized");
 
+    // GL-Resourcen + CUDA-Interop
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
         state.pbo.initAsPixelBuffer(state.width, state.height);
-        // 🦊 Schneefuchs: Texture über Utils erzeugen (immutable storage), nicht via GLBuffer::create.
+        // Schneefuchs: Texture via Utils (immutable storage), kein GLBuffer::create mehr.
         state.tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(state.width, state.height));
         CudaInterop::registerPBO(state.pbo);
         glResourcesInitialized = true;
@@ -120,17 +123,15 @@ void Renderer::renderFrame() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Returned from RendererLoop::renderFrame_impl");
 
-    // 🐑 Schneefuchs: Doppelte Upload/Draw entfernt – die Pipeline zeichnet bereits.
+    // Schneefuchs: Doppelte Upload/Draw entfernt – die Pipeline zeichnet bereits.
 
     glfwSwapBuffers(state.window);
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DRAW] glfwSwapBuffers called");
 
 #if ENABLE_ZOOM_LOGGING
-    {
-        LUCHS_LOG_HOST("[ZOOM] post-frame: zoom=%.6f offset=(%.6f,%.6f)",
-                       state.zoom, state.offset.x, state.offset.y);
-    }
+    LUCHS_LOG_HOST("[ZOOM] post-frame: zoom=%.6f offset=(%.6f,%.6f)",
+                   state.zoom, state.offset.x, state.offset.y);
 #endif
 }
 

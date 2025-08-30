@@ -1,8 +1,15 @@
-/////
+///// Otter: OtterDream – CUDA/Host Coloring-Helpers (Smooth Iter, Paletten, Final Shade).
+///// Schneefuchs: Header-only, zero deps; __host__/__device__ sicher; deterministisch; ASCII-only.
+///// Maus: Keine Typ-Redefs außer Host-Fallback; Korrektur: nu = log2(log|z|) (kein Offset-Bug).
+
 #pragma once
-// OtterDream – lightweight CUDA coloring helpers for eye-candy.
-// Otter: Palette & Smooth Coloring in einem Header (Bezug zu Otter)
-// Schneefuchs: Header-only, zero deps, host/device-sicher (Bezug zu Schneefuchs)
+
+// Fallbacks, falls in Host-TUs inkludiert
+#ifndef __CUDACC__
+  #define __host__
+  #define __device__
+  #define __forceinline__
+#endif
 
 #ifdef __CUDACC__
   #include <cuda_runtime.h>
@@ -11,18 +18,20 @@
   static inline float3 make_float3(float r, float g, float b){ return {r,g,b}; }
 #endif
 
+#include <cmath> // logf, log2f, powf, expf, sinf, floorf, fabsf
+
 namespace otter {
 
 // ---------- utils ----------
-__host__ __device__ static inline float clamp01(float x){ return x < 0.f ? 0.f : (x > 1.f ? 1.f : x); }
-__host__ __device__ static inline float mix1(float a, float b, float t){ return a + (b - a) * t; }
-__host__ __device__ static inline float3 mix3(const float3& a, const float3& b, float t){
+__host__ __device__ __forceinline__ float clamp01(float x){ return x < 0.f ? 0.f : (x > 1.f ? 1.f : x); }
+__host__ __device__ __forceinline__ float mix1(float a, float b, float t){ return a + (b - a) * t; }
+__host__ __device__ __forceinline__ float3 mix3(const float3& a, const float3& b, float t){
   return make_float3(mix1(a.x,b.x,t), mix1(a.y,b.y,t), mix1(a.z,b.z,t));
 }
-__host__ __device__ static inline float3 mul3(const float3& c, float s){
+__host__ __device__ __forceinline__ float3 mul3(const float3& c, float s){
   return make_float3(c.x*s, c.y*s, c.z*s);
 }
-__host__ __device__ static inline float3 add3(const float3& a, const float3& b){
+__host__ __device__ __forceinline__ float3 add3(const float3& a, const float3& b){
   return make_float3(a.x+b.x, a.y+b.y, a.z+b.z);
 }
 
@@ -33,16 +42,17 @@ __host__ __device__ static inline float3 add3(const float3& a, const float3& b){
     nu = it + 1 - log2(log(|z|))  (klassische Douady–Hubbard-Form)
   - Rückgabe: < 0 => Pixel ist „im Set“ (nicht entkommen)
 */
-__host__ __device__ static inline float smoothIter(int it, int maxIt, float zr, float zi){
+__host__ __device__ __forceinline__ float smoothIter(int it, int maxIt, float zr, float zi){
   if (it >= maxIt) return -1.0f;
   // |z|^2:
   float r2 = zr*zr + zi*zi;
   // numerische Guards:
   if (r2 <= 0.f) r2 = 1e-30f;
-  // nu = it + 1 - log2(log(|z|))
-  float log_zn  = 0.5f * logf(r2);
-  float nu      = logf(log_zn / logf(2.0f)) / logf(2.0f);
-  float value   = (float)it + 1.0f - nu;
+  // log|z|:
+  float log_zn = 0.5f * logf(r2);
+  // Korrekt: nu = log2(log|z|) (ohne zusätzlichen Offset)
+  float nu = log2f(fmaxf(log_zn, 1e-30f));
+  float value = (float)it + 1.0f - nu;
   return value;
 }
 
@@ -54,7 +64,7 @@ __host__ __device__ static inline float smoothIter(int it, int maxIt, float zr, 
 enum class Palette : int { Aurora = 0, Glacier = 1, Ember = 2 };
 
 // Keyframe-LUT (handverlesen, 7 Knoten je Palette)
-__host__ __device__ static inline void paletteKey(const Palette p, int idx, float3& out){
+__host__ __device__ __forceinline__ void paletteKey(const Palette p, int idx, float3& out){
   // Werte in [0,1]
   // Aurora
   static const float3 A[7] = {
@@ -91,7 +101,7 @@ __host__ __device__ static inline void paletteKey(const Palette p, int idx, floa
 }
 
 // Takte t in [0,1] durch 7 Keyframes mit kubischer (Catmull-Rom) Interpolation.
-__host__ __device__ static inline float3 palette(const Palette p, float t){
+__host__ __device__ __forceinline__ float3 palette(const Palette p, float t){
   t = clamp01(t);
   const int K = 7;
   float ft = t * (K - 1);
@@ -138,12 +148,13 @@ __host__ __device__ static inline float3 palette(const Palette p, float t){
 //   - stripeFreq/stripeAmp: dezentes Ring-Muster
 //   - gamma: End-Gamma für Punch/Softness
 // Rückgabe: float3 in [0,1]
-__host__ __device__
-static inline float3 shade(int it, int maxIt, float zr, float zi,
-                           Palette paletteId = Palette::Aurora,
-                           float stripeFreq = 3.0f,
-                           float stripeAmp  = 0.10f,
-                           float gamma      = 2.2f){
+__host__ __device__ __forceinline__
+float3 shade(int it, int maxIt, float zr, float zi,
+             Palette paletteId = Palette::Aurora,
+             float stripeFreq = 3.0f,
+             float stripeAmp  = 0.10f,
+             float gamma      = 2.2f)
+{
   float si = smoothIter(it, maxIt, zr, zi);
   if (si < 0.0f){
     // Mandelbrot-Inneres: edles tiefes Schwarz (leichtes Lift für Screens, aber sehr dunkel)
@@ -153,7 +164,7 @@ static inline float3 shade(int it, int maxIt, float zr, float zi,
   float t = si / (float)maxIt;
   t = clamp01(t);
   // Kontrast-Stretch (logistic)
-  float k = 6.0f;                      // Otter: ausgewogenes Punch
+  const float k = 6.0f;                // Otter: ausgewogenes Punch
   t = 1.0f / (1.0f + expf(-k*(t - 0.5f)));
 
   // dezente Stripes (keine harten Zebra-Linien)

@@ -1,36 +1,30 @@
-// Datei: src/renderer_resources.hpp
 ///// Otter: Public API + Back-Compat Adapters; ASCII-Logs; keine versteckte API-Drift.
-///// Schneefuchs: Header/Source synchron; GL4.3 Core; deterministisch.
-///// Otter: Nur LUCHS_LOG_HOST im Host-Pfad; keine CUDA_CHECK-Redefinition.
+///// Schneefuchs: Header/Source synchron; GL4.3-Core-Annahme; deterministisch.
+///// Maus: Header schlank – keine PCH/Settings/Log-Includes; Host-Logs nur in .cpp.
+
 #pragma once
+#include <GL/glew.h> // GLuint, GLsizei
 
-#include "pch.hpp"
-#include "settings.hpp"
-#include "luchs_log_host.hpp"
-#include <GL/glew.h>
+namespace OpenGLUtils {
 
-namespace OpenGLUtils
-{
-    // Context label for logging only (e.g., "init", "resize", "frame")
-    void   setGLResourceContext(const char* context);
+// Kontextlabel nur für Logs in der .cpp (z. B. "init", "resize", "frame")
+void   setGLResourceContext(const char* context);
 
-    // Resource creation
-    GLuint createPBO(int width, int height);
-    GLuint createTexture(int width, int height);
+// Ressourcen-Erzeugung
+[[nodiscard]] GLuint createPBO(int width, int height);
+[[nodiscard]] GLuint createTexture(int width, int height);
 
-    // Upload: PBO -> Texture (robust; saves/restores relevant GL state)
-    void   updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height);
-}
+// Upload: PBO -> Texture (robust; sichert/restauriert relevanten GL-State)
+void   updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height);
+
+} // namespace OpenGLUtils
 
 // -----------------------------------------------------------------------------
-// Back-compat adapters in the global namespace to keep older call sites compiling.
-// Observed call sites in frame_pipeline.cpp (today):
-//   setGLResourceContext();                               // 0-arg
-//   updateTextureFromPBO(GLuint, GLuint, int, int);       // 4-arg (texture, pbo, w, h)
-// We also preserve the previous 2-arg context setter and 3-arg upload.
+// Back-Compat: Adapter im globalen Namespace (alte Call-Sites bleiben buildbar).
+// Bewahrt 0-Arg/2-Arg-Contextsetter und 3-/4-Arg-Uploadsignaturen.
 // -----------------------------------------------------------------------------
-void setGLResourceContext() noexcept;                                      // no-arg (re-bind last cached IDs)
-void setGLResourceContext(GLuint textureId, GLuint pboId) noexcept;        // bind + cache
+void setGLResourceContext() noexcept;                                   // re-bindt zuletzt gecachte IDs
+void setGLResourceContext(GLuint textureId, GLuint pboId) noexcept;     // bind + cache
 
-void updateTextureFromPBO(GLuint textureId, GLsizei width, GLsizei height) noexcept;              // uses currently bound PBO
-void updateTextureFromPBO(GLuint textureId, GLuint pboId, int width, int height) noexcept;        // explicit (texture, pbo, w, h)
+void updateTextureFromPBO(GLuint textureId, GLsizei width, GLsizei height) noexcept;  // nutzt aktuell gebundenen PBO
+void updateTextureFromPBO(GLuint textureId, GLuint pboId, int width, int height) noexcept; // explizit (tex, pbo, w, h)

@@ -1,7 +1,6 @@
-// Datei: src/hermelin_buffer.hpp
-// 🐜 Hermelin: RAII-Wrapper für CUDA- und OpenGL-Buffer mit deterministic Lifecycle-Management.
-// 🦦 Otter: Sichere Ressourcenverwaltung, automatische Freigabe beim Destruktor.
-// 🦊 Schneefuchs: Klarer Ownership-Begriff, keine manuellen cudaFree/glDeleteCalls im Client-Code.
+///// Otter: RAII for CUDA/GL buffers; deterministic lifecycle; ASCII-only API docs.
+///// Schneefuchs: Clear ownership; header/source in sync; no hidden allocations.
+///// Maus: Minimal surface area; no manual cudaFree/glDelete in client code.
 
 #pragma once
 
@@ -21,11 +20,11 @@ public:
     CudaDeviceBuffer(CudaDeviceBuffer&& other) noexcept;
     CudaDeviceBuffer& operator=(CudaDeviceBuffer&& other) noexcept;
 
-    // Allokiert exakt sizeBytes (vorheriger Inhalt wird verworfen)
+    // Allocate exactly sizeBytes (previous content is discarded).
     void   allocate(size_t sizeBytes);
-    // Alias für allocate – für Client-Code, der "resize" erwartet.
+    // Alias for allocate for clients expecting a resize() API.
     void   resize(size_t sizeBytes);
-    // Stellt sicher, dass mindestens minBytes allokiert sind – keine Schrumpfung.
+    // Ensure capacity of at least minBytes; never shrinks.
     void   ensure(size_t minBytes);
 
     void   free();
@@ -54,7 +53,8 @@ public:
 
     void   create();
     void   allocate(GLsizeiptr sizeBytes, GLenum usage = GL_DYNAMIC_DRAW);
-    void   initAsPixelBuffer(int width, int height, int bytesPerPixel = 4); // 🦊 Schneefuchs: Formatlogik gekapselt.
+    // Initialize as pixel-unpack buffer for RGBA8 (bytesPerPixel default = 4).
+    void   initAsPixelBuffer(int width, int height, int bytesPerPixel = 4);
     void   free();
 
     [[nodiscard]] GLuint id() const;

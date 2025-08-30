@@ -1,10 +1,7 @@
-// MAUS:
-// Otter: navigation-only; hide HUD markers by clearing bestIndex.
-// Otter: logs ASCII-only; minimal, math-first behavior.
-
 // =============================== src/zoom_logic.cpp ==========================
 // V3-lite + Pullback metric (center). Smooth direction changes, softmax target.
-// NOTE: At the end we set out.bestIndex = -1 so external HUD draws no green dots.
+// Otter: navigation-only; hide HUD markers by clearing bestIndex.
+// Logs ASCII-only; minimal, math-first behavior.
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -131,7 +128,7 @@ ZoomResult evaluateZoomTarget(
 
     ZoomResult out{}; out.bestIndex=-1; out.shouldZoom=false; out.isNewTarget=false; out.newOffset=previousOffset; out.minDistance=0.02f;
 
-    const int totalTiles = tilesX*tilesY; 
+    const int totalTiles = tilesX*tilesY;
     if(tilesX<=0||tilesY<=0||totalTiles<=0 || (int)entropy.size()<totalTiles || (int)contrast.size()<totalTiles){
         out.shouldZoom = Settings::ForceAlwaysZoom; return out; }
 
@@ -148,14 +145,14 @@ ZoomResult evaluateZoomTarget(
             float nx=1.0f, ny=0.0f; antiVoidDriftNDC(currentOffset.x, currentOffset.y, nx, ny);
             const float2 target = make_float2(previousOffset.x + nx * (float)(kWARMUP_DRIFT_NDC*invZoomEff),
                                               previousOffset.y + ny * (float)(kWARMUP_DRIFT_NDC*invZoomEff));
-            const float a=0.20f; 
+            const float a=0.20f;
             out.newOffset = make_float2(previousOffset.x*(1.0f-a)+target.x*a,
                                         previousOffset.y*(1.0f-a)+target.y*a);
         } else {
             float sx = g_dirInit? g_prevDirX : 1.0f; float sy = g_dirInit? g_prevDirY : 0.0f;
             const float2 target = make_float2(previousOffset.x + sx * (float)(kSEED_STEP_NDC*invZoomEff),
                                               previousOffset.y + sy * (float)(kSEED_STEP_NDC*invZoomEff));
-            const float a=0.20f; 
+            const float a=0.20f;
             out.newOffset = make_float2(previousOffset.x*(1.0f-a)+target.x*a,
                                         previousOffset.y*(1.0f-a)+target.y*a);
         }
@@ -163,6 +160,7 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
+    // Median/MAD auf Kopien (nth_element modifiziert).
     std::vector<float> e(entropy.begin(), entropy.begin()+totalTiles);
     std::vector<float> c(contrast.begin(), contrast.begin()+totalTiles);
     const float eMed = median_inplace(e); const float eMad = mad_from_center_inplace(e, eMed);
@@ -178,10 +176,13 @@ ZoomResult evaluateZoomTarget(
         if (s>bestScore){ bestScore=s; bestIdx=i; }
     }
 
-    double meanS=0.0, meanS2=0.0; 
-    for(int i=0;i<totalTiles;++i){ const float ez=(entropy[i]-eMed)/eMad; const float cz=(contrast[i]-cMed)/cMad; const float s=kALPHA_E*ez+kBETA_C*cz; meanS+=s; meanS2+=double(s)*s; }
-    meanS/=std::max(1, totalTiles); 
-    const double varS = std::max(0.0, meanS2/std::max(1,totalTiles) - meanS*meanS); 
+    double meanS=0.0, meanS2=0.0;
+    for(int i=0;i<totalTiles;++i){
+        const float ez=(entropy[i]-eMed)/eMad; const float cz=(contrast[i]-cMed)/cMad;
+        const float s=kALPHA_E*ez+kBETA_C*cz; meanS+=s; meanS2+=double(s)*s;
+    }
+    meanS/=std::max(1, totalTiles);
+    const double varS = std::max(0.0, meanS2/std::max(1,totalTiles) - meanS*meanS);
     const double stdS = std::sqrt(varS);
 
     float temp = kTEMP_BASE; if (stdS>1e-6) temp = static_cast<float>(kTEMP_BASE/(0.5f+(float)stdS)); temp = clampf(temp, 0.2f, 2.5f);
@@ -190,9 +191,9 @@ ZoomResult evaluateZoomTarget(
     double sumW=0.0, numX=0.0, numY=0.0; int bestAdj=-1; float bestAdjScore=-1e9f;
     for (int i=0;i<totalTiles;++i){
         const float ez=(entropy[i]-eMed)/eMad; const float cz=(contrast[i]-cMed)/cMad; const float s=kALPHA_E*ez+kBETA_C*cz; if (s<sCut) continue;
-        const double cx = currentOffset.x + ndcX[i]*invZoomEff; const double cy = currentOffset.y + ndcY[i]*invZoomEff; 
+        const double cx = currentOffset.x + ndcX[i]*invZoomEff; const double cy = currentOffset.y + ndcY[i]*invZoomEff;
         if (insideCardioidOrBulb(cx,cy)) continue;
-        const double w = std::exp(double((s - bestScore)*invTemp)); sumW += w; numX += w*ndcX[i]; numY += w*ndcY[i]; 
+        const double w = std::exp(double((s - bestScore)*invTemp)); sumW += w; numX += w*ndcX[i]; numY += w*ndcY[i];
         if (s>bestAdjScore){ bestAdjScore=s; bestAdj=i; }
     }
 
@@ -210,7 +211,7 @@ ZoomResult evaluateZoomTarget(
 
     const float2 rawTarget = make_float2(previousOffset.x + (float)(ndcTX*invZoomEff),
                                          previousOffset.y + (float)(ndcTY*invZoomEff));
-    float mvx = rawTarget.x - previousOffset.x; float mvy = rawTarget.y - previousOffset.y; 
+    float mvx = rawTarget.x - previousOffset.x; float mvy = rawTarget.y - previousOffset.y;
     const float rawDist = std::sqrt(mvx*mvx + mvy*mvy);
 
     float dirX = g_dirInit? g_prevDirX : (rawDist>0.0f? mvx/rawDist : 1.0f);
@@ -224,7 +225,7 @@ ZoomResult evaluateZoomTarget(
 
     float lenScale = 1.0f;
     if (hasMove){
-        const float preDot = clampf(dirX*tgtX + dirY*tgtY, -1.0f, 1.0f); 
+        const float preDot = clampf(dirX*tgtX + dirY*tgtY, -1.0f, 1.0f);
         const float preAng = std::acos(preDot);
         rotateTowardsLimited(dirX, dirY, tgtX, tgtY, maxTurn);
         lenScale = 1.0f - smoothstepf(kTHETA_DAMP_LO, kTHETA_DAMP_HI, preAng);
@@ -255,7 +256,7 @@ ZoomResult evaluateZoomTarget(
 
     state.lastOffset = out.newOffset; state.lastTilesX = tilesX; state.lastTilesY = tilesY; state.cooldownLeft = 0;
 
-    if (Settings::debugLogging) {
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[ZOOM-LITE] invZoomEff=%.3g dist=%.4f", (float)invZoomEff, out.distance);
     }
     return out;

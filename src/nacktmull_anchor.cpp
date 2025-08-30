@@ -1,14 +1,15 @@
-// ========================= src/nacktmull_anchor.cpp =========================
-// Project Nacktmull — High‑precision anchor orbit (CPU) implementation.
-// Depends on Boost.Multiprecision (header‑only) for ~100 digits precision.
+///// Otter: High-precision anchor orbit; fixed dz update to use z_n (correct derivative).
+///// Schneefuchs: /WX-safe; added <cmath> for hypot/log; deterministic, ASCII-only comments.
+///// Maus: Pure CPU; no hidden state; vectors pre-sized; Boost mp100.
 
 #include "nacktmull_anchor.hpp"
 #include <boost/multiprecision/cpp_dec_float.hpp>
 #include <algorithm>
+#include <cmath>
 
 namespace Nacktmull {
 
-// Fixed 100‑digit decimal float (compile‑time precision).
+// Fixed 100-digit decimal float (compile-time precision).
 using mp100 = boost::multiprecision::cpp_dec_float_100;
 
 struct mp2 { mp100 x, y; };
@@ -48,13 +49,14 @@ bool computeReferenceOrbit(const AnchorParams& params,
         out.dz[static_cast<size_t>(i)] = to_d2(dz);
         ++out.produced;
 
-        // Next iteration:
+        // Next iteration (use z_n for derivative update!):
         // z_{i+1}  = z_i^2 + c
         // dz_{i+1} = 2 * z_i * dz_i + 1
-        const mp2 z2  = mul(z, z);
-        z  = add(z2, c);
+        const mp2 z_n = z;              // keep z_i
+        const mp2 z2  = mul(z_n, z_n);  // z_i^2
+        z  = add(z2, c);                // z_{i+1}
 
-        const mp2 twoZ = { mp100(2) * z.x, mp100(2) * z.y };
+        const mp2 twoZ = { mp100(2) * z_n.x, mp100(2) * z_n.y };
         dz = add_real(mul(twoZ, dz), mp100(1));
     }
 

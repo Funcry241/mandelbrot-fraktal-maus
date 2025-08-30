@@ -1,9 +1,6 @@
-// Datei: src/renderer_pipeline.cpp
-///// MAUS: Fullscreen pipeline — bind order, ASCII logs, optional GPU timer
-// 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean – HUD/Heatmap bleiben sichtbar.
-// 🦦 Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines. (Bezug zu Otter)
-// 🐑 Schneefuchs: Fehlerquellen mit glGetError sichtbar gemacht, Upload deterministisch. (Bezug zu Schneefuchs)
-// 🐑 Schneefuchs: State-Change-Diät + optionale GPU-Timer-Query; Binds nur bei Änderung, ASCII-Logs.
+///// Otter: Fullscreen pipeline – stabile Bind-Reihenfolge, ASCII-Logs, optionaler GPU-Timer.
+///// Schneefuchs: State-Change-Diät; idempotentes init; Upload deterministisch; keine State-Leaks.
+///// Maus: Shader-Fehler sauber abgefangen; VAO/Program-Handling klar; HUD/Heatmap bleiben sichtbar.
 
 #include "pch.hpp"
 #include "renderer_pipeline.hpp"
@@ -12,7 +9,6 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include <cstdlib>
-#include <GL/glew.h>
 
 namespace RendererPipeline {
 
@@ -33,7 +29,10 @@ namespace {
     inline void bindVAO(GLuint vao)   { if (s_lastVAO != vao)   { glBindVertexArray(vao); s_lastVAO = vao; } }
     inline void bindTex2D(GLuint t)   { if (s_lastTex2D != t)   { glBindTexture(GL_TEXTURE_2D, t); s_lastTex2D = t; } }
     inline void bindPBO(GLuint pbo)   { if (s_lastPBO != pbo)   { glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo); s_lastPBO = pbo; } }
-    inline void setUnpack(int a, int r){ if (s_unpackAlign!=a){glPixelStorei(GL_UNPACK_ALIGNMENT,a); s_unpackAlign=a;} if (s_unpackRowLen!=r){glPixelStorei(GL_UNPACK_ROW_LENGTH,r); s_unpackRowLen=r;} }
+    inline void setUnpack(int a, int r){
+        if (s_unpackAlign!=a){ glPixelStorei(GL_UNPACK_ALIGNMENT,  a); s_unpackAlign  = a; }
+        if (s_unpackRowLen!=r){ glPixelStorei(GL_UNPACK_ROW_LENGTH, r); s_unpackRowLen = r; }
+    }
 }
 
 static constexpr const char* vShader = R"GLSL(

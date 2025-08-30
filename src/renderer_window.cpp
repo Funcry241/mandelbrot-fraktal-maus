@@ -1,7 +1,6 @@
-// Datei: src/renderer_window.cpp
-// 🐭 Maus-Kommentar: Moderner GL-Kontext (4.3 Core), ASCII-Logs, keine C4127-Warnungen.
-// 🦦 Otter: Fehler-Logging früh, deterministischer Setup-Flow.
-// 🐑 Schneefuchs: Debug-Kontext nur bei Debug/Perf, Fensterposition compile-time sauber.
+///// Otter: Moderner GL-Kontext (4.3 Core), deterministischer Setup-Flow; frühes Fehler-Logging.
+///// Schneefuchs: ASCII-Logs; Debug-Kontext nur bei Debug/Perf; compile-time Fensterposition; keine C4127.
+///// Maus: State clean; zentrieren/Position deterministisch; Header/Source synchron.
 
 #include "pch.hpp"
 #include "renderer_window.hpp"

@@ -1,10 +1,12 @@
-// Datei: src/heatmap_utils.hpp
-// (Patch: noexcept + Guards – ASCII logs optional entfernen/aktivieren)
+///// Otter: Tile-Index → Pixelzentrum; robust geklemmt, schnelle Inline-Helfer.
+///// Schneefuchs: noexcept, deterministisch; Assertions nur in Debug; ASCII-only.
+///// Maus: Keine Logs; Header/Source synchron; API stabil, [[nodiscard]] für Nutzungssicherheit.
+
 #pragma once
 #include <utility> // std::pair
 #include <cassert>
 
-inline std::pair<double,double> tileIndexToPixelCenter(
+[[nodiscard]] inline std::pair<double,double> tileIndexToPixelCenter(
     int tileIndex,
     int tilesX, int tilesY,
     int width, int height) noexcept

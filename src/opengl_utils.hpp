@@ -1,10 +1,12 @@
-// 🐭 Maus-Kommentar: Robbe-Edition - keine Altlasten mehr. Moderne Shader-/Quad-Erzeugung, explizite VAO-Nutzung. GLEW/GLFW IMMER im PCH. Schneefuchs: „Header bleibt schlank, sonst beißt die Robbe!“
+///// Otter: OpenGL-Utils (Header) – schlank; nur GLuint-Typ, klare API.
+///// Schneefuchs: Header/Source synchron; deterministisch; ASCII-only; keine Seiteneffekte.
+///// Maus: GLEW/GLFW im PCH ok; hier minimal halten – sonst beißt die Robbe!
 
 #pragma once
 #ifndef OPENGL_UTILS_HPP
 #define OPENGL_UTILS_HPP
 
-#include <GL/glew.h> // Schneefuchs: Nur was für GLuint nötig ist; kein PCH im Header.
+#include <GL/glew.h> // Für GLuint (leichtgewichtig genug; sonst via PCH eingebunden)
 
 namespace OpenGLUtils {
 

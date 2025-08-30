@@ -99,6 +99,8 @@ add_executable(mandelbrot_otterdream
     src/nacktmull_engine.cpp
     src/nacktmull_shade.cu
     src/nacktmull_host.cpp
+    src/progressive_iteration.cu
+    src/progressive_shade_impl.cu
 )
 
 # MAUS: unify CRT to /MT so PCH and NVCC host compiler match (fixes LNK2038)
@@ -178,6 +180,8 @@ set_source_files_properties(
     src/luchs_cuda_log_buffer.cu
     src/nacktmull.cu
     src/nacktmull_shade.cu
+    src/progressive_iteration.cu
+    src/progressive_shade_impl.cu
     PROPERTIES LANGUAGE CUDA
 )
 

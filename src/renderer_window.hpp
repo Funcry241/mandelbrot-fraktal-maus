@@ -1,23 +1,22 @@
-// Datei: src/renderer_window.hpp
-// 🐭 Maus-Kommentar: GLFW-Fensterverwaltung als zentrale API - Callbacks nur noch über createWindow(). Keine Mehrdeutigkeit. Schneefuchs-konform.
-// 🦦 Otter: Schlanker Header ohne Mass-Includes; klare Forward-Declarations. (Bezug zu Otter)
-// 🦊 Schneefuchs: Header/Source synchron, keine versteckten Abhängigkeiten. (Bezug zu Schneefuchs)
+///// Otter: Schlanker Header ohne Mass-Includes; klare Forward-Declarations.
+///// Schneefuchs: Header/Source synchron; keine versteckten Abhängigkeiten; /WX-fest.
+///// Maus: GLFW-Fensterverwaltung als zentrale API; Callbacks nur via createWindow().
 
 #pragma once
 
-// Schlank: keine PCH/GLFW-Header hier
-struct GLFWwindow;   // forward decl
-class Renderer;      // forward decl
+// Forward declarations – kein schwerer GLFW-Header
+struct GLFWwindow;
+class Renderer;
 
 namespace RendererWindow {
 
-// 🟢 Erstellt Fenster und registriert alle Callbacks (Größe, Tasten, etc.)
+// Erstellt Fenster und registriert alle Callbacks (Größe, Tasten, etc.)
 [[nodiscard]] GLFWwindow* createWindow(int width, int height, Renderer* instance);
 
-// Fragt Fenster-Schließwunsch ab
+// Abfrage, ob das Fenster geschlossen werden soll
 [[nodiscard]] bool shouldClose(GLFWwindow* window);
 
-// Gibt Fenster und Ressourcen frei
+// Gibt das Fenster frei (glfwTerminate erfolgt zentral im Renderer)
 void destroyWindow(GLFWwindow* window);
 
 } // namespace RendererWindow

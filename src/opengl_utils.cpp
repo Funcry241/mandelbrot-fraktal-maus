@@ -1,10 +1,13 @@
-// Datei: src/opengl_utils.cpp
-// 🐭 Maus-Kommentar: Shaderfehler beenden das Programm nicht mehr, sondern geben 0 zurück und loggen klar. Schneefuchs: „Otter stirbt erst, wenn du willst.“
-// 🦊 Schneefuchs: Robustere Logs (volle Info-Logs), sauberes State-Restore bei VAO/VBO/EBO, optionale Debug-Gruppen. (Bezug zu Schneefuchs)
+///// Otter: OpenGL-Utils – Shader compile/link mit vollständigen Info-Logs; FSQ-Erzeugung mit sauberem State-Restore.
+///// Schneefuchs: Deterministisch, ASCII-only; Debug-Gruppen optional; keine verdeckten Seiteneffekte.
+///// Maus: Fehler beenden nicht; Funktionen liefern 0 bei Fehler und loggen klar (nur LUCHS_LOG_*).
 
 #include "pch.hpp"
 #include "opengl_utils.hpp"
 #include "luchs_log_host.hpp"
+
+#include <string>
+#include <cstdint>
 
 namespace OpenGLUtils {
 

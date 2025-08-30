@@ -1,6 +1,6 @@
-// Implementation: Async capture using GL pixel pack buffer (PBO) + fence.
-// 🦦 Otter: Zero stalls on the render path — no glFinish; enqueue readback once.
-// 🦊 Schneefuchs: GL state restored; ASCII-only logs; MSVC-safe fopen_s; header/source in sync.
+///// Otter: Async GL readback via PBO+fence; zero stalls; single-shot capture (no glFinish).
+///// Schneefuchs: GL state restored; deterministic ASCII logs; MSVC-safe fopen_s; header/source synchron.
+///// Maus: Keine versteckten Seiteneffekte; PBO lifetime single-use; robust Errors, weiterlaufen.
 
 #include "pch.hpp"              // GL headers (GLEW/GLFW etc.)
 #include "frame_capture.hpp"
@@ -107,7 +107,7 @@ static void enqueue_readback()
 
     // Enqueue non-blocking readback from backbuffer into PBO
     glReadBuffer(GL_BACK);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1); // 🦊 Schneefuchs: robust row packing for any width (Bezug zu Schneefuchs).
+    glPixelStorei(GL_PACK_ALIGNMENT, 1); // robust row packing for any width
     glReadPixels(0, 0, g_cap.w, g_cap.h, GL_RGBA, GL_UNSIGNED_BYTE, (void*)0);
 
     // Insert fence so we can poll completion later
@@ -118,7 +118,7 @@ static void enqueue_readback()
     g_cap.fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 
     // Push commands to the server without stalling
-    glFlush(); // 🦦 Otter: kick the pipe; still non-blocking (Bezug zu Otter).
+    glFlush(); // kick the pipe; still non-blocking
 
     // Restore GL state
     glBindBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLuint>(prevPackPbo));
@@ -148,8 +148,7 @@ static void try_finish_write()
         void* ptr = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr)g_cap.bytes, GL_MAP_READ_BIT);
         if (!ptr) {
             // As a fallback, flush and wait briefly, try again
-            const GLenum res2 = glClientWaitSync(g_cap.fence, GL_SYNC_FLUSH_COMMANDS_BIT, 2000000 /*2ms*/);
-            (void)res2;
+            (void)glClientWaitSync(g_cap.fence, GL_SYNC_FLUSH_COMMANDS_BIT, 2000000 /*2ms*/);
             ptr = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr)g_cap.bytes, GL_MAP_READ_BIT);
         }
 

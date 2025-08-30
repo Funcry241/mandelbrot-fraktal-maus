@@ -1,16 +1,16 @@
-// Datei: src/nacktmull_shade.cu
-// MAUS: Implementation for Nacktmull shading kernels (no uchar4 redefinition)
+///// Otter: Nacktmull-Shading – stabile Kernels; keine eigenen Typen; schnelle Helfer.
+///// Schneefuchs: Deterministisch, ASCII-only; Signaturen exakt wie in .cuh deklariert.
+///// Maus: Kein Device-Logging; mikro-optimiert (invMax, saturatef, rundungsfeste Pack-Funktion).
 
 #include <cuda_runtime.h>
 #include <vector_types.h>
 #include "nacktmull_shade.cuh"
 
-// 🦦 Otter: keine eigene uchar4-Struct – wir verwenden die NV-Types.
-// 🦊 Schneefuchs: simples, deterministisches Farbschema; keine Device-Logs.
-
-static __device__ __forceinline__ uchar4 pack_rgba(
-    unsigned char r, unsigned char g, unsigned char b, unsigned char a = 255u
-) {
+// --- kleine, lokale Helfer ---------------------------------------------------
+static __device__ __forceinline__ float saturatef(float x) {
+    return x < 0.f ? 0.f : (x > 1.f ? 1.f : x);
+}
+static __device__ __forceinline__ uchar4 pack_rgba(unsigned char r, unsigned char g, unsigned char b, unsigned char a = 255u) {
     uchar4 c; c.x = r; c.y = g; c.z = b; c.w = a; return c;
 }
 
@@ -37,11 +37,14 @@ void shade_from_iterations(uchar4* surface,
         return;
     }
 
-    // Einfache, schnelle „heat“-Palette; später austauschbar (HSV etc.)
-    const float t = (maxIterations > 0) ? (float)it / (float)maxIterations : 0.0f;
-    const unsigned char R = (unsigned char)(255.0f * t);
-    const unsigned char G = (unsigned char)(255.0f * (1.0f - t));
-    const unsigned char B = (unsigned char)(255.0f * (0.5f * t));
+    // Einfache, schnelle Heat-Palette: t in [0,1]
+    const float invMax = (maxIterations > 0) ? (1.0f / (float)maxIterations) : 0.0f;
+    const float t = (float)it * invMax;
+
+    // Kanäle (linear gemischt, später leicht austauschbar)
+    const unsigned char R = (unsigned char)(255.0f * saturatef(t) + 0.5f);
+    const unsigned char G = (unsigned char)(255.0f * saturatef(1.0f - t) + 0.5f);
+    const unsigned char B = (unsigned char)(255.0f * saturatef(0.5f * t) + 0.5f);
 
     surface[idx] = pack_rgba(R, G, B, 255u);
 }
@@ -60,7 +63,7 @@ void shade_test_pattern(uchar4* surface,
 
     const int idx = y * width + x;
 
-    // Normalisierte Koordinaten ohne std::max (vermeide Header)
+    // Normalisierte Koordinaten ohne std::max (vermeide zusätzliche Includes)
     const int denomW = (width  > 1) ? (width  - 1) : 1;
     const int denomH = (height > 1) ? (height - 1) : 1;
     const float u = (float)x / (float)denomW;
@@ -78,14 +81,10 @@ void shade_test_pattern(uchar4* surface,
     const float m = ((cx ^ cy) ? 0.75f : 1.0f);
     r *= m; g *= m; b *= m;
 
-    // clamp & pack
-    r = (r < 0.f) ? 0.f : (r > 1.f ? 1.f : r);
-    g = (g < 0.f) ? 0.f : (g > 1.f ? 1.f : g);
-    b = (b < 0.f) ? 0.f : (b > 1.f ? 1.f : b);
-
-    const unsigned char R = (unsigned char)(255.0f * r + 0.5f);
-    const unsigned char G = (unsigned char)(255.0f * g + 0.5f);
-    const unsigned char B = (unsigned char)(255.0f * b + 0.5f);
+    // clamp & pack (rundungsfest)
+    const unsigned char R = (unsigned char)(255.0f * saturatef(r) + 0.5f);
+    const unsigned char G = (unsigned char)(255.0f * saturatef(g) + 0.5f);
+    const unsigned char B = (unsigned char)(255.0f * saturatef(b) + 0.5f);
 
     surface[idx] = pack_rgba(R, G, B, 255u);
 }
