@@ -1,7 +1,7 @@
+///// Otter: SANITY-Kernel optional im CUDA-Pfad; deterministisches ASCII-Logging; /WX-sicher.
+///// Schneefuchs: Keine Funktions-/API-Änderung; Header-synchron; robuste Fehlerpfade.
+///// Maus: Klare Log-Punkte (enter/map/ptr/launch/sync/unmap/exit); Null Seiteneffekte im Hot-Path.
 // Datei: src/cuda_interop.cu
-// 🐜 Schwarze Ameise: Klare Parametrisierung, deterministisches Logging, robustes Ressourcenhandling.
-// 🦦 Otter → Nacktmull-only: Host-Iters + GPU-Shade, kein Legacy-GPU-Path mehr.
-// 🦊 Schneefuchs: Transparente Speicher-/Fehlerprüfung. Null Seiteneffekte in Hot-Paths.
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
@@ -16,9 +16,10 @@
 
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>   // events/memcpy/host register
-#include <vector_types.h>   // uchar4
+#include <vector_types.h>   // uchar4, make_uchar4
 #include <vector>
 #include <stdexcept>
+#include <cstdlib>          // _dupenv_s (Win)
 
 #ifndef CUDA_ARCH
   #include <chrono>
@@ -40,6 +41,32 @@ static void*  s_hostRegEntropyPtr   = nullptr;
 static size_t s_hostRegEntropyBytes = 0;
 static void*  s_hostRegContrastPtr  = nullptr;
 static size_t s_hostRegContrastBytes= 0;
+
+// /WX-sichere Env-Abfrage (Windows: _dupenv_s; POSIX: getenv)
+static bool otter_env_on(const char* name) {
+#ifdef _WIN32
+    char* buf = nullptr; size_t len = 0;
+    const errno_t ec = _dupenv_s(&buf, &len, name);
+    const bool on = (ec == 0 && buf && *buf && *buf != '0');
+    if (buf) free(buf);
+    return on;
+#else
+    const char* e = std::getenv(name);
+    return e && *e && *e != '0';
+#endif
+}
+
+// ---- minimaler SANITY-Kernel: schreibt Checker/Gradient in RGBA8 ------------
+__global__ void __otter_sanity_fill_rgba(uchar4* out, int w, int h) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int n = w * h;
+    if (i >= n) return;
+    int x = i % w, y = i / w;
+    unsigned char r = (unsigned char)((x * 255) / (w ? w : 1));
+    unsigned char g = (unsigned char)((y * 255) / (h ? h : 1));
+    unsigned char b = ((x/32 + y/32) & 1) ? 0 : 255;
+    out[i] = make_uchar4(r,g,b,255);
+}
 
 static inline void ensureDeviceOnce() {
     if (!s_deviceInitDone) {
@@ -150,9 +177,6 @@ void renderCudaFrame(
         throw std::runtime_error("CudaInterop::renderCudaFrame: device buffers undersized");
     }
 
-    // 🦦 Otter: Keine generellen Memsets im Hot-Path — alle Ziele werden vollständig überschrieben. (Bezug zu Otter)
-    // (d_iterations via H2D, d_entropy/d_contrast via computeCudaEntropyContrast/contrastKernel)
-
     // ---------------------------------- NACKTMULL: Host-Iters ----------------------------------
     std::vector<int> h_iters;
     h_iters.resize(totalPixels);
@@ -180,7 +204,7 @@ void renderCudaFrame(
     // Host → Device (Iterationsbild)
     CUDA_CHECK(cudaMemcpy(d_iterations.get(), h_iters.data(), it_bytes, cudaMemcpyHostToDevice));
 
-    // ---------------------------------- PBO map & GPU-Shade ------------------------------------
+    // ---------------------------------- PBO map & (SANITY|Shade) --------------------------------
 #ifndef CUDA_ARCH
     const auto tMap0 = std::chrono::high_resolution_clock::now();
 #endif
@@ -202,7 +226,41 @@ void renderCudaFrame(
         throw std::runtime_error("PBO byte size mismatch");
     }
 
-    // Shade aus Iterationsbild
+    // ---- Optionaler SANITY-Pfad (per Env): Test-Pattern auf GPU schreiben ----
+    if (otter_env_on("OTTER_SANITY_KERNEL")) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[SANITY] OTTER_SANITY_KERNEL=1 -> using CUDA sanity fill (w=%d h=%d bytes=%zu)",
+                           width, height, (size_t)surfBytes);
+        }
+        const int numPx = width * height;
+        const int TPB   = 256;
+        const int BLK   = (numPx + TPB - 1) / TPB;
+        __otter_sanity_fill_rgba<<<BLK, TPB, 0, 0>>>(devSurface, width, height);
+        cudaError_t kerr = cudaDeviceSynchronize();
+        LUCHS_LOG_HOST("[SANITY] kernel sync=%d (numPx=%d blocks=%d tpb=%d)", (int)kerr, numPx, BLK, TPB);
+
+        // Korrektes Unmap über Wrapper (kein direkter Zugriff auf Resource-Handle)
+        pboResource->unmap();
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[SANITY] unmap done -> return");
+        }
+
+        // Minimal-Timings/Flags setzen
+        state.lastTimings.valid            = true;
+#ifndef CUDA_ARCH
+        state.lastTimings.pboMap           = mapMs;
+        state.lastTimings.mandelbrotTotal  = 0.0;
+        state.lastTimings.mandelbrotLaunch = 0.0;
+        state.lastTimings.mandelbrotSync   = 0.0;
+        state.lastTimings.entropy          = 0.0;
+        state.lastTimings.contrast         = 0.0;
+        state.lastTimings.deviceLogFlush   = 0.0;
+#endif
+        shouldZoom = false; newOffset = offset;
+        return; // Frühzeitiger Exit – NUR im SANITY-Mode
+    }
+
+    // ---- Regulärer Shade aus Iterationsbild ---------------------------------
     float shadeMsEv = 0.0f;
     cudaEvent_t evS0 = nullptr, evS1 = nullptr;
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
