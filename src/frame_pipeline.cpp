@@ -9,7 +9,7 @@
 #include <cstring>
 #include <vector_types.h>
 #include <vector_functions.h> // make_float2
-#include <GL/glew.h>          // <-- Viewport & PBO peek
+#include <GL/glew.h>          // glViewport, glIsEnabled(GL_SCISSOR_TEST)
 
 #include "renderer_resources.hpp"    // OpenGLUtils::setGLResourceContext(const char*), OpenGLUtils::updateTextureFromPBO(GLuint pbo, GLuint tex, int w, int h)
 #include "renderer_pipeline.hpp"     // RendererPipeline::drawFullscreenQuad(...)
@@ -25,6 +25,7 @@
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
 #include "common.hpp"
+#include "settings.hpp"
 
 namespace FramePipeline
 {
@@ -61,6 +62,10 @@ namespace {
 
     // --- Diagnose: GL-PBO kurz mappen und die ersten Bytes prüfen ---
     static void peekPBO(GLuint pbo) {
+        if constexpr (!Settings::debugLogging) {
+            (void)pbo;
+            return;
+        }
         GLint prev = 0;
         glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prev);
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -261,20 +266,17 @@ static void applyZoomStep(FrameContext& fctx, CommandBus& bus) {
 static void drawFrame(FrameContext& fctx, RendererState& state) {
     const auto t0 = Clock::now();
 
-    // 1) Viewport sicherstellen (häufige Weiß-Bild-Ursache)
-    {
-        GLint vp[4] = {0,0,0,0};
-        glGetIntegerv(GL_VIEWPORT, vp);
-        if (vp[2] != fctx.width || vp[3] != fctx.height) {
-            glViewport(0, 0, fctx.width, fctx.height);
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[GL] viewport set -> %dx%d (was %dx%d)",
-                               fctx.width, fctx.height, vp[2], vp[3]);
-            }
-        }
-    }
+    // Früh raus bei 0er-Größe (sicherheits-/perf-optimal)
+    if (fctx.width <= 0 || fctx.height <= 0) return;
 
-    // Diagnose: Einmal vor dem Upload ins PBO schauen
+    // **Viewport sicher setzen** (einmal pro Frame, ohne Restore – Ziel ist Fenstergröße)
+    glViewport(0, 0, fctx.width, fctx.height);
+
+    // Scissor während Upload/Draw deaktivieren (Zustand danach wiederherstellen)
+    const GLboolean hadScissor = glIsEnabled(GL_SCISSOR_TEST);
+    if (hadScissor) glDisable(GL_SCISSOR_TEST);
+
+    // Diagnose: Einmal vor dem Upload ins PBO schauen (nur Debug)
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] drawFrame begin: tex=%u pbo=%u %dx%d",
                        state.tex.id(), state.pbo.id(), fctx.width, fctx.height);
@@ -285,14 +287,10 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
     OpenGLUtils::setGLResourceContext("draw");
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), state.tex.id(), fctx.width, fctx.height);
 
-    // Debug-Clear (nur im Debug): dunkler Hintergrund, damit FSQ sichtbar ist
-    if constexpr (Settings::debugLogging) {
-        glDisable(GL_SCISSOR_TEST);
-        glClearColor(0.05f, 0.06f, 0.08f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-    }
-
     RendererPipeline::drawFullscreenQuad(state.tex.id());
+
+    // Scissor-State wiederherstellen
+    if (hadScissor) glEnable(GL_SCISSOR_TEST);
 
     const auto t1 = Clock::now();
     g_texMs = std::chrono::duration_cast<msd>(t1 - t0).count();
