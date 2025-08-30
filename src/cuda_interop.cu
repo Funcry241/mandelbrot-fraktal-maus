@@ -1,6 +1,6 @@
-///// Otter: Phase A – enforce GPU iteration; fix link by matching extern "C" for launch_mandelbrotHybrid.
-///// Schneefuchs: Map/Unmap timings, compact [PERF] summary; WriteDiscard via bear_CudaPBOResource policy.
-///// Maus: Deterministic orchestrator; CPU-iteration path removed; ASCII-only logs.
+///// Otter: Nacktmull-ABI fix – Prototyp und Aufrufreihenfolge korrigiert; GPU-Iteration erzwungen.
+///// Schneefuchs: Frühes Unmap bei Fehler; kompakte [PERF]-Logs; Größen/Tile-Sanity bleibt aktiv.
+///// Maus: Deterministischer Orchestrator; ASCII-only; keine Host-Iteration mehr.
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
@@ -28,15 +28,20 @@
 #include "nacktmull_anchor.hpp"
 #include "nacktmull_host.hpp"
 
-// 🦦 Otter: core_kernel.cu defines the host launch with C linkage; match here to avoid LNK2019.
+// Nacktmull-Export: extern "C" + Signatur (out, d_it, w, h, zoom, offset, maxIter, tile)
 extern "C" void launch_mandelbrotHybrid(
-    uchar4* surface,
-    int width, int height,
-    float zoom, float2 offset,
-    int maxIterations,
-    int* d_iterations,
-    int tileSize
+    uchar4* out, int* d_it,
+    int w, int h, float zoom, float2 offset,
+    int maxIter, int tile
 );
+
+// Emergency fill (nur für isolierte Tests)
+static __global__ void fill_rgba_kernel(uchar4* dst, int w, int h, uchar4 c) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= w || y >= h) return;
+    dst[y * w + x] = c;
+}
 
 namespace CudaInterop {
 
@@ -48,14 +53,6 @@ static void*  s_hostRegEntropyPtr   = nullptr;
 static size_t s_hostRegEntropyBytes = 0;
 static void*  s_hostRegContrastPtr  = nullptr;
 static size_t s_hostRegContrastBytes= 0;
-
-// Minimal kernel for emergency fill (magenta) if shading fails
-static __global__ void fill_rgba_kernel(uchar4* dst, int w, int h, uchar4 c) {
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= w || y >= h) return;
-    dst[y * w + x] = c;
-}
 
 static inline void ensureDeviceOnce() {
     if (!s_deviceInitDone) { CUDA_CHECK(cudaSetDevice(0)); s_deviceInitDone = true; }
@@ -73,17 +70,12 @@ static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size
         if (regPtr) CUDA_CHECK(cudaHostUnregister(regPtr));
         CUDA_CHECK(cudaHostRegister(ptr, bytes, cudaHostRegisterPortable));
         regPtr  = ptr; regBytes = bytes;
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIN] host-register ptr=%p bytes=%zu", ptr, bytes);
-        }
+        if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[PIN] host-register ptr=%p bytes=%zu", ptr, bytes);
     }
 }
 
 void registerPBO(const Hermelin::GLBuffer& pbo) {
-    if (pboResource) {
-        if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!");
-        return;
-    }
+    if (pboResource) { if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!"); return; }
     ensureDeviceOnce();
 
     GLint prev=0; glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prev);
@@ -120,8 +112,18 @@ void renderCudaFrame(
     const auto t0 = std::chrono::high_resolution_clock::now();
     double mapMs=0.0, mbMs=0.0, entMs=0.0, conMs=0.0;
 #endif
-
     if (!pboResource) throw std::runtime_error("[FATAL] CUDA PBO not registered!");
+
+    // Sanity
+    if (width <= 0 || height <= 0) {
+        LUCHS_LOG_HOST("[FATAL] invalid dims w=%d h=%d", width, height);
+        throw std::runtime_error("invalid framebuffer dims");
+    }
+    if (tileSize <= 0) {
+        int oldTs = tileSize;
+        tileSize = Settings::BASE_TILE_SIZE > 0 ? Settings::BASE_TILE_SIZE : 16;
+        LUCHS_LOG_HOST("[WARN] tileSize<=0 (%d) -> using %d", oldTs, tileSize);
+    }
 
     const size_t totalPixels = size_t(width) * size_t(height);
     const int tilesX = (width + tileSize - 1) / tileSize;
@@ -133,7 +135,7 @@ void renderCudaFrame(
     const size_t contrast_bytes = size_t(numTiles) * sizeof(float);
 
     if (d_iterations.size() < it_bytes || d_entropy.size() < entropy_bytes || d_contrast.size() < contrast_bytes) {
-        LUCHS_LOG_HOST("[FATAL] device buffers too small: it=%zu/%zu en=%zu/%zu ct=%zu/%zu",
+        LUCHS_LOG_HOST("[FATAL] device buffers too small it=%zu/%zu en=%zu/%zu ct=%zu/%zu",
                        d_iterations.size(), it_bytes, d_entropy.size(), entropy_bytes, d_contrast.size(), contrast_bytes);
         throw std::runtime_error("CudaInterop::renderCudaFrame: device buffers undersized");
     }
@@ -148,13 +150,17 @@ void renderCudaFrame(
     mapMs = std::chrono::duration<double, std::milli>(tMap1 - tMap0).count();
 #endif
     if (!devSurface) throw std::runtime_error("pboResource->map() returned null");
-    const size_t expected = size_t(width) * size_t(height) * sizeof(uchar4);
-    if (surfBytes < expected) {
+
+    const size_t expectedBytes = size_t(width) * size_t(height) * sizeof(uchar4);
+    if (surfBytes < expectedBytes) {
+        LUCHS_LOG_HOST("[FATAL] PBO bytes mismatch have=%zu need>=%zu", surfBytes, expectedBytes);
         pboResource->unmap();
         throw std::runtime_error("PBO byte size mismatch");
     }
 
-    // === Mandelbrot on GPU (single launch, no CPU iterations) ===
+    // GPU launch (Nacktmull)
+    (void)cudaGetLastError(); // clear sticky
+
     cudaEvent_t ev0=nullptr, ev1=nullptr;
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         CUDA_CHECK(cudaEventCreate(&ev0));
@@ -162,29 +168,59 @@ void renderCudaFrame(
         CUDA_CHECK(cudaEventRecord(ev0, 0));
     }
 
+    // *** KORREKTE REIHENFOLGE: (out, d_it, w, h, zoom, offset, maxIter, tile) ***
     launch_mandelbrotHybrid(
         devSurface,
+        static_cast<int*>(d_iterations.get()),
         width, height,
         zoom, offset,
         maxIterations,
-        static_cast<int*>(d_iterations.get()),
         tileSize
     );
 
     cudaError_t mbErr = cudaGetLastError();
-    if (mbErr != cudaSuccess) {
-        LUCHS_LOG_HOST("[FATAL] mandelbrot launch failed err=%d -> filling PBO magenta", (int)mbErr);
-        dim3 block(32,8), grid((width+31)/32, (height+7)/8);
-        const uchar4 mag = make_uchar4(255,0,255,255);
-        fill_rgba_kernel<<<grid,block>>>(devSurface, width, height, mag);
-        CUDA_CHECK(cudaGetLastError());
+    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
+        cudaError_t syncErr = cudaDeviceSynchronize();
+        if (mbErr == cudaSuccess && syncErr != cudaSuccess) mbErr = syncErr;
+    }
+
+    const bool ok = (mbErr == cudaSuccess);
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[MB] ok=%d err=%d w=%d h=%d tile=%d itMax=%d zoom=%.6f off=(%.6f,%.6f) surf=%p bytes=%zu it_bytes=%zu",
+                       ok?1:0, (int)mbErr, width, height, tileSize, maxIterations,
+                       (double)zoom, (double)offset.x, (double)offset.y,
+                       (void*)devSurface, surfBytes, it_bytes);
+    }
+
+    if (!ok) {
+        pboResource->unmap();
+#ifndef CUDA_ARCH
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double totalMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        state.lastTimings.valid            = true;
+        state.lastTimings.pboMap           = mapMs;
+        state.lastTimings.mandelbrotTotal  = 0.0;
+        state.lastTimings.mandelbrotLaunch = 0.0;
+        state.lastTimings.mandelbrotSync   = 0.0;
+        state.lastTimings.entropy          = 0.0;
+        state.lastTimings.contrast         = 0.0;
+        state.lastTimings.deviceLogFlush   = 0.0;
+        if constexpr (Settings::performanceLogging) {
+            LUCHS_LOG_HOST("[PERF] path=gpu FAIL mp=%.2f tt=%.2f", mapMs, totalMs);
+        }
+#endif
+        (void)cudaGetLastError();
+        shouldZoom = false; newOffset = offset;
+        throw std::runtime_error("CUDA failure: mandelbrot kernel");
     }
 
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         CUDA_CHECK(cudaEventRecord(ev1, 0));
         CUDA_CHECK(cudaEventSynchronize(ev1));
         float ms=0.0f; CUDA_CHECK(cudaEventElapsedTime(&ms, ev0, ev1));
+#ifndef CUDA_ARCH
         mbMs = (double)ms;
+#endif
         CUDA_CHECK(cudaEventDestroy(ev0));
         CUDA_CHECK(cudaEventDestroy(ev1));
     }
@@ -204,7 +240,7 @@ void renderCudaFrame(
     entMs = ecMs * 0.5; conMs = ecMs * 0.5;
 #endif
 
-    // Prepare pinned host vectors and copy analysis home
+    // Host copies
     if (h_entropy.capacity()  < size_t(numTiles)) h_entropy.reserve(size_t(numTiles));
     if (h_contrast.capacity() < size_t(numTiles)) h_contrast.reserve(size_t(numTiles));
     ensureHostPinned(h_entropy,  s_hostRegEntropyPtr,  s_hostRegEntropyBytes);
@@ -215,31 +251,22 @@ void renderCudaFrame(
     CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),  entropy_bytes,  cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(), contrast_bytes, cudaMemcpyDeviceToHost));
 
-    // No retarget here; let zoom logic decide
-    shouldZoom = false;
-    newOffset  = offset;
+    shouldZoom = false; newOffset = offset;
 
     pboResource->unmap();
 
 #ifndef CUDA_ARCH
     const auto t1 = std::chrono::high_resolution_clock::now();
     const double totalMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
-#endif
-
     state.lastTimings.valid            = true;
-#ifndef CUDA_ARCH
     state.lastTimings.pboMap           = mapMs;
     state.lastTimings.mandelbrotTotal  = mbMs;
-    state.lastTimings.mandelbrotLaunch = 0.0;   // kept for compatibility
-    state.lastTimings.mandelbrotSync   = 0.0;   // single implicit sync via memcpy D2H
+    state.lastTimings.mandelbrotLaunch = 0.0;
+    state.lastTimings.mandelbrotSync   = 0.0;
     state.lastTimings.entropy          = entMs;
     state.lastTimings.contrast         = conMs;
     state.lastTimings.deviceLogFlush   = 0.0;
-#else
-    state.lastTimings = {};
-#endif
 
-#ifndef CUDA_ARCH
     if constexpr (Settings::performanceLogging) {
         LUCHS_LOG_HOST("[PERF] path=gpu mp=%.2f mb=%.2f en=%.2f ct=%.2f tt=%.2f",
                        mapMs, mbMs, entMs, conMs, totalMs);
@@ -264,12 +291,8 @@ bool precheckCudaRuntime() {
 bool verifyCudaGetErrorStringSafe() {
     cudaError_t dummy = cudaErrorInvalidValue;
     const char* msg = cudaGetErrorString(dummy);
-    if (msg) {
-        if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[CHECK] cudaGetErrorString(dummy) = \"%s\"", msg);
-        return true;
-    }
-    LUCHS_LOG_HOST("[FATAL] cudaGetErrorString returned null");
-    return false;
+    if (msg) { if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[CHECK] cudaGetLastError(dummy) = \"%s\"", msg); return true; }
+    LUCHS_LOG_HOST("[FATAL] cudaGetErrorString returned null"); return false;
 }
 
 void unregisterPBO() {
