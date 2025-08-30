@@ -1,29 +1,35 @@
 ///// Otter: Minimal GPU E/C kernels; early guards; events only when logging enabled (no C4702).
-///// Schneefuchs: Planbare Occupancy (__launch_bounds__), ASCII logs, bounds-checked sizes; /WX-fest.
-///// Maus: Render-/Shading-Code entfernt; klare Host-Wrapper-API computeCudaEntropyContrast.
+///// Schneefuchs: Predictable occupancy (__launch_bounds__), ASCII logs, bounds-checked sizes; /WX-safe.
+///// Maus: Rendering/shading removed; clear host wrapper API computeCudaEntropyContrast.
 
 #include <cuda_runtime.h>
+#include <math.h>
 #include "core_kernel.h"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 
-// 🦊 Schneefuchs: Launch-bounds für planbare Occupancy bei 128 Threads.
+// 🦊 Schneefuchs: launch-bounds for predictable occupancy with 128 threads.
 __global__ __launch_bounds__(128)
 void entropyKernel(
-    const int* __restrict__ it, float* __restrict__ eOut,
+    const int* __restrict__ it,
+    float* __restrict__ eOut,
     int w, int h, int tile, int maxIter)
 {
-    const int tX = blockIdx.x, tY = blockIdx.y;
-    const int startX = tX * tile, startY = tY * tile;
+    const int tX = blockIdx.x;
+    const int tY = blockIdx.y;
+    const int startX = tX * tile;
+    const int startY = tY * tile;
 
     const int tilesX = (w + tile - 1) / tile;
     const int tileIndex = tY * tilesX + tX;
 
     __shared__ int histo[256];
-    for (int i = threadIdx.x; i < 256; i += blockDim.x) histo[i] = 0;
+    for (int i = threadIdx.x; i < 256; i += blockDim.x) {
+        histo[i] = 0;
+    }
     __syncthreads();
 
-    // 🦦 Otter: Vorabfaktor statt Division im Hot-Path.
+    // 🦦 Otter: precomputed scale avoids a division in the hot path.
     const float scale = 256.0f / float(maxIter + 1);
 
     const int totalCells = tile * tile;
@@ -43,7 +49,7 @@ void entropyKernel(
     __syncthreads();
 
     if (threadIdx.x == 0) {
-        // 🦊 Schneefuchs: echte Sample-Anzahl aus Histogramm bestimmen.
+        // 🦊 Schneefuchs: compute exact sample count from the histogram.
         int count = 0;
         for (int i = 0; i < 256; ++i) count += histo[i];
 
@@ -60,7 +66,8 @@ void entropyKernel(
 }
 
 __global__ void contrastKernel(
-    const float* __restrict__ e, float* __restrict__ cOut,
+    const float* __restrict__ e,
+    float* __restrict__ cOut,
     int tilesX, int tilesY)
 {
     const int tx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -72,15 +79,17 @@ __global__ void contrastKernel(
     float sum = 0.0f;
     int cnt = 0;
 
-    for (int dy = -1; dy <= 1; ++dy)
+    for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
             if (dx == 0 && dy == 0) continue;
-            const int nx = tx + dx, ny = ty + dy;
+            const int nx = tx + dx;
+            const int ny = ty + dy;
             if (nx < 0 || ny < 0 || nx >= tilesX || ny >= tilesY) continue;
             const int nIdx = ny * tilesX + nx;
             sum += fabsf(e[nIdx] - center);
             ++cnt;
         }
+    }
 
     cOut[idx] = (cnt > 0) ? (sum / cnt) : 0.0f;
 }
@@ -90,7 +99,7 @@ void computeCudaEntropyContrast(
     const int* d_it, float* d_e, float* d_c,
     int w, int h, int tile, int maxIter)
 {
-    // Früh-Guards: robuste no-op-Zeroing bei ungültigen Größen
+    // Early guards: robust no-op zeroing for invalid sizes.
     if (w <= 0 || h <= 0 || tile <= 0 || maxIter < 0) {
         const int tilesX0 = (tile > 0) ? (w + tile - 1) / tile : 0;
         const int tilesY0 = (tile > 0) ? (h + tile - 1) / tile : 0;
@@ -112,10 +121,13 @@ void computeCudaEntropyContrast(
     const dim3 enBlock(EN_BLOCK_THREADS);
 
     const dim3 ctBlock(16, 16);
-    const dim3 ctGrid((tilesX + ctBlock.x - 1) / ctBlock.x,
-                      (tilesY + ctBlock.y - 1) / ctBlock.y);
+    const dim3 ctGrid(
+        (tilesX + ctBlock.x - 1) / ctBlock.x,
+        (tilesY + ctBlock.y - 1) / ctBlock.y
+    );
 
-    if constexpr (Settings::performanceLogging || Settings::debugLogging) {
+    // Events only when logging is enabled; avoids overhead and warnings.
+    if (Settings::performanceLogging || Settings::debugLogging) {
         cudaEvent_t evStart{}, evMid{}, evEnd{};
         CUDA_CHECK(cudaEventCreate(&evStart));
         CUDA_CHECK(cudaEventCreate(&evMid));
@@ -131,14 +143,14 @@ void computeCudaEntropyContrast(
         CUDA_CHECK(cudaEventRecord(evEnd, 0));
         CUDA_CHECK(cudaEventSynchronize(evEnd));
 
-        float ms1 = 0.f, ms2 = 0.f;
+        float ms1 = 0.0f, ms2 = 0.0f;
         CUDA_CHECK(cudaEventElapsedTime(&ms1, evStart, evMid));
         CUDA_CHECK(cudaEventElapsedTime(&ms2, evMid, evEnd));
 
-        if constexpr (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[PERF] en=%.2f ct=%.2f", ms1, ms2);
+        if (Settings::performanceLogging) {
+            LUCHS_LOG_HOST("[PERF] en=%.2f ms ct=%.2f ms", ms1, ms2);
         } else {
-            LUCHS_LOG_HOST("[TIME] en=%.2f | ct=%.2f", ms1, ms2);
+            LUCHS_LOG_HOST("[TIME] en=%.2f ms | ct=%.2f ms", ms1, ms2);
         }
 
         CUDA_CHECK(cudaEventDestroy(evStart));
