@@ -1,7 +1,6 @@
-// Datei: src/frame_context.cpp
-// 🐜 Schwarze Ameise: Saubere Trennung von FrameContext-Daten und Logik.
-// 🦦 Otter: Methoden ausgelagert, um Header schlank zu halten.
-// 🦊 Schneefuchs: Debug-Logging und Reset zentral implementiert.
+///// Otter: C4702 fix – logging compiled-in only when enabled; no unreachable code.
+///// Schneefuchs: /WX strikt, ASCII-only Logs/Kommentare; Verhalten unverändert.
+///// Maus: Saubere Trennung von FrameContext-Daten und Logik (Ameise).
 
 #include "frame_context.hpp"
 #include "settings.hpp"
@@ -26,28 +25,32 @@ FrameContext::FrameContext()
 , totalTime(0.0)
 , timeSinceLastZoom(0.0)
 {
-    // Hostseitige Vektoren h_entropy und h_contrast sind per Default leer.
-    // Initialisierung erfolgt später, wenn tileSize und Bildgröße bekannt sind.
+    // Host-side vectors h_entropy and h_contrast are empty by default.
+    // Initialization happens later once tileSize and image size are known.
 }
 
 void FrameContext::clear() noexcept {
-    // 🧹 Buffer zurücksetzen bei Resize oder Reset
+    // Reset host buffers on resize/reset
     h_entropy.clear();
     h_contrast.clear();
 
-    // Device-Zeiger auf nullptr setzen, ohne Freigabe (muss extern erfolgen)
-    d_entropy = nullptr;
-    d_contrast = nullptr;
+    // Reset device pointers; deallocation must be handled externally
+    d_entropy    = nullptr;
+    d_contrast   = nullptr;
     d_iterations = nullptr;
 
-    // Zoom-Flags zurücksetzen
+    // Reset zoom flags
     shouldZoom = false;
 }
 
 void FrameContext::printDebug() const noexcept {
-    if constexpr (!Settings::debugLogging) return;
-
-    // 📣 Wichtige Statusinformationen zum Frame ausgeben (ASCII-only)
-    LUCHS_LOG_HOST("[Frame] width=%d height=%d zoom=%.5f offset=(%.5f, %.5f) tileSize=%d",
-                   width, height, zoom, offset.x, offset.y, tileSize);
+    // C4702 fix: avoid 'return' before subsequent statements under if constexpr.
+    // Compile the log only when debugLogging is enabled at compile time.
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST(
+            "[Frame] width=%d height=%d zoom=%.5f offset=(%.5f, %.5f) tileSize=%d",
+            width, height, zoom, offset.x, offset.y, tileSize
+        );
+    }
+    // If debugLogging is false at compile time, this function compiles to an empty body.
 }
