@@ -121,6 +121,10 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         auto t0 = Clock::now();
 
+        // --- Diagnostics around kernel launch/sync
+        LUCHS_LOG_HOST("[KERNEL] launch begin: w=%d h=%d zoom=%.6f tilesz=%d",
+                       frameCtx.width, frameCtx.height, frameCtx.zoom, frameCtx.tileSize);
+
         CudaInterop::renderCudaFrame(
             state.d_iterations,
             state.d_entropy,
@@ -138,7 +142,10 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
             state
         );
 
-        CUDA_CHECK(cudaDeviceSynchronize());
+        LUCHS_LOG_HOST("[KERNEL] launch returned");
+
+        cudaError_t syncErr = cudaDeviceSynchronize();
+        LUCHS_LOG_HOST("[KERNEL] cudaDeviceSynchronize -> %d", static_cast<int>(syncErr));
 
         auto t1 = Clock::now();
         const double ms = std::chrono::duration_cast<msd>(t1 - t0).count();
@@ -161,6 +168,7 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
         }
     } else {
         // Hot path without host timing
+        LUCHS_LOG_HOST("[KERNEL] launch begin (hot)");
         CudaInterop::renderCudaFrame(
             state.d_iterations,
             state.d_entropy,
@@ -177,7 +185,8 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
             frameCtx.tileSize,
             state
         );
-        CUDA_CHECK(cudaDeviceSynchronize());
+        cudaError_t syncErr = cudaDeviceSynchronize();
+        LUCHS_LOG_HOST("[KERNEL] cudaDeviceSynchronize -> %d (hot)", static_cast<int>(syncErr));
     }
 
     // Deterministic, modular device-log flush; immediate flush on error.
@@ -307,6 +316,16 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
                            static_cast<unsigned>(state.pbo.id()));
         }
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prevPBO));
+    }
+
+    // Viewport sicherstellen (einige Plattformen starten mit 0x0)
+    GLint vp[4] = {0,0,0,0};
+    glGetIntegerv(GL_VIEWPORT, vp);
+    if (vp[2] != frameCtx.width || vp[3] != frameCtx.height) {
+        glViewport(0, 0, frameCtx.width, frameCtx.height);
+        LUCHS_LOG_HOST("[VIEWPORT] set to %dx%d (was %d x %d)", frameCtx.width, frameCtx.height, vp[2], vp[3]);
+    } else if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[VIEWPORT] already %d x %d", vp[2], vp[3]);
     }
 
     // Explizite Bind-Reihenfolge: (texture,pbo) binden und uploaden
