@@ -1,77 +1,43 @@
-///// Otter: SANITY-Kernel optional im CUDA-Pfad; deterministisches ASCII-Logging; /WX-sicher.
-///// Schneefuchs: Keine Funktions-/API-Änderung; Header-synchron; robuste Fehlerpfade.
-///// Maus: Klare Log-Punkte (enter/map/ptr/launch/sync/unmap/exit); Null Seiteneffekte im Hot-Path.
 // Datei: src/cuda_interop.cu
+// 🐜 Schwarze Ameise: Klare Parametrisierung, deterministisches Logging, robustes Ressourcenhandling.
+// 🦦 Otter: Sichtbarer Test-Pattern-Path (GPU-only) für schnelle Verifikation; Iterations-/Analyse-Pfade später einschaltbar.
+// 🦊 Schneefuchs: Saubere Fehlerbehandlung, Null Seiteneffekte außerhalb der TU; /WX-fest.
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
 #include "cuda_interop.hpp"
-#include "core_kernel.h"           // computeCudaEntropyContrast(...)
 #include "settings.hpp"
 #include "common.hpp"
 #include "renderer_state.hpp"
 #include "hermelin_buffer.hpp"
 #include "bear_CudaPBOResource.hpp"
-#include "nacktmull_shade.cuh"
 
 #include <cuda_gl_interop.h>
-#include <cuda_runtime.h>   // events/memcpy/host register
-#include <vector_types.h>   // uchar4, make_uchar4
+#include <cuda_runtime.h>
 #include <vector>
 #include <stdexcept>
-#include <cstdlib>          // _dupenv_s (Win)
 
 #ifndef CUDA_ARCH
   #include <chrono>
 #endif
 
-// --------------------------- Nacktmull (immer aktiv) -------------------------
-#include "nacktmull_anchor.hpp"    // Nacktmull::compute_host_iterations(...)
-#include "nacktmull_host.hpp"      // Host-Iteration
-
 namespace CudaInterop {
 
-// TU-lokaler Zustand
-static bear_CudaPBOResource* pboResource      = nullptr;
-static bool pauseZoom                         = false;
-static bool s_deviceInitDone                  = false;
+// ------------------------------ TU-lokaler Zustand ---------------------------
+static bear_CudaPBOResource* s_pbo      = nullptr;
+static bool                  s_devReady = false;
+static bool                  s_pauseZoom= false;
 
-// Pinned-Host-Registrierung für E/C (schnellere D2H)
-static void*  s_hostRegEntropyPtr   = nullptr;
-static size_t s_hostRegEntropyBytes = 0;
-static void*  s_hostRegContrastPtr  = nullptr;
-static size_t s_hostRegContrastBytes= 0;
-
-// /WX-sichere Env-Abfrage (Windows: _dupenv_s; POSIX: getenv)
-static bool otter_env_on(const char* name) {
-#ifdef _WIN32
-    char* buf = nullptr; size_t len = 0;
-    const errno_t ec = _dupenv_s(&buf, &len, name);
-    const bool on = (ec == 0 && buf && *buf && *buf != '0');
-    if (buf) free(buf);
-    return on;
-#else
-    const char* e = std::getenv(name);
-    return e && *e && *e != '0';
-#endif
-}
-
-// ---- minimaler SANITY-Kernel: schreibt Checker/Gradient in RGBA8 ------------
-__global__ void __otter_sanity_fill_rgba(uchar4* out, int w, int h) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int n = w * h;
-    if (i >= n) return;
-    int x = i % w, y = i / w;
-    unsigned char r = (unsigned char)((x * 255) / (w ? w : 1));
-    unsigned char g = (unsigned char)((y * 255) / (h ? h : 1));
-    unsigned char b = ((x/32 + y/32) & 1) ? 0 : 255;
-    out[i] = make_uchar4(r,g,b,255);
-}
+// Host-Pinning (für spätere schnelle D2H von Analysepuffern)
+static void*  s_hostRegEntropyPtr    = nullptr;
+static size_t s_hostRegEntropyBytes  = 0;
+static void*  s_hostRegContrastPtr   = nullptr;
+static size_t s_hostRegContrastBytes = 0;
 
 static inline void ensureDeviceOnce() {
-    if (!s_deviceInitDone) {
+    if (!s_devReady) {
         CUDA_CHECK(cudaSetDevice(0));
-        s_deviceInitDone = true;
+        s_devReady = true;
     }
 }
 
@@ -94,17 +60,31 @@ static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size
     }
 }
 
+// ------------------------------ Sichtbarer Test-Pattern-Kernel ---------------
+// Ein einfacher Farbverlauf + kariertes Blau, damit man SOFORT etwas sieht.
+__global__ void fill_test_pattern(uchar4* surf, int w, int h) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= w || y >= h) return;
+
+    const unsigned char r = static_cast<unsigned char>((x * 255) / max(w, 1));
+    const unsigned char g = static_cast<unsigned char>((y * 255) / max(h, 1));
+    const unsigned char b = (((x >> 4) ^ (y >> 4)) & 1) ? 255 : 0; // grobes Schachbrett
+    surf[y * w + x] = make_uchar4(r, g, b, 255);
+}
+
+// ------------------------------ PBO-Registration -----------------------------
 void registerPBO(const Hermelin::GLBuffer& pbo) {
-    if (pboResource) {
+    if (s_pbo) {
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!");
+            LUCHS_LOG_HOST("[WARN] registerPBO: already registered (id=%u)", pbo.id());
         }
         return;
     }
 
     ensureDeviceOnce();
 
-    // Sanity: Bind-State check
+    // Sanity: war der Bind erfolgreich?
     GLint boundBefore = 0;
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundBefore);
 
@@ -117,30 +97,32 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
         throw std::runtime_error("glBindBuffer(GL_PIXEL_UNPACK_BUFFER) failed");
     }
 
-    pboResource = new bear_CudaPBOResource(pbo.id());
+    s_pbo = new bear_CudaPBOResource(pbo.id());
 
-    // 🧊 Warm-up: einmaliges map/unmap, um Treiberpfade zu initialisieren (vermeidet 20ms-Spike im 2. Frame)
+    // Warm-up (einmaliges Map/Unmap)
     size_t warmBytes = 0;
-    if (auto* ptr = pboResource->mapAndLog(warmBytes)) {
-        pboResource->unmap();
+    if (auto* ptr = s_pbo->mapAndLog(warmBytes)) {
+        (void)ptr;
+        s_pbo->unmap();
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[PBO] warm-up map/unmap done (%zu bytes)", warmBytes);
         }
     }
 
-    // 🦊 Schneefuchs: ursprünglichen GL-Bind wiederherstellen (Bezug zu Schneefuchs).
+    // Ursprünglichen Bind wiederherstellen
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(boundBefore));
 }
 
+// ------------------------------ Haupt-Frame-Render ---------------------------
 void renderCudaFrame(
-    Hermelin::CudaDeviceBuffer& d_iterations,
+    Hermelin::CudaDeviceBuffer& d_iterations,  // (derzeit ungenutzt im Testpattern)
     Hermelin::CudaDeviceBuffer& d_entropy,
     Hermelin::CudaDeviceBuffer& d_contrast,
     int width,
     int height,
-    float zoom,
+    float /*zoom*/,
     float2 offset,
-    int maxIterations,
+    int /*maxIterations*/,
     std::vector<float>& h_entropy,
     std::vector<float>& h_contrast,
     float2& newOffset,
@@ -150,196 +132,112 @@ void renderCudaFrame(
 ) {
 #ifndef CUDA_ARCH
     const auto t0 = std::chrono::high_resolution_clock::now();
-    double mapMs = 0.0, entMs = 0.0, conMs = 0.0, hostItMs = 0.0, shadeMs = 0.0;
+    double mapMs = 0.0, shadeMs = 0.0;
 #endif
 
-    if (!pboResource)
+    (void)offset; (void)tileSize; // aktuell nicht benötigt
+
+    if (!s_pbo)
         throw std::runtime_error("[FATAL] CUDA PBO not registered!");
 
-    const size_t totalPixels = size_t(width) * size_t(height);
-    const int tilesX = (width + tileSize - 1) / tileSize;
-    const int tilesY = (height + tileSize - 1) / tileSize;
-    const int numTiles = tilesX * tilesY;
-
-    // Größencheck
-    const size_t it_bytes       = totalPixels * sizeof(int);
-    const size_t entropy_bytes  = size_t(numTiles) * sizeof(float);
-    const size_t contrast_bytes = size_t(numTiles) * sizeof(float);
-
-    if (d_iterations.size() < it_bytes ||
-        d_entropy.size()    < entropy_bytes ||
-        d_contrast.size()   < contrast_bytes)
-    {
-        LUCHS_LOG_HOST("[FATAL] device buffers too small: it=%zu/%zu en=%zu/%zu ct=%zu/%zu",
-                       d_iterations.size(), it_bytes,
-                       d_entropy.size(),    entropy_bytes,
-                       d_contrast.size(),   contrast_bytes);
-        throw std::runtime_error("CudaInterop::renderCudaFrame: device buffers undersized");
-    }
-
-    // ---------------------------------- NACKTMULL: Host-Iters ----------------------------------
-    std::vector<int> h_iters;
-    h_iters.resize(totalPixels);
-
-#ifndef CUDA_ARCH
-    hostItMs = Nacktmull::compute_host_iterations(
-        width, height,
-        static_cast<double>(zoom),
-        static_cast<double>(offset.x),
-        static_cast<double>(offset.y),
-        maxIterations,
-        h_iters
-    );
-#else
-    (void)Nacktmull::compute_host_iterations(
-        width, height,
-        static_cast<double>(zoom),
-        static_cast<double>(offset.x),
-        static_cast<double>(offset.y),
-        maxIterations,
-        h_iters
-    );
-#endif
-
-    // Host → Device (Iterationsbild)
-    CUDA_CHECK(cudaMemcpy(d_iterations.get(), h_iters.data(), it_bytes, cudaMemcpyHostToDevice));
-
-    // ---------------------------------- PBO map & (SANITY|Shade) --------------------------------
+    // PBO mappen -> CUDA-Surface bekommen
 #ifndef CUDA_ARCH
     const auto tMap0 = std::chrono::high_resolution_clock::now();
 #endif
     size_t surfBytes = 0;
-    uchar4* devSurface = static_cast<uchar4*>(pboResource->mapAndLog(surfBytes));
+    uchar4* devSurface = static_cast<uchar4*>(s_pbo->mapAndLog(surfBytes));
 #ifndef CUDA_ARCH
     const auto tMap1 = std::chrono::high_resolution_clock::now();
     mapMs = std::chrono::duration<double, std::milli>(tMap1 - tMap0).count();
 #endif
+
     if (!devSurface) {
         LUCHS_LOG_HOST("[FATAL] surface pointer is null");
-        throw std::runtime_error("pboResource->map() returned null");
+        throw std::runtime_error("pbo map returned null");
     }
 
-    const size_t expected = size_t(width) * size_t(height) * sizeof(uchar4);
+    const size_t expected = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uchar4);
     if (surfBytes < expected) {
         LUCHS_LOG_HOST("[FATAL] PBO size too small: got=%zu need=%zu (w=%d h=%d)", surfBytes, expected, width, height);
-        pboResource->unmap();
+        s_pbo->unmap();
         throw std::runtime_error("PBO byte size mismatch");
     }
 
-    // ---- Optionaler SANITY-Pfad (per Env): Test-Pattern auf GPU schreiben ----
-    if (otter_env_on("OTTER_SANITY_KERNEL")) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[SANITY] OTTER_SANITY_KERNEL=1 -> using CUDA sanity fill (w=%d h=%d bytes=%zu)",
-                           width, height, (size_t)surfBytes);
-        }
-        const int numPx = width * height;
-        const int TPB   = 256;
-        const int BLK   = (numPx + TPB - 1) / TPB;
-        __otter_sanity_fill_rgba<<<BLK, TPB, 0, 0>>>(devSurface, width, height);
-        cudaError_t kerr = cudaDeviceSynchronize();
-        LUCHS_LOG_HOST("[SANITY] kernel sync=%d (numPx=%d blocks=%d tpb=%d)", (int)kerr, numPx, BLK, TPB);
+    // --- Sichtbarer Shader: Test-Pattern ---
+    dim3 block(32, 8);
+    dim3 grid((width + block.x - 1)/block.x, (height + block.y - 1)/block.y);
 
-        // Korrektes Unmap über Wrapper (kein direkter Zugriff auf Resource-Handle)
-        pboResource->unmap();
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[SANITY] unmap done -> return");
-        }
-
-        // Minimal-Timings/Flags setzen
-        state.lastTimings.valid            = true;
 #ifndef CUDA_ARCH
-        state.lastTimings.pboMap           = mapMs;
-        state.lastTimings.mandelbrotTotal  = 0.0;
-        state.lastTimings.mandelbrotLaunch = 0.0;
-        state.lastTimings.mandelbrotSync   = 0.0;
-        state.lastTimings.entropy          = 0.0;
-        state.lastTimings.contrast         = 0.0;
-        state.lastTimings.deviceLogFlush   = 0.0;
-#endif
-        shouldZoom = false; newOffset = offset;
-        return; // Frühzeitiger Exit – NUR im SANITY-Mode
-    }
-
-    // ---- Regulärer Shade aus Iterationsbild ---------------------------------
-    float shadeMsEv = 0.0f;
-    cudaEvent_t evS0 = nullptr, evS1 = nullptr;
+    cudaEvent_t evS0=nullptr, evS1=nullptr; float shadeMsEv=0.0f;
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         CUDA_CHECK(cudaEventCreate(&evS0));
         CUDA_CHECK(cudaEventCreate(&evS1));
         CUDA_CHECK(cudaEventRecord(evS0, 0));
     }
+#endif
 
-    dim3 block(32, 8);
-    dim3 grid((width + block.x - 1)/block.x, (height + block.y - 1)/block.y);
-
-    shade_from_iterations<<<grid, block>>>(
-        devSurface,
-        static_cast<const int*>(d_iterations.get()),
-        width, height, maxIterations
-    );
+    fill_test_pattern<<<grid, block>>>(devSurface, width, height);
     CUDA_CHECK(cudaGetLastError());
 
+#ifndef CUDA_ARCH
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         CUDA_CHECK(cudaEventRecord(evS1, 0));
         CUDA_CHECK(cudaEventSynchronize(evS1));
         CUDA_CHECK(cudaEventElapsedTime(&shadeMsEv, evS0, evS1));
         CUDA_CHECK(cudaEventDestroy(evS0));
         CUDA_CHECK(cudaEventDestroy(evS1));
-#ifndef CUDA_ARCH
         shadeMs = static_cast<double>(shadeMsEv);
-#endif
     }
-
-    // ---------------------------------- Entropie/Kontrast --------------------------------------
-#ifndef CUDA_ARCH
-    const auto tEC0 = std::chrono::high_resolution_clock::now();
-#endif
-    ::computeCudaEntropyContrast(
-        static_cast<const int*>(d_iterations.get()),
-        static_cast<float*>(d_entropy.get()),
-        static_cast<float*>(d_contrast.get()),
-        width, height, tileSize, maxIterations
-    );
-#ifndef CUDA_ARCH
-    const auto tEC1 = std::chrono::high_resolution_clock::now();
-    const double ecMs = std::chrono::duration<double, std::milli>(tEC1 - tEC0).count();
-    entMs = ecMs * 0.5;
-    conMs = ecMs * 0.5;
 #endif
 
-    // Host-Ziele vorbereiten (keine Reallocs → dann pinnen)
-    if (h_entropy.capacity()  < size_t(numTiles)) h_entropy.reserve(size_t(numTiles));
-    if (h_contrast.capacity() < size_t(numTiles)) h_contrast.reserve(size_t(numTiles));
+    // --- E/C für Heatmap vorbereiten (hier: Nullfelder, nur um Overlay zu beruhigen) ---
+    const int tilesX = (width  + tileSize - 1) / max(tileSize, 1);
+    const int tilesY = (height + tileSize - 1) / max(tileSize, 1);
+    const size_t numTiles = static_cast<size_t>(tilesX) * static_cast<size_t>(tilesY);
+
+    if (d_entropy.size() < numTiles * sizeof(float))  { d_entropy.resize(numTiles * sizeof(float)); }
+    if (d_contrast.size() < numTiles * sizeof(float)) { d_contrast.resize(numTiles * sizeof(float)); }
+
+    CUDA_CHECK(cudaMemset(d_entropy.get(),  0, d_entropy.size()));
+    CUDA_CHECK(cudaMemset(d_contrast.get(), 0, d_contrast.size()));
+
+    h_entropy.resize(numTiles);
+    h_contrast.resize(numTiles);
+
     ensureHostPinned(h_entropy,  s_hostRegEntropyPtr,  s_hostRegEntropyBytes);
     ensureHostPinned(h_contrast, s_hostRegContrastPtr, s_hostRegContrastBytes);
 
-    h_entropy.resize(size_t(numTiles));
-    h_contrast.resize(size_t(numTiles));
+    CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),  d_entropy.size(),  cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(), d_contrast.size(), cudaMemcpyDeviceToHost));
 
-    CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),  entropy_bytes,  cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(), contrast_bytes, cudaMemcpyDeviceToHost));
-
-    // Zoom-Kommunikation (unverändert)
+    // Zoom-Flags fürs Host-System (vorerst aus)
     shouldZoom = false;
-    newOffset  = offset;
+    newOffset  = make_float2(0.0f, 0.0f);
 
-    pboResource->unmap();
+    // PBO wieder freigeben
+    s_pbo->unmap();
 
 #ifndef CUDA_ARCH
     const auto t1 = std::chrono::high_resolution_clock::now();
     const double totalMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
 #endif
 
-    // Timings an RendererState (GPU-Anteil = Shade)
+    // Timings melden (GPU-Anteil = Pattern Shade)
     state.lastTimings.valid            = true;
 #ifndef CUDA_ARCH
     state.lastTimings.pboMap           = mapMs;
     state.lastTimings.mandelbrotTotal  = shadeMs;
     state.lastTimings.mandelbrotLaunch = 0.0;
     state.lastTimings.mandelbrotSync   = 0.0;
-    state.lastTimings.entropy          = entMs;
-    state.lastTimings.contrast         = conMs;
+    state.lastTimings.entropy          = 0.0;
+    state.lastTimings.contrast         = 0.0;
     state.lastTimings.deviceLogFlush   = 0.0;
+
+    if constexpr (Settings::performanceLogging) {
+        LUCHS_LOG_HOST("[PERF] path=test mp=%.2f shade=%.2f tt=%.2f", mapMs, shadeMs, totalMs);
+    } else if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[TIME] total=%.2f", totalMs);
+    }
 #else
     state.lastTimings.pboMap           = 0.0;
     state.lastTimings.mandelbrotTotal  = 0.0;
@@ -349,19 +247,11 @@ void renderCudaFrame(
     state.lastTimings.contrast         = 0.0;
     state.lastTimings.deviceLogFlush   = 0.0;
 #endif
-
-#ifndef CUDA_ARCH
-    if constexpr (Settings::performanceLogging) {
-        LUCHS_LOG_HOST("[PERF] path=nm mp=%.2f hostIt=%.2f shade=%.2f en=%.2f ct=%.2f tt=%.2f",
-                       mapMs, hostItMs, shadeMs, entMs, conMs, totalMs);
-    } else if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[TIME] total=%.2f", totalMs);
-    }
-#endif
 }
 
-void setPauseZoom(bool pause) { pauseZoom = pause; }
-bool getPauseZoom()           { return pauseZoom; }
+// ------------------------------ Hilfsfunktionen ------------------------------
+void setPauseZoom(bool pause) { s_pauseZoom = pause; }
+bool getPauseZoom()           { return s_pauseZoom; }
 
 bool precheckCudaRuntime() {
     int deviceCount = 0;
@@ -388,16 +278,15 @@ bool verifyCudaGetErrorStringSafe() {
 }
 
 void unregisterPBO() {
-    // Host-Pins sauber lösen
+    // Host-Pins lösen
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr  = nullptr; s_hostRegEntropyBytes  = 0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr = nullptr; s_hostRegContrastBytes = 0; }
 
-    delete pboResource;
-    pboResource = nullptr;
+    delete s_pbo;
+    s_pbo = nullptr;
 }
 
-void logCudaDeviceContext(const char* tag)
-{
+void logCudaDeviceContext(const char* tag) {
     int dev = -1;
     cudaError_t e0 = cudaGetDevice(&dev);
 
@@ -408,7 +297,6 @@ void logCudaDeviceContext(const char* tag)
 
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         if (e0 == cudaSuccess && e1 == cudaSuccess) {
-            // ASCII-only, deterministic
             LUCHS_LOG_HOST("[CUDA] ctx tag=%s device=%d name=\"%s\" cc=%d.%d sms=%d vram=%lluMB",
                 (tag ? tag : "(null)"),
                 dev,

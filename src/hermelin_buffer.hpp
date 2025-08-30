@@ -21,7 +21,13 @@ public:
     CudaDeviceBuffer(CudaDeviceBuffer&& other) noexcept;
     CudaDeviceBuffer& operator=(CudaDeviceBuffer&& other) noexcept;
 
+    // Allokiert exakt sizeBytes (vorheriger Inhalt wird verworfen)
     void   allocate(size_t sizeBytes);
+    // Alias für allocate – für Client-Code, der "resize" erwartet.
+    void   resize(size_t sizeBytes);
+    // Stellt sicher, dass mindestens minBytes allokiert sind – keine Schrumpfung.
+    void   ensure(size_t minBytes);
+
     void   free();
 
     void*  get() const;

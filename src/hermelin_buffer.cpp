@@ -1,3 +1,4 @@
+// ============================================================================
 // Datei: src/hermelin_buffer.cpp
 // 🐜 Hermelin: Implementation der RAII-Buffer für CUDA- und OpenGL-Ressourcen.
 // 🦦 Otter: Trennung von Interface und Logik. Fehler-Logging explizit, Speichergrößen sichtbar.
@@ -52,6 +53,21 @@ void CudaDeviceBuffer::allocate(size_t sizeBytes) {
         throw std::runtime_error("Hermelin: cudaMalloc failed");
     }
     sizeBytes_ = sizeBytes;
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CUDA] cudaMalloc ok ptr=%p bytes=%zu", ptr_, sizeBytes_);
+    }
+}
+
+void CudaDeviceBuffer::resize(size_t sizeBytes) {
+    // exakt wie allocate (wir kopieren bewusst nichts)
+    if (sizeBytes_ == sizeBytes && ptr_ != nullptr) return; // no-op
+    allocate(sizeBytes);
+}
+
+void CudaDeviceBuffer::ensure(size_t minBytes) {
+    // nur wachsen, niemals schrumpfen
+    if (sizeBytes_ >= minBytes) return;
+    allocate(minBytes);
 }
 
 void CudaDeviceBuffer::free() {
@@ -139,8 +155,8 @@ void GLBuffer::allocate(GLsizeiptr sizeBytes, GLenum usage) {
 void GLBuffer::initAsPixelBuffer(int width, int height, int bytesPerPixel) {
     create();
     // 🦦 Otter: Overflow-sicheres Größenprodukt und sinnvoller Default-Usage für Upload (UNPACK).
-    const unsigned long long w = static_cast<unsigned long long>(width);
-    const unsigned long long h = static_cast<unsigned long long>(height);
+    const unsigned long long w   = static_cast<unsigned long long>(width);
+    const unsigned long long h   = static_cast<unsigned long long>(height);
     const unsigned long long bpp = static_cast<unsigned long long>(bytesPerPixel);
     const unsigned long long total = w * h * bpp;
 
