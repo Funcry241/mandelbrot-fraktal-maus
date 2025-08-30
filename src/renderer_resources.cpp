@@ -7,6 +7,7 @@
 #include "renderer_resources.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
+
 #include <stdexcept>
 #include <limits>
 #include <GL/glew.h>
@@ -56,11 +57,16 @@ GLuint createPBO(int width, int height) {
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, bytes, nullptr, GL_STREAM_DRAW); // orphan on (re)alloc
+
+    // verify real size
+    GLint realSize = 0;
+    glGetBufferParameteriv(GL_PIXEL_UNPACK_BUFFER, GL_BUFFER_SIZE, &realSize);
+
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prevPBO));
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createPBO -> ID %u (ctx=%s, %dx%d, bytes=%lld)",
-                       pbo, resourceContext, width, height, static_cast<long long>(bytes));
+        LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createPBO -> ID %u (ctx=%s, %dx%d, bytes=%lld real=%d)",
+                       pbo, resourceContext, width, height, static_cast<long long>(bytes), realSize);
         const GLenum err = glGetError();
         LUCHS_LOG_HOST("[GL-ERROR] createPBO glGetError() = 0x%04X", err);
     }
@@ -78,8 +84,11 @@ GLuint createTexture(int width, int height) {
 
     GLint prevActiveTex = 0;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
-    GLint prevTex2D = 0;
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex2D);
+
+    // Work on unit 0 to avoid surprises; save its binding
+    glActiveTexture(GL_TEXTURE0);
+    GLint prevTex0 = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex0);
 
     GLuint tex = 0;
     glGenTextures(1, &tex);
@@ -87,6 +96,8 @@ GLuint createTexture(int width, int height) {
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ERROR] glGenTextures failed (ctx=%s)", resourceContext);
         }
+        // restore active unit
+        glActiveTexture(static_cast<GLenum>(prevActiveTex));
         return 0;
     }
 
@@ -99,7 +110,8 @@ GLuint createTexture(int width, int height) {
 
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
 
-    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prevTex2D));
+    // restore unit 0 binding and previous active unit
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prevTex0));
     glActiveTexture(static_cast<GLenum>(prevActiveTex));
 
     if constexpr (Settings::debugLogging) {
@@ -118,31 +130,44 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
                        pbo, tex, resourceContext, width, height);
     }
 
-    GLint prevActiveTex = 0, prevTex2D = 0, prevPBO = 0;
-    GLint prevAlign = 0, prevRowLen = 0;
+    if (pbo == 0 || tex == 0 || width <= 0 || height <= 0) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[GL-UPLOAD][ERR] invalid args pbo=%u tex=%u w=%d h=%d", pbo, tex, width, height);
+        }
+        return;
+    }
+
+    // Save global state
+    GLint prevActiveTex = 0, prevPBO = 0, prevAlign = 0, prevRowLen = 0;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex2D);
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevPBO);
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevAlign);
     glGetIntegerv(GL_UNPACK_ROW_LENGTH, &prevRowLen);
 
+    // Switch to unit 0 (Sampler 0) and save its 2D binding
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, tex);
+    GLint prevTex0 = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex0);
 
+    // Upload from PBO -> tex (uchar4 layout)
+    glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
-                    GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexSubImage2D(GL_TEXTURE_2D, 0,
+                    0, 0, width, height,
+                    GL_RGBA, GL_UNSIGNED_BYTE,
+                    nullptr); // from bound PBO
 
     if constexpr (Settings::debugLogging) {
         const GLenum err = glGetError();
         LUCHS_LOG_HOST("[GL-UPLOAD] glTexSubImage2D glGetError() = 0x%04X", err);
     }
 
+    // Restore unit 0 binding, then global state (order matters!)
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prevTex0));
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prevPBO));
-    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prevTex2D));
     glPixelStorei(GL_UNPACK_ALIGNMENT, prevAlign);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, prevRowLen);
     glActiveTexture(static_cast<GLenum>(prevActiveTex));
