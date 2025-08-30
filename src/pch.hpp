@@ -54,10 +54,17 @@
   #define GLEW_NO_IMAGING
 #endif
 
+// 🦊 Schneefuchs: Erzwinge saubere DLL-Imports, wenn dynamisches GLEW genutzt wird (Windows).
+#if defined(_WIN32) && !defined(GLEW_STATIC)
+  #ifndef GLEW_DLL
+    #define GLEW_DLL
+  #endif
+#endif
+
 // Hinweis zur Link-Policy: Projekt bevorzugt dynamisches GLEW.
 // Falls der Build dennoch -DGLEW_STATIC setzt, ist das hier nur eine Info.
 #if defined(GLEW_STATIC)
-  #pragma message("INFO: GLEW_STATIC is defined by the build. Project policy prefers dynamic GLEW (DLL).")
+  #pragma message("WARNING: GLEW_STATIC is defined by the build. Project policy prefers dynamic GLEW (DLL).")
 #endif
 
 #include <GL/glew.h>

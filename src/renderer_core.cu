@@ -9,7 +9,6 @@
 #include "renderer_pipeline.hpp"
 #include "renderer_state.hpp"
 #include "renderer_resources.hpp"
-#include "common.hpp"
 #include "settings.hpp"
 #include "cuda_interop.hpp"
 #include "heatmap_overlay.hpp"
@@ -85,7 +84,8 @@ bool Renderer::initGL() {
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
         state.pbo.initAsPixelBuffer(state.width, state.height);
-        state.tex.create();
+        // 🦊 Schneefuchs: Texture über Utils erzeugen (immutable storage), nicht via GLBuffer::create.
+        state.tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(state.width, state.height));
         CudaInterop::registerPBO(state.pbo);
         glResourcesInitialized = true;
         if (Settings::debugLogging) {
@@ -121,19 +121,13 @@ void Renderer::renderFrame() {
         LUCHS_LOG_HOST("[PIPE] Returned from RendererLoop::renderFrame_impl");
 
     // 🐑 Schneefuchs: Doppelte Upload/Draw entfernt – die Pipeline zeichnet bereits.
-    // (Früher: OpenGLUtils::updateTextureFromPBO(...) + glDrawArrays(...) -> redundant)
 
     glfwSwapBuffers(state.window);
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DRAW] glfwSwapBuffers called");
 
-    // ⚠️ Alte Zoom-Logik entfernt:
-    // - Kein Zugriff mehr auf state.zoomResult
-    // - Keine Verwendung von Settings::zoomFactor
-    // Zoom/Offset werden in RendererLoop/FramePipeline aktualisiert.
 #if ENABLE_ZOOM_LOGGING
     {
-        // Optional: hier könnten HUD/Debug-Infos über state.warzenschweinText geloggt werden.
         LUCHS_LOG_HOST("[ZOOM] post-frame: zoom=%.6f offset=(%.6f,%.6f)",
                        state.zoom, state.offset.x, state.offset.y);
     }

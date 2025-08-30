@@ -1,4 +1,3 @@
-// MAUS:
 // ============================================================================
 // Datei: src/frame_limiter.hpp
 // FrameLimiter — precise 60 FPS pacing (sleep+spin), ASCII logs only.
@@ -11,7 +10,7 @@
 
 #include <chrono>
 #include <thread>
-#include <cmath>            // für std::abs
+#include <cmath>            // std::abs
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 
@@ -22,8 +21,9 @@ public:
     FrameLimiter() = default;
 
     // Limit the calling thread to targetFps. If targetFps <= 0, does nothing.
-    inline void limit(int targetFps) {
+    inline void limit(int targetFps) noexcept {
         using clock = std::chrono::steady_clock;
+        static_assert(clock::is_steady, "steady_clock must be steady");
         const auto now = clock::now();
 
         if (targetFps <= 0) {
@@ -52,8 +52,11 @@ public:
         auto remaining = _nextTick - now;
         double sleptMs = 0.0;
 
-        if (remaining > std::chrono::milliseconds(2)) {
-            const auto coarse = remaining - std::chrono::milliseconds(1);
+        constexpr auto kSpinThreshold = std::chrono::milliseconds(2);
+        constexpr auto kSleepSlack    = std::chrono::milliseconds(1);
+
+        if (remaining > kSpinThreshold) {
+            const auto coarse = remaining - kSleepSlack;
             std::this_thread::sleep_for(coarse);
             sleptMs += std::chrono::duration<double, std::milli>(coarse).count();
         }
@@ -92,10 +95,10 @@ public:
         }
     }
 
-    inline double lastFrameSeconds() const { return _lastDt; }
-    inline double lastSleepMilliseconds() const { return _lastSleep; }
+    [[nodiscard]] inline double lastFrameSeconds() const noexcept { return _lastDt; }
+    [[nodiscard]] inline double lastSleepMilliseconds() const noexcept { return _lastSleep; }
 
-    inline void reset() {
+    inline void reset() noexcept {
         _initialized = false;
         _logCounter  = 0;
         _lastDt      = 0.0;

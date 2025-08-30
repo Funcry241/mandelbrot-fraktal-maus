@@ -1,4 +1,3 @@
-//MAUS
 // Lightweight framebuffer capture (single-shot, non-blocking via PBO + fence). ASCII logs only.
 // Otter: async readback; Schneefuchs: state restore; logs ASCII.
 

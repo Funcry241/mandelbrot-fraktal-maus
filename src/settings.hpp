@@ -1,4 +1,3 @@
-// MAUS:
 // ============================================================================
 // Datei: src/settings.hpp
 // Central project settings — fully documented.

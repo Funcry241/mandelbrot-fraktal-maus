@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <GLFW/glfw3.h>
 #include "renderer_state.hpp"
 
 class Renderer {
@@ -12,14 +11,17 @@ public:
     Renderer(int width, int height);
     ~Renderer();
 
-    bool initGL();
-    bool shouldClose() const;
+    [[nodiscard]] bool initGL();
+    [[nodiscard]] bool shouldClose() const;
     void resize(int newW, int newH);
 
-    void renderFrame();  // <-- 🧩 HINZUFÜGEN
+    void renderFrame();
 
-    RendererState& getState()             { return state; }
-    const RendererState& getState() const { return state; }
+    [[nodiscard]] RendererState&       getState()       noexcept { return state; }
+    [[nodiscard]] const RendererState& getState() const noexcept { return state; }
+
+    Renderer(const Renderer&) = delete;
+    Renderer& operator=(const Renderer&) = delete;
 
 private:
     RendererState state;

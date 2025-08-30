@@ -1,4 +1,3 @@
-//MAUS
 // Loop orchestrates the FramePipeline deterministically; periodic device-log flush, clear dt tracking.
 // Otter: No duplicate upload/draw here – the pipeline does it. ASCII logs, compact. (Bezug zu Otter)
 // Schneefuchs: C4127-free via if constexpr; removed unnecessary includes/statics. (Bezug zu Schneefuchs)
@@ -9,17 +8,14 @@
 #include "renderer_loop.hpp"
 #include "cuda_interop.hpp"
 #include "settings.hpp"
-#include "renderer_pipeline.hpp"
-#include "renderer_resources.hpp"
-#include "heatmap_overlay.hpp"
-#include "warzenschwein_overlay.hpp"
 #include "frame_pipeline.hpp"
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
+#include "heatmap_overlay.hpp"
+#include "warzenschwein_overlay.hpp"
 #include "frame_limiter.hpp"   // header in src/
 #include "frame_capture.hpp"   // async single-shot 100th-frame capture (Otter)
-#include <algorithm>
-#include <cuda_runtime.h>
+#include <cuda_runtime_api.h>
 
 namespace RendererLoop {
 
@@ -28,11 +24,11 @@ namespace {
     static bool g_vsyncInit = false;
 
     static inline void beginFrameLocal(RendererState& state) {
-        const float now = static_cast<float>(glfwGetTime());
-        float delta = now - static_cast<float>(state.lastTime);
-        if (delta < 0.0f) delta = 0.0f;
-        state.deltaTime = delta;
-        state.lastTime  = static_cast<double>(now);
+        const double now = glfwGetTime();
+        double delta = now - state.lastTime;
+        if (delta < 0.0) delta = 0.0;
+        state.deltaTime = static_cast<float>(delta);
+        state.lastTime  = now;
         state.frameCount++; // 1-based after first frame
     }
 

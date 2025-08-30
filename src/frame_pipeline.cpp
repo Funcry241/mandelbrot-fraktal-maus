@@ -1,14 +1,21 @@
+///// Otter: GL-Upload via freie Funktionen; ASCII-Logs; kein Funktionswechsel.
+///// Schneefuchs: /WX-fest; Header-Sync; RAII & deterministisch.
+///// Maus: Eine Quelle für Tiles/Upload; Zoom V2 außerhalb der CUDA-Interop.
+
+
 // 🐭 Maus: Eine Quelle für Tiles pro Frame. Vor Render: Buffer-Sync via setupCudaBuffers(...).
 // 🦦 Otter: Sanity-Logs, deterministische Reihenfolge; Zoom V2 außerhalb der CUDA-Interop. (Bezug zu Otter)
 // 🐑 Schneefuchs: Kein doppeltes Sizing, keine Alt-Settings. (Bezug zu Schneefuchs)
 // 🐑 Schneefuchs: /WX-fest – keine konstanten ifs (C4127) und keine C4702 mehr; Debug/Perf via if constexpr. ASCII logs only.
 
 #include "pch.hpp"
+#include "renderer_resources.hpp"    // <— neu (sofern vorhanden)
+#include "cuda_interop.hpp"          // (falls Funktionen PBO/Interop-Kontext benötigen)
 #include <vector_types.h>
+#include <vector_functions.h> // make_float2
 #include <chrono>   // timing
 #include <cstdio>   // snprintf (ASCII only)
 #include <cmath>
-#include "cuda_interop.hpp"
 #include "renderer_pipeline.hpp"
 #include "frame_context.hpp"
 #include "renderer_state.hpp"
@@ -98,11 +105,11 @@ void computeCudaFrame(FrameContext& frameCtx, RendererState& state) {
     state.setupCudaBuffers(frameCtx.tileSize);
 
     if constexpr (Settings::debugLogging) {
-        const int totalPixels = frameCtx.width * frameCtx.height;
-        const size_t need_it_bytes       = static_cast<size_t>(totalPixels) * sizeof(int);
-        const size_t need_entropy_bytes  = static_cast<size_t>(numTiles)    * sizeof(float);
-        const size_t need_contrast_bytes = static_cast<size_t>(numTiles)    * sizeof(float);
-        LUCHS_LOG_HOST("[SANITY] tiles=%d (%d x %d) pixels=%d need(it=%zu entropy=%zu contrast=%zu) alloc(it=%zu entropy=%zu contrast=%zu)",
+        const size_t totalPixels            = size_t(frameCtx.width) * size_t(frameCtx.height);
+        const size_t need_it_bytes          = totalPixels * sizeof(int);
+        const size_t need_entropy_bytes     = size_t(numTiles) * sizeof(float);
+        const size_t need_contrast_bytes    = size_t(numTiles) * sizeof(float);
+        LUCHS_LOG_HOST("[SANITY] tiles=%d (%d x %d) pixels=%zu need(it=%zu entropy=%zu contrast=%zu) alloc(it=%zu entropy=%zu contrast=%zu)",
                        numTiles, tilesX, tilesY, totalPixels,
                        need_it_bytes, need_entropy_bytes, need_contrast_bytes,
                        state.d_iterations.size(), state.d_entropy.size(), state.d_contrast.size());
@@ -261,8 +268,10 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     // texMs measures only PBO->Texture upload + FSQ draw, separate from overlays.
     auto tTex0 = Clock::now();
 
-    OpenGLUtils::setGLResourceContext("frame");
-    OpenGLUtils::updateTextureFromPBO(state.pbo.id(), tex, frameCtx.width, frameCtx.height);
+    // Neue direkte Aufrufe (freie Funktionen, keine Namespaces nötig)
+    setGLResourceContext();
+    updateTextureFromPBO(tex, state.pbo.id(), frameCtx.width, frameCtx.height);
+
     RendererPipeline::drawFullscreenQuad(tex);
 
     auto tTex1 = Clock::now();

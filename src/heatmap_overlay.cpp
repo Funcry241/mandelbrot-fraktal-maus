@@ -1,4 +1,3 @@
-// MAUS:
 // Datei: src/heatmap_overlay.cpp
 // Zweck: Diagnose der Koordinatenumrechnung zwischen Heatmap-Tiles, Screen-Pixeln und Fraktal.
 // Enthält: Mini-Overlay (HUD oben rechts), optionaler Marker, optionaler Self-Check,

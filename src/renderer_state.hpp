@@ -9,6 +9,7 @@
 #include <vector>
 #include <string>                // HUD-Text
 #include "hermelin_buffer.hpp"   // RAII-Wrapper
+#include <vector_types.h>        // float2
 
 class RendererState {
 public:

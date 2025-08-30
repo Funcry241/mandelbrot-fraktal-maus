@@ -100,6 +100,9 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
             LUCHS_LOG_HOST("[PBO] warm-up map/unmap done (%zu bytes)", warmBytes);
         }
     }
+
+    // 🦊 Schneefuchs: ursprünglichen GL-Bind wiederherstellen (Bezug zu Schneefuchs).
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(boundBefore));
 }
 
 void renderCudaFrame(
@@ -126,15 +129,15 @@ void renderCudaFrame(
     if (!pboResource)
         throw std::runtime_error("[FATAL] CUDA PBO not registered!");
 
-    const int totalPixels = width * height;
+    const size_t totalPixels = size_t(width) * size_t(height);
     const int tilesX = (width + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int numTiles = tilesX * tilesY;
 
     // Größencheck
-    const size_t it_bytes       = static_cast<size_t>(totalPixels) * sizeof(int);
-    const size_t entropy_bytes  = static_cast<size_t>(numTiles)    * sizeof(float);
-    const size_t contrast_bytes = static_cast<size_t>(numTiles)    * sizeof(float);
+    const size_t it_bytes       = totalPixels * sizeof(int);
+    const size_t entropy_bytes  = size_t(numTiles) * sizeof(float);
+    const size_t contrast_bytes = size_t(numTiles) * sizeof(float);
 
     if (d_iterations.size() < it_bytes ||
         d_entropy.size()    < entropy_bytes ||
@@ -147,14 +150,12 @@ void renderCudaFrame(
         throw std::runtime_error("CudaInterop::renderCudaFrame: device buffers undersized");
     }
 
-    // Deterministische Clears
-    CUDA_CHECK(cudaMemset(d_iterations.get(), 0, d_iterations.size()));
-    CUDA_CHECK(cudaMemset(d_entropy.get(),    0, d_entropy.size()));
-    CUDA_CHECK(cudaMemset(d_contrast.get(),   0, d_contrast.size()));
+    // 🦦 Otter: Keine generellen Memsets im Hot-Path — alle Ziele werden vollständig überschrieben. (Bezug zu Otter)
+    // (d_iterations via H2D, d_entropy/d_contrast via computeCudaEntropyContrast/contrastKernel)
 
     // ---------------------------------- NACKTMULL: Host-Iters ----------------------------------
     std::vector<int> h_iters;
-    h_iters.resize(static_cast<size_t>(totalPixels));
+    h_iters.resize(totalPixels);
 
 #ifndef CUDA_ARCH
     hostItMs = Nacktmull::compute_host_iterations(
@@ -194,7 +195,7 @@ void renderCudaFrame(
         throw std::runtime_error("pboResource->map() returned null");
     }
 
-    const size_t expected = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uchar4);
+    const size_t expected = size_t(width) * size_t(height) * sizeof(uchar4);
     if (surfBytes < expected) {
         LUCHS_LOG_HOST("[FATAL] PBO size too small: got=%zu need=%zu (w=%d h=%d)", surfBytes, expected, width, height);
         pboResource->unmap();
@@ -249,13 +250,13 @@ void renderCudaFrame(
 #endif
 
     // Host-Ziele vorbereiten (keine Reallocs → dann pinnen)
-    if ((size_t)h_entropy.capacity()  < (size_t)numTiles) h_entropy.reserve((size_t)numTiles);
-    if ((size_t)h_contrast.capacity() < (size_t)numTiles) h_contrast.reserve((size_t)numTiles);
+    if (h_entropy.capacity()  < size_t(numTiles)) h_entropy.reserve(size_t(numTiles));
+    if (h_contrast.capacity() < size_t(numTiles)) h_contrast.reserve(size_t(numTiles));
     ensureHostPinned(h_entropy,  s_hostRegEntropyPtr,  s_hostRegEntropyBytes);
     ensureHostPinned(h_contrast, s_hostRegContrastPtr, s_hostRegContrastBytes);
 
-    h_entropy.resize((size_t)numTiles);
-    h_contrast.resize((size_t)numTiles);
+    h_entropy.resize(size_t(numTiles));
+    h_contrast.resize(size_t(numTiles));
 
     CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),  entropy_bytes,  cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(), contrast_bytes, cudaMemcpyDeviceToHost));

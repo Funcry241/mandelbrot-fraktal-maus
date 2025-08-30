@@ -3,18 +3,9 @@
 // 🐭 Maus: Header minimal, eindeutig und stabil – keine heimlichen ABI-Änderungen.
 // 🦊 Schneefuchs: Nur die tatsächlich implementierte API, C++-Linkage.
 
+#pragma once
 #ifndef CORE_KERNEL_H
 #define CORE_KERNEL_H
-
-#include <cuda_runtime.h>   // cuda types / API
-#include <vector_types.h>   // float2, uchar4 (nur Assertions)
-#include <type_traits>
-
-// Erwartete Plain-Old-Data-Eigenschaften (Hostsicht)
-static_assert(std::is_trivial<float2>::value, "float2 must be trivial");
-static_assert(std::is_trivial<uchar4>::value, "uchar4 must be trivial");
-static_assert(sizeof(float2) == 8,            "float2 must be 8 bytes");
-static_assert(sizeof(uchar4) == 4,            "uchar4 must be 4 bytes");
 
 // ----------------------------------------------------------------------------
 // computeCudaEntropyContrast

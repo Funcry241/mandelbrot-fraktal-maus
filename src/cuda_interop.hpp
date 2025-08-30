@@ -6,11 +6,9 @@
 #define CUDA_INTEROP_HPP
 
 #include <vector>
-#include <GLFW/glfw3.h>
-#include <vector_types.h>
-#include "core_kernel.h"
-#include "hermelin_buffer.hpp"
-#include "bear_CudaPBOResource.hpp"
+#include <vector_types.h>         // float2
+#include "core_kernel.h"          // computeCudaEntropyContrast(...)
+#include "hermelin_buffer.hpp"    // Hermelin::CudaDeviceBuffer, Hermelin::GLBuffer
 
 class RendererState;
 
@@ -41,11 +39,12 @@ void renderCudaFrame(
 );
 
 void setPauseZoom(bool pause);
-bool getPauseZoom();
-bool precheckCudaRuntime();
-bool verifyCudaGetErrorStringSafe();
+[[nodiscard]] bool getPauseZoom();
+[[nodiscard]] bool precheckCudaRuntime();
+[[nodiscard]] bool verifyCudaGetErrorStringSafe();
 void logCudaDeviceContext(const char* context);
 
+// Bequemer Inline-Forwarder für die E/C-Pipeline (keine neue ABI-Oberfläche).
 inline void computeCudaEntropyContrast(
     const int* d_iterations,
     float* d_entropyOut,

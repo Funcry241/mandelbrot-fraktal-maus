@@ -9,7 +9,6 @@
 #include "settings.hpp"
 #include "renderer_loop.hpp"   // RendererLoop::keyCallback
 #include "luchs_log_host.hpp"
-#include <GLFW/glfw3.h>
 
 namespace RendererInternals {
 

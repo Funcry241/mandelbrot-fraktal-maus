@@ -1,4 +1,3 @@
-// MAUS:
 // Datei: src/common.hpp
 #pragma once
 
@@ -36,9 +35,11 @@
 
 // --- KEIN eigenes CUDA_CHECK mehr hier ---
 
+// 🦊 Schneefuchs: Nutze std::log2 (C++-konform) statt std::log2f; gleiche Semantik, bessere Portabilität.
+// 🦦 Otter: Pfad bleibt numerisch stabil; Clamp nach Rundung sichert Grenzen.
 inline int computeTileSizeFromZoom(float zoom) noexcept {
     const float base = static_cast<float>(Settings::BASE_TILE_SIZE);
-    const float raw  = base - std::log2f(std::max(0.0f, zoom) + 1.0f);
+    const float raw  = base - std::log2(std::max(0.0f, zoom) + 1.0f);
     int t = static_cast<int>(std::lround(raw));
     t = std::clamp(t, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
     return t;

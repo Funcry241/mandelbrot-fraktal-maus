@@ -26,31 +26,28 @@ FrameContext::FrameContext()
 , totalTime(0.0)
 , timeSinceLastZoom(0.0)
 {
-// Hostseitige Vektoren h_entropy und h_contrast sind per Default leer
-// Initialisierung erfolgt später, wenn tileSize und Bildgröße bekannt sind
+    // Hostseitige Vektoren h_entropy und h_contrast sind per Default leer.
+    // Initialisierung erfolgt später, wenn tileSize und Bildgröße bekannt sind.
 }
 
-void FrameContext::clear() {
-// 🧹 Buffer zurücksetzen bei Resize oder Reset
-h_entropy.clear();
-h_contrast.clear();
+void FrameContext::clear() noexcept {
+    // 🧹 Buffer zurücksetzen bei Resize oder Reset
+    h_entropy.clear();
+    h_contrast.clear();
 
-// Device-Zeiger auf nullptr setzen, ohne Freigabe (muss extern erfolgen)
-d_entropy = nullptr;
-d_contrast = nullptr;
-d_iterations = nullptr;
+    // Device-Zeiger auf nullptr setzen, ohne Freigabe (muss extern erfolgen)
+    d_entropy = nullptr;
+    d_contrast = nullptr;
+    d_iterations = nullptr;
 
-// Zoom-Flags zurücksetzen
-shouldZoom = false;
-
+    // Zoom-Flags zurücksetzen
+    shouldZoom = false;
 }
 
-void FrameContext::printDebug() const {
-if (!Settings::debugLogging)
-return;
+void FrameContext::printDebug() const noexcept {
+    if constexpr (!Settings::debugLogging) return;
 
-// 📣 Wichtige Statusinformationen zum Frame ausgeben
-LUCHS_LOG_HOST("[Frame] width=%d height=%d zoom=%.1e offset=(%.5f, %.5f) tileSize=%d",
-    width, height, zoom, offset.x, offset.y, tileSize);
-
+    // 📣 Wichtige Statusinformationen zum Frame ausgeben (ASCII-only)
+    LUCHS_LOG_HOST("[Frame] width=%d height=%d zoom=%.5f offset=(%.5f, %.5f) tileSize=%d",
+                   width, height, zoom, offset.x, offset.y, tileSize);
 }

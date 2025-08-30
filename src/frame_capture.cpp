@@ -1,4 +1,3 @@
-//MAUS
 // Implementation: Async capture using GL pixel pack buffer (PBO) + fence.
 // 🦦 Otter: Zero stalls on the render path — no glFinish; enqueue readback once.
 // 🦊 Schneefuchs: GL state restored; ASCII-only logs; MSVC-safe fopen_s; header/source in sync.
@@ -11,6 +10,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 namespace {
 
@@ -29,8 +29,8 @@ static bool write_bmp24_from_rgba(const char* path, int w, int h, const uint8_t*
     if (w <= 0 || h <= 0 || !rgba) return false;
 
     const int rowStrideBGR = ((w * 3 + 3) / 4) * 4; // 4-byte aligned
-    const uint32_t pixelDataSize = rowStrideBGR * h;
-    const uint32_t fileSize = 54 + pixelDataSize;
+    const uint32_t pixelDataSize = static_cast<uint32_t>(rowStrideBGR) * static_cast<uint32_t>(h);
+    const uint32_t fileSize = 54u + pixelDataSize;
 
     uint8_t hdr[54]; std::memset(hdr, 0, sizeof(hdr));
     hdr[0] = 'B'; hdr[1] = 'M';
@@ -54,10 +54,10 @@ static bool write_bmp24_from_rgba(const char* path, int w, int h, const uint8_t*
 
     if (std::fwrite(hdr, 1, 54, f) != 54) { std::fclose(f); return false; }
 
-    std::vector<uint8_t> row(rowStrideBGR, 0);
+    std::vector<uint8_t> row(static_cast<size_t>(rowStrideBGR), 0);
     // BMP is bottom-up; OpenGL rows start at y=0 bottom when height is positive in header
     for (int y = 0; y < h; ++y) {
-        const uint8_t* src = rgba + (size_t)y * (size_t)w * 4;
+        const uint8_t* src = rgba + (size_t)y * (size_t)w * 4u;
         uint8_t* dst = row.data();
         for (int x = 0; x < w; ++x) {
             const uint8_t r = src[4*x + 0];
@@ -65,7 +65,10 @@ static bool write_bmp24_from_rgba(const char* path, int w, int h, const uint8_t*
             const uint8_t b = src[4*x + 2];
             *dst++ = b; *dst++ = g; *dst++ = r; // BGR
         }
-        if (std::fwrite(row.data(), 1, rowStrideBGR, f) != (size_t)rowStrideBGR) { std::fclose(f); return false; }
+        if (std::fwrite(row.data(), 1, static_cast<size_t>(rowStrideBGR), f) != static_cast<size_t>(rowStrideBGR)) {
+            std::fclose(f);
+            return false;
+        }
     }
     std::fclose(f);
     return true;
@@ -73,6 +76,14 @@ static bool write_bmp24_from_rgba(const char* path, int w, int h, const uint8_t*
 
 static void enqueue_readback()
 {
+    // Preserve GL state we touch
+    GLint prevPackPbo = 0;
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &prevPackPbo);
+    GLint prevReadBuf = 0;
+    glGetIntegerv(GL_READ_BUFFER, &prevReadBuf);
+    GLint prevPackAlign = 0;
+    glGetIntegerv(GL_PACK_ALIGNMENT, &prevPackAlign);
+
     // Query viewport → width/height of the current framebuffer
     GLint vp[4] = {0,0,0,0};
     glGetIntegerv(GL_VIEWPORT, vp);
@@ -80,7 +91,8 @@ static void enqueue_readback()
     g_cap.h = vp[3];
     g_cap.bytes = (size_t)g_cap.w * (size_t)g_cap.h * 4u;
 
-    if (g_cap.w <= 0 || g_cap.h <= 0) {
+    if (g_cap.w <= 0 || g_cap.h <= 0 ||
+        g_cap.bytes > static_cast<size_t>(std::numeric_limits<GLsizeiptr>::max())) {
         LUCHS_LOG_HOST("[CAPTURE] ERROR: invalid viewport (%d x %d)", g_cap.w, g_cap.h);
         g_cap.requested = false; g_cap.done = true;
         return;
@@ -91,10 +103,11 @@ static void enqueue_readback()
         glGenBuffers(1, &g_cap.pbo);
     }
     glBindBuffer(GL_PIXEL_PACK_BUFFER, g_cap.pbo);
-    glBufferData(GL_PIXEL_PACK_BUFFER, (GLsizeiptr)g_cap.bytes, nullptr, GL_STREAM_READ);
+    glBufferData(GL_PIXEL_PACK_BUFFER, static_cast<GLsizeiptr>(g_cap.bytes), nullptr, GL_STREAM_READ);
 
     // Enqueue non-blocking readback from backbuffer into PBO
     glReadBuffer(GL_BACK);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1); // 🦊 Schneefuchs: robust row packing for any width (Bezug zu Schneefuchs).
     glReadPixels(0, 0, g_cap.w, g_cap.h, GL_RGBA, GL_UNSIGNED_BYTE, (void*)0);
 
     // Insert fence so we can poll completion later
@@ -104,7 +117,13 @@ static void enqueue_readback()
     }
     g_cap.fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    // Push commands to the server without stalling
+    glFlush(); // 🦦 Otter: kick the pipe; still non-blocking (Bezug zu Otter).
+
+    // Restore GL state
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLuint>(prevPackPbo));
+    glReadBuffer(prevReadBuf);
+    glPixelStorei(GL_PACK_ALIGNMENT, prevPackAlign);
 
     if (g_cap.fence) {
         LUCHS_LOG_HOST("[CAPTURE] Enqueued readback into PBO (w=%d h=%d bytes=%zu)", g_cap.w, g_cap.h, g_cap.bytes);
@@ -122,6 +141,9 @@ static void try_finish_write()
     const GLenum res = glClientWaitSync(g_cap.fence, 0, 0);
     if (res == GL_ALREADY_SIGNALED || res == GL_CONDITION_SATISFIED) {
         // Map PBO and write BMP
+        GLint prevPackPbo = 0;
+        glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &prevPackPbo);
+
         glBindBuffer(GL_PIXEL_PACK_BUFFER, g_cap.pbo);
         void* ptr = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr)g_cap.bytes, GL_MAP_READ_BIT);
         if (!ptr) {
@@ -143,7 +165,8 @@ static void try_finish_write()
             LUCHS_LOG_HOST("[CAPTURE] ERROR: glMapBufferRange failed");
         }
 
-        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        // Restore previous binding
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLuint>(prevPackPbo));
 
         // Cleanup fence and PBO (single-shot)
         glDeleteSync(g_cap.fence); g_cap.fence = 0;

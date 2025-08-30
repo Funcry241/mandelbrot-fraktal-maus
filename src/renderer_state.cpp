@@ -18,12 +18,14 @@ void RendererState::CudaPhaseTimings::resetHostFrame() noexcept {
     frameTotalMs = 0.0;
 }
 
-// Helper: compute tile layout for given tileSize (header-local, ODR-safe)
-static inline void computeTiles(int width, int height, int tileSize,
-                                int& tilesX, int& tilesY, int& numTiles) {
-    tilesX   = (width  + tileSize - 1) / tileSize;
-    tilesY   = (height + tileSize - 1) / tileSize;
-    numTiles = tilesX * tilesY;
+// 🦊 Schneefuchs: interne Helfer in anonymer NS, noexcept – kein ODR-Risiko, klarer Scope. (Bezug zu Schneefuchs)
+namespace {
+    inline void computeTiles(int width, int height, int tileSize,
+                             int& tilesX, int& tilesY, int& numTiles) noexcept {
+        tilesX   = (width  + tileSize - 1) / tileSize;
+        tilesY   = (height + tileSize - 1) / tileSize;
+        numTiles = tilesX * tilesY;
+    }
 }
 
 RendererState::RendererState(int w, int h)
@@ -76,21 +78,21 @@ void RendererState::setupCudaBuffers(int tileSize) {
     tileSize = std::clamp(tileSize, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
 
     // --- derive sizes ---
-    const int totalPixels = width * height;
+    const size_t totalPixels    = size_t(width) * size_t(height); // 🦊 Schneefuchs: size_t-Multiplikation gegen int-Overflow.
     int tilesX = 0, tilesY = 0, numTiles = 0;
     computeTiles(width, height, tileSize, tilesX, tilesY, numTiles);
 
-    const size_t it_bytes       = static_cast<size_t>(totalPixels) * sizeof(int);
-    const size_t entropy_bytes  = static_cast<size_t>(numTiles)    * sizeof(float);
-    const size_t contrast_bytes = static_cast<size_t>(numTiles)    * sizeof(float);
+    const size_t it_bytes       = totalPixels * sizeof(int);
+    const size_t entropy_bytes  = size_t(numTiles) * sizeof(float);
+    const size_t contrast_bytes = size_t(numTiles) * sizeof(float);
 
     // 🦦 Otter: Fast-Path – wenn alles schon passt, sofort raus (keine Memsets/Sync)
     const bool sizesOk =
-        d_iterations.size() >= it_bytes   &&
+        d_iterations.size() >= it_bytes      &&
         d_entropy.size()    >= entropy_bytes &&
         d_contrast.size()   >= contrast_bytes &&
-        h_entropy.size()    == static_cast<size_t>(numTiles) &&
-        h_contrast.size()   == static_cast<size_t>(numTiles) &&
+        h_entropy.size()    == size_t(numTiles) &&
+        h_contrast.size()   == size_t(numTiles) &&
         lastTileSize        == tileSize;
 
     if (sizesOk) {
@@ -98,7 +100,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
     }
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[DEBUG] setupCudaBuffers: w=%d h=%d zoom=%.5f tileSize=%d tiles=%d (%d x %d) pixels=%d",
+        LUCHS_LOG_HOST("[DEBUG] setupCudaBuffers: w=%d h=%d zoom=%.5f tileSize=%d tiles=%d (%d x %d) pixels=%zu",
                        width, height, zoom, tileSize, numTiles, tilesX, tilesY, totalPixels);
     }
 
@@ -133,11 +135,15 @@ void RendererState::setupCudaBuffers(int tileSize) {
 
     // Diagnostics: pointer attributes (ASCII only, optional)
     if constexpr (Settings::debugLogging) {
-        cudaPointerAttributes attr = {};
-        cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_entropy.get());
-        LUCHS_LOG_HOST("[CHECK] d_entropy attr: err=%d type=%d device=%d hostPtr=%p devicePtr=%p",
-                       (int)attrErr, (int)attr.type, (int)attr.device,
-                       (void*)attr.hostPointer, (void*)attr.devicePointer);
+        cudaPointerAttributes attr{};
+        const cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_entropy.get());
+        if (attrErr == cudaSuccess) {
+            LUCHS_LOG_HOST("[CHECK] d_entropy attr: type=%d device=%d hostPtr=%p devicePtr=%p",
+                           (int)attr.type, (int)attr.device,
+                           (void*)attr.hostPointer, (void*)attr.devicePointer);
+        } else {
+            LUCHS_LOG_HOST("[CHECK] d_entropy attr query failed: err=%d", (int)attrErr);
+        }
     }
 
     // --- contrast buffer (only-grow policy) ---
@@ -164,13 +170,13 @@ void RendererState::setupCudaBuffers(int tileSize) {
     // 🦊 Schneefuchs: optionaler Debug-Sync zur klaren Fehlerlokalisierung
     if constexpr (Settings::debugLogging) {
         CUDA_CHECK(cudaDeviceSynchronize());
-        cudaError_t syncErr = cudaGetLastError();
-        LUCHS_LOG_HOST("[CHECK] post-alloc sync: err=%d", (int)syncErr);
+        cudaError_t lastErr = cudaGetLastError();
+        LUCHS_LOG_HOST("[CHECK] post-alloc sync: err=%d", (int)lastErr);
     }
 
     // --- host mirror sizes ---
-    h_entropy.resize(numTiles);
-    h_contrast.resize(numTiles);
+    h_entropy.resize(size_t(numTiles));
+    h_contrast.resize(size_t(numTiles));
 
     // --- summary ---
     if constexpr (Settings::debugLogging) {

@@ -7,11 +7,12 @@
 #include "frame_context.hpp"
 #include "zoom_command.hpp"
 #include "renderer_state.hpp"
+#include <GL/glew.h> // GLuint
 
 namespace FramePipeline {
 
 // 🔁 Frame-Start (Zeit, Init)
-void beginFrame(FrameContext& ctx);
+void beginFrame(FrameContext& ctx, RendererState& state);
 
 // ⚙️ CUDA Rendering + Heatmap
 void computeCudaFrame(FrameContext& ctx, RendererState& state);

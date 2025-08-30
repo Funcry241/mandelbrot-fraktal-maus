@@ -6,7 +6,8 @@
 #ifndef BEAR_CUDA_PBO_RESOURCE_HPP
 #define BEAR_CUDA_PBO_RESOURCE_HPP
 
-#include "renderer_resources.hpp"
+#include <cstddef>          // size_t
+#include <GL/glew.h>        // GLuint
 #include <cuda_gl_interop.h>
 
 namespace CudaInterop {
@@ -21,10 +22,10 @@ public:
     ~bear_CudaPBOResource();
 
     // 🐻 Bär: Liefert das CUDA-Resource-Handle für Mapping/Unmapping
-    cudaGraphicsResource_t get() const noexcept;
+    [[nodiscard]] cudaGraphicsResource_t get() const noexcept;
 
     // 🐻 Bär: mappt CUDA-Resource und liefert Dev-Pointer zurück, loggt Zustand
-    void* mapAndLog(size_t& sizeOut);
+    [[nodiscard]] void* mapAndLog(size_t& sizeOut);
 
     // 🐻 Bär: unmappt CUDA-Resource
     void unmap();

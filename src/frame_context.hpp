@@ -1,16 +1,18 @@
 // Datei: src/frame_context.hpp
-// 🦦 Otter: Klar sichtbar als Kapsel, keine faulen pragmas. Konstruktor & Logging deklariert.
-// 🦊 Schneefuchs: Speicherstruktur explizit - deterministisch, loggingkompatibel.
+// 🦦 Otter: Klar sichtbare Kapsel, keine schweren Includes im Header. (Bezug zu Otter)
+// 🦊 Schneefuchs: Float2 sauber via <vector_types.h>, noexcept wo sinnvoll. (Bezug zu Schneefuchs)
 
 #pragma once
 #include <vector>
-#include <cuda_runtime.h>
-#include "settings.hpp"
-#include "luchs_log_host.hpp"
+#include <vector_types.h> // float2 (__align__ erzwingt 8-Byte-Alignment → C4324 unter /WX)
 
-#ifdef _MSC_VER
-    #pragma warning(push)
-    #pragma warning(disable: 4324) // 🛡️ MSVC: Padding wegen float2 erlaubt - Struktur korrekt genutzt
+// 🐭 Maus: Intentional alignment due to CUDA float2 members; silence MSVC C4324 locally.
+// 🦦 Otter: Local pragma keeps /WX globally strict.
+// 🐑 Schneefuchs: Bezug zu Schneefuchs: gezielte, dokumentierte Warnungsbehandlung nur um FrameContext.
+
+#if defined(_MSC_VER)
+  #pragma warning(push)
+  #pragma warning(disable : 4324) // structure was padded due to alignment specifier
 #endif
 
 class FrameContext {
@@ -24,23 +26,23 @@ public:
     int tileSize;
 
     // Kamera / Fraktalkoordinaten
-    float zoom;
+    float  zoom;
     float2 offset;
 
     // Auto-Zoom-Steuerung
-    bool pauseZoom = false;
-    bool shouldZoom = false;
+    bool   pauseZoom = false;
+    bool   shouldZoom = false;
     float2 newOffset = {0.0f, 0.0f}; // neues Ziel (wenn shouldZoom = true)
 
     // Entropie-Daten
     std::vector<float> h_entropy;   // hostseitig - pro Tile
     std::vector<float> h_contrast;  // Kontrast pro Tile - für Heatmap
-    float* d_entropy = nullptr;     // device-seitig
-    float* d_contrast = nullptr;    // Kontrastwerte auf GPU
-    int* d_iterations = nullptr;    // Iterationstiefe je Pixel
+    float* d_entropy   = nullptr;   // device-seitig
+    float* d_contrast  = nullptr;   // Kontrastwerte auf GPU
+    int*   d_iterations = nullptr;  // Iterationstiefe je Pixel
 
     // Statuswerte zur Analyse / Logging
-    float lastEntropy = 0.0f;
+    float lastEntropy  = 0.0f;
     float lastContrast = 0.0f;
 
     // Heatmap Overlay
@@ -53,16 +55,16 @@ public:
 
     int frameIndex = 0; // 🦦 Otter: für Kontext-Zeitachsenanalyse – wird pro Frame gesetzt
 
-    // Konstruktor initialisiert aus Settings
+    // Konstruktor initialisiert aus Settings (Definition in .cpp)
     FrameContext();
 
     // Debug-Ausgaben
-    void printDebug() const;
+    void printDebug() const noexcept;
 
-    // Speicher zurücksetzen - z. B. bei Resize
-    void clear();
+    // Speicher zurücksetzen - z. B. bei Resize
+    void clear() noexcept;
 };
 
-#ifdef _MSC_VER
-    #pragma warning(pop)
+#if defined(_MSC_VER)
+  #pragma warning(pop)
 #endif

@@ -1,4 +1,3 @@
-// MAUS:
 // Datei: src/opengl_utils.cpp
 // 🐭 Maus-Kommentar: Shaderfehler beenden das Programm nicht mehr, sondern geben 0 zurück und loggen klar. Schneefuchs: „Otter stirbt erst, wenn du willst.“
 // 🦊 Schneefuchs: Robustere Logs (volle Info-Logs), sauberes State-Restore bei VAO/VBO/EBO, optionale Debug-Gruppen. (Bezug zu Schneefuchs)
@@ -59,6 +58,12 @@ namespace {
 static GLuint compileShader(GLenum type, const char* src) {
     glDebugPush(type == GL_VERTEX_SHADER ? "compile vertex shader" : "compile fragment shader");
 
+    if (!src || !*src) {
+        LUCHS_LOG_HOST("[ShaderError] empty/null source (%s)", type == GL_VERTEX_SHADER ? "Vertex" : "Fragment");
+        glDebugPop();
+        return 0;
+    }
+
     GLuint s = glCreateShader(type);
     if (!s) {
         LUCHS_LOG_HOST("[ShaderError] glCreateShader failed (type=%u)", (unsigned)type);
@@ -96,6 +101,12 @@ static GLuint compileShader(GLenum type, const char* src) {
 
 GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) {
     glDebugPush("link program");
+
+    if (!vertexSrc || !*vertexSrc || !fragmentSrc || !*fragmentSrc) {
+        LUCHS_LOG_HOST("[ShaderError] createProgramFromSource: null/empty source(s)");
+        glDebugPop();
+        return 0;
+    }
 
     GLuint v = compileShader(GL_VERTEX_SHADER,  vertexSrc);
     if (v == 0) { glDebugPop(); return 0; }

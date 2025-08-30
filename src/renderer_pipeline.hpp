@@ -5,7 +5,7 @@
 // Struktur klar, Zweck klar, Header synchron zur Source.
 
 #pragma once
-#include "pch.hpp"
+#include <GL/glew.h> // Schneefuchs: nur was für GLuint nötig – kein PCH im Header.
 
 namespace RendererPipeline {
 

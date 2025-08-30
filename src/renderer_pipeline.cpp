@@ -53,6 +53,14 @@ void main() { FragColor = texture(uTex, vTex); }
 )GLSL";
 
 void init() {
+    // 🦊 Schneefuchs: idempotent – mehrfacher Aufruf erzeugt keine Ressourcen doppelt.
+    if (program != 0 && VAO != 0) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[PIPELINE] init skipped (already initialized)");
+        }
+        return;
+    }
+
     program = OpenGLUtils::createProgramFromSource(vShader, fShader);
     if (!program) {
         LUCHS_LOG_HOST("[FATAL] Shader program creation failed - aborting");

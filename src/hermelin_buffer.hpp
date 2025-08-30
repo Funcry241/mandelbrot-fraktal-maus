@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include <cuda_runtime.h>
 #include <GL/glew.h>
 #include <cstddef>
 
@@ -22,15 +21,15 @@ public:
     CudaDeviceBuffer(CudaDeviceBuffer&& other) noexcept;
     CudaDeviceBuffer& operator=(CudaDeviceBuffer&& other) noexcept;
 
-    void allocate(size_t sizeBytes);
-    void free();
+    void   allocate(size_t sizeBytes);
+    void   free();
 
-    void* get() const;
+    void*  get() const;
     size_t size() const;
-    explicit operator bool() const;
+    [[nodiscard]] explicit operator bool() const { return get() != nullptr && size() > 0; }
 
 private:
-    void* ptr_;
+    void*  ptr_;
     size_t sizeBytes_;
 };
 
@@ -47,13 +46,13 @@ public:
 
     explicit GLBuffer(GLuint id) noexcept;
 
-    void create();
-    void allocate(GLsizeiptr sizeBytes, GLenum usage = GL_DYNAMIC_DRAW);
-    void initAsPixelBuffer(int width, int height, int bytesPerPixel = 4); // 🦊 Schneefuchs: Formatlogik gekapselt.
-    void free();
+    void   create();
+    void   allocate(GLsizeiptr sizeBytes, GLenum usage = GL_DYNAMIC_DRAW);
+    void   initAsPixelBuffer(int width, int height, int bytesPerPixel = 4); // 🦊 Schneefuchs: Formatlogik gekapselt.
+    void   free();
 
-    GLuint id() const;
-    explicit operator bool() const;
+    [[nodiscard]] GLuint id() const;
+    [[nodiscard]] explicit operator bool() const { return id() != 0; }
 
 private:
     GLuint id_;
