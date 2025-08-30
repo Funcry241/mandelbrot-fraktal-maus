@@ -9,6 +9,7 @@
 #include <cstring>
 #include <vector_types.h>
 #include <vector_functions.h> // make_float2
+#include <GL/glew.h>          // <-- Viewport & PBO peek
 
 #include "renderer_resources.hpp"    // OpenGLUtils::setGLResourceContext(const char*), OpenGLUtils::updateTextureFromPBO(GLuint pbo, GLuint tex, int w, int h)
 #include "renderer_pipeline.hpp"     // RendererPipeline::drawFullscreenQuad(...)
@@ -260,6 +261,19 @@ static void applyZoomStep(FrameContext& fctx, CommandBus& bus) {
 static void drawFrame(FrameContext& fctx, RendererState& state) {
     const auto t0 = Clock::now();
 
+    // 1) Viewport sicherstellen (häufige Weiß-Bild-Ursache)
+    {
+        GLint vp[4] = {0,0,0,0};
+        glGetIntegerv(GL_VIEWPORT, vp);
+        if (vp[2] != fctx.width || vp[3] != fctx.height) {
+            glViewport(0, 0, fctx.width, fctx.height);
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[GL] viewport set -> %dx%d (was %dx%d)",
+                               fctx.width, fctx.height, vp[2], vp[3]);
+            }
+        }
+    }
+
     // Diagnose: Einmal vor dem Upload ins PBO schauen
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] drawFrame begin: tex=%u pbo=%u %dx%d",
@@ -270,6 +284,13 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
     // **WICHTIG**: Stabile API & richtige Reihenfolge -> PBO vor Texture
     OpenGLUtils::setGLResourceContext("draw");
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), state.tex.id(), fctx.width, fctx.height);
+
+    // Debug-Clear (nur im Debug): dunkler Hintergrund, damit FSQ sichtbar ist
+    if constexpr (Settings::debugLogging) {
+        glDisable(GL_SCISSOR_TEST);
+        glClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
 
     RendererPipeline::drawFullscreenQuad(state.tex.id());
 
