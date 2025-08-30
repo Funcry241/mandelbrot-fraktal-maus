@@ -270,9 +270,50 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     // texMs measures only PBO->Texture upload + FSQ draw, separate from overlays.
     auto tTex0 = Clock::now();
 
+    // Optional: einmalige Testfarbe, um Draw-Pfad zu verifizieren (nur Debug)
+    if constexpr (Settings::debugLogging) {
+        if (globalFrameCounter == 1) {
+            unsigned char cc[4] = {255, 0, 255, 255}; // magenta RGBA
+            glBindTexture(GL_TEXTURE_2D, tex);
+            glClearTexImage(tex, 0, GL_RGBA, GL_UNSIGNED_BYTE, cc);
+            LUCHS_LOG_HOST("[DBG] clearTexImage applied (magenta) to verify draw path");
+        }
+    }
+
+    // Debug: PBO-Inhalt kurz peek'en (erste Bytes), um Upload-Quelle zu validieren
+    if constexpr (Settings::debugLogging) {
+        GLint prevPBO = 0;
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevPBO);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, state.pbo.id());
+        const GLsizeiptr total = (GLsizeiptr)frameCtx.width * (GLsizeiptr)frameCtx.height * 4;
+        GLsizeiptr sample = total < 64 ? total : 64;
+        void* ptr = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, sample, GL_MAP_READ_BIT);
+        if (ptr) {
+            const unsigned char* u = static_cast<const unsigned char*>(ptr);
+            unsigned int s0=u[0], s1=u[1], s2=u[2], s3=u[3];
+            unsigned int sum = 0; for (int i=0; i<16 && i<sample; ++i) sum += u[i];
+            LUCHS_LOG_HOST("[PBO-PEEK] pbo=%u first4=%u,%u,%u,%u sum16=%u",
+                           static_cast<unsigned>(state.pbo.id()), s0, s1, s2, s3, sum);
+            glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+        } else {
+            LUCHS_LOG_HOST("[PBO-PEEK][ERR] glMapBufferRange returned null for pbo=%u",
+                           static_cast<unsigned>(state.pbo.id()));
+        }
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prevPBO));
+    }
+
     // Explizite Bind-Reihenfolge: (texture,pbo) binden und uploaden
     setGLResourceContext(tex, state.pbo.id());
     updateTextureFromPBO(tex, state.pbo.id(), frameCtx.width, frameCtx.height);
+
+    if constexpr (Settings::debugLogging) {
+        const GLenum upErr = glGetError();
+        LUCHS_LOG_HOST("[PIPE][UPLOAD] tex=%u pbo=%u %dx%d glError=0x%04X",
+                       static_cast<unsigned>(tex),
+                       static_cast<unsigned>(state.pbo.id()),
+                       frameCtx.width, frameCtx.height,
+                       static_cast<unsigned>(upErr));
+    }
 
     RendererPipeline::drawFullscreenQuad(tex);
 
