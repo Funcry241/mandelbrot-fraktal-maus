@@ -360,8 +360,8 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     }
 
     // Context tag for logging + upload PBO->Texture
-    setGLResourceContext(state.pbo.id(), tex);
-    updateTextureFromPBO(state.pbo.id(), tex, frameCtx.width, frameCtx.height);
+    setGLResourceContext(tex, state.pbo.id());
+    updateTextureFromPBO(tex, state.pbo.id(), frameCtx.width, frameCtx.height);
 
     if constexpr (Settings::debugLogging) {
         const GLenum upErr = glGetError();
