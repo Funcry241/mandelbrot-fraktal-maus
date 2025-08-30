@@ -2,15 +2,16 @@
 ///// Schneefuchs: /WX-fest; Header-Sync; RAII & deterministisch.
 ///// Maus: Eine Quelle für Tiles/Upload; Zoom V2 außerhalb der CUDA-Interop.
 
+// Datei: src/frame_pipeline.cpp
 
-// 🐭 Maus: Eine Quelle für Tiles pro Frame. Vor Render: Buffer-Sync via setupCudaBuffers(...).
-// 🦦 Otter: Sanity-Logs, deterministische Reihenfolge; Zoom V2 außerhalb der CUDA-Interop. (Bezug zu Otter)
-// 🐑 Schneefuchs: Kein doppeltes Sizing, keine Alt-Settings. (Bezug zu Schneefuchs)
-// 🐑 Schneefuchs: /WX-fest – keine konstanten ifs (C4127) und keine C4702 mehr; Debug/Perf via if constexpr. ASCII logs only.
+// Maus: Eine Quelle für Tiles pro Frame. Vor Render: Buffer-Sync via setupCudaBuffers(...).
+// Otter: Sanity-Logs, deterministische Reihenfolge; Zoom V2 außerhalb der CUDA-Interop.
+// Schneefuchs: Kein doppeltes Sizing, keine Alt-Settings.
+// Schneefuchs: /WX-fest – keine konstanten ifs (C4127) und keine C4702 mehr; Debug/Perf via if constexpr. ASCII logs only.
 
 #include "pch.hpp"
-#include "renderer_resources.hpp"    // <— neu (sofern vorhanden)
-#include "cuda_interop.hpp"          // (falls Funktionen PBO/Interop-Kontext benötigen)
+#include "renderer_resources.hpp"
+#include "cuda_interop.hpp"
 #include <vector_types.h>
 #include <vector_functions.h> // make_float2
 #include <chrono>   // timing
@@ -29,6 +30,7 @@
 #include "zoom_logic.hpp"
 #include "fps_meter.hpp"
 #include "hud_text.hpp"
+#include <GL/glew.h>
 
 namespace FramePipeline {
 
@@ -39,7 +41,7 @@ static int globalFrameCounter = 0;
 // Small local zoom gain (per accepted step)
 static constexpr float kZOOM_GAIN = 1.006f;
 
-// 🦦 Otter: Local perf accumulators for this TU (ASCII-only).
+// Otter: Local perf accumulators for this TU (ASCII-only).
 namespace {
     using Clock = std::chrono::high_resolution_clock;
     using msd   = std::chrono::duration<double, std::milli>;
@@ -67,7 +69,7 @@ namespace {
 
 // --------------------------------- frame begin --------------------------------
 void beginFrame(FrameContext& frameCtx, RendererState& state) {
-    // 🐑 Schneefuchs: Host-Timings pro Frame auf Null (eine Quelle, falls genutzt)
+    // Schneefuchs: Host-Timings pro Frame auf Null (eine Quelle, falls genutzt)
     state.lastTimings.resetHostFrame();
 
     const double now = glfwGetTime();
@@ -268,15 +270,14 @@ void drawFrame(FrameContext& frameCtx, GLuint tex, RendererState& state) {
     // texMs measures only PBO->Texture upload + FSQ draw, separate from overlays.
     auto tTex0 = Clock::now();
 
-    // Neue direkte Aufrufe (freie Funktionen, keine Namespaces nötig)
-    setGLResourceContext();
+    // Explizite Bind-Reihenfolge: (texture,pbo) binden und uploaden
+    setGLResourceContext(tex, state.pbo.id());
     updateTextureFromPBO(tex, state.pbo.id(), frameCtx.width, frameCtx.height);
 
     RendererPipeline::drawFullscreenQuad(tex);
 
     auto tTex1 = Clock::now();
     g_perfTexMs = std::chrono::duration_cast<msd>(tTex1 - tTex0).count();
-    // optional: zentral ablegen (tut nix kaputt, wird nur befüllt)
     state.lastTimings.uploadMs = g_perfTexMs;
 
     // overlaysMs measures Heatmap + Warzenschwein together.
