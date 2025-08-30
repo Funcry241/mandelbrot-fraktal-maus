@@ -15,8 +15,8 @@
 #include "nacktmull_shade.cuh"     // shade_from_iterations / shade_test_pattern
 
 #include <cuda_gl_interop.h>
-#include <cuda_runtime.h>          // events/memcpy/host register
-#include <vector_types.h>          // uchar4
+#include <cuda_runtime.h>   // events/memcpy/host register
+#include <vector_types.h>   // uchar4
 #include <vector_functions.h>
 #include <vector>
 #include <stdexcept>
@@ -30,22 +30,32 @@
 #include "nacktmull_anchor.hpp"    // Nacktmull::compute_host_iterations(...)
 #include "nacktmull_host.hpp"      // Host-Iteration
 
-namespace CudaInterop
-{
+namespace CudaInterop {
 
 // TU-lokaler Zustand
 static bear_CudaPBOResource* pboResource      = nullptr;
-static bool  pauseZoom                        = false;
-static bool  s_deviceInitDone                 = false;
+static bool pauseZoom                         = false;
+static bool s_deviceInitDone                  = false;
 
 // Pinned-Host-Registrierung für E/C (schnellere D2H)
-static void*  s_hostRegEntropyPtr    = nullptr;
-static size_t s_hostRegEntropyBytes  = 0;
-static void*  s_hostRegContrastPtr   = nullptr;
-static size_t s_hostRegContrastBytes = 0;
+static void*  s_hostRegEntropyPtr   = nullptr;
+static size_t s_hostRegEntropyBytes = 0;
+static void*  s_hostRegContrastPtr  = nullptr;
+static size_t s_hostRegContrastBytes= 0;
 
-// Sichtbarkeits-Fallback in den ersten Frames
-static int    s_bootFrames           = 0;     // erzwingt Testmuster
+// Boot-Fallback: in den ersten Frames immer Testpattern (prüft GL-Upload/Draw deterministisch)
+static int s_bootFrames = 0;
+static constexpr int kBootFallbackFrames = 2;
+
+// --- winziger Kernel zum harten Farb-Fill bei Fehlern (Magenta) ---------------
+static __global__ void fill_rgba_kernel(uchar4* dst, int width, int height, uchar4 c)
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= width || y >= height) return;
+    const int idx = y * width + x;
+    dst[idx] = c;
+}
 
 static inline void ensureDeviceOnce() {
     if (!s_deviceInitDone) {
@@ -65,8 +75,8 @@ static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size
     if (ptr != regPtr || bytes != regBytes) {
         if (regPtr) CUDA_CHECK(cudaHostUnregister(regPtr));
         CUDA_CHECK(cudaHostRegister(ptr, bytes, cudaHostRegisterPortable));
-        regPtr   = ptr;
-        regBytes = bytes;
+        regPtr  = ptr;
+        regBytes= bytes;
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[PIN] host-register ptr=%p bytes=%zu", ptr, bytes);
         }
@@ -98,7 +108,7 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
 
     pboResource = new bear_CudaPBOResource(pbo.id());
 
-    // 🧊 Warm-up: einmaliges map/unmap, um Treiberpfade zu initialisieren (vermeidet 20ms-Spike im 2. Frame)
+    // 🧊 Warm-up
     size_t warmBytes = 0;
     if (auto* ptr = pboResource->mapAndLog(warmBytes)) {
         (void)ptr;
@@ -108,7 +118,6 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
         }
     }
 
-    // 🦊 Schneefuchs: ursprünglichen GL-Bind wiederherstellen.
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(boundBefore));
 }
 
@@ -141,7 +150,7 @@ void renderCudaFrame(
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int numTiles = tilesX * tilesY;
 
-    // Größencheck (Gerätepuffer werden außerhalb dimensioniert)
+    // Größencheck
     const size_t it_bytes       = totalPixels * sizeof(int);
     const size_t entropy_bytes  = size_t(numTiles) * sizeof(float);
     const size_t contrast_bytes = size_t(numTiles) * sizeof(float);
@@ -157,7 +166,11 @@ void renderCudaFrame(
         throw std::runtime_error("CudaInterop::renderCudaFrame: device buffers undersized");
     }
 
-    // ---------------------------------- NACKTMULL: Host-Iters ----------------------------------
+    // ---------------------------------- Host-Iters ----------------------------------
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[STEP] A: host iterations start (w=%d h=%d itMax=%d zoom=%.6f off=(%.6f,%.6f))",
+                       width, height, maxIterations, zoom, (double)offset.x, (double)offset.y);
+    }
     std::vector<int> h_iters;
     h_iters.resize(totalPixels);
 
@@ -180,20 +193,32 @@ void renderCudaFrame(
         h_iters
     );
 #endif
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[STEP] A-done: host iterations ready");
+    }
 
-    // Prüfen, ob überhaupt etwas "außerhalb" ist (sichtbarer Rand)
+    // Prüfen, ob überhaupt etwas "außerhalb" ist
     bool anyOutside = false;
     for (size_t i = 0; i < h_iters.size(); ++i) {
         if (h_iters[i] < maxIterations) { anyOutside = true; break; }
     }
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[STEP] A2: anyOutside=%d", anyOutside ? 1 : 0);
+    }
 
     // Host → Device (Iterationsbild)
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[STEP] B: memcpy H2D (iterations)");
+    }
     CUDA_CHECK(cudaMemcpy(d_iterations.get(), h_iters.data(), it_bytes, cudaMemcpyHostToDevice));
 
-    // ---------------------------------- PBO map & GPU-Shade ------------------------------------
+    // ---------------------------------- PBO map --------------------------------------
 #ifndef CUDA_ARCH
     const auto tMap0 = std::chrono::high_resolution_clock::now();
 #endif
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[STEP] C: map PBO");
+    }
     size_t surfBytes = 0;
     uchar4* devSurface = static_cast<uchar4*>(pboResource->mapAndLog(surfBytes));
 #ifndef CUDA_ARCH
@@ -212,7 +237,7 @@ void renderCudaFrame(
         throw std::runtime_error("PBO byte size mismatch");
     }
 
-    // Shade aus Iterationsbild ODER Test-Pattern (Fallback)
+    // ---------------------------------- Shade ----------------------------------------
     float shadeMsEv = 0.0f;
     cudaEvent_t evS0 = nullptr, evS1 = nullptr;
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
@@ -224,26 +249,35 @@ void renderCudaFrame(
     dim3 block(32, 8);
     dim3 grid((width + block.x - 1)/block.x, (height + block.y - 1)/block.y);
 
-    const bool usePattern = (s_bootFrames < 30) || !anyOutside;
-    if (usePattern) {
+    if (s_bootFrames < kBootFallbackFrames) {
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[FALLBACK] shade_test_pattern: bootFrames=%d anyOutside=%d", s_bootFrames, (int)anyOutside);
+            LUCHS_LOG_HOST("[STEP] D0: BOOT-FALLBACK test pattern (frame=%d)", s_bootFrames);
         }
         shade_test_pattern<<<grid, block>>>(devSurface, width, height, 24);
-    } else {
+        ++s_bootFrames;
+    } else if (anyOutside) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[STEP] D1: shade_from_iterations");
+        }
         shade_from_iterations<<<grid, block>>>(
             devSurface,
             static_cast<const int*>(d_iterations.get()),
             width, height, maxIterations
         );
+    } else {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[STEP] D2: test pattern (all inside)");
+        }
+        shade_test_pattern<<<grid, block>>>(devSurface, width, height, 24);
     }
-    ++s_bootFrames;
 
     cudaError_t shadeLaunchErr = cudaGetLastError();
     if (shadeLaunchErr != cudaSuccess) {
-        // Harte Absicherung: alles weiß, gut sichtbar + Diagnose
-        LUCHS_LOG_HOST("[FATAL] shade kernel failed err=%d -> clearing PBO to white", (int)shadeLaunchErr);
-        CUDA_CHECK(cudaMemset(devSurface, 0xFF, expected)); // RGBA = 255/255/255/255
+        LUCHS_LOG_HOST("[FATAL] shade kernel failed err=%d -> filling PBO magenta", (int)shadeLaunchErr);
+        // harter Fill in Magenta (255,0,255,255)
+        const uchar4 mag = make_uchar4(255, 0, 255, 255);
+        fill_rgba_kernel<<<grid, block>>>(devSurface, width, height, mag);
+        CUDA_CHECK(cudaGetLastError());
     }
 
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
@@ -257,10 +291,13 @@ void renderCudaFrame(
 #endif
     }
 
-    // ---------------------------------- Entropie/Kontrast --------------------------------------
+    // ---------------------------------- Entropie/Kontrast -----------------------------
 #ifndef CUDA_ARCH
     const auto tEC0 = std::chrono::high_resolution_clock::now();
 #endif
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[STEP] E: computeCudaEntropyContrast");
+    }
     ::computeCudaEntropyContrast(
         static_cast<const int*>(d_iterations.get()),
         static_cast<float*>(d_entropy.get()),
@@ -274,7 +311,10 @@ void renderCudaFrame(
     conMs = ecMs * 0.5;
 #endif
 
-    // Host-Ziele vorbereiten (keine Reallocs → dann pinnen)
+    // ---------------------------------- Host copies -----------------------------------
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[STEP] F: prepare host vectors + pin");
+    }
     if (h_entropy.capacity()  < size_t(numTiles)) h_entropy.reserve(size_t(numTiles));
     if (h_contrast.capacity() < size_t(numTiles)) h_contrast.reserve(size_t(numTiles));
     ensureHostPinned(h_entropy,  s_hostRegEntropyPtr,  s_hostRegEntropyBytes);
@@ -283,6 +323,9 @@ void renderCudaFrame(
     h_entropy.resize(size_t(numTiles));
     h_contrast.resize(size_t(numTiles));
 
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[STEP] G: memcpy D2H (entropy/contrast)");
+    }
     CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),  entropy_bytes,  cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(), contrast_bytes, cudaMemcpyDeviceToHost));
 
@@ -290,6 +333,9 @@ void renderCudaFrame(
     shouldZoom = false;
     newOffset  = offset;
 
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[STEP] H: unmap PBO");
+    }
     pboResource->unmap();
 
 #ifndef CUDA_ARCH
