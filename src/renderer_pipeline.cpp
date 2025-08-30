@@ -1,5 +1,5 @@
-///// MAUS: Fullscreen pipeline — bind order, ASCII logs, optional GPU timer
 // Datei: src/renderer_pipeline.cpp
+///// MAUS: Fullscreen pipeline — bind order, ASCII logs, optional GPU timer
 // 🐭 Maus-Kommentar: Kompakt, robust, Shader-Errors werden sauber erkannt. VAO-Handling und OpenGL-State sind clean – HUD/Heatmap bleiben sichtbar.
 // 🦦 Otter: Keine OpenGL-Misere, Schneefuchs freut sich über stabile Pipelines. (Bezug zu Otter)
 // 🐑 Schneefuchs: Fehlerquellen mit glGetError sichtbar gemacht, Upload deterministisch. (Bezug zu Schneefuchs)

@@ -15,8 +15,8 @@
 #include "nacktmull_shade.cuh"     // shade_from_iterations / shade_test_pattern
 
 #include <cuda_gl_interop.h>
-#include <cuda_runtime.h>   // events/memcpy/host register
-#include <vector_types.h>   // uchar4
+#include <cuda_runtime.h>          // events/memcpy/host register
+#include <vector_types.h>          // uchar4
 #include <vector_functions.h>
 #include <vector>
 #include <stdexcept>
@@ -30,18 +30,22 @@
 #include "nacktmull_anchor.hpp"    // Nacktmull::compute_host_iterations(...)
 #include "nacktmull_host.hpp"      // Host-Iteration
 
-namespace CudaInterop {
+namespace CudaInterop
+{
 
 // TU-lokaler Zustand
 static bear_CudaPBOResource* pboResource      = nullptr;
-static bool pauseZoom                         = false;
-static bool s_deviceInitDone                  = false;
+static bool  pauseZoom                        = false;
+static bool  s_deviceInitDone                 = false;
 
 // Pinned-Host-Registrierung für E/C (schnellere D2H)
-static void*  s_hostRegEntropyPtr   = nullptr;
-static size_t s_hostRegEntropyBytes = 0;
-static void*  s_hostRegContrastPtr  = nullptr;
-static size_t s_hostRegContrastBytes= 0;
+static void*  s_hostRegEntropyPtr    = nullptr;
+static size_t s_hostRegEntropyBytes  = 0;
+static void*  s_hostRegContrastPtr   = nullptr;
+static size_t s_hostRegContrastBytes = 0;
+
+// Sichtbarkeits-Fallback in den ersten Frames
+static int    s_bootFrames           = 0;     // erzwingt Testmuster
 
 static inline void ensureDeviceOnce() {
     if (!s_deviceInitDone) {
@@ -61,8 +65,8 @@ static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size
     if (ptr != regPtr || bytes != regBytes) {
         if (regPtr) CUDA_CHECK(cudaHostUnregister(regPtr));
         CUDA_CHECK(cudaHostRegister(ptr, bytes, cudaHostRegisterPortable));
-        regPtr  = ptr;
-        regBytes= bytes;
+        regPtr   = ptr;
+        regBytes = bytes;
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[PIN] host-register ptr=%p bytes=%zu", ptr, bytes);
         }
@@ -104,7 +108,7 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
         }
     }
 
-    // 🦊 Schneefuchs: ursprünglichen GL-Bind wiederherstellen (Bezug zu Schneefuchs).
+    // 🦊 Schneefuchs: ursprünglichen GL-Bind wiederherstellen.
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(boundBefore));
 }
 
@@ -220,20 +224,20 @@ void renderCudaFrame(
     dim3 block(32, 8);
     dim3 grid((width + block.x - 1)/block.x, (height + block.y - 1)/block.y);
 
-    if (anyOutside) {
-        // Normale Färbung
+    const bool usePattern = (s_bootFrames < 30) || !anyOutside;
+    if (usePattern) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[FALLBACK] shade_test_pattern: bootFrames=%d anyOutside=%d", s_bootFrames, (int)anyOutside);
+        }
+        shade_test_pattern<<<grid, block>>>(devSurface, width, height, 24);
+    } else {
         shade_from_iterations<<<grid, block>>>(
             devSurface,
             static_cast<const int*>(d_iterations.get()),
             width, height, maxIterations
         );
-    } else {
-        // Sichtbarer Fallback (z.B. bei Start komplett „innen“)
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[FALLBACK] shade_test_pattern: all pixels reached maxIterations, showing debug pattern.");
-        }
-        shade_test_pattern<<<grid, block>>>(devSurface, width, height, 24);
     }
+    ++s_bootFrames;
 
     cudaError_t shadeLaunchErr = cudaGetLastError();
     if (shadeLaunchErr != cudaSuccess) {

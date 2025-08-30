@@ -1,3 +1,4 @@
+// Datei: src/frame_pipeline.cpp
 ///// Otter: Feste Aufrufreihenfolge – updateTextureFromPBO(PBO, TEX, W, H); ASCII-Logs; keine Compat-Wrapper.
 ///// Schneefuchs: /WX-fest; zusätzliche Diagnose (PBO-PEEK) vor Upload; RAII & deterministische Logs.
 ///// Maus: Eine Quelle für Tiles/Upload; Zoom-V2 außerhalb der CUDA-Interop bleibt unverändert.
@@ -9,8 +10,8 @@
 #include <vector_types.h>
 #include <vector_functions.h> // make_float2
 
-#include "renderer_resources.hpp"    // setGLResourceContext(const char*), updateTextureFromPBO(GLuint pbo, GLuint tex, int w, int h)
-#include "renderer_pipeline.hpp"     // drawFullscreenQuad(...)
+#include "renderer_resources.hpp"    // OpenGLUtils::setGLResourceContext(const char*), OpenGLUtils::updateTextureFromPBO(GLuint pbo, GLuint tex, int w, int h)
+#include "renderer_pipeline.hpp"     // RendererPipeline::drawFullscreenQuad(...)
 #include "cuda_interop.hpp"          // CudaInterop::renderCudaFrame(...)
 #include "frame_context.hpp"
 #include "renderer_state.hpp"
@@ -24,7 +25,8 @@
 #include "luchs_cuda_log_buffer.hpp"
 #include "common.hpp"
 
-namespace FramePipeline {
+namespace FramePipeline
+{
 
 // ------------------------------ TU-lokaler Zustand ----------------------------
 static FrameContext g_ctx;
