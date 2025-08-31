@@ -1,11 +1,16 @@
+///// MAUS
+///// OWNER
+///// RESERVED
+///// Datei: src/progressive_iteration.cu
+
 ///// Otter: Progressive Iteration & Resume (impl)
 ///// Schneefuchs: Messbare Pfade; ASCII-Logs; kein versteckter Funktionswechsel.
 ///// Maus: Coalesced SoA, fixed block, chunked inner loop.
-///// Datei: src/progressive_iteration.cu
 
 #include "progressive_iteration.cuh"
 #include "luchs_log_host.hpp"
 #include "luchs_log_device.hpp"
+#include "settings.hpp"          // <-- Fix: Settings::* sichtbar machen
 
 #include <cuda_runtime.h>
 #include <vector_types.h>
@@ -35,11 +40,12 @@ static __device__ __forceinline__ int dev_append_int(char* dst, int pos, int cap
 
 // ------------------------------- Device kernels -------------------------------
 
-__global__ void k_reset_state(float2* __restrict__ z,
-                              uint32_t* __restrict__ it,
-                              uint8_t* __restrict__ flags,
-                              uint32_t* __restrict__ esc,
-                              int n)
+__global__ __launch_bounds__(256)
+void k_reset_state(float2* __restrict__ z,
+                   uint32_t* __restrict__ it,
+                   uint8_t* __restrict__ flags,
+                   uint32_t* __restrict__ esc,
+                   int n)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
@@ -49,15 +55,16 @@ __global__ void k_reset_state(float2* __restrict__ z,
     esc[i] = 0u;
 }
 
-__global__ void k_progressive_step(float2* __restrict__ z,
-                                   uint32_t* __restrict__ it,
-                                   uint8_t* __restrict__ flags,
-                                   uint32_t* __restrict__ esc,
-                                   uint32_t* __restrict__ activeCount,
-                                   int width, int height,
-                                   float x0, float y0, float dx, float dy,
-                                   uint32_t addIter, uint32_t maxIterCap, float bailout2,
-                                   int debugDevice)
+__global__ __launch_bounds__(256)
+void k_progressive_step(float2* __restrict__ z,
+                        uint32_t* __restrict__ it,
+                        uint8_t* __restrict__ flags,
+                        uint32_t* __restrict__ esc,
+                        uint32_t* __restrict__ activeCount,
+                        int width, int height,
+                        float x0, float y0, float dx, float dy,
+                        uint32_t addIter, uint32_t maxIterCap, float bailout2,
+                        int debugDevice)
 {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -68,43 +75,45 @@ __global__ void k_progressive_step(float2* __restrict__ z,
     uint32_t iters = it[i];
     uint8_t  fl = flags[i];
 
-    if (fl & 0x03u) {
-        return;
-    }
+    // finished (escaped or capped)
+    if (fl & 0x03u) return;
 
     const float cr = x0 + dx * (float)x;
     const float ci = y0 + dy * (float)y;
 
+    // chunked inner loop
     uint32_t local = 0u;
     while (local < addIter && iters < maxIterCap) {
-        const float zr2 = zi.x * zi.x;
-        const float zi2 = zi.y * zi.y;
-        const float zrzi2 = (zi.x + zi.y) * (zi.x + zi.y) - zr2 - zi2;
-        zi = make_float2(zr2 - zi2 + cr, zrzi2 + ci);
+        // z = z^2 + c (use 1 mul for xy via fmaf)
+        const float x2 = zi.x * zi.x;
+        const float y2 = zi.y * zi.y;
+        const float xy = zi.x * zi.y;
+        zi = make_float2((x2 - y2) + cr, fmaf(2.f, xy, ci));
 
         ++iters;
         ++local;
 
+        // escape?
         const float r2 = zi.x * zi.x + zi.y * zi.y;
         if (r2 > bailout2) {
-            fl |= 0x01u;
+            fl |= 0x01u;          // escaped
             esc[i] = iters;
             break;
         }
     }
 
     if (iters >= maxIterCap) {
-        fl |= 0x02u;
+        fl |= 0x02u;              // reached cap
     }
 
     z[i] = zi;
     it[i] = iters;
     flags[i] = fl;
 
+    // survivor counting + optional tiny device log
     if ((fl & 0x03u) == 0u) {
         atomicAdd(activeCount, 1u);
         if (debugDevice) {
-            // One-line ASCII device log without snprintf.
             char msg[128];
             int p = 0;
             p = dev_append_lit (msg, p, (int)sizeof(msg), "[DEV] survivor x=");
@@ -213,27 +222,38 @@ ProgressiveMetrics CudaProgressiveState::step(const ViewportParams& vp, const Pr
     const dim3 block = chooseBlock();
     const dim3 grid  = chooseGrid(width_, height_, block);
 
-    cudaEvent_t evStart, evStop;
-    CUDA_CHECK(cudaEventCreate(&evStart));
-    CUDA_CHECK(cudaEventCreate(&evStop));
-    CUDA_CHECK(cudaEventRecord(evStart, stream));
-
-    k_progressive_step<<<grid, block, 0, stream>>>(
-        d_z_, d_it_, d_flags_, d_escapeIter_, d_activeCount_,
-        width_, height_,
-        map.x0, map.y0, map.dx, map.dy,
-        cfg.chunkIter, cfg.maxIterCap, cfg.bailout2,
-        cfg.debugDevice ? 1 : 0
-    );
-    CUDA_CHECK(cudaGetLastError());
-
-    CUDA_CHECK(cudaEventRecord(evStop, stream));
-    CUDA_CHECK(cudaEventSynchronize(evStop));
-
     float ms = 0.0f;
-    CUDA_CHECK(cudaEventElapsedTime(&ms, evStart, evStop));
-    CUDA_CHECK(cudaEventDestroy(evStart));
-    CUDA_CHECK(cudaEventDestroy(evStop));
+
+    if constexpr (Settings::performanceLogging || Settings::debugLogging) {
+        cudaEvent_t evStart{}, evStop{};
+        CUDA_CHECK(cudaEventCreate(&evStart));
+        CUDA_CHECK(cudaEventCreate(&evStop));
+        CUDA_CHECK(cudaEventRecord(evStart, stream));
+
+        k_progressive_step<<<grid, block, 0, stream>>>(
+            d_z_, d_it_, d_flags_, d_escapeIter_, d_activeCount_,
+            width_, height_,
+            map.x0, map.y0, map.dx, map.dy,
+            cfg.chunkIter, cfg.maxIterCap, cfg.bailout2,
+            cfg.debugDevice ? 1 : 0
+        );
+        CUDA_CHECK(cudaGetLastError());
+
+        CUDA_CHECK(cudaEventRecord(evStop, stream));
+        CUDA_CHECK(cudaEventSynchronize(evStop));
+        CUDA_CHECK(cudaEventElapsedTime(&ms, evStart, evStop));
+        CUDA_CHECK(cudaEventDestroy(evStart));
+        CUDA_CHECK(cudaEventDestroy(evStop));
+    } else {
+        k_progressive_step<<<grid, block, 0, stream>>>(
+            d_z_, d_it_, d_flags_, d_escapeIter_, d_activeCount_,
+            width_, height_,
+            map.x0, map.y0, map.dx, map.dy,
+            cfg.chunkIter, cfg.maxIterCap, cfg.bailout2,
+            cfg.debugDevice ? 1 : 0
+        );
+        CUDA_CHECK(cudaGetLastError());
+    }
 
     uint32_t still = 0u;
     CUDA_CHECK(cudaMemcpy(&still, d_activeCount_, sizeof(uint32_t), cudaMemcpyDeviceToHost));

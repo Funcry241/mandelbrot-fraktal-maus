@@ -1,12 +1,16 @@
+///// MAUS
+///// OWNER
+///// RESERVED
+///// Datei: src/nacktmull_math.cuh
+
 ///// Otter: Pixel<->Komplex-Mapping (header-only) – zwei Overloads + schneller Precompute-Mapper.
 ///// Schneefuchs: __host__ __device__ __forceinline__, deterministisch; Guards bei w/h=0; ASCII-only.
 ///// Maus: API additiv (keine Brueche); vorhandene Overloads behalten; neuer Mapper fuer Performance.
-///// Datei: src/nacktmull_math.cuh
 
 #pragma once
 
-#include <cuda_runtime.h>   // __host__/__device__
-#include <vector_types.h>   // float2
+#include <cuda_runtime.h>     // __host__/__device__
+#include <vector_types.h>     // float2
 #include <vector_functions.h> // make_float2
 
 // ----------------------------- Overload A: center + zoom -----------------------------
