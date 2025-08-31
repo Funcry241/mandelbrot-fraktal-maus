@@ -10,7 +10,8 @@
 // Policy:
 //   - Logs sind ASCII-only (gilt projektweit); in diesem Header KEINE Logs.
 //   - Kommentare dürfen Deutsch sein; Runtime-Strings bleiben Englisch.
-//   - Alle Defaults so gewählt, dass bestehendes Verhalten UNVERÄNDERT bleibt.
+//   - Defaults: Planner3D jetzt AKTIV (enabled=true) für Anti-Crawl & Snap.
+//               Progressive bewusst noch AUS (enabled=false) — sicherer Schritt.
 //   - Header-only; keine versteckten Abhängigkeiten; /WX-fest.
 //   - Host-Only Datenträger (keine __host__/__device__ Anmerkungen hier).
 // ============================================================================
@@ -27,7 +28,7 @@ namespace NacktmullSettings {
 // keine Wirkung, bis konsumierende Stellen sie verwenden.
 struct Planner3D {
     // Aktiviert den 3D-Planner-Pfad (x, y, logZoom).
-    // Bereich: {false, true} | Default: false (keine Verhaltensänderung)
+    // Bereich: {false, true} | Default: true (aktiv)
     bool enabled;
 
     // Skaliert den Fehler in der Zoom-Achse: ez' = ez / kZ.
@@ -84,7 +85,7 @@ struct PlannerGains {
 // erst Konsumenten (Kernels/Wrapper) setzen das um.
 struct Progressive {
     // Aktiviert den Progressive-Pfad (per-pixel Resume).
-    // Bereich: {false, true} | Default: false (kein Verhaltenswechsel)
+    // Bereich: {false, true} | Default: false (vorerst aus)
     bool enabled;
 
     // Minimale Iterations-Slice-Länge pro Touch.
@@ -130,7 +131,7 @@ struct Printing {
 // Defaults (inline constexpr)
 // ---------------------------
 inline constexpr Planner3D Planner3D_Default {
-    /*enabled*/          false,
+    /*enabled*/          true,
     /*kZ*/               1.6,
     /*zeta*/             0.8,
     /*omegaN*/           3.0,
