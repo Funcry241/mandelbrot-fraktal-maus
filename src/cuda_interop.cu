@@ -1,5 +1,5 @@
-///// Otter: Nacktmull-ABI fix – Prototyp und Aufrufreihenfolge korrigiert; GPU-Iteration erzwungen.
-///// Schneefuchs: Frühes Unmap bei Fehler; kompakte [PERF]-Logs; Größen/Tile-Sanity bleibt aktiv.
+///// Otter: Nacktmull-ABI fix - Prototyp und Aufrufreihenfolge korrigiert; GPU-Iteration erzwungen.
+///// Schneefuchs: Fruehes Unmap bei Fehler; kompakte [PERF]-Logs; Groessen/Tile-Sanity bleibt aktiv.
 ///// Maus: Deterministischer Orchestrator; ASCII-only; keine Host-Iteration mehr.
 
 #include "pch.hpp"
@@ -15,6 +15,7 @@
 
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
+#include <device_launch_parameters.h>
 #include <vector_types.h>
 #include <vector_functions.h>
 #include <vector>
@@ -35,7 +36,7 @@ extern "C" void launch_mandelbrotHybrid(
     int maxIter, int tile
 );
 
-// Emergency fill (nur für isolierte Tests)
+// Emergency fill (nur fuer isolierte Tests)
 static __global__ void fill_rgba_kernel(uchar4* dst, int w, int h, uchar4 c) {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;

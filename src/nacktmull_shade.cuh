@@ -1,4 +1,4 @@
-///// Otter: Nacktmull-Shade (Header) – inline Device-Helfer + Kernel-Prototypen, keine Implementierungen.
+///// Otter: Nacktmull-Shade (Header) - inline Device-Helfer + Kernel-Prototypen, keine Implementierungen.
 ///// Schneefuchs: Deterministisch, ASCII-only; nur CUDA-Basics; Header/Source strikt getrennt.
 ///// Maus: Keine eigenen Typ-Redefs (NV-Types verwenden); API stabil; mikro-optimierte Inlines.
 
@@ -15,7 +15,7 @@
 // ------------------------ kleine Device-Helfer ---------------------------------
 #if defined(__CUDACC__)
 static __device__ __forceinline__ float clamp01(float x) {
-    // Branchless ist oft minimal schneller, aber hier bewusst simpel & stabil:
+    // Bewusst simpel & stabil:
     return x < 0.f ? 0.f : (x > 1.f ? 1.f : x);
 }
 

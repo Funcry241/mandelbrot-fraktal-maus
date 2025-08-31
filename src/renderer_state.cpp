@@ -1,6 +1,7 @@
-///// Otter: Visible tile/buffer sanity; only-grow fast path; deterministic ASCII logs.
-///// Schneefuchs: Host-timings zentral (/WX-fest); RAII & bounds clamp; keine State-Leaks.
-///// Maus: Keine Mallocs ins Leere; eindeutige Resize-Pfade; GL/CUDA-Cleanup geordnet.
+///// Otter: Einheitliche, klare Struktur – nur aktive Zustaende; Header schlank, keine PCH; Nacktmull-Pullover.
+///// Schneefuchs: Speicher/Buffer exakt definiert; Host-Timings zentral – eine Quelle; /WX-fest; ASCII-only.
+///// Maus: tileSize bleibt in Pipelines explizit; hier nur Zustand & Ressourcen; keine versteckten Semantikwechsel.
+// Datei: src/renderer_state.cpp
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
@@ -10,13 +11,6 @@
 #include "renderer_resources.hpp"
 #include <algorithm>        // std::clamp
 
-// ---- Host-Timings: Definition der Methodik aus dem Header --------------------
-void RendererState::CudaPhaseTimings::resetHostFrame() noexcept {
-    uploadMs     = 0.0;
-    overlaysMs   = 0.0;
-    frameTotalMs = 0.0;
-}
-
 // 🦊 Schneefuchs: interne Helfer in anonymer NS, noexcept – klarer Scope.
 namespace {
     inline void computeTiles(int width, int height, int tileSize,
@@ -24,6 +18,14 @@ namespace {
         tilesX   = (width  + tileSize - 1) / tileSize;
         tilesY   = (height + tileSize - 1) / tileSize;
         numTiles = tilesX * tilesY;
+    }
+
+    inline void recomputePixelScale(RendererState& rs) noexcept {
+        const double invZoom = (rs.zoom != 0.0) ? (1.0 / rs.zoom) : 1.0;
+        const double ar      = (rs.height > 0) ? (double)rs.width / (double)rs.height : 1.0;
+        const double sy      = (rs.height > 0) ? (2.0 / (double)rs.height) * invZoom : 2.0 * invZoom;
+        rs.pixelScale.y = sy;
+        rs.pixelScale.x = sy * ar;
     }
 }
 
@@ -33,15 +35,17 @@ RendererState::RendererState(int w, int h)
 }
 
 void RendererState::reset() {
-    // Camera
+    // Kamera (Nacktmull-Pullover: doubles)
     zoom   = static_cast<double>(Settings::initialZoom);
-    offset = { static_cast<float>(Settings::initialOffsetX), static_cast<float>(Settings::initialOffsetY) };
+    center = make_double2(static_cast<double>(Settings::initialOffsetX),
+                          static_cast<double>(Settings::initialOffsetY));
+    recomputePixelScale(*this);
 
-    // Iterations
+    // Iterationen
     baseIterations = Settings::INITIAL_ITERATIONS;
     maxIterations  = Settings::MAX_ITERATIONS_CAP;
 
-    // Timers / Counters
+    // Timings / Zähler
     fps        = 0.0f;
     deltaTime  = 0.0f;
     frameCount = 0;
@@ -53,16 +57,18 @@ void RendererState::reset() {
     // Overlays
     heatmapOverlayEnabled       = Settings::heatmapOverlayEnabled;
     warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
+    warzenschweinText.clear();
 
-    // Host analysis buffers
+    // Host-Analysepuffer
     h_entropy.clear();
     h_contrast.clear();
 
-    // Zoom V2 state (explicit reset – no globals)
-    zoomV2State = ZoomLogic::ZoomState{};
+    // Zoom V3 Silk-Lite: persistenter Zustand auf Default
+    zoomV3State = {};
 
-    // Timings reset (CUDA + HOST auf Default)
-    lastTimings = CudaPhaseTimings{}; // valid=false by default
+    // CUDA/Host-Timings: Default (valid=false) + Host-Frame-Nullung
+    lastTimings = CudaPhaseTimings{};
+    lastTimings.resetHostFrame();
 }
 
 void RendererState::setupCudaBuffers(int tileSize) {
@@ -77,7 +83,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
     tileSize = std::clamp(tileSize, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
 
     // --- derive sizes ---
-    const size_t totalPixels    = size_t(width) * size_t(height); // 🦊 Schneefuchs: size_t gegen int-Overflow.
+    const size_t totalPixels    = size_t(width) * size_t(height);
     int tilesX = 0, tilesY = 0, numTiles = 0;
     computeTiles(width, height, tileSize, tilesX, tilesY, numTiles);
 
@@ -85,7 +91,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
     const size_t entropy_bytes  = size_t(numTiles) * sizeof(float);
     const size_t contrast_bytes = size_t(numTiles) * sizeof(float);
 
-    // 🦦 Otter: Fast-Path – wenn alles schon passt, sofort raus (keine Memsets/Sync)
+    // 🦦 Otter: Fast-Path – wenn alles schon passt, sofort raus
     const bool sizesOk =
         d_iterations.size() >= it_bytes      &&
         d_entropy.size()    >= entropy_bytes &&
@@ -132,7 +138,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
         LUCHS_LOG_HOST("[ALLOC] d_entropy ok: have=%zu need=%zu (tiles %d, no realloc)", have_entropy, entropy_bytes, numTiles);
     }
 
-    // Diagnostics: pointer attributes (ASCII only, optional)
+    // Optional: Pointer-Attribute prüfen
     if constexpr (Settings::debugLogging) {
         cudaPointerAttributes attr{};
         const cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_entropy.get());
@@ -157,7 +163,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
         LUCHS_LOG_HOST("[ALLOC] d_contrast ok: have=%zu need=%zu (tiles %d, no realloc)", have_contrast, contrast_bytes, numTiles);
     }
 
-    // 🐭 Maus: Zeroing nur bei NEU-Allocation (oder in Debug immer) → spart Bandbreite & Stalls
+    // 🐭 Maus: Zeroing nur bei NEU-Allocation (oder in Debug immer)
     const bool clearIterations = grow_it       || Settings::debugLogging;
     const bool clearEntropy    = grow_entropy  || Settings::debugLogging;
     const bool clearContrast   = grow_contrast || Settings::debugLogging;
@@ -166,7 +172,6 @@ void RendererState::setupCudaBuffers(int tileSize) {
     if (clearEntropy)    CUDA_CHECK(cudaMemset(d_entropy.get(),    0, entropy_bytes));
     if (clearContrast)   CUDA_CHECK(cudaMemset(d_contrast.get(),   0, contrast_bytes));
 
-    // 🦊 Schneefuchs: optionaler Debug-Sync zur klaren Fehlerlokalisierung
     if constexpr (Settings::debugLogging) {
         CUDA_CHECK(cudaDeviceSynchronize());
         cudaError_t lastErr = cudaGetLastError();
@@ -177,7 +182,6 @@ void RendererState::setupCudaBuffers(int tileSize) {
     h_entropy.resize(size_t(numTiles));
     h_contrast.resize(size_t(numTiles));
 
-    // --- summary ---
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[ALLOC] buffers ready: it=%p(%zu) entropy=%p(%zu) contrast=%p(%zu) | %dx%d px, tileSize=%d -> tiles=%d",
                        d_iterations.get(), d_iterations.size(),
@@ -220,6 +224,9 @@ void RendererState::resize(int newWidth, int newHeight) {
     tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
 
     CudaInterop::registerPBO(pbo);
+
+    // PixelScale hängt von Größe/Zoom ab → neu berechnen
+    recomputePixelScale(*this);
 
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
     lastTileSize = std::clamp(lastTileSize, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);

@@ -1,17 +1,18 @@
-///// Otter: settings.hpp – vollständig dokumentierte Toggles; ASCII-only, deterministisch.
-//*** Schneefuchs: Keine versteckten Semantikänderungen; Defaults stabil, /WX-fest.
-//*** Maus: Kein Logging hier; nur Konstanten & Doku, Header-only.
+///// Otter: settings.hpp - voll dokumentierte Toggles; ASCII-only; deterministisch.
+///// Schneefuchs: Keine versteckten Semantik-Aenderungen; Defaults stabil; /WX-fest.
+///// Maus: Kein Logging hier; nur Konstanten & Doku; Header-only; Nacktmull-Pullover aktiv.
 
 #pragma once
 
 // ============================================================================
-// Central project settings — fully documented.
+// Central project settings - fully documented.
 // Policy: All runtime LOG/DEBUG output must be English and ASCII-only.
-// Kommentare dürfen Deutsch sein. Referenzen:
-//   – Otter = vom User inspiriert (Bezug zu Otter)
-//   – Schneefuchs = von Schwester inspiriert (Bezug zu Schneefuchs)
-// Keine Regressionen, keine versteckten Semantik-Änderungen. Werte stabil.
-// Neu (Otter/Schneefuchs): Framerate-Cap (60 FPS) + optionales VSync.
+// Kommentare duerfen Deutsch sein. Referenzen:
+//   - Otter = vom User inspiriert (Bezug zu Otter)
+//   - Schneefuchs = von Schwester inspiriert (Bezug zu Schneefuchs)
+// Keine Regressionen, keine versteckten Semantik-Aenderungen. Werte stabil.
+// Neu (Otter/Schneefuchs): Framerate-Cap (60 FPS), optionales VSync,
+// sowie Nacktmull-Pullover (Praezisions- und Orbit-Guards).
 // ============================================================================
 
 namespace Settings {
@@ -19,231 +20,429 @@ namespace Settings {
     // ------------------------------------------------------------------------
     // ForceAlwaysZoom
     // Wirkung:
-    //   Erzwingt kontinuierliches Zoomen, unabhängig von Entropie/Kontrast-
-    //   Ergebnissen. Dient als „Drift“-Fallback, damit die Kamera stets Bewegung
-    //   zeigt, selbst wenn die Analyse mal kein klares Ziel liefert.
+    //   Erzwingt kontinuierliches Zoomen, unabhaengig von Entropie/Kontrast.
     //
     // Empfehlung (Min..Max):
     //   false .. true  (bool)
     //
-    // Erhöhung/Reduzierung:
-    //   • true (Erhöhung auf aktiv): Stetige Bewegung, ideal für Demos und
-    //     zur Vermeidung von Stagnation bei flachen Regionen. (Bezug zu Otter)
-    //   • false (Reduzierung auf aus): Bewegung ergibt sich nur aus den
-    //     Analysewerten; kann „ehrlicher“, aber auch stoppanfälliger sein.
-    //
-    // Hinweis:
-    //   Aktiv lassen, wenn „Silk-Lite“ stets flüssig wirken soll; deaktivieren,
-    //   um die Treffgüte der Zielsuche zu verifizieren. (Bezug zu Schneefuchs)
+    // Effekt bei Erhoehung/Verringerung:
+    //   - true: Stetige Bewegung, ideal fuer Demos und als Drift-Fallback. (Otter)
+    //   - false: Bewegung nur aus Analysewerten; ehrlicher, aber stoppanfaelliger.
     // ------------------------------------------------------------------------
-    inline constexpr bool   ForceAlwaysZoom = true;   // 🦦 Otter: „always zoom“
+    inline constexpr bool   ForceAlwaysZoom = true;   // Otter: always zoom
 
     // ------------------------------------------------------------------------
     // ForcedZoomStep
     // Wirkung:
-    //   Multiplikativer Zoomfaktor pro Frame, wenn ForceAlwaysZoom aktiv ist.
-    //   Werte < 1.0 zoomen rein, Werte > 1.0 zoomen raus.
+    //   Multiplikativer Zoomfaktor pro Frame, falls ForceAlwaysZoom aktiv ist.
+    //   < 1.0 zoomt rein, > 1.0 zoomt raus.
     //
     // Empfehlung (Min..Max):
     //   0.90 .. 0.999 (double)
-    //   Typisch für sanften Drift: 0.95 .. 0.985
     //
-    // Erhöhung/Reduzierung:
-    //   • Näher an 1.0 (Erhöhung): Langsamer, subtiler Zoom; ruhiger Look.
-    //   • Richtung 0.90 (Reduzierung): Schneller Zoom; eindrucksvoll, aber
-    //     potenziell unruhig und iterationsintensiver. (Bezug zu Otter)
-    //
-    // Hinweis:
-    //   PD-Motion-Planner kann die visuelle Geschwindigkeit zusätzlich glätten.
+    // Effekt:
+    //   - Naeher an 1.0: langsamer, subtiler Zoom.
+    //   - Richtung 0.90: schneller Zoom, potenziell unruhiger. (Otter)
     // ------------------------------------------------------------------------
-    inline constexpr double ForcedZoomStep  = 0.97;   // 🦦 Otter: smooth & steady
+    inline constexpr double ForcedZoomStep  = 0.97;
 
     // ------------------------------------------------------------------------
     // debugLogging
     // Wirkung:
-    //   Schaltet gezielte Debug-/Diagnose-Ausgaben im Host/Device-Pfad frei
-    //   (Timing, Kernel-Phasen, Indizes, etc.). Laufzeitlogs sind stets EN/ASCII.
+    //   Aktiviert gezielte Debug-/Diagnose-Ausgaben (Host/Device).
     //
-    // Empfehlung (Min..Max):
-    //   false .. true  (bool)
+    // Empfehlung:
+    //   false .. true (bool)
     //
-    // Erhöhung/Reduzierung:
-    //   • true (Erhöhung auf aktiv): Mehr Einblick, evtl. leichte FPS-Kosten.
-    //   • false (Reduzierung auf aus): Ruhiger Lauf, ideal für Captures/Bench.
-    //
-    // Hinweis:
-    //   Nur aktivieren, wenn du reproduzierbare Fragen klären willst; sonst aus.
-    //   Deterministische, sparsame Device-Logs bevorzugen. (Bezug zu Schneefuchs)
+    // Effekt:
+    //   - true: Mehr Einblick, leicht geringere FPS.
+    //   - false: Ruhiger Lauf, ideal fuer Captures/Benchmarks. (Schneefuchs)
     // ------------------------------------------------------------------------
     inline constexpr bool debugLogging  = false;
 
     // ------------------------------------------------------------------------
     // performanceLogging
     // Wirkung:
-    //   Aktiviert kompakte, periodische Performance-Logs im Hostpfad:
-    //   • Zeiten pro Frame-Phase (map, kernel, unmap, tex, overlays, total)
-    //   • CUDA-Event-Timings (mandelbrot, entropy, contrast)
-    //   • FPS, Iterationen, Entropy[0], Contrast[0]
+    //   Aktiviert kompakte Performance-Logs (Zeiten pro Phase, FPS, Metriken).
     //
-    // Empfehlung (Min..Max):
-    //   false .. true  (bool)
+    // Empfehlung:
+    //   false .. true (bool)
     //
-    // Erhöhung/Reduzierung:
-    //   • true (Erhöhung auf aktiv): Präzise Einblicke in Performance-Hotspots,
-    //     minimaler Overhead (~1–2 % FPS). Ideal zum Priorisieren von Optimierungen.
-    //   • false (Reduzierung auf aus): Keine Zeitmessungen, maximal sauberes FPS.
-    //
-    // Hinweis:
-    //   Nur für Messläufe aktivieren. Logs erscheinen als kompakte ASCII-Zeilen,
-    //   deterministisch, CSV-freundlich. Flush-Intervall zentral konfigurierbar.
-    //   Schneefuchs-Prinzip: Messen, dann abschalten. (Bezug zu Schneefuchs)
+    // Effekt:
+    //   - true: Praezise Einsicht; Overhead ca. 1-2 %.
+    //   - false: Maximale Ruhe. (Schneefuchs)
     // ------------------------------------------------------------------------
     inline constexpr bool performanceLogging = true;
 
     // ------------------------------------------------------------------------
     // progressiveEnabled  (NEU)
     // Wirkung:
-    //   Aktiviert die Progressive Iteration + Resume Pipeline
-    //   (per-Pixel persistent state; zeitbudgetierte Iterationsslices).
+    //   Aktiviert Progressive Iteration + Resume (zeitbudgetierte Slices).
     //
-    // Empfehlung (Min..Max):
+    // Empfehlung:
     //   false .. true (bool)
     //
-    // Erhöhung/Reduzierung:
-    //   • true: Progressive-Pfad in frame_pipeline wird genutzt (weitere Kernel/States).
-    //   • false: Klassischer Single-Pass-Renderpfad bleibt aktiv.
-    //
-    // Hinweis:
-    //   Konservativ standardmäßig aus, um Verhalten stabil zu halten.
-    //   Bei Aktivierung Budget (chunkIter) via PI regeln. (Bezug zu Schneefuchs)
+    // Effekt:
+    //   - true: Progressive-Pfad nutzbar.
+    //   - false: Klassischer Single-Pass. (Schneefuchs)
     // ------------------------------------------------------------------------
     inline constexpr bool progressiveEnabled = false;
 
     // ------------------------------------------------------------------------
     // capFramerate  (NEU)
     // Wirkung:
-    //   Aktiviert eine präzise CPU-Seitenratenbegrenzung (sleep+spin), die — in
-    //   Kombination mit optionalem VSync — das Pacing auf eine Ziel-FPS deckelt.
-    //   Ziel: glattes 60 FPS-Motion-Feeling unabhängig von Monitor-Hz.
+    //   CPU-Seitenratenbegrenzung per sleep+spin auf Ziel-FPS.
     //
-    // Empfehlung (Min..Max):
+    // Empfehlung:
     //   false .. true (bool)
     //
-    // Erhöhung/Reduzierung:
-    //   • true: stabilisiert Bewegungs-Pacing; reduziert Jitter sichtbar. (Otter)
-    //   • false: volles Tempo (keine Deckelung), geeignet für Benchmarks.
-    //
-    // Hinweis:
-    //   In Kombination mit preferVSync auf >60 Hz Displays hält der Limiter
-    //   die 60er-Taktung, jeder Frame bleibt 2–3 Refreshes sichtbar. (Schneefuchs)
+    // Effekt:
+    //   - true: Stabileres Pacing, weniger Jitter. (Otter)
+    //   - false: Volles Tempo fuer Benchmarks.
     // ------------------------------------------------------------------------
     inline constexpr bool capFramerate = true;
 
     // ------------------------------------------------------------------------
     // capTargetFps  (NEU)
     // Wirkung:
-    //   Zieltakt der Framebegrenzung in FPS.
+    //   Zielrate der Framebegrenzung.
     //
     // Empfehlung (Min..Max):
     //   30 .. 240
     //
-    // Erhöhung/Reduzierung:
-    //   • Höher: straffere Zielrate, geringere Sleepzeit, potenziell mehr Last.
-    //   • Niedriger: mehr Ruhezeit → weniger Last, aber weniger temporale Auflösung.
-    //
-    // Hinweis:
-    //   Standard = 60 für natürliches Motion-Feeling. (Bezug zu Otter)
+    // Effekt:
+    //   - Hoeher: straffere Zielrate, mehr Last.
+    //   - Niedriger: mehr Ruhezeit, weniger Last. (Otter)
     // ------------------------------------------------------------------------
     inline constexpr int capTargetFps = 60;
 
     // ------------------------------------------------------------------------
     // preferVSync  (NEU)
     // Wirkung:
-    //   Setzt beim Start `glfwSwapInterval(1)` für Tear-freies Rendering.
-    //   In Verbindung mit capFramerate wird *vor/um* den Swap getaktet, sodass
-    //   bei 120/144 Hz Displays dennoch 60 FPS gezeigt werden (Frames „leben“
-    //   dann über mehrere Refreshes).
+    //   Setzt glfwSwapInterval(1) fuer tear-freies Rendering.
     //
-    // Empfehlung (Min..Max):
+    // Empfehlung:
     //   false .. true (bool)
     //
-    // Erhöhung/Reduzierung:
-    //   • true: Tear-frei, natürliche Präsentation; etwas höhere Latenz möglich.
-    //   • false: Kein VSync (SwapInterval 0) — rein softwareseitiges Pacing.
-    //
-    // Hinweis:
-    //   Bei Messläufen ohne Tearing-Bedarf kann VSync aus. (Bezug zu Schneefuchs)
+    // Effekt:
+    //   - true: Tear-frei, natuerliche Praesentation; etwas mehr Latenz moeglich.
+    //   - false: Kein VSync, nur Software-Pacing. (Schneefuchs)
     // ------------------------------------------------------------------------
     inline constexpr bool preferVSync = true;
+
+    // ======================= Nacktmull-Pullover ==============================
+    // Ziel:
+    //   Praezisionssichere Mapping-Pipeline und orbit-sichere Retarget-Strategie.
+    //   Verhindert Pixel-Quantisierung bei tiefem Zoom und stale Orbits.
+    // ========================================================================
+
+    // ------------------------------------------------------------------------
+    // nacktmullPulloverEnabled  (NEU)
+    // Wirkung:
+    //   Schaltet alle Schutzmechanismen in diesem Block logisch zusammen.
+    //
+    // Empfehlung:
+    //   false .. true (bool)
+    //
+    // Effekt:
+    //   - true: Precision-Guard, Rebase, Orbit-Refresh nutzbar.
+    //   - false: Schutzpfade aus; klassisches Verhalten.
+    // ------------------------------------------------------------------------
+    inline constexpr bool nacktmullPulloverEnabled = true;
+
+    // ------------------------------------------------------------------------
+    // useDoublePrecisionPipeline  (NEU)
+    // Wirkung:
+    //   Erzwingt double fuer Mapping/Center/PixelScale und Orbit-Parameter
+    //   (Host- und Device-Args), wo unterstuetzt.
+    //
+    // Empfehlung:
+    //   false .. true (bool)
+    //
+    // Effekt:
+    //   - true: Deutlich hoehere numerische Reserve im Deep-Zoom.
+    //   - false: Schneller, aber frueher Quantisierung. (Schneefuchs)
+    // ------------------------------------------------------------------------
+    inline constexpr bool useDoublePrecisionPipeline = true;
+
+    // ------------------------------------------------------------------------
+    // precisionGuardEnabled  (NEU)
+    // Wirkung:
+    //   Aktiviert Nachbarpixel-Delta-vs-ULP-Pruefung im Hostpfad.
+    //
+    // Empfehlung:
+    //   false .. true (bool)
+    //
+    // Effekt:
+    //   - true: Logik kann Rebase/Orbit-Refresh triggern.
+    //   - false: Keine Schutzaktion, groesstes Risiko fuer Pixel-Blocks.
+    // ------------------------------------------------------------------------
+    inline constexpr bool precisionGuardEnabled = true;
+
+    // ------------------------------------------------------------------------
+    // precisionGuardMinRatio  (NEU)
+    // Wirkung:
+    //   Schwelle fuer (delta_cx / ulp(cx)). Unterhalb dieser Ratio ist die
+    //   Float-Todeszone erreicht und eine Gegenmassnahme angezeigt.
+    //
+    // Empfehlung (Min..Max):
+    //   2.0 .. 16.0  (double)
+    //
+    // Effekt:
+    //   - Hoeher: Frueheres Eingreifen (mehr Rebase/Refresh).
+    //   - Niedriger: Spaeteres Eingreifen (weniger Schutzaktionen). (Otter)
+    // ------------------------------------------------------------------------
+    inline constexpr double precisionGuardMinRatio = 4.0;
+
+    // ------------------------------------------------------------------------
+    // rebaseEnable  (NEU)
+    // Wirkung:
+    //   Erlaubt periodisches Re-Centering, um Ausloeschung zu vermeiden.
+    //
+    // Empfehlung:
+    //   false .. true (bool)
+    //
+    // Effekt:
+    //   - true: Center wird in die Naehe von 0 verschoben, Praezision steigt.
+    //   - false: Kein Rebase, hoeheres Risiko fuer Praezisionsverlust.
+    // ------------------------------------------------------------------------
+    inline constexpr bool rebaseEnable = true;
+
+    // ------------------------------------------------------------------------
+    // rebaseCenterOverPixelStepThreshold  (NEU)
+    // Wirkung:
+    //   Rebase-Trigger, wenn |center| / pixel_step diesen Wert ueberschreitet.
+    //
+    // Empfehlung (Min..Max):
+    //   1e6 .. 1e9  (double)
+    //
+    // Effekt:
+    //   - Hoeher: Seltener Rebase, mehr Praezisionsrisiko.
+    //   - Niedriger: Haeufiger Rebase, stabilere Praezision. (Schneefuchs)
+    // ------------------------------------------------------------------------
+    inline constexpr double rebaseCenterOverPixelStepThreshold = 1.0e7;
+
+    // ------------------------------------------------------------------------
+    // orbitPerTileEnabled  (NEU)
+    // Wirkung:
+    //   Nutzt tile-lokale Referenzorbits statt eines globalen pro Frame.
+    //
+    // Empfehlung:
+    //   false .. true (bool)
+    //
+    // Effekt:
+    //   - true: Robust in Randbereichen grosser Bilder, weniger Drift.
+    //   - false: Einfacher Pfad, moeglichere Randartefakte. (Otter)
+    // ------------------------------------------------------------------------
+    inline constexpr bool orbitPerTileEnabled = false;
+
+    // ------------------------------------------------------------------------
+    // orbitRebuildOnRetarget  (NEU)
+    // Wirkung:
+    //   Erzwingt Orbits-Neuaufbau nach Retarget plus Warm-up-Freeze.
+    //
+    // Empfehlung:
+    //   false .. true (bool)
+    //
+    // Effekt:
+    //   - true: Exakte Orbit-Basis nach Zielwechsel.
+    //   - false: Orbit bleibt bestehen, Risiko fuer stale Basis. (Schneefuchs)
+    // ------------------------------------------------------------------------
+    inline constexpr bool orbitRebuildOnRetarget = true;
+
+    // ------------------------------------------------------------------------
+    // orbitRebuildMaxDeltaOverPixelStep  (NEU)
+    // Wirkung:
+    //   Trigger fuer Orbit-Neuaufbau, wenn max(|delta_c|)/pixel_step diese
+    //   Schwelle ueberschreitet.
+    //
+    // Empfehlung (Min..Max):
+    //   1e4 .. 1e8  (double)
+    //
+    // Effekt:
+    //   - Hoeher: Weniger Rebuilds, groesseres Drift-Risiko.
+    //   - Niedriger: Mehr Rebuilds, stabilere Perturbation.
+    // ------------------------------------------------------------------------
+    inline constexpr double orbitRebuildMaxDeltaOverPixelStep = 1.0e6;
+
+    // ------------------------------------------------------------------------
+    // deltaGuardFactorBeta  (NEU)
+    // Wirkung:
+    //   Device-seitiger Guard: falls |delta_z| > beta * pixel_step, Flag fuer
+    //   Rebase/Refresh setzen.
+    //
+    // Empfehlung (Min..Max):
+    //   8 .. 256  (double)
+    //
+    // Effekt:
+    //   - Hoeher: Weniger Flags, Risiko fuer Drift.
+    //   - Niedriger: Mehr Flags, stabiler aber event. mehr Rebuilds. (Otter)
+    // ------------------------------------------------------------------------
+    inline constexpr double deltaGuardFactorBeta = 64.0;
+
+    // ======================= Zoom Silk-Lite / Planner ========================
+
+    // ------------------------------------------------------------------------
+    // warmUpFreezeSeconds
+    // Wirkung:
+    //   Nach Retarget fuer diese Zeit keine Richtungswechsel (Stabilisierung).
+    //
+    // Empfehlung (Min..Max):
+    //   0.2 .. 2.0 (double)
+    //
+    // Effekt:
+    //   - Hoeher: Ruhiger, traeger Start.
+    //   - Niedriger: Schnelleres Reagieren, evtl. Flattern. (Schneefuchs)
+    // ------------------------------------------------------------------------
+    inline constexpr double warmUpFreezeSeconds = 1.0;
+
+    // ------------------------------------------------------------------------
+    // retargetIntervalFrames
+    // Wirkung:
+    //   Mindestabstand zwischen neuen Zielauswahlen (Frames).
+    //
+    // Empfehlung (Min..Max):
+    //   1 .. 30 (int)
+    //
+    // Effekt:
+    //   - Hoeher: Weniger Zielwechsel, stabiler Fokus.
+    //   - Niedriger: Reaktiver, aber potentiell nervoes. (Otter)
+    // ------------------------------------------------------------------------
+    inline constexpr int retargetIntervalFrames = 5;
+
+    // ------------------------------------------------------------------------
+    // lockFrames
+    // Wirkung:
+    //   Harte Sperre der Zielwahl fuer N Frames nach Lock.
+    //
+    // Empfehlung (Min..Max):
+    //   4 .. 60 (int)
+    //
+    // Effekt:
+    //   - Hoeher: Konstanter Fokus, weniger Zittern.
+    //   - Niedriger: Mehr Reaktivitaet. (Schneefuchs)
+    // ------------------------------------------------------------------------
+    inline constexpr int lockFrames = 12;
+
+    // ------------------------------------------------------------------------
+    // hysteresisRel
+    // Wirkung:
+    //   Relative Ueberlegenheit, die ein Kandidat gegen den aktuellen Sieger
+    //   aufweisen muss, um einen Wechsel auszueloesen (z. B. 0.12 = +12 %).
+    //
+    // Empfehlung (Min..Max):
+    //   0.02 .. 0.30 (double)
+    //
+    // Effekt:
+    //   - Hoeher: Weniger Wechsel, stabiler.
+    //   - Niedriger: Schnelleres Umschalten. (Otter)
+    // ------------------------------------------------------------------------
+    inline constexpr double hysteresisRel = 0.12;
+
+    // ------------------------------------------------------------------------
+    // softmaxTopK
+    // Wirkung:
+    //   Anzahl Top-K Tiles/Kandidaten fuer Softmax-basierte Zielwahl.
+    //
+    // Empfehlung (Min..Max):
+    //   1 .. 32 (int)
+    //
+    // Effekt:
+    //   - Hoeher: Breitere Auswahl, robust gegen Ausreisser.
+    //   - Niedriger: Fokus auf Spitzenkandidaten, evtl. sprunghaft. (Schneefuchs)
+    // ------------------------------------------------------------------------
+    inline constexpr int softmaxTopK = 6;
+
+    // ------------------------------------------------------------------------
+    // statsCadenceFrames
+    // Wirkung:
+    //   Frequenz fuer Statistik-Aktualisierung (Median/MAD, Normalisierung).
+    //
+    // Empfehlung (Min..Max):
+    //   1 .. 10 (int)
+    //
+    // Effekt:
+    //   - Hoeher: Weniger CPU-Overhead, traegere Reaktion.
+    //   - Niedriger: Reaktiver, mehr Overhead. (Otter)
+    // ------------------------------------------------------------------------
+    inline constexpr int statsCadenceFrames = 3;
+
+    // ------------------------------------------------------------------------
+    // pdKp, pdKd
+    // Wirkung:
+    //   Proportional- und Damping-Gewichte fuer den Zoom-Motion-Planner.
+    //
+    // Empfehlung (Min..Max):
+    //   Kp: 0.1 .. 3.0
+    //   Kd: 0.0 .. 1.5
+    //
+    // Effekt:
+    //   - Kp hoeher: Schnelleres Anziehen, Risiko Ueberschwingen.
+    //   - Kd hoeher: Mehr Daempfung, ruhiger, evtl. traeger. (Schneefuchs)
+    // ------------------------------------------------------------------------
+    inline constexpr double pdKp = 1.0;
+    inline constexpr double pdKd = 0.30;
+
+    // ------------------------------------------------------------------------
+    // pdMaxAccel, pdMaxVelocity
+    // Wirkung:
+    //   Klemmen der Planner-Ausgaben fuer sanftes Pacing.
+    //
+    // Empfehlung (Min..Max):
+    //   Accel: 0.1 .. 10.0
+    //   Vel  : 0.01 .. 5.0
+    //
+    // Effekt:
+    //   - Hoeher: Reaktiver, evtl. ruckeliger.
+    //   - Niedriger: Ruhiger, evtl. zaeh. (Otter)
+    // ------------------------------------------------------------------------
+    inline constexpr double pdMaxAccel   = 3.0;
+    inline constexpr double pdMaxVelocity= 1.2;
+
+    // ------------------------------------------------------------------------
+    // microDeadbandNDC
+    // Wirkung:
+    //   Deadband in NDC fuer Mikro-Bewegungen, um Flattern zu vermeiden.
+    //
+    // Empfehlung (Min..Max):
+    //   1e-5 .. 5e-3
+    //
+    // Effekt:
+    //   - Hoeher: Weniger Zittern, aber geringere Feinausrichtung.
+    //   - Niedriger: Praeziser, aber potentiell vibrationen. (Schneefuchs)
+    // ------------------------------------------------------------------------
+    inline constexpr double microDeadbandNDC = 5e-4;
+
+    // ======================= UI / Overlays / Window ==========================
 
     // ------------------------------------------------------------------------
     // heatmapOverlayEnabled
     // Wirkung:
-    //   Bestimmt, ob das Heatmap-Overlay beim Programmstart sichtbar ist.
-    //
-    // Empfehlung (Min..Max):
-    //   false .. true  (bool)
-    //
-    // Erhöhung/Reduzierung:
-    //   • true: Sofortige Diagnose/Analyse im Bild; gut für Entwicklung.
-    //   • false: Aufgeräumteres Bild; Overlay bei Bedarf zuschalten.
-    //
-    // Hinweis:
-    //   Für „Pfote/Eule“-Diagnosen sinnvoll zunächst aktiv. (Bezug zu Otter)
+    //   Sichtbarkeit des Heatmap-Overlays beim Start.
     // ------------------------------------------------------------------------
-    inline constexpr bool heatmapOverlayEnabled = true; 
+    inline constexpr bool heatmapOverlayEnabled = true;
 
     // ------------------------------------------------------------------------
     // warzenschweinOverlayEnabled
     // Wirkung:
-    //   Schaltet das Warzenschwein-HUD (FPS/Stats/Text) an/aus zum Start.
-    //
-    // Empfehlung (Min..Max):
-    //   false .. true  (bool)
-    //
-    // Erhöhung/Reduzierung:
-    //   • true: HUD sofort sichtbar (nützlich beim Tuning).
-    //   • false: Clean Look; HUD nur auf Anfrage.
-    //
-    // Hinweis:
-    //   Für „WOW-Effekt“-Style-Checks zu Beginn aktiv lassen. (Bezug zu Otter)
+    //   Sichtbarkeit des Warzenschwein-HUD beim Start.
     // ------------------------------------------------------------------------
-    inline constexpr bool warzenschweinOverlayEnabled = true; 
+    inline constexpr bool warzenschweinOverlayEnabled = true;
 
     // ------------------------------------------------------------------------
     // hudPixelSize
     // Wirkung:
-    //   Skalierung der HUD-Glyphen in NDC-Einheiten pro Pixelquadrat.
-    //   Steuert die wahrgenommene Textgröße.
+    //   Skalierung der HUD-Glyphen in NDC-Einheiten.
     //
     // Empfehlung (Min..Max):
     //   0.0015f .. 0.0040f
-    //
-    // Erhöhung/Reduzierung:
-    //   • Höher: Größerer, präsenterer Text (Risiko: Clipping/Überlagerung).
-    //   • Niedriger: Dezenter; kann auf hochauflösenden Displays zu klein sein.
-    //
-    // Hinweis:
-    //   An DPI/Fenstergröße koppeln, wenn dynamisch benötigt. (Bezug zu Schneefuchs)
     // ------------------------------------------------------------------------
     inline constexpr float hudPixelSize = 0.0025f;
 
     // ------------------------------------------------------------------------
-    // Fensterkonfiguration (width/height/windowPosX/windowPosY)
+    // Fensterkonfiguration
     // Wirkung:
-    //   Startgröße und Startposition des Fensters.
-    //
-    // Empfehlung (Min..Max):
-    //   width :  800 .. 3840
-    //   height:  600 .. 2160
-    //   Pos   : frei (je nach Multi-Monitor-Setup)
-    //
-    // Erhöhung/Reduzierung:
-    //   • Größere Fenster: Mehr Pixel → höhere GPU-Last, klareres Bild.
-    //   • Kleinere Fenster: Höhere FPS, geringere Renderlast.
-    //
-    // Hinweis:
-    //   Für reproduzierbare Benchmarks feste Startwerte beibehalten. (Schneefuchs)
+    //   Startgroesse und -position des Fensters.
     // ------------------------------------------------------------------------
     inline constexpr int width       = 1024;
     inline constexpr int height      = 768;
@@ -251,66 +450,26 @@ namespace Settings {
     inline constexpr int windowPosY  = 100;
 
     // ------------------------------------------------------------------------
-    // Initialer Fraktal-Ausschnitt (initialZoom, initialOffsetX/Y)
+    // Initialer Fraktal-Ausschnitt
     // Wirkung:
-    //   Start-Zoom und -Offset im Komplexraum. Bestimmt den Erst-Eindruck.
-    //
-    // Empfehlung (Min..Max):
-    //   initialZoom   : 0.5f .. 10.0f
-    //   initialOffsetX: -2.0f .. +2.0f
-    //   initialOffsetY: -2.0f .. +2.0f
-    //
-    // Erhöhung/Reduzierung:
-    //   • Höherer initialZoom: Näher dran, mehr Detail, höhere Iterationskosten.
-    //   • Niedrigerer initialZoom: Weiterer Blick, schneller, weniger Details.
-    //
-    // Hinweis:
-    //   Aktuelle Defaults liefern einen klassischen Mandelbrot-Frame. (Otter)
+    //   Start-Zoom und Offset im Komplexraum.
     // ------------------------------------------------------------------------
     inline constexpr float initialZoom    = 1.5f;
     inline constexpr float initialOffsetX = -0.5f;
     inline constexpr float initialOffsetY = 0.0f;
 
     // ------------------------------------------------------------------------
-    // Iterationssteuerung (INITIAL_ITERATIONS, MAX_ITERATIONS_CAP)
+    // Iterationssteuerung
     // Wirkung:
-    //   INITIAL_ITERATIONS: Startbudget der Iterationen pro Pixel.
-    //   MAX_ITERATIONS_CAP: Harte Obergrenze gegen Explodieren der Kosten.
-    //
-    // Empfehlung (Min..Max):
-    //   INITIAL_ITERATIONS: 64 .. 1024
-    //   MAX_ITERATIONS_CAP: 4096 .. 200000 (GPU/Anspruch abhängig)
-    //
-    // Erhöhung/Reduzierung:
-    //   • INITIAL_ITERATIONS ↑: Sauberere Kanten, mehr Kosten/FPS-Verlust möglich.
-    //   • MAX_ITERATIONS_CAP ↑: Tiefere Zoomschärfe; Risiko von Frame-Spikes.
-    //   • ↓ jeweils entsprechend entlastend, aber gröber.
-    //
-    // Hinweis:
-    //   Bei aggressivem Zoom (ForcedZoomStep klein) Obergrenzen im Blick behalten.
-    //   Dokumentationspflicht: Warnung vor Perf-Cliffs. (Bezug zu Schneefuchs)
+    //   Startbudget und harte Obergrenze der Iterationen pro Pixel.
     // ------------------------------------------------------------------------
     inline constexpr int INITIAL_ITERATIONS = 100;
     inline constexpr int MAX_ITERATIONS_CAP = 50000;
 
     // ------------------------------------------------------------------------
-    // CUDA Tile-Größen (BASE/MIN/MAX_TILE_SIZE)
+    // CUDA Tile-Groessen
     // Wirkung:
-    //   Steuern die Arbeitsaufteilung in Kacheln für CUDA-Kernels.
-    //   Kachelkanten sollten i. d. R. vielfache von 8 sein (Warp-freundlich).
-    //
-    // Empfehlung (Min..Max):
-    //   BASE_TILE_SIZE: 16 .. 64
-    //   MIN_TILE_SIZE :  8 .. BASE_TILE_SIZE
-    //   MAX_TILE_SIZE : BASE_TILE_SIZE .. 128
-    //
-    // Erhöhung/Reduzierung:
-    //   • Größere Tiles: Weniger Launches, potenziell bessere Coalescing-Effekte,
-    //     aber ungleichmäßige Lastverteilung bei komplexen Regionen möglich.
-    //   • Kleinere Tiles: Feinere Verteilung, mehr Launch-Overhead/Synchronisation.
-    //
-    // Hinweis:
-    //   In Einklang mit Zoom-Geschwindigkeit und FPS-Zielen tunen. (Bezug zu Otter)
+    //   Arbeitsaufteilung fuer CUDA-Kernels.
     // ------------------------------------------------------------------------
     inline constexpr int BASE_TILE_SIZE = 32;
     inline constexpr int MIN_TILE_SIZE  = 8;

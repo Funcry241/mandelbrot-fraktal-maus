@@ -1,19 +1,18 @@
 ///// Otter: Loop orchestrates FramePipeline; no duplicate upload/draw; async 100th-frame capture.
 ///// Schneefuchs: if constexpr for C4127; VSync init-once; precise 60 FPS pacing; ASCII-only logs.
-///// Maus: Schlanke TU; keine unnötigen Includes/Statics; deterministische Reihenfolge.
+///// Maus: Schlanke TU; keine unnoetigen Includes/Statics; deterministische Reihenfolge.
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
-#include "cuda_interop.hpp"
-#include "settings.hpp"
 #include "frame_pipeline.hpp"
+#include "cuda_interop.hpp"          // pause toggle in keyCallback
+#include "settings.hpp"
 #include "luchs_log_host.hpp"
-#include "luchs_cuda_log_buffer.hpp"
-#include "heatmap_overlay.hpp"
-#include "warzenschwein_overlay.hpp"
-#include "frame_limiter.hpp"   // namespace pace::FrameLimiter
-#include "frame_capture.hpp"   // async single-shot 100th-frame capture
-#include <cuda_runtime_api.h>
+#include "luchs_cuda_log_buffer.hpp" // LuchsLogger::flushDeviceLogToHost
+#include "heatmap_overlay.hpp"       // HeatmapOverlay::toggle
+#include "frame_limiter.hpp"         // pace::FrameLimiter
+#include "frame_capture.hpp"         // async single-shot 100th-frame capture
+#include <cuda_runtime_api.h>        // cudaPeekAtLastError
 
 namespace RendererLoop {
 
@@ -51,10 +50,10 @@ void renderFrame_impl(RendererState& state) {
     initVSyncOnce();
     beginFrameLocal(state);
 
-    // Full frame pipeline (CUDA → Upload → Draw → Overlays → PERF)
+    // Full frame pipeline (CUDA -> Upload -> Draw -> Overlays -> PERF)
     FramePipeline::execute(state);
 
-    // --- Single-shot async capture of the 100th frame (non-blocking) ----------
+    // Single-shot async capture of the 100th frame (non-blocking)
     FrameCapture::OnFrameRendered(state.frameCount);
 
     // Device log flush (debug or periodic)

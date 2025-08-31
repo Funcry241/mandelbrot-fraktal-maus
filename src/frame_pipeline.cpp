@@ -1,4 +1,4 @@
-///// Otter: Feste Aufrufreihenfolge – updateTextureFromPBO(PBO, TEX, W, H); ASCII-Logs; keine Compat-Wrapper.
+///// Otter: Feste Aufrufreihenfolge - updateTextureFromPBO(PBO, TEX, W, H); ASCII-Logs; keine Compat-Wrapper.
 ///// Schneefuchs: /WX-fest; keine toten TU-scope-Symbole bei deaktiviertem Progressive-Pfad.
 ///// Maus: Progressive-Code nur bauen, wenn SETTINGS_PROGRESSIVE_ENABLED=1.
 
@@ -26,21 +26,20 @@
 #include "common.hpp"
 #include "settings.hpp"
 
-// Progressive-Iteration (Resume) – additiv, kein API-Bruch
-#include "progressive_iteration.cuh"
-#include "progressive_shade.cuh"
-#include "progressive_controller.hpp"
-#include "bear_CudaPBOResource.hpp"
-
-// -----------------------------------------------------------------------------
-// Compile-time Switches
-// -----------------------------------------------------------------------------
 #ifndef SETTINGS_PROGRESSIVE_ENABLED
 #define SETTINGS_PROGRESSIVE_ENABLED 0
 #endif
 
 #ifndef OTTER_ENABLE_PBO_MAP_AND_LOG
 #define OTTER_ENABLE_PBO_MAP_AND_LOG 0
+#endif
+
+#if SETTINGS_PROGRESSIVE_ENABLED
+  // Progressive-Iteration (Resume) – nur wenn gebaut
+  #include "progressive_iteration.cuh"
+  #include "progressive_shade.cuh"
+  #include "progressive_controller.hpp"
+  #include "bear_CudaPBOResource.hpp"
 #endif
 
 namespace FramePipeline
@@ -54,7 +53,7 @@ static int          g_frame = 0;
 // Kleine Zoom-Stufe pro akzeptiertem Schritt
 static constexpr float kZOOM_GAIN = 1.006f;
 
-// 🐑 Schneefuchs: lokale Perf-Zwischenspeicher (nur Host-Seite dieser TU)
+// Schneefuchs: lokale Perf-Zwischenspeicher (nur Host-Seite dieser TU)
 namespace {
     using Clock = std::chrono::high_resolution_clock;
     using msd   = std::chrono::duration<double, std::milli>;
@@ -76,7 +75,7 @@ namespace {
         }
     }
 
-    // --- Diagnose: GL-PBO kurz mappen und die ersten Bytes prüfen ---
+    // --- Diagnose: GL-PBO kurz mappen und die ersten Bytes pruefen ---
     static void peekPBO(GLuint pbo) {
         if constexpr (!Settings::debugLogging) {
             (void)pbo;
@@ -214,7 +213,7 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
         LuchsLogger::flushDeviceLogToHost(0);
     }
 
-    // Device-Logs periodisch spülen
+    // Device-Logs periodisch spuelen
     {
         const cudaError_t err = cudaPeekAtLastError();
         if constexpr (Settings::debugLogging) {
@@ -241,7 +240,7 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
             fctx.width, fctx.height,
             currOff, fctx.zoom,
             prevOff,
-            state.zoomV2State
+            state.zoomV3State
         );
 
         if (zr.bestIndex >= 0) {
@@ -258,7 +257,7 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
         }
 
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIPE] ZOOMV2: best=%d score=%.3f accept=%d newOff=(%.6f,%.6f)",
+            LUCHS_LOG_HOST("[PIPE] ZOOMV3: best=%d score=%.3f accept=%d newOff=(%.6f,%.6f)",
                            zr.bestIndex, zr.bestScore, zr.shouldZoom ? 1 : 0,
                            zr.newOffset.x, zr.newOffset.y);
         }
@@ -282,13 +281,13 @@ static void computeCudaFrame_progressive(FrameContext& fctx, RendererState& stat
         return;
     }
 
-    // Stelle sicher, dass Analysepuffer existieren (Overlay/HUD erwartet Größen)
+    // Stelle sicher, dass Analysepuffer existieren (Overlay/HUD erwartet Groessen)
     state.setupCudaBuffers(fctx.tileSize);
     if ((int)fctx.h_entropy.size() != numTiles) fctx.h_entropy.assign((size_t)numTiles, 0.0f);
     if ((int)fctx.h_contrast.size() != numTiles) fctx.h_contrast.assign((size_t)numTiles, 0.0f);
 
-    // 1) Progressive Step (Iterationsbudget hinzufügen)
-    auto scaleFromZoom = [](double zoom) {
+    // 1) Progressive Step (Iterationsbudget hinzufuegen)
+    auto scaleFromZoom_local = [](double zoom) {
         constexpr double BASE_HEIGHT_SPAN = 3.0;
         return BASE_HEIGHT_SPAN / (zoom > 0.0 ? zoom : 1.0);
     };
@@ -296,7 +295,7 @@ static void computeCudaFrame_progressive(FrameContext& fctx, RendererState& stat
     prog::ViewportParams vp;
     vp.centerX = (double)fctx.offset.x;
     vp.centerY = (double)fctx.offset.y;
-    vp.scale   = scaleFromZoom((double)fctx.zoom); // height-based
+    vp.scale   = scaleFromZoom_local((double)fctx.zoom); // height-based
     vp.width   = fctx.width;
     vp.height  = fctx.height;
 
@@ -310,7 +309,7 @@ static void computeCudaFrame_progressive(FrameContext& fctx, RendererState& stat
     const auto met = g_progState.step(vp, cfg, /*stream=*/0);
 
     // 2) Shade in den PBO (CUDA-Interop)
-#if OTTER_ENABLE_PBO_MAP_AND_LOG
+  #if OTTER_ENABLE_PBO_MAP_AND_LOG
     {
         uchar4* d_pixels = state.pbo.mapAndLog();
         if (!d_pixels) {
@@ -320,14 +319,14 @@ static void computeCudaFrame_progressive(FrameContext& fctx, RendererState& stat
         }
         state.pbo.unmapAndLog();
     }
-#else
+  #else
     LUCHS_LOG_HOST("[PROG] PBO map/unmap path disabled (OTTER_ENABLE_PBO_MAP_AND_LOG=0)");
-#endif
+  #endif
 
     // 3) Budgetregelung (PI)
     g_progChunk = g_progPI.suggest(g_progChunk, met.kernel_ms);
 
-    // 4) Device-Logs periodisch spülen (identisch zur klassischen Pipeline)
+    // 4) Device-Logs periodisch spuelen (identisch zur klassischen Pipeline)
     {
         const cudaError_t err = cudaPeekAtLastError();
         if constexpr (Settings::debugLogging) {
@@ -343,9 +342,9 @@ static void computeCudaFrame_progressive(FrameContext& fctx, RendererState& stat
     }
 
     // 5) Zoom-Analyse (vorerst neutral: keine Zielauswahl ohne E/C)
-    fctx.shouldZoom = false;
+    fctx.shouldZoom  = false;
     fctx.lastEntropy = 0.0f;
-    fctx.lastContrast = 0.0f;
+    fctx.lastContrast= 0.0f;
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PROG] step addIter=%u ms=%.3f survivors=%u scale=%.17g",
@@ -395,6 +394,7 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
     }
 
     OpenGLUtils::setGLResourceContext("draw");
+    // Feste Aufrufreihenfolge: updateTextureFromPBO(PBO, TEX, W, H)
     OpenGLUtils::updateTextureFromPBO(state.pbo.id(), state.tex.id(), fctx.width, fctx.height);
 
     RendererPipeline::drawFullscreenQuad(state.tex.id());
@@ -438,7 +438,8 @@ void execute(RendererState& state) {
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
     g_ctx.zoom          = static_cast<float>(state.zoom);
-    g_ctx.offset        = state.offset;
+    // Nacktmull-Pullover: State haelt center (double2); FrameContext haelt offset (float2)
+    g_ctx.offset        = make_float2((float)state.center.x, (float)state.center.y);
     g_ctx.maxIterations = state.maxIterations;
     g_ctx.tileSize      = computeTileSizeFromZoom(g_ctx.zoom);
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
@@ -452,9 +453,9 @@ void execute(RendererState& state) {
 
     applyZoomStep(g_ctx, g_zoomBus);
 
-    // Ergebnisse zurück nach State
+    // Ergebnisse zurueck nach State
     state.zoom   = g_ctx.zoom;
-    state.offset = g_ctx.offset;
+    state.center = { (double)g_ctx.offset.x, (double)g_ctx.offset.y };
 
     // HUD-Text (ASCII) – nutzt MaxFPS vom letzten Frame
     state.warzenschweinText = HudText::build(g_ctx, state);

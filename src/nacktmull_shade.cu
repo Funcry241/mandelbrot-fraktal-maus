@@ -1,4 +1,4 @@
-///// Otter: Nacktmull-Shading – stabile Kernels; keine eigenen Typen; schnelle Helfer.
+///// Otter: Nacktmull-Shading - stabile Kernels; keine eigenen Typen; schnelle Helfer.
 ///// Schneefuchs: Deterministisch, ASCII-only; Signaturen exakt wie in .cuh deklariert.
 ///// Maus: Kein Device-Logging; mikro-optimiert (invMax, saturatef, rundungsfeste Pack-Funktion).
 
@@ -15,7 +15,7 @@ static __device__ __forceinline__ uchar4 pack_rgba(unsigned char r, unsigned cha
 }
 
 // ----------------------------------------------------------------------------
-// Mandelbrot-Färbung aus Iterationsbild
+// Mandelbrot-Faerbung aus Iterationsbild
 // Signatur muss exakt der Deklaration in nacktmull_shade.cuh entsprechen.
 // ----------------------------------------------------------------------------
 extern "C" __global__
@@ -32,7 +32,7 @@ void shade_from_iterations(uchar4* surface,
     const int it  = iters[idx];
 
     if (it >= maxIterations) {
-        // Punkte im Inneren → schwarz
+        // Punkte im Inneren -> schwarz
         surface[idx] = pack_rgba(0u, 0u, 0u, 255u);
         return;
     }
@@ -41,7 +41,7 @@ void shade_from_iterations(uchar4* surface,
     const float invMax = (maxIterations > 0) ? (1.0f / (float)maxIterations) : 0.0f;
     const float t = (float)it * invMax;
 
-    // Kanäle (linear gemischt, später leicht austauschbar)
+    // Kanaele (linear gemischt, leicht austauschbar)
     const unsigned char R = (unsigned char)(255.0f * saturatef(t) + 0.5f);
     const unsigned char G = (unsigned char)(255.0f * saturatef(1.0f - t) + 0.5f);
     const unsigned char B = (unsigned char)(255.0f * saturatef(0.5f * t) + 0.5f);
@@ -50,7 +50,7 @@ void shade_from_iterations(uchar4* surface,
 }
 
 // ----------------------------------------------------------------------------
-// Debug/Diagnose: sanfter Farbverlauf + Checker-Overlay
+// Debug/Diagnose: weicher Farbverlauf + Checker-Overlay
 // ----------------------------------------------------------------------------
 extern "C" __global__
 void shade_test_pattern(uchar4* surface,
@@ -63,7 +63,7 @@ void shade_test_pattern(uchar4* surface,
 
     const int idx = y * width + x;
 
-    // Normalisierte Koordinaten ohne std::max (vermeide zusätzliche Includes)
+    // Normalisierte Koordinaten ohne std::max (vermeide weitere Includes)
     const int denomW = (width  > 1) ? (width  - 1) : 1;
     const int denomH = (height > 1) ? (height - 1) : 1;
     const float u = (float)x / (float)denomW;

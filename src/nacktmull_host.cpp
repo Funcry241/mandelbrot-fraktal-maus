@@ -1,6 +1,6 @@
-///// Otter: Host-Mandelbrot (CPU) – schnelle Referenz mit inkrementeller NDC und Row-Ptr.
-///// Schneefuchs: Deterministisch, ASCII-only; keine iostreams; Guards für Edge-Cases.
-///// Maus: Keine versteckten Pfade; nur lokale Optimierungen, API unverändert.
+///// Otter: Host-Mandelbrot (CPU) - schnelle Referenz mit inkrementeller NDC und Row-Ptr.
+///// Schneefuchs: Deterministisch, ASCII-only; keine iostreams; Guards fuer Edge-Cases.
+///// Maus: Keine versteckten Pfade; nur lokale Optimierungen, API unveraendert.
 
 #include "nacktmull_host.hpp"
 #include <chrono>
@@ -37,7 +37,7 @@ double compute_host_iterations(int width, int height,
     using clock = std::chrono::high_resolution_clock;
     const auto t0 = clock::now();
 
-    // Edge-Cases: leere Fläche oder kein Budget → sofort zurück
+    // Edge-Cases: leere Flaeche oder kein Budget -> sofort zurueck
     if (width <= 0 || height <= 0 || maxIter <= 0) {
         outIters.clear();
         const auto t1 = clock::now();
@@ -53,9 +53,9 @@ double compute_host_iterations(int width, int height,
 
     // Inkrementelle NDC-Abbildung: ndc = a*x + b
     const double stepX = 2.0 / static_cast<double>(width);
-    const double baseX = (1.0 / static_cast<double>(width)) - 1.0;   // x=0 → (0.5/width)*2 - 1
+    const double baseX = (1.0 / static_cast<double>(width)) - 1.0;   // x=0 -> (0.5/width)*2 - 1
     const double stepY = 2.0 / static_cast<double>(height);
-    const double baseY = (1.0 / static_cast<double>(height)) - 1.0;  // y=0 → (0.5/height)*2 - 1
+    const double baseY = (1.0 / static_cast<double>(height)) - 1.0;  // y=0 -> (0.5/height)*2 - 1
 
     int* __restrict dst = outIters.data();
 

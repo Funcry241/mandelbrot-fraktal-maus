@@ -1,7 +1,6 @@
-// =============================== src/zoom_logic.cpp ==========================
-// V3-lite + Pullback metric (center). Smooth direction changes, softmax target.
-// Otter: navigation-only; hide HUD markers by clearing bestIndex.
-// Logs ASCII-only; minimal, math-first behavior.
+///// Otter: V3-lite + Pullback metric (center); smooth direction changes; softmax target; HUD hidden.
+///// Schneefuchs: ASCII-only logs; deterministic; /WX-safe; minimal math-first behavior.
+///// Maus: Navigation-only; clear bestIndex; stable ABI; no HUD markers.
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -12,6 +11,8 @@
 #include <chrono>
 #include <cmath>
 #include <vector>
+#include <vector_types.h>
+#include <vector_functions.h>
 
 namespace {
 // ---- Weights & thresholds ----------------------------------------------------
@@ -26,8 +27,7 @@ constexpr float kMETRIC_ALPHA  = 0.40f;
 constexpr float kMETRIC_MIN_F  = 0.55f;
 constexpr float kMETRIC_MAX_F  = 1.00f;
 
-// Warm-up / Seed
-constexpr double kNO_TURN_WARMUP_SEC = 1.0;
+// Warm-up / Seed (freeze duration comes from Settings)
 constexpr float  kWARMUP_DRIFT_NDC   = 0.08f;
 constexpr float  kSEED_STEP_NDC      = 0.015f;
 
@@ -124,7 +124,7 @@ ZoomResult evaluateZoomTarget(
 
     static bool warmInit=false; static clock::time_point warmStart;
     if(!warmInit){ warmStart=t0; warmInit=true; }
-    const bool freezeDirection = (std::chrono::duration<double>(t0 - warmStart).count() < kNO_TURN_WARMUP_SEC);
+    const bool freezeDirection = (std::chrono::duration<double>(t0 - warmStart).count() < Settings::warmUpFreezeSeconds);
 
     ZoomResult out{}; out.bestIndex=-1; out.shouldZoom=false; out.isNewTarget=false; out.newOffset=previousOffset; out.minDistance=0.02f;
 
@@ -160,7 +160,7 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // Median/MAD auf Kopien (nth_element modifiziert).
+    // Median/MAD on copies (nth_element modifies input).
     std::vector<float> e(entropy.begin(), entropy.begin()+totalTiles);
     std::vector<float> c(contrast.begin(), contrast.begin()+totalTiles);
     const float eMed = median_inplace(e); const float eMad = mad_from_center_inplace(e, eMed);

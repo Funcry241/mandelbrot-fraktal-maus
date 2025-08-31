@@ -1,6 +1,6 @@
-///// Otter: Header minimal und stabil – nur E/C-API; keine versteckten Abhängigkeiten.
+///// Otter: Header minimal und stabil - nur E/C-API; keine versteckten Abhaengigkeiten.
 ///// Schneefuchs: C++-Linkage, /WX-fest, ASCII-only; Header/Source synchron.
-///// Maus: Render-Kernel entfernt; einzig verbleibende öffentliche Funktion dokumentiert.
+///// Maus: Render-Kernel entfernt; einzig verbleibende oeffentliche Funktion dokumentiert.
 
 #pragma once
 #ifndef CORE_KERNEL_H
@@ -14,10 +14,10 @@
 //  - d_entropyOut : Entropie je Tile (device memory, tilesX*tilesY floats)
 //  - d_contrastOut: Kontrast je Tile (device memory, tilesX*tilesY floats)
 //  - width/height : Bildabmessungen in Pixeln
-//  - tileSize     : Kantenlänge der Tiles
+//  - tileSize     : Kantenlaenge der Tiles (Pixel)
 //  - maxIterations: Iterationslimit (zur Histogramm-Normierung)
 //
-// Erwartet valide Größen/Allokationen gemäß width,height,tileSize.
+// Erwartet valide Groessen/Allokationen gemaess width,height,tileSize (C++-Linkage).
 void computeCudaEntropyContrast(
     const int* d_iterations,
     float*     d_entropyOut,

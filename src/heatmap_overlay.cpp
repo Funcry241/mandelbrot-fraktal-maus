@@ -1,6 +1,7 @@
-///// Otter: Heatmap-Overlay – Diagnose & Mini-HUD; Shader 0 on error; cached uniforms; no state leaks.
+///// Otter: Heatmap-Overlay - Diagnose & Mini-HUD; Shader 0 on error; cached uniforms; no state leaks.
 ///// Schneefuchs: Zustands-Restore (VAO/VBO/Program/Blend); ASCII-Logs; deterministisch; keine verdeckten Pfade.
 ///// Maus: Default ohne Marker/Points; Overlay y=0 unten; gleiche Datenquelle wie Zoom.
+// Datei: src/heatmap_overlay.cpp
 
 #pragma warning(push)
 #pragma warning(disable: 4100)
@@ -15,24 +16,22 @@
 #include <cmath>
 #include <utility>
 
-// --- Build-time toggles -------------------------------------------------------
-// 0 = aus, 1 = an. Beide standardmäßig aus, damit keine Punkte gezeichnet werden.
+// 0 = aus, 1 = an.
 #ifndef HEATMAP_DRAW_MAX_MARKER
-#define HEATMAP_DRAW_MAX_MARKER 0   // Marker im Hauptbild am Zentrum der "besten" Kachel (grün/teal).  // Otter
+#define HEATMAP_DRAW_MAX_MARKER 0
 #endif
 #ifndef HEATMAP_DRAW_SELF_CHECK
-#define HEATMAP_DRAW_SELF_CHECK 0   // 5 Testpunkte im Mini-Overlay (nur für Diagnose).                // Otter
+#define HEATMAP_DRAW_SELF_CHECK 0
 #endif
 
-// Otter: always read from the *actual* context (no hidden fallbacks).
-// Schneefuchs: deterministic – overlay and zoom share the same source of truth.
-#define RS_OFFSET_X(ctx) ((ctx).offset.x)
-#define RS_OFFSET_Y(ctx) ((ctx).offset.y)
+// Quelle: RendererState – keine verdeckten Pfade.
+// Nacktmull-Pullover: State nutzt center (double2).
+#define RS_OFFSET_X(ctx) ((ctx).center.x)
+#define RS_OFFSET_Y(ctx) ((ctx).center.y)
 #define RS_ZOOM(ctx)     ((ctx).zoom)
 
 namespace HeatmapOverlay {
 
-// ---------- GL State ----------
 static GLuint overlayVAO = 0;
 static GLuint overlayVBO = 0;
 static GLuint overlayShader = 0;
@@ -40,7 +39,6 @@ static GLint  overlay_uScaleLoc  = -1;
 static GLint  overlay_uOffsetLoc = -1;
 
 #if HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
-// Punkt-Pipeline nur kompilieren, wenn mindestens eine Punkt-Option aktiv ist.
 static GLuint pointProg   = 0;
 static GLuint pointVAO    = 0;
 static GLuint pointVBO    = 0;
@@ -49,14 +47,13 @@ static GLint  point_uOffsetLoc  = -1;
 static GLint  point_uSizeLoc    = -1;
 #endif
 
-// ---------- Overlay Shader ----------
 static const char* vertexShaderSrc = R"GLSL(
 #version 430 core
-layout(location = 0) in vec2 aPos;   // Kachelkoordinaten (x,y) in [0..tilesX],[0..tilesY]
+layout(location = 0) in vec2 aPos;
 layout(location = 1) in float aValue;
 out float vValue;
-uniform vec2 uOffset;  // NDC Offset des Mini-Overlays
-uniform vec2 uScale;   // NDC Scale des Mini-Overlays
+uniform vec2 uOffset;
+uniform vec2 uScale;
 void main() {
     vec2 pos = aPos * uScale + uOffset;
     gl_Position = vec4(pos, 0.0, 1.0);
@@ -77,7 +74,6 @@ void main() {
 }
 )GLSL";
 
-// ---------- Hilfen ----------
 static GLuint compile(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
     if (!shader) {
@@ -133,12 +129,11 @@ static GLuint createOverlayProgram() {
 }
 
 #if HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
-// ---------- Minimaler Punkt-Shader (für Overlay- und Screen-Punkte) ----------
 static const char* pointVS = R"GLSL(
 #version 430 core
-layout(location=0) in vec2 aPos;   // generische Position (Einheit siehe uScale/uOffset)
+layout(location=0) in vec2 aPos;
 layout(location=1) in vec3 aColor;
-uniform vec2 uScale;               // pos_ndc = aPos*uScale + uOffset
+uniform vec2 uScale;
 uniform vec2 uOffset;
 uniform float uPointSize;
 out vec3 vColor;
@@ -165,20 +160,16 @@ static void ensurePointPipeline()
     if (pointProg == 0) return;
     glGenVertexArrays(1, &pointVAO);
     glGenBuffers(1, &pointVBO);
-    // Cache uniform locations (einmalig)
     point_uScaleLoc  = glGetUniformLocation(pointProg, "uScale");
     point_uOffsetLoc = glGetUniformLocation(pointProg, "uOffset");
     point_uSizeLoc   = glGetUniformLocation(pointProg, "uPointSize");
 }
 
-// Zeichnet N Punkte mit aPos=(x,y) und aColor=(r,g,b) – Umrechnung nach NDC über uScale/uOffset.
-// Erwartet: pts ist Array aus {x,y,r,g,b}, stride=5 floats.
 static void drawPoints(const float* pts, int count, float scaleX, float scaleY, float offX, float offY, float pointSize)
 {
     ensurePointPipeline();
     if (pointProg == 0) return;
 
-    // State sichern
     GLint prevVAO = 0, prevArray = 0, prevProg = 0;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArray);
@@ -186,7 +177,7 @@ static void drawPoints(const float* pts, int count, float scaleX, float scaleY, 
 
     glBindVertexArray(pointVAO);
     glBindBuffer(GL_ARRAY_BUFFER, pointVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float)*5*count, nullptr, GL_DYNAMIC_DRAW); // orphan
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float)*5*count, nullptr, GL_DYNAMIC_DRAW);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(float)*5*count, pts);
 
     glUseProgram(pointProg);
@@ -199,7 +190,6 @@ static void drawPoints(const float* pts, int count, float scaleX, float scaleY, 
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5*sizeof(float), (void*)(2*sizeof(float)));
 
-    // Blend temporär aktivieren (für alpha in Overlay/Points)
     GLboolean wasBlend = GL_FALSE;
     glGetBooleanv(GL_BLEND, &wasBlend);
     glEnable(GL_PROGRAM_POINT_SIZE);
@@ -208,7 +198,6 @@ static void drawPoints(const float* pts, int count, float scaleX, float scaleY, 
 
     glDrawArrays(GL_POINTS, 0, count);
 
-    // State restaurieren
     if (!wasBlend) glDisable(GL_BLEND);
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
@@ -217,18 +206,17 @@ static void drawPoints(const float* pts, int count, float scaleX, float scaleY, 
     glUseProgram((GLuint)prevProg);
 }
 
-// Self-Check: fünf eindeutige Punkte im Mini-Overlay – gleiche Transform wie Overlay.
 static void DrawHeatmapSelfCheck_OverlaySpace(int tilesX, int tilesY,
                                               float scaleX, float scaleY,
                                               float offsetX, float offsetY)
 {
 #if HEATMAP_DRAW_SELF_CHECK
     const float pts[5][5] = {
-        { 0.5f,        0.5f,         0.0f, 0.0f, 1.0f }, // BL  - Blue
-        { tilesX-0.5f, 0.5f,         0.0f, 1.0f, 0.0f }, // BR  - Green
-        { tilesX-0.5f, tilesY-0.5f,  1.0f, 1.0f, 0.0f }, // TR  - Yellow
-        { 0.5f,        tilesY-0.5f,  1.0f, 0.0f, 1.0f }, // TL  - Magenta
-        { tilesX*0.5f, tilesY*0.5f,  1.0f, 0.0f, 0.0f }, // CTR - Red
+        { 0.5f,        0.5f,         0.0f, 0.0f, 1.0f },
+        { tilesX-0.5f, 0.5f,         0.0f, 1.0f, 0.0f },
+        { tilesX-0.5f, tilesY-0.5f,  1.0f, 1.0f, 0.0f },
+        { 0.5f,        tilesY-0.5f,  1.0f, 0.0f, 1.0f },
+        { tilesX*0.5f, tilesY*0.5f,  1.0f, 0.0f, 0.0f },
     };
     drawPoints(&pts[0][0], 5, scaleX, scaleY, offsetX, offsetY, 10.0f);
 #else
@@ -236,11 +224,9 @@ static void DrawHeatmapSelfCheck_OverlaySpace(int tilesX, int tilesY,
 #endif
 }
 
-// Zeichnet einen Punkt im HAUPTBILD an Pixelzentrum (px,py).
 static void DrawPoint_ScreenPixels(float px, float py, int width, int height, float r, float g, float b, float sizePx)
 {
 #if HEATMAP_DRAW_MAX_MARKER
-    // NDC = ((px+0.5)/W*2-1, (py+0.5)/H*2-1)
     const float scaleX =  2.0f / float(width);
     const float scaleY =  2.0f / float(height);
     const float offX   = -1.0f;
@@ -253,9 +239,7 @@ static void DrawPoint_ScreenPixels(float px, float py, int width, int height, fl
 }
 #endif // HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
 
-// ---------- Mandelbrot/Fraktal: Bildschirm -> komplexe Ebene ----------
 static inline std::pair<double,double>
-// Hinweis: y=0 entspricht unterstem Bildschirmrand (FlipY = false)
 screenToComplex(int px, int py, int width, int height, const RendererState& ctx, bool flipY)
 {
     const double nx = ((double(px) + 0.5) / double(width))  * 2.0 - 1.0;
@@ -270,7 +254,6 @@ screenToComplex(int px, int py, int width, int height, const RendererState& ctx,
     return {re, im};
 }
 
-// ---------- API ----------
 void toggle(RendererState& ctx) {
 #if defined(USE_HEATMAP_OVERLAY)
     ctx.heatmapOverlayEnabled = !ctx.heatmapOverlayEnabled;
@@ -294,7 +277,6 @@ void cleanup() {
     overlay_uScaleLoc = overlay_uOffsetLoc = -1;
 }
 
-// Hinweis: y=0 entspricht unterstem Bildschirmrand (FlipY = false)
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width, int height,
@@ -318,7 +300,6 @@ void drawOverlay(const std::vector<float>& entropy,
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int quadCount = tilesX * tilesY;
 
-    // 1) Heatmap-Daten (Kachelraum) vorbereiten
     std::vector<float> data;
     data.reserve(static_cast<size_t>(quadCount) * 6u * 3u);
 
@@ -349,7 +330,6 @@ void drawOverlay(const std::vector<float>& entropy,
         }
     }
 
-    // 2) Overlay-Pipeline
     if (overlayVAO == 0) {
         glGenVertexArrays(1, &overlayVAO);
         glGenBuffers(1, &overlayVBO);
@@ -357,7 +337,7 @@ void drawOverlay(const std::vector<float>& entropy,
         if (overlayShader == 0) {
             if constexpr (Settings::debugLogging)
                 LUCHS_LOG_HOST("[HM] ERROR: overlay shader creation failed.");
-            return;
+            return; // Shader==0 on error -> no draw, kein State-Leak
         }
         overlay_uScaleLoc  = glGetUniformLocation(overlayShader, "uScale");
         overlay_uOffsetLoc = glGetUniformLocation(overlayShader, "uOffset");
@@ -366,7 +346,6 @@ void drawOverlay(const std::vector<float>& entropy,
         }
     }
 
-    // State sichern
     GLint prevVAO = 0, prevArray = 0, prevProg = 0;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArray);
@@ -376,7 +355,6 @@ void drawOverlay(const std::vector<float>& entropy,
 
     glUseProgram(overlayShader);
 
-    // Mini-Overlay Größe/Position (Pixel) -> NDC (oben rechts)
     constexpr int overlayHeightPx = 100;
     const float overlayAspect = float(tilesX) / float(tilesY);
     const int overlayWidthPx = static_cast<int>(overlayHeightPx * overlayAspect);
@@ -392,7 +370,7 @@ void drawOverlay(const std::vector<float>& entropy,
 
     glBindVertexArray(overlayVAO);
     glBindBuffer(GL_ARRAY_BUFFER, overlayVBO);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(data.size() * sizeof(float)), nullptr, GL_DYNAMIC_DRAW); // orphan
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(data.size() * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
     glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(data.size() * sizeof(float)), data.data());
 
     glEnableVertexAttribArray(0);
@@ -400,7 +378,6 @@ void drawOverlay(const std::vector<float>& entropy,
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)(2 * sizeof(float)));
 
-    // Blend aktivieren für 0.85 Alpha
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -413,19 +390,16 @@ void drawOverlay(const std::vector<float>& entropy,
     }
 
 #if HEATMAP_DRAW_SELF_CHECK
-    // 3) Self-Check-Punkte im Overlay (gleiche Transform) – optional
     DrawHeatmapSelfCheck_OverlaySpace(tilesX, tilesY, scaleX, scaleY, offsetX, offsetY);
 #endif
 
 #if HEATMAP_DRAW_MAX_MARKER
-    // 4) Max-Tile im Hauptbild markieren (optional)
     auto [centerPx, centerPy] = tileIndexToPixelCenter(maxIdx, tilesX, tilesY, width, height);
     DrawPoint_ScreenPixels(static_cast<float>(centerPx), static_cast<float>(centerPy),
                            width, height, 0.0f, 1.0f, 0.5f, 10.0f);
 #endif
 
     if constexpr (Settings::debugLogging) {
-        // Logging nur, keine sichtbaren Marker erzwungen.
         int bx = maxIdx % tilesX;
         int by = maxIdx / tilesX;
         auto [centerPxLog, centerPyLog] = tileIndexToPixelCenter(maxIdx, tilesX, tilesY, width, height);
@@ -439,11 +413,10 @@ void drawOverlay(const std::vector<float>& entropy,
                        tilesX, tilesY, tileSize, maxIdx, bx, by, centerPxLog, centerPyLog, ndcX, ndcY);
         LUCHS_LOG_HOST("[HM] complex(noFlip)= %.9f + i*%.9f   |   complex(Yflip)= %.9f + i*%.9f",
                        reA, imA, reB, imB);
-        LUCHS_LOG_HOST("[HM] camera zoom=%.6f  offset=(%.9f, %.9f)  aspect=%.6f",
+        LUCHS_LOG_HOST("[HM] camera zoom=%.6f  center=(%.9f, %.9f)  aspect=%.6f",
                        RS_ZOOM(ctx), RS_OFFSET_X(ctx), RS_OFFSET_Y(ctx), double(width)/double(height));
     }
 
-    // State restaurieren
     if (!wasBlend) glDisable(GL_BLEND);
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
@@ -454,4 +427,4 @@ void drawOverlay(const std::vector<float>& entropy,
 
 } // namespace HeatmapOverlay
 
-#pragma warning(pop) // ursprüngliche Warnungseinstellungen wiederherstellen
+#pragma warning(pop)
