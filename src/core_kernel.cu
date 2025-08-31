@@ -1,5 +1,5 @@
 ///// Otter: Minimal GPU E/C kernels; early guards; events only when logging enabled (no C4702).
-///// Schneefuchs: Predictable occupancy (__launch_bounds__), ASCII logs, bounds-checked sizes; /WX-safe.
+///// Schneefuchs: Predictable occupancy (__launch_bounds__), warp-private histograms, ASCII logs, bounds-checked sizes; /WX-safe.
 ///// Maus: Rendering/shading removed; clear host wrapper API computeCudaEntropyContrast.
 ///// Datei: src/core_kernel.cu
 
@@ -19,9 +19,18 @@ static __device__ __forceinline__ int clamp_int_0_255(int v) {
     return (v > 255) ? 255 : v;
 }
 
+namespace {
+    // Keep block size in one place so __launch_bounds__ and host launch stay in sync.
+    constexpr int EN_BLOCK_THREADS = 128;
+    constexpr int EN_BINS          = 256;
+    constexpr int WARP_SIZE        = 32;
+    constexpr int EN_WARPS         = EN_BLOCK_THREADS / WARP_SIZE;
+    static_assert(EN_WARPS * WARP_SIZE == EN_BLOCK_THREADS, "block size must be multiple of warp size");
+}
+
 // ------------------------------- entropy kernel ------------------------------
-// Schneefuchs: launch-bounds for predictable occupancy with 128 threads.
-__global__ __launch_bounds__(128)
+// Warp-private histograms to reduce atomic contention (EN_WARPS × 256 bins in shared mem).
+__global__ __launch_bounds__(EN_BLOCK_THREADS)
 void entropyKernel(
     const int* __restrict__ it,
     float* __restrict__ eOut,
@@ -38,13 +47,18 @@ void entropyKernel(
     const int startY = tY * tile;
     const int tileIndex = tY * tilesX + tX;
 
-    __shared__ int histo[256];
-    for (int i = threadIdx.x; i < 256; i += blockDim.x) {
-        histo[i] = 0;
+    __shared__ int histo[EN_WARPS][EN_BINS];
+
+    const int lane = threadIdx.x & (WARP_SIZE - 1);
+    const int warp = threadIdx.x >> 5;
+
+    // Zero warp-local histograms
+    for (int i = lane; i < EN_BINS; i += WARP_SIZE) {
+        histo[warp][i] = 0;
     }
     __syncthreads();
 
-    // Otter: precomputed scale avoids a division in the hot path.
+    // Precomputed scale avoids division in the hot path.
     const float scale = 256.0f / float(maxIter + 1);
 
     const int totalCells = tile * tile;
@@ -59,20 +73,31 @@ void entropyKernel(
         v = (v < 0) ? 0 : v;
         int bin = __float2int_rz(float(v) * scale);
         bin = clamp_int_0_255(bin);
-        atomicAdd(&histo[bin], 1);
+        atomicAdd(&histo[warp][bin], 1);
+    }
+    __syncthreads();
+
+    // Reduce warp-local histograms into histo[0][*]
+    if (threadIdx.x < EN_BINS) {
+        int sum = 0;
+        #pragma unroll
+        for (int widx = 0; widx < EN_WARPS; ++widx) sum += histo[widx][threadIdx.x];
+        histo[0][threadIdx.x] = sum;
     }
     __syncthreads();
 
     if (threadIdx.x == 0) {
-        // Schneefuchs: compute exact sample count from the histogram.
+        // Exact sample count from the merged histogram
         int count = 0;
-        for (int i = 0; i < 256; ++i) count += histo[i];
+        #pragma unroll
+        for (int i = 0; i < EN_BINS; ++i) count += histo[0][i];
 
         float entropy = 0.0f;
         if (count > 0) {
             const float invCount = 1.0f / float(count);
-            for (int i = 0; i < 256; ++i) {
-                const float p = float(histo[i]) * invCount;
+            #pragma unroll
+            for (int i = 0; i < EN_BINS; ++i) {
+                const float p = float(histo[0][i]) * invCount;
                 if (p > 0.0f) entropy -= p * __log2f(p);
             }
         }
@@ -98,7 +123,9 @@ void contrastKernel(
     int cnt = 0;
 
     // 8-neighborhood (without center)
+    #pragma unroll
     for (int dy = -1; dy <= 1; ++dy) {
+        #pragma unroll
         for (int dx = -1; dx <= 1; ++dx) {
             if (dx == 0 && dy == 0) continue;
             const int nx = tx + dx;
@@ -139,7 +166,6 @@ void computeCudaEntropyContrast(
     CUDA_CHECK(cudaMemset(d_e, 0, tilesTotal * sizeof(float)));
 
     // Launch config
-    constexpr int EN_BLOCK_THREADS = 128;
     const dim3 enGrid(tilesX, tilesY);
     const dim3 enBlock(EN_BLOCK_THREADS);
 
