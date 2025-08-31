@@ -1,16 +1,13 @@
-///// MAUS
-///// OWNER
-///// RESERVED
-///// Datei: src/progressive_iteration.cu
-
-///// Otter: Progressive Iteration & Resume (impl)
+///// Otter: Progressive Iteration & Resume (impl) + Nacktmull-Settings (optional, default off)
 ///// Schneefuchs: Messbare Pfade; ASCII-Logs; kein versteckter Funktionswechsel.
 ///// Maus: Coalesced SoA, fixed block, chunked inner loop.
+///// Datei: src/progressive_iteration.cu
 
 #include "progressive_iteration.cuh"
 #include "luchs_log_host.hpp"
 #include "luchs_log_device.hpp"
-#include "settings.hpp"          // <-- Fix: Settings::* sichtbar machen
+#include "settings.hpp"              // Host toggles (performanceLogging/debugLogging)
+#include "settings_nacktmull.hpp"    // NacktmullSettings::Progressive_Default (enabled=false → no-op)
 
 #include <cuda_runtime.h>
 #include <vector_types.h>
@@ -222,6 +219,15 @@ ProgressiveMetrics CudaProgressiveState::step(const ViewportParams& vp, const Pr
     const dim3 block = chooseBlock();
     const dim3 grid  = chooseGrid(width_, height_, block);
 
+    // --- Nacktmull Progressive (optional, default off → funktionsneutral) -----
+    constexpr auto P = NacktmullSettings::Progressive_Default;
+    const uint32_t sliceMin = P.enabled ? std::max<uint32_t>(1u, P.sliceMin) : 1u;
+    const uint32_t sliceMax = P.enabled ? std::max<uint32_t>(1u, (uint32_t)std::floor(P.sliceMaxPct * (double)cfg.maxIterCap))
+                                        : cfg.maxIterCap;
+    const uint32_t effAddIter = std::min<uint32_t>(std::max<uint32_t>(cfg.chunkIter, sliceMin), sliceMax);
+    const int devDbg = (cfg.debugDevice || (P.enabled && P.deviceDebugLog)) ? 1 : 0;
+    // --------------------------------------------------------------------------
+
     float ms = 0.0f;
 
     if constexpr (Settings::performanceLogging || Settings::debugLogging) {
@@ -234,8 +240,8 @@ ProgressiveMetrics CudaProgressiveState::step(const ViewportParams& vp, const Pr
             d_z_, d_it_, d_flags_, d_escapeIter_, d_activeCount_,
             width_, height_,
             map.x0, map.y0, map.dx, map.dy,
-            cfg.chunkIter, cfg.maxIterCap, cfg.bailout2,
-            cfg.debugDevice ? 1 : 0
+            effAddIter, cfg.maxIterCap, cfg.bailout2,
+            devDbg
         );
         CUDA_CHECK(cudaGetLastError());
 
@@ -249,8 +255,8 @@ ProgressiveMetrics CudaProgressiveState::step(const ViewportParams& vp, const Pr
             d_z_, d_it_, d_flags_, d_escapeIter_, d_activeCount_,
             width_, height_,
             map.x0, map.y0, map.dx, map.dy,
-            cfg.chunkIter, cfg.maxIterCap, cfg.bailout2,
-            cfg.debugDevice ? 1 : 0
+            effAddIter, cfg.maxIterCap, cfg.bailout2,
+            devDbg
         );
         CUDA_CHECK(cudaGetLastError());
     }
@@ -261,7 +267,23 @@ ProgressiveMetrics CudaProgressiveState::step(const ViewportParams& vp, const Pr
     ProgressiveMetrics m;
     m.kernel_ms = ms;
     m.stillActive = still;
-    m.addIterApplied = cfg.chunkIter;
+    m.addIterApplied = effAddIter;
+
+    const double totalPx = (double)width_ * (double)height_;
+    const double survivorsPct = (totalPx > 0.0) ? (100.0 * (double)still / totalPx) : 0.0;
+
+    if constexpr (Settings::debugLogging) {
+        if (P.enabled) {
+            LUCHS_LOG_HOST("[PROG] cfg clamp addIter=%u→%u sliceMin=%u sliceMax=%u surv=%.3f%%",
+                           cfg.chunkIter, effAddIter, sliceMin, sliceMax, (float)survivorsPct);
+        }
+    }
+
+    // Optional: Schwellenhinweis (kein API-Wechsel, nur Log-Hinweis)
+    if (P.enabled && survivorsPct < P.stopThresholdSurvivorsPct) {
+        LUCHS_LOG_HOST("[PROG] HALT-SUGGEST thresh=%.3f%% survivors=%.3f%% w=%d h=%d",
+                       (float)P.stopThresholdSurvivorsPct, (float)survivorsPct, width_, height_);
+    }
 
     LUCHS_LOG_HOST("[PROG] step done addIter=%u maxCap=%u ms=%.3f survivors=%u w=%d h=%d",
                    m.addIterApplied, cfg.maxIterCap, m.kernel_ms, m.stillActive, width_, height_);

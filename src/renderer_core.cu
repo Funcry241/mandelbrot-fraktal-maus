@@ -1,11 +1,8 @@
-///// MAUS
-///// OWNER
-///// RESERVED
-///// Datei: src/renderer_core.cu
 
 ///// Otter: Renderer-Core – GL-Init/Window, Loop-Delegation; keine Zoom-Logik hier.
 ///// Schneefuchs: CUDA/GL strikt getrennt; deterministische ASCII-Logs; Ressourcen klar besitzend.
 ///// Maus: Alpha 80 – Pipeline/Loop entscheidet; Renderer zeichnet/tauscht nur, ohne Doppelpfad.
+///// Datei: src/renderer_core.cu
 
 #include "pch.hpp"
 

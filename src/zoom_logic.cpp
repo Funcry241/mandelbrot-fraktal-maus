@@ -1,4 +1,5 @@
-///// Otter: V3-lite + Pullback metric (center); smooth direction changes; softmax target; HUD hidden.
+
+///// Otter: V3-lite + Pullback metric (center); optional Nacktmull Planner 3D (disabled by default); smooth direction changes; softmax target; HUD hidden.
 ///// Schneefuchs: ASCII-only logs; deterministic; /WX-safe; minimal math-first behavior.
 ///// Maus: Navigation-only; clear bestIndex; stable ABI; no HUD markers.
 ///// Datei: src/zoom_logic.cpp
@@ -7,6 +8,7 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "heatmap_utils.hpp" // tileIndexToPixelCenter
+#include "settings_nacktmull.hpp" // additive, funktionsneutral bis enabled=true
 
 #include <algorithm>
 #include <chrono>
@@ -233,8 +235,47 @@ ZoomResult evaluateZoomTarget(
         g_prevDirX = dirX; g_prevDirY = dirY;
     }
 
-    const float2 proposed = make_float2(previousOffset.x + dirX * (rawDist*lenScale),
-                                        previousOffset.y + dirY * (rawDist*lenScale));
+    float2 proposed = make_float2(previousOffset.x + dirX * (rawDist*lenScale),
+                                  previousOffset.y + dirY * (rawDist*lenScale));
+
+    // --- Optional Nacktmull Planner 3D (disabled by default, funktionsneutral) ---
+    {
+        constexpr auto P = NacktmullSettings::Planner3D_Default; // enabled=false → no-op
+        if (P.enabled) {
+            // Fehlernorm in (x,y,logZoom) – hier zunächst nur (x,y), z wird später ergänzt.
+            const double ex_ndc = ndcTX;
+            const double ey_ndc = ndcTY;
+            const double ez_ndc = 0.0;
+            const double ez_scaled = ez_ndc / std::max(1e-9, P.kZ);
+            const double e_norm = std::sqrt(ex_ndc*ex_ndc + ey_ndc*ey_ndc + ez_scaled*ez_scaled);
+
+            if (e_norm < P.snapEps) {
+                out.shouldZoom = true;
+                out.newOffset  = rawTarget; // hartes Snap
+                out.distance   = std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y);
+                if constexpr (Settings::debugLogging) {
+                    if (P.logEnabled) LUCHS_LOG_HOST("[PLAN3D] snap eps=%.4f e=%.4f", (float)P.snapEps, (float)e_norm);
+                }
+                return out; // Snap überschreibt nachfolgende Glättung
+            }
+
+            // Anti-Crawl: Mindestgeschwindigkeit auf Vektorlänge
+            const double step_now = std::hypot((double)(proposed.x - previousOffset.x), (double)(proposed.y - previousOffset.y));
+            const double v_now    = step_now / std::max(1e-9, dt);
+            const double v_min    = P.vminFactor * e_norm / std::max(1e-9, dt);
+
+            if (v_now < v_min && step_now > 0.0) {
+                const double scale = (v_min * dt) / step_now;
+                proposed.x = previousOffset.x + (float)((proposed.x - previousOffset.x) * scale);
+                proposed.y = previousOffset.y + (float)((proposed.y - previousOffset.y) * scale);
+            }
+            if constexpr (Settings::debugLogging) {
+                if (P.logEnabled) LUCHS_LOG_HOST("[PLAN3D] e=%.4f v=%.4f vmin=%.4f dt=%.4f",
+                                                 (float)e_norm, (float)v_now, (float)v_min, (float)dt);
+            }
+        }
+    }
+    // --- Ende optionaler Planner 3D ---
 
     const float dist = std::hypot(proposed.x-previousOffset.x, proposed.y-previousOffset.y);
     const float distNorm = clampf(dist/0.5f, 0.0f, 1.0f);

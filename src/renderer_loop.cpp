@@ -1,11 +1,8 @@
-///// MAUS
-///// OWNER
-///// RESERVED
-///// Datei: src/renderer_loop.cpp
 
 ///// Otter: Loop orchestrates FramePipeline; no duplicate upload/draw; async 100th-frame capture.
 ///// Schneefuchs: if constexpr for C4127; VSync init-once; precise 60 FPS pacing; ASCII-only logs.
 ///// Maus: Schlanke TU; keine unnoetigen Includes/Statics; deterministische Reihenfolge.
+///// Datei: src/renderer_loop.cpp
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
