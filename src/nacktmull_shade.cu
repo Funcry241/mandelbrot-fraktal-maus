@@ -1,6 +1,6 @@
 ///// Otter: Nacktmull-Shading - stabile Kernels; keine eigenen Typen; schnelle Helfer.
-///// Schneefuchs: Deterministisch, ASCII-only; Signaturen exakt wie in .cuh deklariert.
-///// Maus: Kein Device-Logging; mikro-optimiert (invMax, saturatef, rundungsfeste Pack-Funktion).
+///// Schneefuchs: Deterministisch, ASCII-only; Signaturen exakt wie in .cuh deklariert; __launch_bounds__ für planbare Occupancy.
+///// Maus: Kein Device-Logging; mikro-optimiert (invMax, __saturatef, rundungsfeste Pack-Funktion, __ldg).
 ///// Datei: src/nacktmull_shade.cu
 
 #include <cuda_runtime.h>
@@ -9,18 +9,19 @@
 
 // --- kleine, lokale Helfer ---------------------------------------------------
 static __device__ __forceinline__ float saturatef(float x) {
-    return x < 0.f ? 0.f : (x > 1.f ? 1.f : x);
+    // CUDA-Intrinsic: meist 1 Instruktion, clamped auf [0,1]
+    return __saturatef(x);
 }
 static __device__ __forceinline__ uchar4 pack_rgba(unsigned char r, unsigned char g, unsigned char b, unsigned char a = 255u) {
     uchar4 c; c.x = r; c.y = g; c.z = b; c.w = a; return c;
 }
 
 // ----------------------------------------------------------------------------
-// Mandelbrot-Faerbung aus Iterationsbild
+// Mandelbrot-Färbung aus Iterationsbild
 // Signatur muss exakt der Deklaration in nacktmull_shade.cuh entsprechen.
 // ----------------------------------------------------------------------------
-extern "C" __global__
-void shade_from_iterations(uchar4* surface,
+extern "C" __global__ __launch_bounds__(256)
+void shade_from_iterations(uchar4* __restrict__ surface,
                            const int* __restrict__ iters,
                            int width, int height,
                            int maxIterations)
@@ -30,7 +31,7 @@ void shade_from_iterations(uchar4* surface,
     if (x >= width || y >= height) return;
 
     const int idx = y * width + x;
-    const int it  = iters[idx];
+    const int it  = __ldg(&iters[idx]); // readonly fetch hint
 
     if (it >= maxIterations) {
         // Punkte im Inneren -> schwarz
@@ -42,10 +43,10 @@ void shade_from_iterations(uchar4* surface,
     const float invMax = (maxIterations > 0) ? (1.0f / (float)maxIterations) : 0.0f;
     const float t = (float)it * invMax;
 
-    // Kanaele (linear gemischt, leicht austauschbar)
-    const unsigned char R = (unsigned char)(255.0f * saturatef(t) + 0.5f);
-    const unsigned char G = (unsigned char)(255.0f * saturatef(1.0f - t) + 0.5f);
-    const unsigned char B = (unsigned char)(255.0f * saturatef(0.5f * t) + 0.5f);
+    // Kanäle (linear gemischt, leicht austauschbar)
+    const unsigned char R = (unsigned char)(255.0f * saturatef(t)         + 0.5f);
+    const unsigned char G = (unsigned char)(255.0f * saturatef(1.0f - t)  + 0.5f);
+    const unsigned char B = (unsigned char)(255.0f * saturatef(0.5f * t)  + 0.5f);
 
     surface[idx] = pack_rgba(R, G, B, 255u);
 }
@@ -53,8 +54,8 @@ void shade_from_iterations(uchar4* surface,
 // ----------------------------------------------------------------------------
 // Debug/Diagnose: weicher Farbverlauf + Checker-Overlay
 // ----------------------------------------------------------------------------
-extern "C" __global__
-void shade_test_pattern(uchar4* surface,
+extern "C" __global__ __launch_bounds__(256)
+void shade_test_pattern(uchar4* __restrict__ surface,
                         int width, int height,
                         int checkSize)
 {
@@ -64,7 +65,7 @@ void shade_test_pattern(uchar4* surface,
 
     const int idx = y * width + x;
 
-    // Normalisierte Koordinaten ohne std::max (vermeide weitere Includes)
+    // Normalisierte Koordinaten ohne weitere Includes
     const int denomW = (width  > 1) ? (width  - 1) : 1;
     const int denomH = (height > 1) ? (height - 1) : 1;
     const float u = (float)x / (float)denomW;

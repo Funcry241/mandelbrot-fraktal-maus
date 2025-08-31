@@ -1,7 +1,11 @@
+///// MAUS
+///// OWNER
+///// RESERVED
+///// Datei: src/renderer_core.cu
+
 ///// Otter: Renderer-Core – GL-Init/Window, Loop-Delegation; keine Zoom-Logik hier.
 ///// Schneefuchs: CUDA/GL strikt getrennt; deterministische ASCII-Logs; Ressourcen klar besitzend.
 ///// Maus: Alpha 80 – Pipeline/Loop entscheidet; Renderer zeichnet/tauscht nur, ohne Doppelpfad.
-///// Datei: src/renderer_core.cu
 
 #include "pch.hpp"
 
@@ -46,9 +50,6 @@ bool Renderer::initGL() {
         return false;
     }
 
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] GLFW window created successfully");
-
     // createWindow() macht den Kontext bereits current; zweiter Aufruf ist harmlos.
     glfwMakeContextCurrent(state.window);
     if (Settings::debugLogging) {
@@ -60,7 +61,8 @@ bool Renderer::initGL() {
         }
     }
 
-    // GLEW (dynamisch laut PCH-Policy)
+    // GLEW dynamisch initialisieren (Projektpolicy). Für Core-Profiles nötig:
+    glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
         LUCHS_LOG_HOST("[ERROR] glewInit() failed");
         RendererWindow::destroyWindow(state.window);
@@ -89,9 +91,15 @@ bool Renderer::initGL() {
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
         state.pbo.initAsPixelBuffer(state.width, state.height);
-        // Schneefuchs: Texture via Utils (immutable storage), kein GLBuffer::create mehr.
+        // Texture via Utils (immutable storage). Wrapper bleibt Eigentümer des Handles.
         state.tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(state.width, state.height));
+
+        // CUDA-Interop an PBO koppeln
         CudaInterop::registerPBO(state.pbo);
+
+        // Saubere GL-State: PBO unbinden
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
         glResourcesInitialized = true;
         if (Settings::debugLogging) {
             GLint boundPBO = 0;
@@ -119,13 +127,13 @@ void Renderer::renderFrame() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Entering Renderer::renderFrame");
 
-    // Ab hier uebernimmt die Loop die komplette Frame-Pipeline (inkl. Upload & Draw)
+    // Ab hier übernimmt die Loop die komplette Frame-Pipeline (Upload & Draw)
     RendererLoop::renderFrame_impl(this->state);
 
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Returned from RendererLoop::renderFrame_impl");
 
-    // Schneefuchs: Kein doppelter Draw – die Pipeline zeichnet bereits.
+    // Kein doppelter Draw – die Pipeline zeichnet bereits.
     glfwSwapBuffers(state.window);
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DRAW] glfwSwapBuffers called");
@@ -153,15 +161,15 @@ void Renderer::resize(int newW, int newH) {
 }
 
 void Renderer::cleanup() {
-    // WICHTIG: Alle GL-Objekte loeschen, solange ein gültiger Kontext existiert!
+    // WICHTIG: Alle GL-Objekte löschen, solange ein gültiger Kontext existiert!
     RendererPipeline::cleanup();
     WarzenschweinOverlay::cleanup();
     HeatmapOverlay::cleanup();
 
-    // CUDA-Interop freigeben (benoetigt keinen GL-Kontext)
+    // CUDA-Interop freigeben (benötigt keinen GL-Kontext)
     CudaInterop::unregisterPBO();
 
-    // Fenster (und damit GL-Kontext) zerstoeren
+    // Fenster (und damit GL-Kontext) zerstören
     RendererWindow::destroyWindow(state.window);
 
     // Host-Seite
