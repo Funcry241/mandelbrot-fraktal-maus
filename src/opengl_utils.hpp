@@ -1,6 +1,7 @@
 ///// Otter: OpenGL-Utils (Header) – schlank; nur GLuint-Typ, klare API.
 ///// Schneefuchs: Header/Source synchron; deterministisch; ASCII-only; keine Seiteneffekte.
 ///// Maus: GLEW/GLFW im PCH ok; hier minimal halten – sonst beißt die Robbe!
+///// Datei: src/opengl_utils.hpp
 
 #pragma once
 #ifndef OPENGL_UTILS_HPP

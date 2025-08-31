@@ -1,6 +1,8 @@
 ///// Otter: Progressive PI-Controller (header-only)
 ///// Schneefuchs: Konservativ, stabil, deterministisch.
 ///// Maus: Ziel ~160 ms; Klemmer und Clamps inklusive.
+///// Datei: src/progressive_controller.hpp
+
 #pragma once
 #include <cstdint>
 #include <algorithm>

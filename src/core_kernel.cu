@@ -1,10 +1,14 @@
 ///// Otter: Minimal GPU E/C kernels; early guards; events only when logging enabled (no C4702).
 ///// Schneefuchs: Predictable occupancy (__launch_bounds__), ASCII logs, bounds-checked sizes; /WX-safe.
 ///// Maus: Rendering/shading removed; clear host wrapper API computeCudaEntropyContrast.
+///// Datei: src/core_kernel.cu
+
+#include "pch.hpp"
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <math.h>
+
 #include "core_kernel.h"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"

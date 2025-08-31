@@ -1,6 +1,7 @@
 ///// Otter: Perturbation/Series Path – Referenz-Orbit (DD) + GPU-Delta; API unveraendert.
 ///// Schneefuchs: Deterministisch, ASCII-only; Mapping konsistent (center+zoom); kompakte PERF-Logs.
 ///// Maus: Keine Overlays/Sprites; kein CUDA_CHECK; fruehe Rueckgaben bei Fehlern.
+///// Datei: src/nacktmull.cu
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>

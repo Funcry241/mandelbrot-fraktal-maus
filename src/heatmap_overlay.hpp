@@ -1,6 +1,7 @@
 ///// Otter: Heatmap-Overlay-API – zustandslos, exakt wie ZoomLogic (kein Y-Flip).
 ///// Schneefuchs: Header/Source synchron, deterministisch, ASCII-only; keine verdeckten Pfade.
 ///// Maus: Nur LUCHS_LOG_* im Hostpfad; klare Parameter (Tiles, Texture, State).
+///// Datei: src/heatmap_overlay.hpp
 
 #pragma once
 #include <vector>

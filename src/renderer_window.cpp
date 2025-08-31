@@ -1,6 +1,7 @@
 ///// Otter: Moderner GL-Kontext (4.3 Core), deterministischer Setup-Flow; frühes Fehler-Logging.
 ///// Schneefuchs: ASCII-Logs; Debug-Kontext nur bei Debug/Perf; compile-time Fensterposition; keine C4127.
 ///// Maus: State clean; zentrieren/Position deterministisch; Header/Source synchron.
+///// Datei: src/renderer_window.cpp
 
 #include "pch.hpp"
 #include "renderer_window.hpp"
@@ -8,6 +9,8 @@
 #include "settings.hpp"
 #include "renderer_loop.hpp"   // RendererLoop::keyCallback
 #include "luchs_log_host.hpp"
+
+#include <GLFW/glfw3.h>
 
 namespace RendererInternals {
 
@@ -41,7 +44,7 @@ static void centerWindowIfRequested(GLFWwindow* window, int w, int h) {
 }
 
 // Erstellt Fenster, setzt GL-Kontext & VSync
-GLFWwindow* createGLFWWindow(int width, int height) {
+static GLFWwindow* createGLFWWindow(int width, int height) {
     // Error-Callback VOR glfwInit()
     glfwSetErrorCallback(glfwErrorCallback);
 
@@ -71,7 +74,7 @@ GLFWwindow* createGLFWWindow(int width, int height) {
 
     GLFWwindow* window = glfwCreateWindow(width, height, "OtterDream Mandelbrot", nullptr, nullptr);
     if (!window) {
-        LUCHS_LOG_HOST("[ERROR] Window creation failed");
+        LUCHS_LOG_HOST("[ERROR] Window creation failed w=%d h=%d", width, height);
         glfwTerminate();
         return nullptr;
     }
@@ -86,7 +89,7 @@ GLFWwindow* createGLFWWindow(int width, int height) {
 }
 
 // Callbacks registrieren (Größe, Tasten)
-void configureWindowCallbacks(GLFWwindow* window, void* userPointer) {
+static void configureWindowCallbacks(GLFWwindow* window, void* userPointer) {
     glfwSetWindowUserPointer(window, userPointer);
 
     glfwSetFramebufferSizeCallback(window, [](GLFWwindow* win, int newW, int newH) {

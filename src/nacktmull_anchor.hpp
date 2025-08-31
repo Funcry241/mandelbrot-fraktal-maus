@@ -1,12 +1,9 @@
-// ========================= src/nacktmull_anchor.hpp =========================
-// Project Nacktmull — High-precision anchor orbit for Mandelbrot perturbation
-// Host-only (no CUDA headers). Exposes a compact, GPU-friendly double layout.
-// 🐭 Maus: ASCII-only, schlank; keine Nebenwirkungen im Header.
-// 🦦 Otter: Rückgabewerte als [[nodiscard]] markiert (Fehler nicht übersehen).
-// 🦊 Schneefuchs: Explizites 16-Byte-Alignment für CUDA-kompatibles Layout.
+///// Otter: Host-only header, minimal API; [[nodiscard]] on public funcs; ASCII-only comments.
+///// Schneefuchs: Explicit 16-byte alignment (CUDA double2 layout); /WX-safe; header/source in sync.
+///// Maus: No CUDA includes; no hidden state; compact GPU-friendly double layout.
+///// Datei: src/nacktmull_anchor.hpp
 
 #pragma once
-
 #include <vector>
 
 namespace Nacktmull {
@@ -40,7 +37,7 @@ struct AnchorOrbit {
 // Returns true on success; 'out' vectors are resized to params.maxIter.
 //
 // Notes:
-//  * Precision uses Boost.Multiprecision cpp_dec_float_100 (≈ 100 decimal digits).
+//  * Precision uses Boost.Multiprecision cpp_dec_float_100 (~100 decimal digits).
 //  * We iterate up to params.maxIter unconditionally (no early bail).
 //  * 'bailoutRadius' is for optional diagnostics; sequence remains complete.
 [[nodiscard]] bool computeReferenceOrbit(const AnchorParams& params,

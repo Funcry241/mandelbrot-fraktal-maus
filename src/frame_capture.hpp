@@ -1,6 +1,7 @@
 ///// Otter: Async Framebuffer-Capture – single-shot via PBO+Fence; zero stalls, kein glFinish.
 ///// Schneefuchs: Zustands-Restore & ASCII-Logs; Header/Source synchron; MSVC-safe I/O in .cpp.
 ///// Maus: Nach dem Render einmal pro Frame aufrufen; 100. Frame triggert Capture; Rest non-blocking.
+///// Datei: src/frame_capture.hpp
 
 #pragma once
 

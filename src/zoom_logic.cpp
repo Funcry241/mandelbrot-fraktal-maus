@@ -1,6 +1,7 @@
 ///// Otter: V3-lite + Pullback metric (center); smooth direction changes; softmax target; HUD hidden.
 ///// Schneefuchs: ASCII-only logs; deterministic; /WX-safe; minimal math-first behavior.
 ///// Maus: Navigation-only; clear bestIndex; stable ABI; no HUD markers.
+///// Datei: src/zoom_logic.cpp
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"

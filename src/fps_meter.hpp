@@ -1,6 +1,7 @@
 ///// Otter: FPS-Meter-API – glättet Core-Zeit zu stabiler Max-FPS-Anzeige.
 ///// Schneefuchs: Header/Source strikt getrennt; ABI stabil; ASCII-only.
 ///// Maus: Keine iostreams; Thread-safety via Atomics in .cpp; API minimal.
+///// Datei: src/fps_meter.hpp
 
 #pragma once
 

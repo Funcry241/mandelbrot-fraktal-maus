@@ -1,6 +1,7 @@
 ///// Otter: C4702 fix – logging compiled-in only when enabled; no unreachable code.
 ///// Schneefuchs: /WX strikt, ASCII-only Logs/Kommentare; Verhalten unverändert.
 ///// Maus: Saubere Trennung von FrameContext-Daten und Logik (Ameise).
+///// Datei: src/frame_context.cpp
 
 #include "frame_context.hpp"
 #include "settings.hpp"

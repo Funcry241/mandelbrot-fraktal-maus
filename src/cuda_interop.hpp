@@ -1,6 +1,7 @@
 ///// Otter: CUDA-Interop-API für PBO-RAII und Renderpfad; sauberer Forwarder für E/C.
 ///// Schneefuchs: Deterministische Signaturen; nur Deklarationen hier; Header/Source synchron halten.
 ///// Maus: Keine neuen CHECK-Makros; Logging bleibt im Hostpfad (LUCHS_LOG_*), ASCII-only.
+///// Datei: src/cuda_interop.hpp
 
 #pragma once
 #ifndef CUDA_INTEROP_HPP

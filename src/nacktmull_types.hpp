@@ -1,6 +1,7 @@
 ///// Otter: Nacktmull-Host-Typen – Mehrpräzision nur für CPU; flexible Stellenzahl per Makro.
 ///// Schneefuchs: Host-only Guard (#error in .cu/.cuh); ASCII-only; deterministisch.
 ///// Maus: Keine Device-Dependencies; Header/Source synchron; API minimal (real, cplx).
+///// Datei: src/nacktmull_types.hpp
 
 #pragma once
 

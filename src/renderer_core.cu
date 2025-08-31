@@ -1,6 +1,7 @@
 ///// Otter: Renderer-Core – GL-Init/Window, Loop-Delegation; keine Zoom-Logik hier.
 ///// Schneefuchs: CUDA/GL strikt getrennt; deterministische ASCII-Logs; Ressourcen klar besitzend.
-///// Maus: Alpha 80 – Pipeline/Loop entscheidet; Renderer zeichnet/tauscht nur, ohne DoppelpFad.
+///// Maus: Alpha 80 – Pipeline/Loop entscheidet; Renderer zeichnet/tauscht nur, ohne Doppelpfad.
+///// Datei: src/renderer_core.cu
 
 #include "pch.hpp"
 
@@ -48,6 +49,7 @@ bool Renderer::initGL() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DEBUG] GLFW window created successfully");
 
+    // createWindow() macht den Kontext bereits current; zweiter Aufruf ist harmlos.
     glfwMakeContextCurrent(state.window);
     if (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] OpenGL context made current");
@@ -117,21 +119,20 @@ void Renderer::renderFrame() {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Entering Renderer::renderFrame");
 
-    // Ab hier übernimmt die Loop die komplette Frame-Pipeline (inkl. Upload & Draw)
+    // Ab hier uebernimmt die Loop die komplette Frame-Pipeline (inkl. Upload & Draw)
     RendererLoop::renderFrame_impl(this->state);
 
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIPE] Returned from RendererLoop::renderFrame_impl");
 
-    // Schneefuchs: Doppelte Upload/Draw entfernt – die Pipeline zeichnet bereits.
-
+    // Schneefuchs: Kein doppelter Draw – die Pipeline zeichnet bereits.
     glfwSwapBuffers(state.window);
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[DRAW] glfwSwapBuffers called");
 
 #if ENABLE_ZOOM_LOGGING
-    LUCHS_LOG_HOST("[ZOOM] post-frame: zoom=%.6f offset=(%.6f,%.6f)",
-                   state.zoom, state.offset.x, state.offset.y);
+    LUCHS_LOG_HOST("[ZOOM] post-frame: zoom=%.6f center=(%.6f,%.6f)",
+                   state.zoom, state.center.x, state.center.y);
 #endif
 }
 
@@ -152,12 +153,21 @@ void Renderer::resize(int newW, int newH) {
 }
 
 void Renderer::cleanup() {
+    // WICHTIG: Alle GL-Objekte loeschen, solange ein gültiger Kontext existiert!
     RendererPipeline::cleanup();
-    CudaInterop::unregisterPBO();
-    RendererWindow::destroyWindow(state.window);
     WarzenschweinOverlay::cleanup();
-    freeDeviceBuffers();
     HeatmapOverlay::cleanup();
+
+    // CUDA-Interop freigeben (benoetigt keinen GL-Kontext)
+    CudaInterop::unregisterPBO();
+
+    // Fenster (und damit GL-Kontext) zerstoeren
+    RendererWindow::destroyWindow(state.window);
+
+    // Host-Seite
+    freeDeviceBuffers();
     glfwTerminate();
+
     glInitialized = false;
+    glResourcesInitialized = false;
 }

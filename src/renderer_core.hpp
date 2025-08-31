@@ -1,6 +1,7 @@
 ///// Otter: Rendering-Modul (Header) – Kontext sauber gekapselt; keine Frühregistrierung.
 ///// Schneefuchs: Header/Source synchron; keine Schattenvariablen; deterministische API.
 ///// Maus: Keine überflüssigen Parameter; exakt passend zur Implementation.
+///// Datei: src/renderer_core.hpp
 
 #pragma once
 

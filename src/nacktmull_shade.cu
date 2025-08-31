@@ -1,6 +1,7 @@
 ///// Otter: Nacktmull-Shading - stabile Kernels; keine eigenen Typen; schnelle Helfer.
 ///// Schneefuchs: Deterministisch, ASCII-only; Signaturen exakt wie in .cuh deklariert.
 ///// Maus: Kein Device-Logging; mikro-optimiert (invMax, saturatef, rundungsfeste Pack-Funktion).
+///// Datei: src/nacktmull_shade.cu
 
 #include <cuda_runtime.h>
 #include <vector_types.h>

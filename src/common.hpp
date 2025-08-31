@@ -1,6 +1,7 @@
-///// Otter: Zentrale Helfer & Konstanten; präzise Tilegröße via log1p, keine eigenen CHECK-Makros.
+///// Otter: Zentrale Helfer & Konstanten; praezise Tilegroesse via log1p, keine eigenen CHECK-Makros.
 ///// Schneefuchs: Deterministisch, ASCII-only; Header/Source synchron; keine verdeckten Funktionswechsel.
-///// Maus: Nur LUCHS_LOG_* fürs Logging; Settings steuern Verhalten; keine Supersampling-Pfade.
+///// Maus: Nur LUCHS_LOG_* fuers Logging; Settings steuern Verhalten; keine Supersampling-Pfade.
+///// Datei: src/common.hpp
 
 #pragma once
 
@@ -38,7 +39,7 @@
 
 // --- KEIN eigenes CUDA_CHECK mehr hier ---
 
-// 🦊 Schneefuchs: numerisch stabiler mit log1p für kleine zoom-Werte; deterministisch geklemmt.
+// 🦊 Schneefuchs: numerisch stabiler mit log1p fuer kleine zoom-Werte; deterministisch geklemmt.
 // 🦦 Otter: INV_LN2 als constexpr vermeidet wiederholte std::log(2.0)-Aufrufe.
 [[nodiscard]] inline int computeTileSizeFromZoom(float zoom) noexcept {
     const float base = static_cast<float>(Settings::BASE_TILE_SIZE);

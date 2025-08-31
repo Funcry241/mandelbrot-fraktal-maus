@@ -1,6 +1,7 @@
-// 🐭 Maus-Kommentar: Kompakte, direkte Glyph-Zuordnung.
-// 🐑 Schneefuchs: Explizite Glyph{...}-Initialisierung -> MSVC /permissive- fix (C2440), /WX-safe. (Bezug zu Schneefuchs)
-// 🦦 Otter: Klammern () und [] + Space ergänzt, damit "FPS (max)" sicher gerendert wird. (Bezug zu Otter)
+///// Otter: Klammern fuer () und [] sowie Space; sicheres Rendering von "FPS (max)"; ASCII-only.
+///// Schneefuchs: Explizite Glyph-Initialisierung mit Glyph{...}; MSVC /permissive- fix; /WX-fest.
+///// Maus: Kompakte, direkte Glyph-Zuordnung; Fallback-Glyph all-zero; Header-only Hilfsfunktionen.
+///// Datei: src/warzenschwein_fontdata.hpp
 
 #pragma once
 #include <unordered_map>
@@ -13,7 +14,7 @@ namespace WarzenschweinFont {
 
 using Glyph = std::array<std::uint8_t, 12>;
 
-// Achtung MSVC: bei std::pair braced-init ohne Typ führt leicht zu C2440.
+// Achtung MSVC: bei std::pair braced-init ohne Typ fuehrt leicht zu C2440.
 // Deshalb immer: { 'X', Glyph{ ... } } statt { 'X', { ... } }.
 inline const std::unordered_map<char, Glyph> font = {
     { ' ', Glyph{ 0,0,0,0,0,0,0,0,0,0,0,0 } },

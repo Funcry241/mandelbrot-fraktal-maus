@@ -1,6 +1,7 @@
 ///// Otter: High-precision anchor orbit; fixed dz update to use z_n (correct derivative).
 ///// Schneefuchs: /WX-safe; added <cmath> for hypot/log; deterministic, ASCII-only comments.
 ///// Maus: Pure CPU; no hidden state; vectors pre-sized; Boost mp100.
+///// Datei: src/nacktmull_anchor.cpp
 
 #include "nacktmull_anchor.hpp"
 #include <boost/multiprecision/cpp_dec_float.hpp>
@@ -84,10 +85,10 @@ bool shouldReuseAnchor(const AnchorParams& prev,
     const double distPixels = std::hypot(dx, dy);
 
     const double zoomRatio = now.zoom / std::max(prev.zoom, 1e-30);
-    const double zoomDelta = std::abs(std::log(zoomRatio)); // ~relative change
+    const double zoomDelta = std::abs(std::log(zoomRatio)); // ~1% change threshold uses 0.01 below
 
     const bool centerOk = distPixels <= pixelTolerance;
-    const bool zoomOk   = zoomDelta <= 0.01; // ≈ 1% change threshold
+    const bool zoomOk   = zoomDelta <= 0.01; // ~1% change threshold
 
     return centerOk && zoomOk;
 }

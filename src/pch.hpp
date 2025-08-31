@@ -1,6 +1,7 @@
 ///// Otter: PCH für dynamisches GLEW; stabile Include-Reihenfolge; DLL-Import unter Windows.
 ///// Schneefuchs: Keine impliziten GL-Includes; deterministisch; ASCII-only.
 ///// Maus: GLEW/GLFW nur hier; andere Header schlank halten; keine Seiteneffekte.
+///// Datei: src/pch.hpp
 
 #pragma once
 

@@ -1,6 +1,8 @@
 ///// Otter: CUDA-Guards – Host sieht keine CUDA-Builtins; Device nutzt logf/log2f & Grid-Indizes.
 ///// Schneefuchs: Deterministisch, ASCII-only; Header bleibt für .cpp-TUs kompilierbar.
 ///// Maus: Keine versteckten Pfade; Kernel nur unter __CUDACC__, Host bekommt nur die Launcher-Deklaration.
+///// Datei: src/progressive_shade.cuh
+
 #pragma once
 #include <cuda_runtime.h>
 #include <vector_types.h>

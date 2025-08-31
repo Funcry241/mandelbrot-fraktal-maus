@@ -1,7 +1,7 @@
 ///// Otter: Heatmap-Overlay - Diagnose & Mini-HUD; Shader 0 on error; cached uniforms; no state leaks.
 ///// Schneefuchs: Zustands-Restore (VAO/VBO/Program/Blend); ASCII-Logs; deterministisch; keine verdeckten Pfade.
 ///// Maus: Default ohne Marker/Points; Overlay y=0 unten; gleiche Datenquelle wie Zoom.
-// Datei: src/heatmap_overlay.cpp
+///// Datei: src/heatmap_overlay.cpp
 
 #pragma warning(push)
 #pragma warning(disable: 4100)

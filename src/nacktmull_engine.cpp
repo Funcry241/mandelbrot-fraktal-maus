@@ -1,18 +1,20 @@
-///// Otter: CPU-Referenzrenderer für Nacktmull – klar, stabil, ohne Nebenpfade.
-///// Schneefuchs: Deterministisch, ASCII-only; Schleifen leicht optimiert (dx/dy, Row-Ptr).
-///// Maus: Keine Logs, kein noexcept auf Allokationspfaden; Header/Source synchron halten.
+///// Otter: CPU reference renderer for Nacktmull – clear, stable, no side paths.
+///// Schneefuchs: Deterministic, ASCII-only; light loop opts (dx/dy, row pointer); /WX-safe.
+///// Maus: No logs; no noexcept on allocation paths; keep header/source in sync.
+///// Datei: src/nacktmull_engine.cpp
 
 #include "nacktmull_types.hpp"
 #include <vector>
-#include <cstddef> // size_t
+#include <cstddef>   // size_t
+#include <algorithm> // std::max
 
 namespace nm {
 
 struct View { nm::real cx, cy, spanX, spanY; int w, h; };
 
-// Füllt "iters" (size = w*h) mit Escape-Iteration (oder maxIter wenn innen)
+// Fill "iters" (size = w*h) with escape iteration (or maxIter if inside)
 void render(const View& v, int maxIter, std::vector<int>& iters) {
-    // Robustheit: negative/Null-Dimensionen oder maxIter<=0 → leere/Nullfläche
+    // Robustness: negative/null dims or maxIter<=0 -> empty/zero area
     const bool invalid = (v.w <= 0 || v.h <= 0 || maxIter <= 0);
     iters.assign(static_cast<size_t>(std::max(v.w, 0)) * static_cast<size_t>(std::max(v.h, 0)), 0);
     if (invalid) return;
@@ -20,7 +22,7 @@ void render(const View& v, int maxIter, std::vector<int>& iters) {
     const nm::real two  = nm::real(2);
     const nm::real four = nm::real(4);
 
-    // Precompute Mapping (Höhen-basierte Pixelgröße in X/Y)
+    // Precompute mapping (pixel size in X/Y)
     const nm::real x0 = v.cx - v.spanX * nm::real(0.5);
     const nm::real y0 = v.cy - v.spanY * nm::real(0.5);
     const nm::real dx = v.spanX / nm::real(v.w);
@@ -41,7 +43,7 @@ void render(const View& v, int maxIter, std::vector<int>& iters) {
                 const nm::real zr2 = zr * zr;
                 const nm::real zi2 = zi * zi;
 
-                // Escape-Test auf aktuellem z
+                // Escape test on current z
                 if (zr2 + zi2 > four) break;
 
                 const nm::real zr_new = zr2 - zi2 + cr;

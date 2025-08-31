@@ -1,8 +1,7 @@
-// Datei: src/zoom_command.hpp
-// 🐭 Maus: deterministische, replayfähige Kommandos; CSV stabil.
-// 🦦 Otter: keine impliziten Makros; Logging via Host-Layer.
-// 🦊 Schneefuchs: trivially-copyable, keine heimlichen ABI-Fallen.
-// ➕ Bonus: rvalue-push & dumpCSV(FILE*) für direkte Ausgabe ohne Extras.
+///// Otter: keine impliziten Makros; Logging via Host-Layer.
+///// Schneefuchs: trivially-copyable, keine heimlichen ABI-Fallen.
+///// Maus: deterministische, replayfaehige Kommandos; CSV stabil.
+///// Datei: src/zoom_command.hpp
 
 #pragma once
 
@@ -30,7 +29,7 @@ public:
 
     // CSV: Frame,X,Y,ZoomBefore,ZoomAfter,Entropy,Contrast
     [[nodiscard]] std::string toCSV() const {
-        // Feste Präzision für deterministisches Diffen/Replays.
+        // Feste Praezision fuer deterministisches Diffen/Replays.
         char buf[192];
         std::snprintf(buf, sizeof(buf),
                       "%d,%.5f,%.5f,%.6e,%.6e,%.4f,%.4f",
@@ -61,8 +60,8 @@ public:
     void reserve(std::size_t n)                  { commands.reserve(n); }
     [[nodiscard]] std::size_t capacity() const   { return commands.capacity(); }
 
-    // Direkte CSV-Ausgabe (Header + alle Zeilen) in einen geöffneten FILE*.
-    // Rückgabe true bei Erfolg (fflush==0).
+    // Direkte CSV-Ausgabe (Header + alle Zeilen) in einen geoeffneten FILE*.
+    // Rueckgabe true bei Erfolg (fflush==0).
     [[nodiscard]] bool dumpCSV(std::FILE* f) const {
         if (!f) return false;
         std::fputs(ZoomCommand::csvHeader().c_str(), f);

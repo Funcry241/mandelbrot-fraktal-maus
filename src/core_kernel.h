@@ -1,6 +1,7 @@
 ///// Otter: Header minimal und stabil - nur E/C-API; keine versteckten Abhaengigkeiten.
 ///// Schneefuchs: C++-Linkage, /WX-fest, ASCII-only; Header/Source synchron.
 ///// Maus: Render-Kernel entfernt; einzig verbleibende oeffentliche Funktion dokumentiert.
+///// Datei: src/core_kernel.h
 
 #pragma once
 #ifndef CORE_KERNEL_H

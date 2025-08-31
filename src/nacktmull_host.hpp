@@ -1,6 +1,7 @@
 ///// Otter: Host Mandelbrot (CPU) declaration; returns ms and fills iteration buffer.
 ///// Schneefuchs: Signature matches cuda_interop; ABI stable; ASCII-only.
 ///// Maus: No logging; header/source in sync; [[nodiscard]] return.
+///// Datei: src/nacktmull_host.hpp
 
 #pragma once
 #include <vector>

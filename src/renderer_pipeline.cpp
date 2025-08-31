@@ -1,6 +1,7 @@
 ///// Otter: Fullscreen pipeline – stabile Bind-Reihenfolge, ASCII-Logs, optionaler GPU-Timer.
 ///// Schneefuchs: State-Change-Diät; idempotentes init; Upload deterministisch; keine State-Leaks.
 ///// Maus: Shader-Fehler sauber abgefangen; VAO/Program-Handling klar; HUD/Heatmap bleiben sichtbar.
+///// Datei: src/renderer_pipeline.cpp
 
 #include "pch.hpp"
 #include "renderer_pipeline.hpp"

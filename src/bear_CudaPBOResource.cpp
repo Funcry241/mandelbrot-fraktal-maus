@@ -1,6 +1,9 @@
 ///// Otter: PBO-RAII – sicher unmap im Dtor; No-arg map & unmapAndLog.
 ///// Schneefuchs: deterministische ASCII-Logs; numerische CUDA-Codes.
 ///// Maus: Keine Side-Effects – GL-Bindings werden sauber restauriert.
+///// Datei: src/bear_CudaPBOResource.cpp
+
+#include "pch.hpp"
 #include "bear_CudaPBOResource.hpp"
 #include "luchs_log_host.hpp"
 #include "settings.hpp"

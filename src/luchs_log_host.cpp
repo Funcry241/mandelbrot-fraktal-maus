@@ -1,7 +1,7 @@
-// Datei: src/luchs_log_host.cpp
-// 🐭 Maus-Kommentar: Host-Logging – präzise Zeitstempel, ASCII-only.
-// 🦦 Otter: Konsistentes Format Host/Device.
-// 🦊 Schneefuchs: Thread-safe, /WX-fest, kein strncat.
+///// Otter: Konsistentes Format Host/Device; praezise Zeitstempel; ASCII-only.
+///// Schneefuchs: Thread-safe, /WX-fest; kein strncat; deterministisches Verhalten.
+///// Maus: Host-Logging; Debugger-Mirror optional; API: setMirrorToDebugger/flushLogs.
+///// Datei: src/luchs_log_host.cpp
 
 #include "luchs_log_host.hpp"
 #include <chrono>
@@ -43,8 +43,7 @@ namespace LuchsLogger {
         const long long epochMs = static_cast<long long>(ms_since_epo);
 
         // ----- stdout pass -----
-        std::fprintf(stdout, "[%lld|%s|%d] ",
-                     epochMs, base, line);
+        std::fprintf(stdout, "[%lld|%s|%d] ", epochMs, base, line);
 
         va_list a1;
         va_start(a1, fmt);

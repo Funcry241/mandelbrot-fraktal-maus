@@ -1,6 +1,7 @@
 ///// Otter: Pipeline-API schlank – ein öffentlicher Einstiegspunkt: execute(RendererState&).
 ///// Schneefuchs: Header/Source synchron; keine schweren Includes; keine verdeckten Abhängigkeiten.
 ///// Maus: Zoom V2 bleibt intern in der .cpp (deterministische Reihenfolge, einheitliche Tiles/Upload).
+///// Datei: src/frame_pipeline.hpp
 
 #pragma once
 #ifndef FRAME_PIPELINE_HPP

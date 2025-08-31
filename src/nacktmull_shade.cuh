@@ -1,6 +1,7 @@
 ///// Otter: Nacktmull-Shade (Header) - inline Device-Helfer + Kernel-Prototypen, keine Implementierungen.
 ///// Schneefuchs: Deterministisch, ASCII-only; nur CUDA-Basics; Header/Source strikt getrennt.
 ///// Maus: Keine eigenen Typ-Redefs (NV-Types verwenden); API stabil; mikro-optimierte Inlines.
+///// Datei: src/nacktmull_shade.cuh
 
 #pragma once
 

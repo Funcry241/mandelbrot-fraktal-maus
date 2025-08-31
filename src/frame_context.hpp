@@ -1,6 +1,7 @@
 ///// Otter: Klar sichtbare Kapsel; keine schweren Includes im Header.
 ///// Schneefuchs: float2 via <vector_types.h>; gezielte C4324-Unterdrückung; noexcept wo sinnvoll.
 ///// Maus: ASCII-only; Header/Source synchron; keine impliziten GL-Includes.
+///// Datei: src/frame_context.hpp
 
 #pragma once
 #include <vector>

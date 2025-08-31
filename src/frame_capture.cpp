@@ -1,6 +1,7 @@
 ///// Otter: Async GL readback via PBO+fence; zero stalls; single-shot capture (no glFinish).
 ///// Schneefuchs: GL state restored; deterministic ASCII logs; MSVC-safe fopen_s; header/source synchron.
 ///// Maus: Keine versteckten Seiteneffekte; PBO lifetime single-use; robust Errors, weiterlaufen.
+///// Datei: src/frame_capture.cpp
 
 #include "pch.hpp"              // GL headers (GLEW/GLFW etc.)
 #include "frame_capture.hpp"

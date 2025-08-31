@@ -1,16 +1,8 @@
-// ============================================================================
-// Datei: src/nacktmull.hpp
-// Projekt Nacktmull – Perturbation/Series-Engine für unendliches Zoomen
-// ----------------------------------------------------------------------------
-// 🦙 Idee (kurz): Ein Referenzzentrum c0 wird hochpräzise auf der CPU iteriert.
-// Für jedes Pixel gilt c = c0 + δc. Auf der GPU wird nur δz iteriert
-// (Perturbation mit Quadratik-Term), während z⁰_n (Orbit um c0) aus einem
-// vorab berechneten Puffer gelesen wird. Bei zu großem Fehler/δc wird re-centered.
-// ----------------------------------------------------------------------------
-// Vorgabe: Diese Engine ersetzt den bisherigen Hybrid-Renderer vollständig.
-// (Kein Feature-Flag, kein Fallback – Integration erfolgt im core_kernel-Pfad.)
-// ----------------------------------------------------------------------------
-/* ASCII-only, header-only API. Implementierung folgt in nacktmull.cu/.cpp. */
+///// Otter: Nacktmull engine header – perturbation/series API; replaces hybrid path; ASCII-only.
+///// Schneefuchs: Header-only declarations; /WX-safe; no macro redefs beyond guarded LUCHS_LOG_HOST.
+///// Maus: Minimal host+GPU structs; float2 orbit on device; clear lifecycle + stats.
+///// Datei: src/nacktmull.hpp
+
 #pragma once
 
 #include <cuda_runtime.h>    // float2, double2, uchar4
@@ -18,7 +10,7 @@
 #include <cstddef>
 #include <vector>
 
-// Vorwärtsdeklaration Host-Logger (bestehendes Projekt-API)
+// Forward decl for host logger (project API)
 namespace LuchsLogger { void logMessage(const char* file, int line, const char* fmt, ...); }
 #ifndef LUCHS_LOG_HOST
 #define LUCHS_LOG_HOST(...) ::LuchsLogger::logMessage(__FILE__, __LINE__, __VA_ARGS__)
@@ -27,46 +19,46 @@ namespace LuchsLogger { void logMessage(const char* file, int line, const char* 
 namespace Nacktmull {
 
 // ---------------------------------------------------------------------------
-// Konfiguration (Host)
+// Configuration (host)
 // ---------------------------------------------------------------------------
 struct Config {
-    int     maxOrbitTerms        = 200000; // maximale Referenz-Orbit-Länge (CPU)
-    double  recenterThreshold    = 1e-12;  // |δc|-Schwelle für Re-Centering
-    double  maxDeltaError        = 1e-10;  // tolerierter |δz|-Fehler (heuristisch)
-    int     maxRecentersPerFrame = 2;      // Schutz gegen Ping-Pong
-    double  refOrbitBudgetMs     = 0.0;    // Budget für CPU-Referenz (0 = adaptiv)
+    int     maxOrbitTerms        = 200000; // max reference-orbit length (CPU)
+    double  recenterThreshold    = 1e-12;  // |delta c| threshold for re-centering
+    double  maxDeltaError        = 1e-10;  // tolerated |delta z| error (heuristic)
+    int     maxRecentersPerFrame = 2;      // guard against ping-pong
+    double  refOrbitBudgetMs     = 0.0;    // CPU reference budget (0 = adaptive)
 };
 
-// Minimaler Telemetriedatensatz für kompakte PERF-Zeilen
+// Compact telemetry for PERF lines
 struct Stats {
-    double ref_ms  = 0.0;  // CPU-Referenzzeit
-    double kern_ms = 0.0;  // GPU-Kernelzeit gesamt
-    int    centers = 0;    // Anzahl Re-Centerings in diesem Frame
-    int    orbitN  = 0;    // Länge des verwendeten Orbits
-    double err_max = 0.0;  // gemessene maximale |δz|-Fehlergröße
+    double ref_ms  = 0.0;  // CPU reference time
+    double kern_ms = 0.0;  // total GPU kernel time
+    int    centers = 0;    // number of re-centerings in this frame
+    int    orbitN  = 0;    // length of orbit used
+    double err_max = 0.0;  // measured max |delta z|
 };
 
 // ---------------------------------------------------------------------------
-// Host-Seite: Referenz-Orbit Speicher
-// Hinweis: Aktuelle GPU-Pipeline nutzt float2-Orbit (kompakt, schnell).
-// Bei späterer Double-Pipeline kann dieser Typ auf double2 angehoben werden.
+// Host-side: reference orbit storage
+// Current GPU pipeline uses float2 orbit (compact, fast). Can be lifted to
+// double2 later if a double pipeline is introduced.
 // ---------------------------------------------------------------------------
 struct RefOrbitHost {
-    std::vector<float2> z;  // Länge = orbitN (inkl. z0 = 0)
+    std::vector<float2> z;  // length = orbitN (includes z0 = 0)
 };
 
 // ---------------------------------------------------------------------------
-// Device-Seite: Referenz-Orbit Buffer (RAII-light via Methoden)
+// Device-side: reference orbit buffer (RAII-light via methods)
 // ---------------------------------------------------------------------------
 struct RefOrbitDevice {
-    float2* d_z   = nullptr; // Geräteseitiger Puffer für z⁰_n
-    int     count = 0;       // Anzahl Elemente (Orbit-Länge)
+    float2* d_z   = nullptr; // device buffer for z^0_n
+    int     count = 0;       // number of elements (orbit length)
 
     void free() noexcept {
         if (d_z) { cudaFree(d_z); d_z = nullptr; }
         count = 0;
     }
-    // Allokiert (oder vergrößert) den Orbit-Puffer auf 'n' Elemente
+    // Allocate (or grow) orbit buffer to 'n' elements
     void ensure_capacity(int n) {
         if (n <= count) return;
         if (d_z) cudaFree(d_z);
@@ -76,17 +68,17 @@ struct RefOrbitDevice {
 };
 
 // ---------------------------------------------------------------------------
-// Host-API: Engine-Lebenszyklus
+// Host API: engine lifecycle
 // ---------------------------------------------------------------------------
 struct View {
     int    width  = 0;
     int    height = 0;
-    double zoom   = 1.0;          // View-Zoom (wie bisher)
-    float2 offset {0.f, 0.f};     // Kamerazentrum (Bildmitte im Fraktalraum)
+    double zoom   = 1.0;          // view zoom (matches existing semantics)
+    float2 offset {0.f, 0.f};     // camera center (image midpoint in fractal space)
 };
 
 struct Center {
-    // Aktuelles Referenzzentrum c0 (Host-seitig in doppelter Präzision verwaltet)
+    // Current reference center c0 (managed on host in double precision)
     double c0x = -0.5;
     double c0y =  0.0;
 };
@@ -96,61 +88,61 @@ public:
     Engine() = default;
     ~Engine() { device_.free(); }
 
-    // Initialisiert View/Config; invalidiert ggf. bestehende Orbitdaten
+    // Initialize view/config; invalidates orbit if needed
     void initialize(const View& v, const Config& cfg);
 
-    // Setzt neue Ansicht und markiert Rebuild-Bedarf, wenn c0 zu weit weg ist
+    // Update view and mark rebuild when c0 is too far
     void update_view(const View& v);
 
-    // Haupt-Einstieg: CPU-Referenz-Orbit (falls nötig) + Upload + GPU-Perturbation
-    // Schreibt Iterationen/Pixel (wie bisher: d_out + d_iters).
+    // Main entry: CPU reference orbit (if needed) + upload + GPU perturbation.
+    // Writes per-pixel iterations (as before: d_out + d_iters).
     void render_frame(uchar4* d_out, int* d_iters, int maxIter, Stats& outStats);
 
-    // Zugriff auf internes Zentrum (c0)
+    // Access current center (c0)
     const Center& center() const { return center_; }
 
 private:
-    // CPU: Referenz-Orbit neu aufbauen (High-Precision intern, aktuell → float2)
+    // CPU: rebuild reference orbit (high-precision internally; float2 output)
     void build_ref_orbit_cpu(int maxIter, double budgetMs, Stats& stats);
 
-    // GPU: Orbit an Gerät senden
+    // GPU: send orbit to device
     void upload_ref_orbit_gpu();
 
-    // GPU: Perturbations-Render starten
+    // GPU: launch perturbation render
     void launch_perturbation_kernel(uchar4* d_out, int* d_iters, int maxIter, Stats& stats);
 
-    // Heuristik: Re-Centering nötig?
+    // Heuristic: is re-centering required?
     bool recenter_required() const;
 
 private:
     Config         cfg_{};
     View           view_{};
-    Center         center_{};     // aktuelles c0
-    RefOrbitHost   hostOrbit_{};  // Host-Puffer
-    RefOrbitDevice device_{};     // Device-Puffer
-    bool           needRecenter_ = true; // erster Frame erzwingt Aufbau
+    Center         center_{};     // current c0
+    RefOrbitHost   hostOrbit_{};  // host buffer
+    RefOrbitDevice device_{};     // device buffer
+    bool           needRecenter_ = true; // first frame forces build
 };
 
 // ---------------------------------------------------------------------------
-// GPU-Schnittstelle (Definition in nacktmull.cu)
-// Hinweis: Orbit ist derzeit float2 (GPU-seitig wie oben).
+// GPU interface (definition in nacktmull.cu)
+// Orbit is currently float2 (device side as above).
 // ---------------------------------------------------------------------------
 void launchPerturbationPass(
-    uchar4*      d_out,
-    int*         d_iters,
-    int          w,
-    int          h,
-    double       zoom,
-    float2       offset,
-    int          maxIter,
+    uchar4*       d_out,
+    int*          d_iters,
+    int           w,
+    int           h,
+    double        zoom,
+    float2        offset,
+    int           maxIter,
     const float2* d_refOrbit,
-    int          orbitCount,
-    double       c0x,
-    double       c0y,
-    double&      outKernelMs  // gefüllte Kernelzeit (ms)
+    int           orbitCount,
+    double        c0x,
+    double        c0y,
+    double&       outKernelMs  // filled kernel time (ms)
 );
 
-// Hilfsfunktion: Pixel → komplexe Zahl (double), Nacktmull-Koordinaten
+// Helper: pixel -> complex (double), Nacktmull coordinates
 __host__ __device__ inline double2 pixelToComplexD(
     double px, double py, int w, int h, double spanX, double spanY, double2 off)
 {

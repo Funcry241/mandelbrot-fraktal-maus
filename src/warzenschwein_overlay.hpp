@@ -1,31 +1,35 @@
-// Datei: src/warzenschwein_overlay.hpp
-// 🐭 Maus-Kommentar: Volle Kontrolle - Text wird extern via setText() gesetzt, Rest ist gekapselt. drawOverlay nutzt nur Zoom. Kein Zugriff auf internen RendererState nötig. Schneefuchs: Trennung, Otter: Lesbarkeit.
+///// Otter: Overlay-API gekapselt; drawOverlay braucht nur zoom; ASCII-only.
+///// Schneefuchs: Keine Abhaengigkeit von RendererState; explizite Geometrie; /WX-fest.
+///// Maus: Text via setText(); Sichtbarkeit intern; OpenGL-Ressourcen sauber verwaltet.
+// src/warzenschwein_overlay.hpp
 
 #pragma once
 #include <string>
 #include <vector>
-#include "renderer_state.hpp"
 
 namespace WarzenschweinOverlay {
 
-// Overlay aktualisieren und zeichnen
-void drawOverlay(RendererState&);
+// Overlay zeichnen – benoetigt nur den aktuellen Zoom.
+// Alle weiteren Zustaende (Sichtbarkeit, Text, GPU-Ressourcen) liegen intern.
+void drawOverlay(float zoom);
 
-// Sichtbarkeit umschalten
-void toggle(RendererState&);
+// Sichtbarkeit umschalten (internes Toggle).
+void toggle();
 
-// Textinhalt setzen
-void setText(const std::string&);
+// Textinhalt setzen (ASCII).
+void setText(const std::string& text);
 
-// OpenGL-Resourcen freigeben
+// OpenGL-Ressourcen freigeben (idempotent).
 void cleanup();
 
-// Erzeugt Vertex- und Hintergrunddaten für Textanzeige
+// Erzeugt Vertex- und Hintergrund-Quads fuer die Textanzeige ohne RendererState.
+// Viewport-Groesse und Zoom werden explizit uebergeben.
 void generateOverlayQuads(
     const std::string& text,
+    int viewportW,
+    int viewportH,
+    float zoom,
     std::vector<float>& vertexOut,
-    std::vector<float>& backgroundOut,
-    const RendererState& ctx);
+    std::vector<float>& backgroundOut);
 
 } // namespace WarzenschweinOverlay
-

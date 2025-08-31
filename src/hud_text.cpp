@@ -1,6 +1,7 @@
 ///// Otter: HUD-Text – kompakte ASCII-Anzeige (zoom, offset, fps, tiles); robust gegen edge cases.
 ///// Schneefuchs: Header mit vollständigen Typdefinitionen; deterministisch; keine iostreams.
 ///// Maus: Nur LUCHS_LOG_* im Projekt; hier keine Logs, reine Textformatierung.
+///// Datei: src/hud_text.cpp
 
 #include "hud_text.hpp"
 #include <algorithm>

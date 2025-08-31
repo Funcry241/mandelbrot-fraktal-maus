@@ -1,6 +1,7 @@
 ///// Otter: Public API + Back-Compat Adapters; ASCII-Logs; keine versteckte API-Drift.
 ///// Schneefuchs: Header/Source synchron; GL4.3-Core-Annahme; deterministisch.
 ///// Maus: Header schlank – keine PCH/Settings/Log-Includes; Host-Logs nur in .cpp.
+///// Datei: src/renderer_resources.hpp
 
 #pragma once
 #include <GL/glew.h> // GLuint, GLsizei

@@ -1,6 +1,7 @@
 ///// Otter: Immutable Texture-Storage; deterministischer Upload; sauberes PixelStore-Handling.
 ///// Schneefuchs: State sichern/wiederherstellen; klare Fehlerpfade; ASCII-Logs.
 ///// Maus: OpenGL PBO/Texture Utils – robuste Init/Upload-Reihenfolge; keine versteckten Seiteneffekte.
+///// Datei: src/renderer_resources.cpp
 
 #include "pch.hpp"
 #include "renderer_resources.hpp"

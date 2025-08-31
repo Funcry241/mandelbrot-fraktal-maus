@@ -1,6 +1,7 @@
 ///// Otter: Loop orchestrates FramePipeline; no duplicate upload/draw; async 100th-frame capture.
 ///// Schneefuchs: if constexpr for C4127; VSync init-once; precise 60 FPS pacing; ASCII-only logs.
 ///// Maus: Schlanke TU; keine unnoetigen Includes/Statics; deterministische Reihenfolge.
+///// Datei: src/renderer_loop.cpp
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
@@ -12,6 +13,7 @@
 #include "heatmap_overlay.hpp"       // HeatmapOverlay::toggle
 #include "frame_limiter.hpp"         // pace::FrameLimiter
 #include "frame_capture.hpp"         // async single-shot 100th-frame capture
+#include "warzenschwein_overlay.hpp" // WarzenschweinOverlay::toggle() – neue Signatur
 #include <cuda_runtime_api.h>        // cudaPeekAtLastError
 
 namespace RendererLoop {
@@ -87,6 +89,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     switch (key) {
         case GLFW_KEY_H:
             HeatmapOverlay::toggle(*state);
+            break;
+        case GLFW_KEY_O:
+            // Neue API: kein RendererState mehr erforderlich.
+            WarzenschweinOverlay::toggle();
             break;
         case GLFW_KEY_P: {
             const bool paused = CudaInterop::getPauseZoom();

@@ -1,6 +1,7 @@
 ///// Otter: Host-Mandelbrot (CPU) - schnelle Referenz mit inkrementeller NDC und Row-Ptr.
 ///// Schneefuchs: Deterministisch, ASCII-only; keine iostreams; Guards fuer Edge-Cases.
 ///// Maus: Keine versteckten Pfade; nur lokale Optimierungen, API unveraendert.
+///// Datei: src/nacktmull_host.cpp
 
 #include "nacktmull_host.hpp"
 #include <chrono>

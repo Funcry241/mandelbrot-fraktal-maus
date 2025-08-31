@@ -1,8 +1,7 @@
-///// MAUS: file header — English ASCII logs only
-// Datei: src/main.cpp
-// 🐭 Maus-Kommentar: Main sets up error callback, CUDA precheck, GL init via Renderer, and a tight frame loop.
-// Otter: Logs are English ASCII only; timing is precise; overlays follow Settings.
-// Schneefuchs: Headers/sources in sync; no macro redefinitions; CUDA_CHECK lives in luchs_log_host.hpp.
+///// Otter: Main sets error callback, CUDA precheck, GL init via Renderer, tight frame loop; ASCII logs only.
+///// Schneefuchs: Headers/sources in sync; no macro redefinitions; CUDA_CHECK lives in luchs_log_host.hpp.
+///// Maus: Precise timing; overlays follow Settings; deterministic behavior; thread-safe logging.
+///// Datei: src/main.cpp
 
 #include "pch.hpp"
 #include "renderer_core.hpp"
@@ -11,7 +10,10 @@
 #include "renderer_state.hpp"
 #include "cuda_interop.hpp"
 #include "luchs_log_host.hpp"
+
 #include <chrono>
+#include <cstdlib>
+#include <GLFW/glfw3.h>
 
 // -----------------------------
 // GLFW error callback (ASCII only)
@@ -50,9 +52,6 @@ int main()
         LUCHS_LOG_HOST("[FATAL] CUDA error-string path invalid - refusing to proceed");
         return EXIT_FAILURE;
     }
-
-    // 💡 Initialize GPU resources only after a valid GL context exists
-    renderer.getState().resize(Settings::width, Settings::height);
 
     // Sync overlay flags from Settings (runtime-visible defaults)
     renderer.getState().heatmapOverlayEnabled       = Settings::heatmapOverlayEnabled;

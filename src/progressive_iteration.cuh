@@ -1,6 +1,8 @@
 ///// Otter: Progressive Iteration & Resume (header)
 ///// Schneefuchs: Keine verdeckten Pfade; deterministische Logs.
 ///// Maus: RAII, SoA-State, API-unverändert.
+///// Datei: src/progressive_iteration.cuh
+
 #pragma once
 
 #include <cstdint>

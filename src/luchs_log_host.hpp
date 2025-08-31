@@ -1,8 +1,8 @@
-// MAUS:
-// Datei: src/luchs_log_host.hpp
-// 🐭 Maus: Host-only Logging, klarer Vertrag, ASCII-only.
-// 🦦 Otter: CUDA_CHECK integriert, deterministischer Fehlerpfad. (Bezug zu Otter)
-// 🦊 Schneefuchs: Keine Header-Seiteneffekte, /WX-fest. (Bezug zu Schneefuchs)
+///// Otter: Host-only Logging, klarer Vertrag; CUDA_CHECK integriert; deterministischer Fehlerpfad.
+///// Schneefuchs: Keine Header-Seiteneffekte; /WX-fest; ASCII-only; nur Deklarationen & Makros.
+///// Maus: Einheitliches Format; LUCHS_LOG_HOST faengt Datei/Zeile; keine versteckten Abhaengigkeiten.
+///// Datei: src/luchs_log_host.hpp
+
 #pragma once
 
 #include <cstdarg>

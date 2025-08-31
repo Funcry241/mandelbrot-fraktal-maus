@@ -1,6 +1,8 @@
 ///// Otter: PBO-RAII – kompatibel zur Frame-Pipeline (No-arg map, unmapAndLog).
 ///// Schneefuchs: Header/Source synchron; kein verdeckter Funktionswechsel.
 ///// Maus: ASCII-Logs; nur LUCHS_LOG_HOST im Hostpfad.
+///// Datei: src/bear_CudaPBOResource.hpp
+
 #pragma once
 #ifndef BEAR_CUDA_PBO_RESOURCE_HPP
 #define BEAR_CUDA_PBO_RESOURCE_HPP
@@ -12,35 +14,35 @@
 
 namespace CudaInterop {
 
-// 🐻 Bär: Verwaltet das Lifetime des CUDA-GL-Interop-Resource-Handles
+// Baer: Verwaltet das Lifetime des CUDA-GL-Interop-Resource-Handles
 class bear_CudaPBOResource {
 public:
-    // 🐻 Bär: Konstruktor registriert den PBO als CUDA-Resource
+    // Baer: Konstruktor registriert den PBO als CUDA-Resource
     explicit bear_CudaPBOResource(GLuint pboId);
     
-    // 🐻 Bär: Destruktor deregistriert automatisch die CUDA-Resource
+    // Baer: Destruktor deregistriert automatisch die CUDA-Resource
     ~bear_CudaPBOResource();
 
-    // 🐻 Bär: Liefert das CUDA-Resource-Handle für Mapping/Unmapping
+    // Baer: Liefert das CUDA-Resource-Handle fuer Mapping/Unmapping
     [[nodiscard]] cudaGraphicsResource_t get() const noexcept;
 
-    // 🐻 Bär: mappt CUDA-Resource und liefert Dev-Pointer zurück, loggt Zustand
+    // Baer: mappt CUDA-Resource und liefert Dev-Pointer zurueck, loggt Zustand
     [[nodiscard]] void*   mapAndLog(size_t& sizeOut);
 
-    // 🐻 Bär: Bequemer Overload: typisierter Pixelpointer (uchar4), Größe wird intern geloggt
+    // Baer: Bequemer Overload: typisierter Pixelpointer (uchar4), Groesse wird intern geloggt
     [[nodiscard]] uchar4* mapAndLog();
 
-    // 🐻 Bär: unmappt CUDA-Resource
+    // Baer: unmappt CUDA-Resource
     void unmap();
 
-    // 🐻 Bär: unmappt mit Zeitmessung (PI/Perf-Logs konsistent zur Pipeline)
+    // Baer: unmappt mit Zeitmessung (PI/Perf-Logs konsistent zur Pipeline)
     void unmapAndLog();
 
-    // 🐻 Bär: Nicht kopierbar, um doppelte Registrierung zu vermeiden
+    // Baer: Nicht kopierbar, um doppelte Registrierung zu vermeiden
     bear_CudaPBOResource(const bear_CudaPBOResource&) = delete;
     bear_CudaPBOResource& operator=(const bear_CudaPBOResource&) = delete;
     
-    // 🐻 Bär: Bewegbar, überträgt Ownership des Handles
+    // Baer: Bewegbar, uebertraegt Ownership des Handles
     bear_CudaPBOResource(bear_CudaPBOResource&& other) noexcept;
     bear_CudaPBOResource& operator=(bear_CudaPBOResource&& other) noexcept;
 

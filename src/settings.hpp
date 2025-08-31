@@ -1,6 +1,7 @@
 ///// Otter: settings.hpp - voll dokumentierte Toggles; ASCII-only; deterministisch.
 ///// Schneefuchs: Keine versteckten Semantik-Aenderungen; Defaults stabil; /WX-fest.
 ///// Maus: Kein Logging hier; nur Konstanten & Doku; Header-only; Nacktmull-Pullover aktiv.
+///// Datei: src/settings.hpp
 
 #pragma once
 

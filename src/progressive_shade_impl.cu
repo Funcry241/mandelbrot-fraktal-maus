@@ -1,6 +1,8 @@
 ///// Otter: Progressive-Shading (impl)
 ///// Schneefuchs: Saubere Trennung, nur Host-seitige Logs.
 ///// Maus: Keine Format-Logs im Devicepfad.
+///// Datei: src/progressive_shade_impl.cu
+
 #include "progressive_shade.cuh"
 #include "progressive_iteration.cuh"
 #include "luchs_log_host.hpp"

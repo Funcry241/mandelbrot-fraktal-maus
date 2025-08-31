@@ -1,6 +1,7 @@
 ///// Otter: Precise 60 FPS pacing (sleep+spin); ASCII logs gated via settings.
 ///// Schneefuchs: Drift correction, /WX-fest; steady_clock only; header-only.
 ///// Maus: Keine versteckten Abhängigkeiten; API minimal; deterministisch.
+///// Datei: src/frame_limiter.hpp
 
 #pragma once
 

@@ -1,6 +1,7 @@
 ///// Otter: OtterDream – CUDA/Host Coloring-Helpers (Smooth Iter, Paletten, Final Shade).
 ///// Schneefuchs: Header-only, zero deps; __host__/__device__ sicher; deterministisch; ASCII-only.
 ///// Maus: Keine Typ-Redefs außer Host-Fallback; Korrektur: nu = log2(log|z|) (kein Offset-Bug).
+///// Datei: src/otter_color.hpp
 
 #pragma once
 

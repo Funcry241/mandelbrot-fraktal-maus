@@ -1,6 +1,7 @@
 ///// Otter: FPS-Meter – glättet Framezeiten per EMA für stabile HUD-Anzeige.
 ///// Schneefuchs: Lock-free Atomics, ASCII-only; keine iostreams; deterministisch.
 ///// Maus: Keine API-Änderungen; Header/Source synchron; nur minimal nötige Includes.
+///// Datei: src/fps_meter.cpp
 
 #include "fps_meter.hpp"
 #include <atomic>

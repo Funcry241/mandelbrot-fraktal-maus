@@ -1,8 +1,7 @@
-// MAUS: device-safe tiny formatter (bounded; no CRT redeclare; ASCII only)
-// Datei: src/luchs_device_format.hpp
-// 🐭 Maus: Header-only helpers to build log strings on device without snprintf.
-// 🦦 Otter: Supports strings, ints, and fixed-point floats with chosen decimals.
-// 🦊 Schneefuchs: No __device__ redeclarations of CRT; deterministic, bounded writes.
+///// Otter: Header-only device-safe tiny formatter; no snprintf; supports strings, ints, fixed-point floats.
+///// Schneefuchs: Keine __device__-CRT-Redeclarations; deterministisch, bounded writes; ASCII-only.
+///// Maus: Minimaler, stabiler Formatter fuer Device-Logs; keine eigenen CHECK-Makros; Header/Source synchron.
+///// Datei: src/luchs_device_format.hpp
 
 #pragma once
 #include <cstddef>

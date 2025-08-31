@@ -1,6 +1,7 @@
 ///// Otter: Feste Aufrufreihenfolge - updateTextureFromPBO(PBO, TEX, W, H); ASCII-Logs; keine Compat-Wrapper.
 ///// Schneefuchs: /WX-fest; keine toten TU-scope-Symbole bei deaktiviertem Progressive-Pfad.
 ///// Maus: Progressive-Code nur bauen, wenn SETTINGS_PROGRESSIVE_ENABLED=1.
+///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
 #include <chrono>
@@ -76,7 +77,7 @@ namespace {
     }
 
     // --- Diagnose: GL-PBO kurz mappen und die ersten Bytes pruefen ---
-    static void peekPBO(GLuint pbo) {
+    [[maybe_unused]] static void peekPBO(GLuint pbo) {
         if constexpr (!Settings::debugLogging) {
             (void)pbo;
             return;
@@ -330,7 +331,7 @@ static void computeCudaFrame_progressive(FrameContext& fctx, RendererState& stat
     {
         const cudaError_t err = cudaPeekAtLastError();
         if constexpr (Settings::debugLogging) {
-            if (err != cudaSuccess || (g_frame % 30 == 0)) {
+            if (err != cudaSuccess || (g_frame % 30) == 0) {
                 LUCHS_LOG_HOST("[PIPE][PROG] Flushing device logs (err=%d, frame=%d)", (int)err, g_frame);
                 LuchsLogger::flushDeviceLogToHost(0);
             }
@@ -415,7 +416,7 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
 
     if constexpr (Settings::warzenschweinOverlayEnabled) {
         if (!state.warzenschweinText.empty()) {
-            WarzenschweinOverlay::drawOverlay(state);
+            WarzenschweinOverlay::drawOverlay(static_cast<float>(state.zoom));
         }
     }
 

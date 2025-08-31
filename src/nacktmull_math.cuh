@@ -1,6 +1,7 @@
 ///// Otter: Pixel<->Komplex-Mapping (header-only) – zwei Overloads + schneller Precompute-Mapper.
 ///// Schneefuchs: __host__ __device__ __forceinline__, deterministisch; Guards bei w/h=0; ASCII-only.
 ///// Maus: API additiv (keine Brueche); vorhandene Overloads behalten; neuer Mapper fuer Performance.
+///// Datei: src/nacktmull_math.cuh
 
 #pragma once
 

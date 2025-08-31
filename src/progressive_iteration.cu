@@ -1,6 +1,8 @@
 ///// Otter: Progressive Iteration & Resume (impl)
 ///// Schneefuchs: Messbare Pfade; ASCII-Logs; kein versteckter Funktionswechsel.
 ///// Maus: Coalesced SoA, fixed block, chunked inner loop.
+///// Datei: src/progressive_iteration.cu
+
 #include "progressive_iteration.cuh"
 #include "luchs_log_host.hpp"
 #include "luchs_log_device.hpp"

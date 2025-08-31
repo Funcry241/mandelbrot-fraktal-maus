@@ -1,8 +1,7 @@
-// MAUS:
-// Datei: src/warzenschwein_overlay.cpp
-// 🐭 Maus-Kommentar: Vollständig gekapselt wie HeatmapOverlay – keine GL-State-Leaks.
-// 🦦 Otter: Orphaning + SubData, deterministischer Draw, ASCII-Logs nur bei Bedarf. (Bezug zu Otter)
-// 🐑 Schneefuchs: Pixel-Space im CPU-Pfad + px->NDC im VS; getrennte X/Y-Skalierung fixiert Aspect Ratio. (Bezug zu Schneefuchs)
+///// Otter: Orphaning + SubData; deterministischer Draw; ASCII-Logs nur bei Bedarf. (Bezug zu Otter)
+///// Schneefuchs: Pixel-Space im CPU-Pfad + px->NDC im VS; getrennte X/Y-Skalierung fixiert Aspect Ratio. (Bezug zu Schneefuchs)
+///// Maus: Vollstaendig gekapselt wie HeatmapOverlay – keine GL-State-Leaks; drawOverlay nutzt nur Zoom.
+// src/warzenschwein_overlay.cpp
 
 #pragma warning(push)
 #pragma warning(disable: 4100)
@@ -11,11 +10,12 @@
 #include "warzenschwein_overlay.hpp"
 #include "warzenschwein_fontdata.hpp"
 #include "settings.hpp"
-#include "renderer_state.hpp"
 #include "luchs_log_host.hpp"
+
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <cstdint>
 
 namespace WarzenschweinOverlay {
 
@@ -34,8 +34,7 @@ static GLint uHudScaleLoc   = -1;
 
 // ----------------------------------------------------------------------------
 // Shader: Wir liefern Positionen in PIXELKOORDINATEN (Origin: top-left).
-// Der Vertex-Shader rechnet erst am Ende korrekt nach NDC um (getrennt X/Y).
-// Dadurch gibt es kein „Gestaucht“-Problem mehr.
+// Der Vertex-Shader rechnet erst am Ende nach NDC um (getrennt X/Y).
 // ----------------------------------------------------------------------------
 static const char* vsSrc = R"GLSL(
 #version 430 core
@@ -154,7 +153,7 @@ static void initGL() {
 }
 
 // ---- Background Quad (pixel space) -----------------------------------------
-static void buildBackground(float x0, float y0, float x1, float y1) {
+static void buildBackgroundTo(std::vector<float>& out, float x0, float y0, float x1, float y1) {
     const float bg[3] = {0.10f, 0.10f, 0.10f};
     const float quad[6][5] = {
         {x0, y0, bg[0], bg[1], bg[2]},
@@ -164,24 +163,26 @@ static void buildBackground(float x0, float y0, float x1, float y1) {
         {x1, y1, bg[0], bg[1], bg[2]},
         {x0, y1, bg[0], bg[1], bg[2]},
     };
-    background.insert(background.end(), &quad[0][0], &quad[0][0] + 6 * 5);
+    out.insert(out.end(), &quad[0][0], &quad[0][0] + 6 * 5);
 }
 
 // Otter: Symmetric padding; Schneefuchs: Glyph-Advance stabil, px-sicher.
-// WICHTIG: Wir generieren ALLE Koordinaten in PIXELN (origin top-left).
+// WICHTIG: Alle Koordinaten in PIXELN (origin top-left).
 void generateOverlayQuads(const std::string& text,
+                          int viewportW,
+                          int viewportH,
+                          float zoom,
                           std::vector<float>& vertexOut,
-                          std::vector<float>& backgroundOut,
-                          const RendererState& ctx)
+                          std::vector<float>& backgroundOut)
 {
-    (void)ctx; // nur für mögliche künftige Layout-Regeln; aktuell nicht benötigt
+    (void)zoom; (void)viewportW; (void)viewportH; // reserved for future layout rules
     vertexOut.clear();
     backgroundOut.clear();
 
-    // Skalierung der HUD-Glyphen in Pixeln (Otter: Settings steuert Größe)
+    // Skalierung der HUD-Glyphen in Pixeln (Otter: Settings steuert Groesse)
     const float scalePx = std::max(1.0f, Settings::hudPixelSize); // Schneefuchs: min 1.0
 
-    // Anker oben-links in PIXELN (Außenabstand zum Fensterrand)
+    // Anker oben-links in PIXELN (Aussenabstand zum Fensterrand)
     const float marginX = 16.0f;
     const float marginY = 16.0f;
     const float x0 = marginX;
@@ -216,7 +217,7 @@ void generateOverlayQuads(const std::string& text,
     const float bgY0 = y0 - padT;
     const float bgX1 = x0 + boxW + padR;
     const float bgY1 = y0 + boxH + padB;
-    buildBackground(bgX0, bgY0, bgX1, bgY1);
+    buildBackgroundTo(backgroundOut, bgX0, bgY0, bgX1, bgY1);
 
     // Glyphen zeichnen
     const float r = 1.0f, g = 0.8f, b = 0.3f;
@@ -252,19 +253,25 @@ void generateOverlayQuads(const std::string& text,
 }
 
 // ---- Draw -------------------------------------------------------------------
-void drawOverlay(RendererState& ctx) {
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[WS] drawOverlay: visible=%d empty=%d viewport=%dx%d",
-                       visible ? 1 : 0, currentText.empty() ? 1 : 0,
-                       (int)ctx.width, (int)ctx.height);
-    }
+void drawOverlay(float zoom) {
     if (!Settings::warzenschweinOverlayEnabled || !visible || currentText.empty())
         return;
+
+    // Viewport abfragen (x,y,w,h)
+    GLint vp[4] = {0,0,0,0};
+    glGetIntegerv(GL_VIEWPORT, vp);
+    const int vpW = vp[2];
+    const int vpH = vp[3];
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[WS] drawOverlay: visible=%d empty=%d viewport=%dx%d zoom=%.3f",
+                       visible ? 1 : 0, currentText.empty() ? 1 : 0, vpW, vpH, (double)zoom);
+    }
 
     initGL();
     if (shader == 0) return;
 
-    generateOverlayQuads(currentText, vertices, background, ctx);
+    generateOverlayQuads(currentText, vpW, vpH, zoom, vertices, background);
 
     // GL-State sichern
     GLint  prevVAO = 0, prevArray = 0, prevProg = 0;
@@ -285,7 +292,7 @@ void drawOverlay(RendererState& ctx) {
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
 
     // Set uniforms (viewport + optional per-axis scale = 1,1)
-    if (uViewportPxLoc >= 0) glUniform2f(uViewportPxLoc, (float)ctx.width, (float)ctx.height);
+    if (uViewportPxLoc >= 0) glUniform2f(uViewportPxLoc, (float)vpW, (float)vpH);
     if (uHudScaleLoc   >= 0) glUniform2f(uHudScaleLoc,   1.0f, 1.0f);
 
     // Background upload (Orphaning + SubData)
@@ -320,13 +327,9 @@ void drawOverlay(RendererState& ctx) {
 }
 
 // ---- API --------------------------------------------------------------------
-void toggle(RendererState&) {
-    visible = !visible;
-}
+void toggle() { visible = !visible; }
 
-void setText(const std::string& text) {
-    currentText = text;
-}
+void setText(const std::string& text) { currentText = text; }
 
 void cleanup() {
     if (vao) glDeleteVertexArrays(1, &vao);

@@ -1,7 +1,7 @@
-// Datei: src/zoom_command.hpp
-// 🐭 Maus: deterministische, replayfähige Kommandos; CSV stabil.
-// 🦦 Otter: keine impliziten Makros; Logging via Host-Layer. (Bezug zu Otter)
-// 🦊 Schneefuchs: trivially-copyable, keine heimlichen ABI-Fallen. (Bezug zu Schneefuchs)
+///// Otter: keine impliziten Makros; Logging via Host-Layer. (Bezug zu Otter)
+///// Schneefuchs: trivially-copyable, keine heimlichen ABI-Fallen. (Bezug zu Schneefuchs)
+///// Maus: deterministische, replayfaehige Kommandos; CSV stabil.
+///// Datei: src/zoom_command.hpp
 
 #pragma once
 #include <vector>
@@ -27,7 +27,7 @@ public:
 
     // CSV: Frame,X,Y,ZoomBefore,ZoomAfter,Entropy,Contrast
     [[nodiscard]] std::string toCSV() const {
-        // Feste Präzision für deterministisches Diffen/Replays.
+        // Feste Praezision fuer deterministisches Diffen/Replays.
         char buf[192];
         std::snprintf(buf, sizeof(buf),
                       "%d,%.5f,%.5f,%.6e,%.6e,%.4f,%.4f",
@@ -40,7 +40,7 @@ public:
     }
 
     [[nodiscard]] static std::string csvHeader() {
-        // Konstant, aber als std::string zurückgegeben für bequeme Nutzung.
+        // Konstant, aber als std::string zur bequemen Nutzung.
         return "Frame,X,Y,ZoomBefore,ZoomAfter,Entropy,Contrast";
     }
 };
@@ -61,16 +61,9 @@ private:
     std::vector<ZoomCommand> commands;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Freie Helfer (Implementierung in zoom_command.cpp)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// CSV-Datei schreiben (Header + alle Zeilen).
-void exportCommandsToCSV(const CommandBus& bus, const std::string& filename);
-
-// Letzte N Einträge als ASCII-CSV über LUCHS_LOG_HOST ausgeben.
-// maxLines <= 0 ⇒ Default 10.
-void printZoomHistory(const CommandBus& bus, int maxLines = 10);
+// -----------------------------------------------------------------------------
 
 #ifdef _MSC_VER
   #pragma warning(pop)

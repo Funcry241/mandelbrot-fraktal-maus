@@ -1,6 +1,7 @@
 ///// Otter: Nacktmull-ABI fix - Prototyp und Aufrufreihenfolge korrigiert; GPU-Iteration erzwungen.
 ///// Schneefuchs: Fruehes Unmap bei Fehler; kompakte [PERF]-Logs; Groessen/Tile-Sanity bleibt aktiv.
 ///// Maus: Deterministischer Orchestrator; ASCII-only; keine Host-Iteration mehr.
+///// Datei: src/cuda_interop.cu
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
@@ -21,8 +22,7 @@
 #include <vector>
 #include <stdexcept>
 #include <cstdint>
-
-#ifndef CUDA_ARCH
+#if !defined(__CUDA_ARCH__)
   #include <chrono>
 #endif
 
@@ -109,7 +109,7 @@ void renderCudaFrame(
     float2& newOffset, bool& shouldZoom,
     int tileSize, RendererState& state
 ) {
-#ifndef CUDA_ARCH
+#if !defined(__CUDA_ARCH__)
     const auto t0 = std::chrono::high_resolution_clock::now();
     double mapMs=0.0, mbMs=0.0, entMs=0.0, conMs=0.0;
 #endif
@@ -141,12 +141,12 @@ void renderCudaFrame(
         throw std::runtime_error("CudaInterop::renderCudaFrame: device buffers undersized");
     }
 
-#ifndef CUDA_ARCH
+#if !defined(__CUDA_ARCH__)
     const auto tMap0 = std::chrono::high_resolution_clock::now();
 #endif
     size_t surfBytes=0;
     uchar4* devSurface = static_cast<uchar4*>(pboResource->mapAndLog(surfBytes));
-#ifndef CUDA_ARCH
+#if !defined(__CUDA_ARCH__)
     const auto tMap1 = std::chrono::high_resolution_clock::now();
     mapMs = std::chrono::duration<double, std::milli>(tMap1 - tMap0).count();
 #endif
@@ -195,7 +195,7 @@ void renderCudaFrame(
 
     if (!ok) {
         pboResource->unmap();
-#ifndef CUDA_ARCH
+#if !defined(__CUDA_ARCH__)
         const auto t1 = std::chrono::high_resolution_clock::now();
         const double totalMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
         state.lastTimings.valid            = true;
@@ -219,14 +219,14 @@ void renderCudaFrame(
         CUDA_CHECK(cudaEventRecord(ev1, 0));
         CUDA_CHECK(cudaEventSynchronize(ev1));
         float ms=0.0f; CUDA_CHECK(cudaEventElapsedTime(&ms, ev0, ev1));
-#ifndef CUDA_ARCH
+#if !defined(__CUDA_ARCH__)
         mbMs = (double)ms;
 #endif
         CUDA_CHECK(cudaEventDestroy(ev0));
         CUDA_CHECK(cudaEventDestroy(ev1));
     }
 
-#ifndef CUDA_ARCH
+#if !defined(__CUDA_ARCH__)
     const auto tEC0 = std::chrono::high_resolution_clock::now();
 #endif
     ::computeCudaEntropyContrast(
@@ -235,7 +235,7 @@ void renderCudaFrame(
         static_cast<float*>(d_contrast.get()),
         width, height, tileSize, maxIterations
     );
-#ifndef CUDA_ARCH
+#if !defined(__CUDA_ARCH__)
     const auto tEC1 = std::chrono::high_resolution_clock::now();
     const double ecMs = std::chrono::duration<double, std::milli>(tEC1 - tEC0).count();
     entMs = ecMs * 0.5; conMs = ecMs * 0.5;
@@ -256,7 +256,7 @@ void renderCudaFrame(
 
     pboResource->unmap();
 
-#ifndef CUDA_ARCH
+#if !defined(__CUDA_ARCH__)
     const auto t1 = std::chrono::high_resolution_clock::now();
     const double totalMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
     state.lastTimings.valid            = true;

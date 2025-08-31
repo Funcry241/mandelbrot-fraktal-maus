@@ -1,6 +1,7 @@
 ///// Otter: RAII for CUDA/GL buffers; deterministic lifecycle; ASCII-only API docs.
 ///// Schneefuchs: Clear ownership; header/source in sync; no hidden allocations.
 ///// Maus: Minimal surface area; no manual cudaFree/glDelete in client code.
+///// Datei: src/hermelin_buffer.hpp
 
 #pragma once
 
