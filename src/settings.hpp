@@ -87,7 +87,7 @@ namespace Settings {
     //   - true: Progressive-Pfad nutzbar.
     //   - false: Klassischer Single-Pass. (Schneefuchs)
     // ------------------------------------------------------------------------
-    inline constexpr bool progressiveEnabled = false;
+    inline constexpr bool progressiveEnabled = true;
 
     // ------------------------------------------------------------------------
     // capFramerate  (NEU)
