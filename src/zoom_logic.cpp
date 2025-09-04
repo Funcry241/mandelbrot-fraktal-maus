@@ -207,9 +207,8 @@ ZoomResult evaluateZoomTarget(
         if (!insideCardioidOrBulb(cx,cy)) { ndcTX=ndcX[bestIdx]; ndcTY=ndcY[bestIdx]; }
     }
     if (ndcTX==0.0 && ndcTY==0.0){
-        if (insideCardioidOrBulb(currentOffset.x, currentOffset.y)) { float bx=1.0f,by=0.0f; antiVoidDriftNDC(currentOffset.x,currentOffset.y,bx,by); ndcTX=bx; ndcTY=by; }
-        else { ndcTX = g_dirInit? g_prevDirX : 1.0f; ndcTY = g_dirInit? g_prevDirY : 0.0f; }
-    }
+        ndcTX = g_dirInit? g_prevDirX : 1.0f; ndcTY = g_dirInit? g_prevDirY : 0.0f;
+    }  
 
     // ---- Patch A: minimal NDC-Target-Inertia (keine weiteren Änderungen) ----
     if (g_dirInit) {
