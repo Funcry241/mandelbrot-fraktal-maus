@@ -299,7 +299,13 @@ ZoomResult evaluateZoomTarget(
     state.lastOffset = out.newOffset; state.lastTilesX = tilesX; state.lastTilesY = tilesY; state.cooldownLeft = 0;
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ZOOM-LITE] invZoomEff=%.3g dist=%.4f", (float)invZoomEff, out.distance);
+        LUCHS_LOG_HOST("[ZOOM-LITE] invZoomEff=%.3g dist=%.6f ndc=%.6f len=%.3f ema=%.3f omega=%.3f",
+               (float)invZoomEff,
+               out.distance,
+               (float)std::sqrt(ndcTX*ndcTX + ndcTY*ndcTY),
+               lenScale,
+               emaAlpha,
+               maxTurn);
     }
     return out;
 }
