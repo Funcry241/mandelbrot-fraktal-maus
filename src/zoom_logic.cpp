@@ -1,4 +1,3 @@
-
 ///// Otter: V3-lite + Pullback metric (center); optional Nacktmull Planner 3D (disabled by default); smooth direction changes; softmax target; HUD hidden.
 ///// Schneefuchs: ASCII-only logs; deterministic; /WX-safe; minimal math-first behavior.
 ///// Maus: Navigation-only; clear bestIndex; stable ABI; no HUD markers.
@@ -211,6 +210,13 @@ ZoomResult evaluateZoomTarget(
         if (insideCardioidOrBulb(currentOffset.x, currentOffset.y)) { float bx=1.0f,by=0.0f; antiVoidDriftNDC(currentOffset.x,currentOffset.y,bx,by); ndcTX=bx; ndcTY=by; }
         else { ndcTX = g_dirInit? g_prevDirX : 1.0f; ndcTY = g_dirInit? g_prevDirY : 0.0f; }
     }
+
+    // ---- Patch A: minimal NDC-Target-Inertia (keine weiteren Änderungen) ----
+    if (g_dirInit) {
+        ndcTX = 0.7f * ndcTX + 0.3f * g_prevDirX;
+        ndcTY = 0.7f * ndcTY + 0.3f * g_prevDirY;
+    }
+    // -------------------------------------------------------------------------
 
     const float2 rawTarget = make_float2(previousOffset.x + (float)(ndcTX*invZoomEff),
                                          previousOffset.y + (float)(ndcTY*invZoomEff));
