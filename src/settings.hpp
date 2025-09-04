@@ -59,7 +59,7 @@ namespace Settings {
     //   - true: Mehr Einblick, leicht geringere FPS.
     //   - false: Ruhiger Lauf, ideal fuer Captures/Benchmarks. (Schneefuchs)
     // ------------------------------------------------------------------------
-    inline constexpr bool debugLogging  = false;
+    inline constexpr bool debugLogging  = true;
 
     // ------------------------------------------------------------------------
     // performanceLogging
