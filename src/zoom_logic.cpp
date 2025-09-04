@@ -39,7 +39,7 @@ constexpr float kTURN_OMEGA_MAX = 10.0f;
 constexpr float kTHETA_DAMP_LO  = 0.35f;
 constexpr float kTHETA_DAMP_HI  = 1.20f;
 
-constexpr float kSOFTMAX_LOG_EPS = -4.0f; // entschärft
+constexpr float kSOFTMAX_LOG_EPS = -7.0f;
 
 // EMA (dt)
 constexpr float kEMA_TAU_MIN   = 0.040f;
@@ -194,9 +194,8 @@ ZoomResult evaluateZoomTarget(
     for (int i=0;i<totalTiles;++i){
         const float ez=(entropy[i]-eMed)/eMad; const float cz=(contrast[i]-cMed)/cMad; const float s=kALPHA_E*ez+kBETA_C*cz; if (s<sCut) continue;
         const double cx = currentOffset.x + ndcX[i]*invZoomEff; const double cy = currentOffset.y + ndcY[i]*invZoomEff;
-        const bool inCore = insideCardioidOrBulb(cx,cy);
-        const double w = std::exp(double((s - bestScore)*invTemp)) * (inCore ? 0.25 : 1.0);
-        sumW += w; numX += w*ndcX[i]; numY += w*ndcY[i];
+        if (insideCardioidOrBulb(cx,cy)) continue;
+        const double w = std::exp(double((s - bestScore)*invTemp)); sumW += w; numX += w*ndcX[i]; numY += w*ndcY[i];
         if (s>bestAdjScore){ bestAdjScore=s; bestAdj=i; }
     }
 
@@ -208,15 +207,15 @@ ZoomResult evaluateZoomTarget(
         if (!insideCardioidOrBulb(cx,cy)) { ndcTX=ndcX[bestIdx]; ndcTY=ndcY[bestIdx]; }
     }
     if (ndcTX==0.0 && ndcTY==0.0){
-        // Fallback: träge Richtung statt Anti-Void
         ndcTX = g_dirInit? g_prevDirX : 1.0f; ndcTY = g_dirInit? g_prevDirY : 0.0f;
-    }
+    }  
 
-    // Patch A: minimal NDC-Target-Inertia (glättet Sprünge)
+    // ---- Patch A: minimal NDC-Target-Inertia (keine weiteren Änderungen) ----
     if (g_dirInit) {
         ndcTX = 0.7f * ndcTX + 0.3f * g_prevDirX;
         ndcTY = 0.7f * ndcTY + 0.3f * g_prevDirY;
     }
+    // -------------------------------------------------------------------------
 
     const float2 rawTarget = make_float2(previousOffset.x + (float)(ndcTX*invZoomEff),
                                          previousOffset.y + (float)(ndcTY*invZoomEff));
@@ -230,16 +229,14 @@ ZoomResult evaluateZoomTarget(
     const float sigFactor  = clampf(static_cast<float>(stdS), 0.0f, 1.0f);
     const float distFactor = clampf(rawDist/0.25f, 0.0f, 1.0f);
     const float omega = kTURN_OMEGA_MIN + (kTURN_OMEGA_MAX - kTURN_OMEGA_MIN) * std::max(sigFactor, distFactor);
-
-    const float dtStable = clampf((float)dt, 1.0f/120.0f, 1.0f/75.0f);
-    const float maxTurn = omega * dtStable;
+    const float maxTurn = omega * static_cast<float>(dt);
 
     float lenScale = 1.0f;
     if (hasMove){
         const float preDot = clampf(dirX*tgtX + dirY*tgtY, -1.0f, 1.0f);
         const float preAng = std::acos(preDot);
         rotateTowardsLimited(dirX, dirY, tgtX, tgtY, maxTurn);
-        lenScale = std::max(1.0f - smoothstepf(kTHETA_DAMP_LO, kTHETA_DAMP_HI, preAng), 0.04f);
+        lenScale = 1.0f - smoothstepf(kTHETA_DAMP_LO, kTHETA_DAMP_HI, preAng);
         g_prevDirX = dirX; g_prevDirY = dirY;
     }
 
@@ -288,7 +285,7 @@ ZoomResult evaluateZoomTarget(
     const float dist = std::hypot(proposed.x-previousOffset.x, proposed.y-previousOffset.y);
     const float distNorm = clampf(dist/0.5f, 0.0f, 1.0f);
     const float tau = kEMA_TAU_MAX + (kEMA_TAU_MIN - kEMA_TAU_MAX) * distNorm;
-    float emaAlpha = 1.0f - std::exp(-dtStable/std::max(1e-5f, tau));
+    float emaAlpha = 1.0f - std::exp(-static_cast<float>(dt)/std::max(1e-5f, tau));
     emaAlpha = clampf(emaAlpha, kEMA_ALPHA_MIN, kEMA_ALPHA_MAX);
     if (Settings::ForceAlwaysZoom && stdS < kMIN_SIGNAL_STD) emaAlpha = std::max(emaAlpha, kFORCE_MIN_DRIFT_ALPHA);
 
@@ -296,7 +293,7 @@ ZoomResult evaluateZoomTarget(
                                         previousOffset.y*(1.0f-emaAlpha) + proposed.y*emaAlpha);
 
     const bool hasSignal = (stdS >= kMIN_SIGNAL_STD);
-    out.shouldZoom = hasSignal || (Settings::ForceAlwaysZoom && stdS >= 0.5f * kMIN_SIGNAL_STD);
+    out.shouldZoom = hasSignal || Settings::ForceAlwaysZoom;
     out.newOffset  = out.shouldZoom ? smoothed : previousOffset;
     out.distance   = std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y);
 
