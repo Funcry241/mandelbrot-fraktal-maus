@@ -33,19 +33,19 @@ constexpr float kMETRIC_MAX_F  = 1.00f;
 constexpr float  kWARMUP_DRIFT_NDC   = 0.08f;
 constexpr float  kSEED_STEP_NDC      = 0.015f;
 
-// Turn limiter & length damping 
-constexpr float kTURN_OMEGA_MIN = 2.0f;   // war 2.5f
-constexpr float kTURN_OMEGA_MAX = 7.0f;   // war 10.0f
-constexpr float kTHETA_DAMP_LO  = 0.25f;  // war 0.35f
-constexpr float kTHETA_DAMP_HI  = 0.90f;  // war 1.20f
+// Turn limiter & length damping
+constexpr float kTURN_OMEGA_MIN = 2.5f;
+constexpr float kTURN_OMEGA_MAX = 10.0f;
+constexpr float kTHETA_DAMP_LO  = 0.35f;
+constexpr float kTHETA_DAMP_HI  = 1.20f;
 
 constexpr float kSOFTMAX_LOG_EPS = -7.0f;
 
 // EMA (dt)
-constexpr float kEMA_TAU_MIN   = 0.080f;  // war 0.040f
-constexpr float kEMA_TAU_MAX   = 0.320f;  // war 0.220f
-constexpr float kEMA_ALPHA_MIN = 0.04f;   // war 0.06f
-constexpr float kEMA_ALPHA_MAX = 0.20f;   // war 0.30f
+constexpr float kEMA_TAU_MIN   = 0.040f;
+constexpr float kEMA_TAU_MAX   = 0.220f;
+constexpr float kEMA_ALPHA_MIN = 0.06f;
+constexpr float kEMA_ALPHA_MAX = 0.30f;
 constexpr float kFORCE_MIN_DRIFT_ALPHA = 0.05f;
 
 inline float clampf(float x, float lo, float hi){ return x<lo?lo:(x>hi?hi:x); }
@@ -210,10 +210,12 @@ ZoomResult evaluateZoomTarget(
         ndcTX = g_dirInit? g_prevDirX : 1.0f; ndcTY = g_dirInit? g_prevDirY : 0.0f;
     }  
 
+    // ---- Patch A: minimal NDC-Target-Inertia (keine weiteren Änderungen) ----
     if (g_dirInit) {
-        ndcTX = 0.85f * ndcTX + 0.15f * g_prevDirX;  // Verstärkte Trägheit
-        ndcTY = 0.85f * ndcTY + 0.15f * g_prevDirY;  // war 0.7/0.3
+        ndcTX = 0.7f * ndcTX + 0.3f * g_prevDirX;
+        ndcTY = 0.7f * ndcTY + 0.3f * g_prevDirY;
     }
+    // -------------------------------------------------------------------------
 
     const float2 rawTarget = make_float2(previousOffset.x + (float)(ndcTX*invZoomEff),
                                          previousOffset.y + (float)(ndcTY*invZoomEff));
@@ -235,10 +237,6 @@ ZoomResult evaluateZoomTarget(
         const float preAng = std::acos(preDot);
         rotateTowardsLimited(dirX, dirY, tgtX, tgtY, maxTurn);
         lenScale = 1.0f - smoothstepf(kTHETA_DAMP_LO, kTHETA_DAMP_HI, preAng);
-        
-        // Extra Dämpfung bei sehr großen Winkeln
-        if(preAng > 1.5f) lenScale *= 0.7f;
-        
         g_prevDirX = dirX; g_prevDirY = dirY;
     }
 
@@ -247,8 +245,9 @@ ZoomResult evaluateZoomTarget(
 
     // --- Optional Nacktmull Planner 3D (disabled by default, funktionsneutral) ---
     {
-        constexpr auto P = NacktmullSettings::Planner3D_Default;
+        constexpr auto P = NacktmullSettings::Planner3D_Default; // enabled=false → no-op
         if (P.enabled) {
+            // Fehlernorm in (x,y,logZoom) – hier zunächst nur (x,y), z wird später ergänzt.
             const double ex_ndc = ndcTX;
             const double ey_ndc = ndcTY;
             const double ez_ndc = 0.0;
@@ -257,14 +256,15 @@ ZoomResult evaluateZoomTarget(
 
             if (e_norm < P.snapEps) {
                 out.shouldZoom = true;
-                out.newOffset  = rawTarget;
+                out.newOffset  = rawTarget; // hartes Snap
                 out.distance   = std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y);
                 if constexpr (Settings::debugLogging) {
                     if (P.logEnabled) LUCHS_LOG_HOST("[PLAN3D] snap eps=%.4f e=%.4f", (float)P.snapEps, (float)e_norm);
                 }
-                return out;
+                return out; // Snap überschreibt nachfolgende Glättung
             }
 
+            // Anti-Crawl: Mindestgeschwindigkeit auf Vektorlänge
             const double step_now = std::hypot((double)(proposed.x - previousOffset.x), (double)(proposed.y - previousOffset.y));
             const double v_now    = step_now / std::max(1e-9, dt);
             const double v_min    = P.vminFactor * e_norm / std::max(1e-9, dt);
@@ -280,6 +280,7 @@ ZoomResult evaluateZoomTarget(
             }
         }
     }
+    // --- Ende optionaler Planner 3D ---
 
     const float dist = std::hypot(proposed.x-previousOffset.x, proposed.y-previousOffset.y);
     const float distNorm = clampf(dist/0.5f, 0.0f, 1.0f);
@@ -296,6 +297,7 @@ ZoomResult evaluateZoomTarget(
     out.newOffset  = out.shouldZoom ? smoothed : previousOffset;
     out.distance   = std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y);
 
+    // Hide interest markers in HUD:
     out.bestIndex = -1;
     out.isNewTarget = false;
 
