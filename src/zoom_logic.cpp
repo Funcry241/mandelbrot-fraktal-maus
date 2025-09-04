@@ -39,7 +39,7 @@ constexpr float kTURN_OMEGA_MAX = 10.0f;
 constexpr float kTHETA_DAMP_LO  = 0.35f;
 constexpr float kTHETA_DAMP_HI  = 1.20f;
 
-constexpr float kSOFTMAX_LOG_EPS = -5.0f; // etwas weicher
+constexpr float kSOFTMAX_LOG_EPS = -7.0f;
 
 // EMA (dt)
 constexpr float kEMA_TAU_MIN   = 0.040f;
@@ -158,11 +158,11 @@ ZoomResult evaluateZoomTarget(
             out.newOffset = make_float2(previousOffset.x*(1.0f-a)+target.x*a,
                                         previousOffset.y*(1.0f-a)+target.y*a);
         }
-        out.distance = static_cast<float>(std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y));
+        out.distance = std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y);
         return out;
     }
 
-    // Median/MAD auf Kopien (nth_element modifiziert Input).
+    // Median/MAD on copies (nth_element modifies input).
     std::vector<float> e(entropy.begin(), entropy.begin()+totalTiles);
     std::vector<float> c(contrast.begin(), contrast.begin()+totalTiles);
     const float eMed = median_inplace(e); const float eMad = mad_from_center_inplace(e, eMed);
@@ -194,11 +194,8 @@ ZoomResult evaluateZoomTarget(
     for (int i=0;i<totalTiles;++i){
         const float ez=(entropy[i]-eMed)/eMad; const float cz=(contrast[i]-cMed)/cMad; const float s=kALPHA_E*ez+kBETA_C*cz; if (s<sCut) continue;
         const double cx = currentOffset.x + ndcX[i]*invZoomEff; const double cy = currentOffset.y + ndcY[i]*invZoomEff;
-        const bool inCore = insideCardioidOrBulb(cx,cy);
-        const double r = std::sqrt((double)(ndcX[i]*ndcX[i] + ndcY[i]*ndcY[i]));
-        const float edge = clampf((float)((r - 0.70) / 0.30), 0.0f, 1.0f); // Rand/Ecke abwerten
-        const double w = std::exp(double((s - bestScore)*invTemp)) * (inCore ? 0.4 : 1.0) * (1.0 - 0.35*edge);
-        sumW += w; numX += w*ndcX[i]; numY += w*ndcY[i];
+        if (insideCardioidOrBulb(cx,cy)) continue;
+        const double w = std::exp(double((s - bestScore)*invTemp)); sumW += w; numX += w*ndcX[i]; numY += w*ndcY[i];
         if (s>bestAdjScore){ bestAdjScore=s; bestAdj=i; }
     }
 
@@ -210,20 +207,20 @@ ZoomResult evaluateZoomTarget(
         if (!insideCardioidOrBulb(cx,cy)) { ndcTX=ndcX[bestIdx]; ndcTY=ndcY[bestIdx]; }
     }
     if (ndcTX==0.0 && ndcTY==0.0){
-        ndcTX = g_dirInit? g_prevDirX : 1.0f; ndcTY = g_dirInit? g_prevDirY : 0.0f; // keine Anti-Void-Übersteuerung
-    }
+        ndcTX = g_dirInit? g_prevDirX : 1.0f; ndcTY = g_dirInit? g_prevDirY : 0.0f;
+    }  
 
-    // leichte Trägheit & NDC-Clamp
-    if (g_dirInit) { ndcTX = 0.75 * ndcTX + 0.25 * g_prevDirX; ndcTY = 0.75 * ndcTY + 0.25 * g_prevDirY; }
-    { 
-        double L = std::sqrt(ndcTX*ndcTX + ndcTY*ndcTY); 
-        if (L > 0.98) { double s = 0.98 / L; ndcTX *= s; ndcTY *= s; } 
+    // ---- Patch A: minimal NDC-Target-Inertia (keine weiteren Änderungen) ----
+    if (g_dirInit) {
+        ndcTX = 0.7f * ndcTX + 0.3f * g_prevDirX;
+        ndcTY = 0.7f * ndcTY + 0.3f * g_prevDirY;
     }
+    // -------------------------------------------------------------------------
 
-    const float2 rawTarget = make_float2(previousOffset.x + static_cast<float>(ndcTX*invZoomEff),
-                                         previousOffset.y + static_cast<float>(ndcTY*invZoomEff));
+    const float2 rawTarget = make_float2(previousOffset.x + (float)(ndcTX*invZoomEff),
+                                         previousOffset.y + (float)(ndcTY*invZoomEff));
     float mvx = rawTarget.x - previousOffset.x; float mvy = rawTarget.y - previousOffset.y;
-    const float rawDist = static_cast<float>(std::sqrt(mvx*mvx + mvy*mvy));
+    const float rawDist = std::sqrt(mvx*mvx + mvy*mvy);
 
     float dirX = g_dirInit? g_prevDirX : (rawDist>0.0f? mvx/rawDist : 1.0f);
     float dirY = g_dirInit? g_prevDirY : (rawDist>0.0f? mvy/rawDist : 0.0f); g_dirInit=true;
@@ -232,16 +229,14 @@ ZoomResult evaluateZoomTarget(
     const float sigFactor  = clampf(static_cast<float>(stdS), 0.0f, 1.0f);
     const float distFactor = clampf(rawDist/0.25f, 0.0f, 1.0f);
     const float omega = kTURN_OMEGA_MIN + (kTURN_OMEGA_MAX - kTURN_OMEGA_MIN) * std::max(sigFactor, distFactor);
-
-    const float dtStable = clampf(static_cast<float>(dt), 1.0f/120.0f, 1.0f/75.0f);
-    const float maxTurn = omega * dtStable;
+    const float maxTurn = omega * static_cast<float>(dt);
 
     float lenScale = 1.0f;
     if (hasMove){
         const float preDot = clampf(dirX*tgtX + dirY*tgtY, -1.0f, 1.0f);
         const float preAng = std::acos(preDot);
         rotateTowardsLimited(dirX, dirY, tgtX, tgtY, maxTurn);
-        lenScale = std::max(1.0f - smoothstepf(kTHETA_DAMP_LO, kTHETA_DAMP_HI, preAng), 0.06f); // nie 0
+        lenScale = 1.0f - smoothstepf(kTHETA_DAMP_LO, kTHETA_DAMP_HI, preAng);
         g_prevDirX = dirX; g_prevDirY = dirY;
     }
 
@@ -252,28 +247,32 @@ ZoomResult evaluateZoomTarget(
     {
         constexpr auto P = NacktmullSettings::Planner3D_Default; // enabled=false → no-op
         if (P.enabled) {
-            const double ex_ndc = ndcTX, ey_ndc = ndcTY, ez_ndc = 0.0;
+            // Fehlernorm in (x,y,logZoom) – hier zunächst nur (x,y), z wird später ergänzt.
+            const double ex_ndc = ndcTX;
+            const double ey_ndc = ndcTY;
+            const double ez_ndc = 0.0;
             const double ez_scaled = ez_ndc / std::max(1e-9, P.kZ);
             const double e_norm = std::sqrt(ex_ndc*ex_ndc + ey_ndc*ey_ndc + ez_scaled*ez_scaled);
 
             if (e_norm < P.snapEps) {
                 out.shouldZoom = true;
-                out.newOffset  = rawTarget;
-                out.distance   = static_cast<float>(std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y));
+                out.newOffset  = rawTarget; // hartes Snap
+                out.distance   = std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y);
                 if constexpr (Settings::debugLogging) {
                     if (P.logEnabled) LUCHS_LOG_HOST("[PLAN3D] snap eps=%.4f e=%.4f", (float)P.snapEps, (float)e_norm);
                 }
-                return out;
+                return out; // Snap überschreibt nachfolgende Glättung
             }
 
+            // Anti-Crawl: Mindestgeschwindigkeit auf Vektorlänge
             const double step_now = std::hypot((double)(proposed.x - previousOffset.x), (double)(proposed.y - previousOffset.y));
             const double v_now    = step_now / std::max(1e-9, dt);
             const double v_min    = P.vminFactor * e_norm / std::max(1e-9, dt);
 
             if (v_now < v_min && step_now > 0.0) {
                 const double scale = (v_min * dt) / step_now;
-                proposed.x = previousOffset.x + static_cast<float>((proposed.x - previousOffset.x) * scale);
-                proposed.y = previousOffset.y + static_cast<float>((proposed.y - previousOffset.y) * scale);
+                proposed.x = previousOffset.x + (float)((proposed.x - previousOffset.x) * scale);
+                proposed.y = previousOffset.y + (float)((proposed.y - previousOffset.y) * scale);
             }
             if constexpr (Settings::debugLogging) {
                 if (P.logEnabled) LUCHS_LOG_HOST("[PLAN3D] e=%.4f v=%.4f vmin=%.4f dt=%.4f",
@@ -283,10 +282,10 @@ ZoomResult evaluateZoomTarget(
     }
     // --- Ende optionaler Planner 3D ---
 
-    const float dist = static_cast<float>(std::hypot(proposed.x-previousOffset.x, proposed.y-previousOffset.y));
+    const float dist = std::hypot(proposed.x-previousOffset.x, proposed.y-previousOffset.y);
     const float distNorm = clampf(dist/0.5f, 0.0f, 1.0f);
     const float tau = kEMA_TAU_MAX + (kEMA_TAU_MIN - kEMA_TAU_MAX) * distNorm;
-    float emaAlpha = 1.0f - static_cast<float>(std::exp(-dtStable/std::max(1e-5f, tau)));
+    float emaAlpha = 1.0f - std::exp(-static_cast<float>(dt)/std::max(1e-5f, tau));
     emaAlpha = clampf(emaAlpha, kEMA_ALPHA_MIN, kEMA_ALPHA_MAX);
     if (Settings::ForceAlwaysZoom && stdS < kMIN_SIGNAL_STD) emaAlpha = std::max(emaAlpha, kFORCE_MIN_DRIFT_ALPHA);
 
@@ -294,9 +293,9 @@ ZoomResult evaluateZoomTarget(
                                         previousOffset.y*(1.0f-emaAlpha) + proposed.y*emaAlpha);
 
     const bool hasSignal = (stdS >= kMIN_SIGNAL_STD);
-    out.shouldZoom = hasSignal || (Settings::ForceAlwaysZoom && stdS >= 0.5f * kMIN_SIGNAL_STD);
+    out.shouldZoom = hasSignal || Settings::ForceAlwaysZoom;
     out.newOffset  = out.shouldZoom ? smoothed : previousOffset;
-    out.distance   = static_cast<float>(std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y));
+    out.distance   = std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y);
 
     // Hide interest markers in HUD:
     out.bestIndex = -1;
@@ -308,7 +307,7 @@ ZoomResult evaluateZoomTarget(
         LUCHS_LOG_HOST("[ZOOM-LITE] invZoomEff=%.3g dist=%.6f ndc=%.6f len=%.3f ema=%.3f omega=%.3f",
                (float)invZoomEff,
                out.distance,
-               static_cast<float>(std::sqrt(ndcTX*ndcTX + ndcTY*ndcTY)),
+               (float)std::sqrt(ndcTX*ndcTX + ndcTY*ndcTY),
                lenScale,
                emaAlpha,
                maxTurn);
