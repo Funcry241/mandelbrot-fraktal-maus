@@ -1,4 +1,4 @@
-///// Otter: V3-lite + Pullback metric (center); optional Nacktmull Planner 3D (disabled by default); smooth direction changes; softmax target; HUD hidden.
+///// Otter: V3-lite + Pullback metric (center); optional Nacktmull Planner 3D (signal-gated); smooth direction changes; softmax target; HUD hidden.
 ///// Schneefuchs: ASCII-only logs; deterministic; /WX-safe; minimal math-first behavior.
 ///// Maus: Navigation-only; clear bestIndex; stable ABI; no HUD markers.
 ///// Datei: src/zoom_logic.cpp
@@ -208,7 +208,7 @@ ZoomResult evaluateZoomTarget(
     }
     if (ndcTX==0.0 && ndcTY==0.0){
         ndcTX = g_dirInit? g_prevDirX : 1.0f; ndcTY = g_dirInit? g_prevDirY : 0.0f;
-    }  
+    }
 
     // ---- Patch A: minimal NDC-Target-Inertia (keine weiteren Änderungen) ----
     if (g_dirInit) {
@@ -226,6 +226,9 @@ ZoomResult evaluateZoomTarget(
     float dirY = g_dirInit? g_prevDirY : (rawDist>0.0f? mvy/rawDist : 0.0f); g_dirInit=true;
     float tgtX = mvx, tgtY = mvy; const bool hasMove = normalize2D(tgtX,tgtY);
 
+    // --- Signal-Flag früh (für Planner & Dämpfung) ---
+    const bool hasSignal = (stdS >= kMIN_SIGNAL_STD);
+
     const float sigFactor  = clampf(static_cast<float>(stdS), 0.0f, 1.0f);
     const float distFactor = clampf(rawDist/0.25f, 0.0f, 1.0f);
     const float omega = kTURN_OMEGA_MIN + (kTURN_OMEGA_MAX - kTURN_OMEGA_MIN) * std::max(sigFactor, distFactor);
@@ -240,19 +243,25 @@ ZoomResult evaluateZoomTarget(
         g_prevDirX = dirX; g_prevDirY = dirY;
     }
 
+    // C) Dämpfe Schrittlänge bei schwachem Signal (zitterfrei bei ForceAlwaysZoom)
+    lenScale *= clampf((float)stdS, 0.0f, 1.0f);
+
     float2 proposed = make_float2(previousOffset.x + dirX * (rawDist*lenScale),
                                   previousOffset.y + dirY * (rawDist*lenScale));
 
-    // --- Optional Nacktmull Planner 3D (disabled by default, funktionsneutral) ---
+    // --- Optional Nacktmull Planner 3D (jetzt signal-gated) ---
     {
         constexpr auto P = NacktmullSettings::Planner3D_Default; // enabled=false → no-op
-        if (P.enabled) {
-            // Fehlernorm in (x,y,logZoom) – hier zunächst nur (x,y), z wird später ergänzt.
+        if (P.enabled && hasSignal) {
+            // Fehlernorm in (x,y,logZoom) – z-Anteil (logZoom) optional, hier 0
             const double ex_ndc = ndcTX;
             const double ey_ndc = ndcTY;
             const double ez_ndc = 0.0;
             const double ez_scaled = ez_ndc / std::max(1e-9, P.kZ);
-            const double e_norm = std::sqrt(ex_ndc*ex_ndc + ey_ndc*ey_ndc + ez_scaled*ez_scaled);
+
+            // B) Mindestgeschwindigkeit an Signal koppeln
+            const double s_gain = std::clamp(stdS, 0.0, 1.0);
+            const double e_norm = s_gain * std::sqrt(ex_ndc*ex_ndc + ey_ndc*ey_ndc + ez_scaled*ez_scaled);
 
             if (e_norm < P.snapEps) {
                 out.shouldZoom = true;
@@ -292,7 +301,6 @@ ZoomResult evaluateZoomTarget(
     const float2 smoothed = make_float2(previousOffset.x*(1.0f-emaAlpha) + proposed.x*emaAlpha,
                                         previousOffset.y*(1.0f-emaAlpha) + proposed.y*emaAlpha);
 
-    const bool hasSignal = (stdS >= kMIN_SIGNAL_STD);
     out.shouldZoom = hasSignal || Settings::ForceAlwaysZoom;
     out.newOffset  = out.shouldZoom ? smoothed : previousOffset;
     out.distance   = std::hypot(out.newOffset.x-previousOffset.x, out.newOffset.y-previousOffset.y);
