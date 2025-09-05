@@ -1,8 +1,7 @@
-##### Otter: Alpha 81 – Fix B: single static CUDA runtime (drop CUDA::cudadevrt). No DLL copy here.
-##### Schneefuchs: Keep vcpkg + /MT hardening; add explicit Boost (container, random, system) + OpenGL::GLU like in your link line.
-##### Maus: Arch 80/86/89/90; CUDA separable compilation on; warnings-as-errors on host; no duplicate cudart.
+##### Otter: Alpha 81 – single static CUDA runtime (no cudart.dll, no cudadevrt link); dynamic GLEW; host /WX.
+##### Schneefuchs: vcpkg via toolchain (from script), OpenGL::GLU added; Boost components explicit; separable compilation ON.
+##### Maus: Arch 80/86/89/90; CUDA c++20; ASCII-only logs unaffected; no duplicate cudart; no in-tree toolchain override.
 ##### Datei: CMakeLists.txt
-
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -23,10 +22,6 @@ endif()
 
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
-# vcpkg integration
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
-set(VCPKG_MANIFEST_MODE ON)
-
 # Language standards
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,7 +33,7 @@ set(CMAKE_CUDA_EXTENSIONS OFF)
 
 # Packages
 find_package(OpenGL REQUIRED)
-find_package(glew CONFIG REQUIRED)
+find_package(GLEW REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
@@ -103,7 +98,7 @@ if(MSVC)
     $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/MT$<$<CONFIG:Debug>:d>>)
 endif()
 
-# Prefer static cudart to match /MT  (B: ensure single occurrence, no cudadevrt)
+# Prefer static cudart to match /MT (ensure single occurrence; no cudadevrt link)
 target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
   OpenGL::GLU
