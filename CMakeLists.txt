@@ -1,6 +1,6 @@
-##### Otter: Enforce static CUDA runtime end-to-end; drop stray cudart.dll; fix GLEW to dynamic + undefine GLEW_STATIC.
-##### Schneefuchs: vcpkg (CONFIG) for glew; OpenGL::GLU; /MT unified; separable compilation ON; host /WX.
-##### Maus: Arch 80/86/89/90; CUDA C++20; ASCII logs untouched; no duplicate cudart; deterministic link line.
+##### Otter: Kill D9025 noise — remove any legacy /D GLEW_STATIC; no /U workaround needed; dynamic GLEW clean.
+##### Schneefuchs: Static CUDA runtime enforced; /MT unified; separable compilation ON; host /WX; OpenGL::GLU + Boost explicit.
+##### Maus: Arch 80/86/89/90; CUDA C++20; zero GLEW policy warnings; deterministic, duplicate-free defines.
 ##### Datei: CMakeLists.txt
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
@@ -22,6 +22,10 @@ endif()
 
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
+# --- CUDA runtime policy: force STATIC everywhere --------------------------------
+set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON)   # legacy toggle still honored
+set(CMAKE_CUDA_RUNTIME_LIBRARY Static)       # modern toggle used by generators
+
 # Language standards
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,15 +35,9 @@ set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
-# --- CUDA runtime policy: force STATIC everywhere --------------------------------
-# Older toggle still honored by CMake/NVCC:
-set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON)
-# Newer policy variable for generator logic:
-set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
-
 # Packages
 find_package(OpenGL REQUIRED)
-find_package(glew CONFIG REQUIRED)          # use vcpkg's CONFIG package
+find_package(glew CONFIG REQUIRED)           # vcpkg CONFIG package → GLEW::GLEW
 find_package(glfw3 CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
@@ -58,6 +56,17 @@ if(NOT CUDA_GL_INTEROP_INCLUDE_DIR)
   message(FATAL_ERROR "cuda_gl_interop.h not found - CUDA-OpenGL interop required")
 endif()
 include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
+
+# --- Purge any legacy /D GLEW_STATIC coming from older config/caches -------------
+# (Prevents MSVC D9025 '/DGLEW_STATIC' overridden by '/UGLEW_STATIC')
+remove_definitions(-DGLEW_STATIC)
+foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
+  if(DEFINED ${flag_var})
+    string(REPLACE "/DGLEW_STATIC" "" ${flag_var} "${${flag_var}}")
+    string(REPLACE "-DGLEW_STATIC" "" ${flag_var} "${${flag_var}}")
+    set(${flag_var} "${${flag_var}}" CACHE STRING "" FORCE)
+  endif()
+endforeach()
 
 # Executable: core renderer files
 add_executable(mandelbrot_otterdream
@@ -104,8 +113,7 @@ if(MSVC)
     $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/MT$<$<CONFIG:Debug>:d>>)
 endif()
 
-# Prefer static cudart to match /MT (ensure single runtime; device runtime is fine)
-# NOTE: cudadevrt is expected with separable compilation; it is not a DLL and can stay.
+# Link — prefer static cudart to match /MT (device runtime is expected with separable compilation)
 target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
   OpenGL::GLU
@@ -119,39 +127,26 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
   Boost::multiprecision
 )
 
-# --- Make sure generator and target both agree on STATIC runtime -----------------
+# Target properties
 set_target_properties(mandelbrot_otterdream PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON
   CUDA_RESOLVE_DEVICE_SYMBOLS ON
   CUDA_RUNTIME_LIBRARY Static
 )
 
+# Includes
 target_include_directories(mandelbrot_otterdream PRIVATE "${CMAKE_SOURCE_DIR}/src")
 
-# Extra CUDA includes for IntelliSense (MSVC)
-if(MSVC)
-  list(APPEND extra_cuda_includes
-    "$ENV{CUDA_PATH}/include"
-    "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/include"
-  )
-  foreach(path IN LISTS extra_cuda_includes)
-    if(EXISTS "${path}/cuda_runtime.h")
-      target_include_directories(mandelbrot_otterdream PRIVATE "${path}")
-      break()
-    endif()
-  endforeach()
-endif()
-
-# Explicit compiler options (+ undefine GLEW_STATIC to match dynamic GLEW)
+# Explicit compiler options (no /U hack needed anymore)
 target_compile_options(mandelbrot_otterdream PRIVATE
-  $<$<COMPILE_LANGUAGE:CUDA>:--std=c++20 --expt-relaxed-constexpr -UGLEW_STATIC -Xcompiler=/UGLEW_STATIC>
+  $<$<COMPILE_LANGUAGE:CUDA>:--std=c++20 --expt-relaxed-constexpr>
   $<$<COMPILE_LANGUAGE:CXX>:
-    $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /permissive- /Zc:__cplusplus /UGLEW_STATIC>
-    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Werror -UGLEW_STATIC>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /permissive- /Zc:__cplusplus>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Werror>
   >
 )
 
-# GLEW compile definitions (avoid imaging/GLU; do NOT define GLEW_STATIC)
+# GLEW: keep lean build flags (do NOT define GLEW_STATIC)
 target_compile_definitions(mandelbrot_otterdream PRIVATE
   GLEW_NO_IMAGING
   GLEW_NO_GLU
