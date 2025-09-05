@@ -44,7 +44,7 @@
 #ifndef GLFW_INCLUDE_NONE
   #define GLFW_INCLUDE_NONE
 #endif
-// Keine Alt-GL-Header über GLEW einziehen:
+// Keine Alt-GL-Header über andere Pfade einziehen:
 #ifndef GL_DO_NOT_INCLUDE_GL_H
   #define GL_DO_NOT_INCLUDE_GL_H
 #endif
@@ -56,18 +56,16 @@
   #define GLEW_NO_IMAGING
 #endif
 
-// Erzwinge saubere DLL-Imports, wenn dynamisches GLEW genutzt wird (Windows).
-#if defined(_WIN32) && !defined(GLEW_STATIC)
+// Sicherstellen, dass wir dynamisches GLEW nutzen:
+#ifdef GLEW_STATIC
+  #undef GLEW_STATIC
+#endif
+#if defined(_WIN32)
   #ifndef GLEW_DLL
     #define GLEW_DLL
   #endif
 #endif
 
-// Hinweis zur Link-Policy: Projekt bevorzugt dynamisches GLEW.
-// Falls der Build dennoch -DGLEW_STATIC setzt, ist das hier nur eine Info.
-#if defined(GLEW_STATIC)
-  #pragma message("WARNING: GLEW_STATIC is defined by the build. Project policy prefers dynamic GLEW (DLL).")
-#endif
-
+// Reihenfolge: erst GLEW, dann GLFW
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
