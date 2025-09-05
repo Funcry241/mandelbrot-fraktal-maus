@@ -36,14 +36,6 @@ extern "C" void launch_mandelbrotHybrid(
     int maxIter, int tile
 );
 
-// Emergency fill (nur fuer isolierte Tests)
-static __global__ void fill_rgba_kernel(uchar4* dst, int w, int h, uchar4 c) {
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= w || y >= h) return;
-    dst[y * w + x] = c;
-}
-
 namespace CudaInterop {
 
 static bear_CudaPBOResource* pboResource      = nullptr;
