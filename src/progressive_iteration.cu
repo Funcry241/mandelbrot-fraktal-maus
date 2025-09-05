@@ -1,4 +1,4 @@
-///// Otter: Progressive Iteration & Resume (impl) + Nacktmull-Settings (optional, default off)
+///// Otter: Progressive Iteration & Resume (impl) + optional local Nacktmull-Settings (default off)
 ///// Schneefuchs: Messbare Pfade; ASCII-Logs; kein versteckter Funktionswechsel.
 ///// Maus: Coalesced SoA, fixed block, chunked inner loop.
 ///// Datei: src/progressive_iteration.cu
@@ -7,7 +7,6 @@
 #include "luchs_log_host.hpp"
 #include "luchs_log_device.hpp"
 #include "settings.hpp"              // Host toggles (performanceLogging/debugLogging)
-#include "settings_nacktmull.hpp"    // NacktmullSettings::Progressive_Default (enabled=false → no-op)
 
 #include <cuda_runtime.h>
 #include <vector_types.h>
@@ -15,6 +14,27 @@
 #include <algorithm>
 #include <stdexcept>
 #include <cstdint>
+
+// -----------------------------------------------------------------------------
+// Local, headerless Nacktmull settings (functional, but default OFF)
+// This replaces the removed settings_nacktmull.hpp for this TU only.
+// -----------------------------------------------------------------------------
+namespace NacktmullSettings {
+struct ProgressivePolicy {
+    bool     enabled;                   // false → neutral (no influence)
+    uint32_t sliceMin;                  // min addIter per step when enabled (>=1)
+    double   sliceMaxPct;               // clamp addIter to <= sliceMaxPct * maxIterCap
+    bool     deviceDebugLog;            // extra device logs from kernel
+    double   stopThresholdSurvivorsPct; // suggest halt if survivors% < threshold (in PERCENT)
+};
+inline constexpr ProgressivePolicy Progressive_Default{
+    /*enabled                    */ false,
+    /*sliceMin                   */ 8u,
+    /*sliceMaxPct                */ 0.50,   // 50% of maxIterCap
+    /*deviceDebugLog             */ false,
+    /*stopThresholdSurvivorsPct  */ 0.50    // 0.5%
+};
+} // namespace NacktmullSettings
 
 namespace prog {
 
@@ -81,7 +101,7 @@ void k_progressive_step(float2* __restrict__ z,
     // chunked inner loop
     uint32_t local = 0u;
     while (local < addIter && iters < maxIterCap) {
-        // z = z^2 + c (use 1 mul for xy via fmaf)
+        // z = z^2 + c (use 1 FMA for 2xy)
         const float x2 = zi.x * zi.x;
         const float y2 = zi.y * zi.y;
         const float xy = zi.x * zi.y;
@@ -219,7 +239,7 @@ ProgressiveMetrics CudaProgressiveState::step(const ViewportParams& vp, const Pr
     const dim3 block = chooseBlock();
     const dim3 grid  = chooseGrid(width_, height_, block);
 
-    // --- Nacktmull Progressive (optional, default off → funktionsneutral) -----
+    // --- Optional progressive policy (default OFF → neutral) ------------------
     constexpr auto P = NacktmullSettings::Progressive_Default;
     const uint32_t sliceMin = P.enabled ? std::max<uint32_t>(1u, P.sliceMin) : 1u;
     const uint32_t sliceMax = P.enabled ? std::max<uint32_t>(1u, (uint32_t)std::floor(P.sliceMaxPct * (double)cfg.maxIterCap))
@@ -274,7 +294,7 @@ ProgressiveMetrics CudaProgressiveState::step(const ViewportParams& vp, const Pr
 
     if constexpr (Settings::debugLogging) {
         if (P.enabled) {
-            LUCHS_LOG_HOST("[PROG] cfg clamp addIter=%u→%u sliceMin=%u sliceMax=%u surv=%.3f%%",
+            LUCHS_LOG_HOST("[PROG] cfg clamp addIter=%u->%u sliceMin=%u sliceMax=%u surv=%.3f%%",
                            cfg.chunkIter, effAddIter, sliceMin, sliceMax, (float)survivorsPct);
         }
     }
