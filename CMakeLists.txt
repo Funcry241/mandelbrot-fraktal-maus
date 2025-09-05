@@ -117,7 +117,6 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
 
 # GLEW compile definitions (avoid imaging/GLU)
 target_compile_definitions(mandelbrot_otterdream PRIVATE
-    GLEW_STATIC
     GLEW_NO_IMAGING
     GLEW_NO_GLU
 )
