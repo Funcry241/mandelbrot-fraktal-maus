@@ -1,6 +1,6 @@
 <!-- Datei: README.md -->
 
-<!-- 🐭 Maus-Kommentar: README für Alpha 81 – CI-validiert, Silk-Lite Zoom integriert, Auto-Tuner statt JSON-Reload. Logs jetzt mit Epoch-Millis, strikt einzeilig. Schneefuchs: „Nur was synchron ist, bleibt stabil.“ -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 81 – CI-validiert, Silk-Lite Zoom integriert, Auto-Tuner statt JSON-Reload. Logs jetzt mit Epoch-Millis, strikt einzeilig. CUDA 13 ist Pflicht; GLEW dynamisch. Schneefuchs: „Nur was synchron ist, bleibt stabil.“ -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
@@ -30,7 +30,7 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
   Warm-up-Drift und **Void-Bias** schieben den Fokus verlässlich aus Innenbereichen → *kein „Zoom ins Schwarze“*.
 
 * **📈 Progressive Iterationen (Zoom-abhängig)**
-  Iterationszahl steigt automatisch mit dem Zoom-Level.
+  Iterationszahl steigt automatisch mit dem Zoom-Level (Progressive/Resume optional).
 
 * **🎨 Rüsselwarze-Farbmodus**
   Innen dunkel, außen strukturierte Chaoswellen (Smooth Coloring mit Streifen-Shading).
@@ -68,19 +68,20 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
 
 * Windows 10/11 **oder** Linux
 * **NVIDIA GPU** mit CUDA (Compute Capability **8.0+**, empfohlen **8.6+**)
-* CUDA Toolkit (empfohlen: **v12.9**)
+* **CUDA Toolkit v13.0+ (erforderlich)** – inkl. `nvcc`
 * Visual Studio 2022 **oder** GCC 11+
 * CMake (Version **≥ 3.28**), Ninja
-* vcpkg (für GLFW, GLEW)
+* vcpkg (für GLFW, GLEW; **GLEW dynamisch**, kein `GLEW_STATIC`)
 
-> ⚠️ GPUs unter Compute Capability 8.0 (z. B. Kepler, Maxwell) werden **nicht** unterstützt.
+> ⚠️ GPUs unter Compute Capability 8.0 (z. B. Kepler, Maxwell) werden **nicht** unterstützt.  
+> ⚠️ OpenGL **4.3 Core** wird vorausgesetzt.
 
 ---
 
 ## 📦 Abhängigkeiten (via vcpkg)
 
 * [GLFW](https://www.glfw.org/) – Fenster-/Eingabe-Handling
-* [GLEW](http://glew.sourceforge.net/) – OpenGL-Extension-Management
+* [GLEW](http://glew.sourceforge.net/) – OpenGL-Extension-Management (dynamisch)
 
 ---
 
@@ -108,6 +109,8 @@ cmake -S . -B build -G Ninja `
   -DCMAKE_TOOLCHAIN_FILE="${PWD}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
+# (optional) Installationsbaum erzeugen
+cmake --install build --prefix .\dist
 # Ausführen
 ./build/mandelbrot_otterdream.exe
 ```
@@ -115,10 +118,10 @@ cmake --build build --config Release
 ### 3) Linux (GCC + Ninja)
 
 ```bash
-cmake -S . -B build -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-  -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja   -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake"   -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
+# (optional) Installationsbaum erzeugen
+cmake --install build --prefix ./dist
 # Ausführen
 ./build/mandelbrot_otterdream
 ```
@@ -126,8 +129,7 @@ cmake --build build --config Release
 > **Tipp:** Abweichende Compute Capability? Beim Konfigurieren überschreiben:
 >
 > ```bash
-> cmake -S . -B build -G Ninja -DCMAKE_CUDA_ARCHITECTURES=90 \
->   -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release
+> cmake -S . -B build -G Ninja -DCMAKE_CUDA_ARCHITECTURES=90 >   -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release
 > ```
 
 ---
@@ -136,6 +138,8 @@ cmake --build build --config Release
 
 * `P`: Auto-Zoom pausieren/fortsetzen
 * `H`: Heatmap-Overlay ein/aus
+* `T`: HUD (Warzenschwein) ein/aus
+> Optional: `Space` kann zusätzlich als Alias für `P` gemappt werden.
 
 ---
 
@@ -188,9 +192,9 @@ MIT-Lizenz – siehe [LICENSE](LICENSE).
 **OtterDream** – von der Raupe zum Fraktal-Schmetterling 🦋
 *Happy Zooming!*
 
-🐭 Maus sorgt für Fokus und ASCII-Sauberkeit.
-🦊 Schneefuchs bewacht die Präzision.
-🦦 Otter treibt den Zoom unaufhaltsam.
-🦭 Robbe schützt die API-Würde.
-🦝 Waschbär hält den Build hygienisch.
+🐭 Maus sorgt für Fokus und ASCII-Sauberkeit.  
+🦊 Schneefuchs bewacht die Präzision.  
+🦦 Otter treibt den Zoom unaufhaltsam.  
+🦭 Robbe schützt die API-Würde.  
+🦝 Waschbär hält den Build hygienisch.  
 🦉 Eule sorgt für Überblick in Heatmap & Koordinaten.

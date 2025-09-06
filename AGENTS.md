@@ -1,6 +1,6 @@
 <!-- Datei: AGENTS.md -->
 
-<!-- 🐭 Maus-Kommentar: Dokumentiert Buildprozesse und Toolchains für OtterDream. Jetzt mit Hotkey-Doku, CUDA-Architektur-Hinweis, Frame‑Budget‑Pacing‑Hinweis, Robbe‑Regel, LUCHS_LOG‑Trennung und kompakten PERF‑Logs (Epoch‑Millis). Schneefuchs flüstert: „Ein Agent kennt die versteckten Knöpfe und sorgt für saubere Übergänge.“ -->
+<!-- 🐭 Maus-Kommentar: Dokumentiert Buildprozesse und Toolchains für OtterDream. Jetzt mit Hotkey-Doku (bereinigt), CUDA-13-Hinweis, Frame‑Budget‑Pacing, Robbe‑Regel, LUCHS_LOG‑Trennung und kompakten PERF‑Logs (Epoch‑Millis). Schneefuchs flüstert: „Ein Agent kennt die versteckten Knöpfe und sorgt für saubere Übergänge.“ -->
 
 # 👩‍💻 OtterDream Build Agents
 
@@ -25,18 +25,18 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 ## 🧰 Tools & Versionen
 
-| Tool          | Mindestversion | Hinweise                  |
-| ------------- | -------------- | ------------------------- |
-| CUDA Toolkit  | 12.9+          | `nvcc` lokal erforderlich |
-| OpenGL        | 4.3+           | Core Profile              |
-| Visual Studio | 2022           | C++ + CUDA                |
-| CMake         | ≥3.28          | Presets & `--install`     |
-| Ninja         | 1.10+          | Schneller Parallel‑Build  |
-| vcpkg         | aktuell        | Drittanbieter‑Libs        |
+| Tool          | Mindestversion | Hinweise                         |
+| ------------- | -------------- | -------------------------------- |
+| CUDA Toolkit  | **13.0+**      | `nvcc` v13 lokal erforderlich    |
+| OpenGL        | 4.3+           | Core Profile                     |
+| Visual Studio | 2022           | C++ + CUDA                       |
+| CMake         | ≥3.28          | Presets & `--install`            |
+| Ninja         | 1.10+          | Schneller Parallel‑Build         |
+| vcpkg         | aktuell        | Drittanbieter‑Libs               |
 
 ### ⚠️ CUDA erforderlich
 
-Ohne lokal installiertes CUDA (inkl. `nvcc`) startet der Build nicht.
+Ohne lokal installiertes **CUDA 13** (inkl. `nvcc`) startet der Build nicht.
 
 ---
 
@@ -52,20 +52,20 @@ Die passende Compute Capability deiner GPU findest du in NVIDIAs Übersicht.
 
 ---
 
-## 🧯 Host/Device‑Logging (LUCHS\_LOG)
+## 🧯 Host/Device‑Logging (LUCHS_LOG)
 
 * **Host**: `LUCHS_LOG_HOST(...)` — ASCII‑only, **eine Zeile pro Event**, Zeitstempel als **Epoch‑Millis**.
 * **Device**: `LUCHS_LOG_DEVICE(msg)` — schreibt in den Device‑Puffer; Flush auf Host synchronisiert **außerhalb** des Hot‑Paths.
 * **Kein `printf/fprintf`** im Produktionspfad. Logs dürfen **keine** impliziten Synchronisationen auslösen.
 * **Zwei Schalter** (`Settings`):
-  `performanceLogging` → kompakte Messwerte via CUDA‑Events
+  `performanceLogging` → kompakte Messwerte via CUDA‑Events  
   `debugLogging` → detaillierter, ggf. langsamer
 
 ---
 
 ## ⏱️ Frame‑Budget‑Pacing (Silk‑Lite kompatibel)
 
-Der Mandelbrot‑Pfad hält sich an ein weiches Zeitbudget pro Frame. Silk‑Lite steuert Bewegung (Yaw‑Limiter + Dämpfung), Analyse (Entropie/Kontrast) liefert Ziele.
+Der Mandelbrot‑Pfad hält sich an ein weiches Zeitbudget pro Frame. Silk‑Lite steuert Bewegung (Yaw‑Limiter + Dämpfung), Analyse (Entropie/Kontrast) liefert Ziele.  
 **Regel**: Pacing misst mit CUDA‑Events (kostenarm) und **erzwingt keine** globale Synchronisation.
 
 ---
@@ -75,11 +75,10 @@ Der Mandelbrot‑Pfad hält sich an ein weiches Zeitbudget pro Frame. Silk‑Lit
 | Taste   | Funktion                       |
 | ------- | ------------------------------ |
 | `P`     | Auto‑Zoom pausieren/fortsetzen |
-| `Space` | Alternativ zu `P`              |
 | `H`     | Heatmap‑Overlay toggeln        |
 | `T`     | HUD (Warzenschwein) toggeln    |
 
-> **Silk‑Lite** sorgt für sanfte Richtungswechsel (Yaw‑Limiter + Dämpfung), unabhängig vom Logging.
+> Hinweis: `Space` kann optional zusätzlich gemappt werden – Standard ist **nur `P`**.
 
 ---
 
@@ -110,11 +109,10 @@ cmake --install build\windows --prefix .\dist
 
 ```bash
 sudo apt update
-sudo apt install build-essential cmake git ninja-build \
-  libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config libcuda1-525
+sudo apt install build-essential cmake git ninja-build   libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config libcuda1-545
 ```
 
-> Je nach Treiber ggf. `libcuda1-545` o. ä.
+> Je nach Treiber ggf. `libcuda1-55x` o. ä.
 
 2. Klonen & vcpkg bootstrap:
 
@@ -139,6 +137,7 @@ cmake --install build/linux --prefix ./dist
 
 * **CRT vereinheitlicht**: `/MT` (inkl. NVCC‑Host) → keine LNK2038‑Mismatches.
 * **`CUDA::cudart_static`**: passt zum `/MT`‑CRT.
+* **GLEW dynamisch**: **kein** `GLEW_STATIC`; vcpkg‑Triplet passend wählen.
 * **Hardening nur im Host‑Link**: `/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf` über `$<HOST_LINK:...>`.
 * **Separable Compilation** + **Device‑Symbols** aktiviert (CMake Properties).
 
@@ -196,7 +195,6 @@ Separat und knapp:
 * Configure → Build (Ninja) → Install
 * Artefakte: Install‑Tree unter `dist/`
 * Prüfungen:
-
   * CUDA‑Kompilation für Presets
   * konsistente CMake‑Presets
   * deterministische Builds (gleiche Inputs → gleiche Outputs)
@@ -210,8 +208,8 @@ Separat und knapp:
 
 ## ❓ Troubleshooting (Kurz)
 
-* **`nvcc` fehlt** → CUDA 12.9 installieren, PATH prüfen
-* **`glew32d.lib` verlinkt** → Triplet prüfen; Build‑Cache löschen (Preset neu)
+* **`nvcc` fehlt** → **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen
+* **GLEW‑Mismatch (z. B. `glew32d.lib`)** → auf **dynamisches GLEW** wechseln und Triplet/Cache prüfen
 * **Schwarze Frames** bei extremem Pan/Zoom → Silk‑Lite/Anti‑Black‑Guard aktiv lassen; Messläufe ohne Debug‑Logs
 * **CUDA‑Interop Stalls** → PBO‑Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences
 
