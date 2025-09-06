@@ -1,7 +1,8 @@
-///// Otter: Nacktmull Bonbon – continuous iteration (sqrt-free via r2), squared-threshold fallback, zartes deterministisches Dither; schneller & glatter, ABI unverändert.
-///// Schneefuchs: Deterministisch, ASCII-only; Mapping (center+zoom) konsistent; keine CUDA_CHECKs in dieser Datei; kompakte [PERF]-Logs.
-///// Maus: Frühe Rückgaben bei Fehlern; keine Overlays/Sprites; gleiche Kernel-Signaturen.
-/// /// Datei: src/nacktmull.cu
+
+///// Otter: Perturbation/Series Path – Referenz-Orbit (DD) + GPU-Delta; API unveraendert.
+///// Schneefuchs: Deterministisch, ASCII-only; Mapping konsistent (center+zoom); kompakte PERF-Logs.
+///// Maus: Keine Overlays/Sprites; kein CUDA_CHECK; fruehe Rueckgaben bei Fehlern.
+///// Datei: src/nacktmull.cu
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -91,9 +92,8 @@ namespace {
     __device__ __forceinline__ float2 f2_mul(float2 a, float2 b){ return make_float2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }
     __device__ __forceinline__ float  f2_abs2(float2 a){ return a.x*a.x + a.y*a.y; }
 
-    // Glättende Kurve von t -> RGB
-    __device__ __forceinline__ float3 shade_from_t(float t){
-        t = fminf(1.0f, fmaxf(0.0f, t));
+    __device__ inline float3 shade_from_iter(int it, int maxIter){
+        float t = fminf(1.0f, (float)it / (float)maxIter);
         float v = 1.f - __expf(-1.75f * t);
         v = powf(fmaxf(0.f, v), 0.80f);
         v = v + 0.08f * (1.0f - v);
@@ -101,19 +101,6 @@ namespace {
         float g = fminf(1.f, 0.95f*powf(v, 0.56f));
         float b = fminf(1.f, 0.70f*powf(v, 0.88f));
         return make_float3(r,g,b);
-    }
-
-    // Kleines, deterministisches Dither in [0,1)
-    __device__ __forceinline__ unsigned int wanghash(unsigned int x){
-        x = (x ^ 61u) ^ (x >> 16);
-        x *= 9u;
-        x = x ^ (x >> 4);
-        x *= 0x27d4eb2du;
-        x = x ^ (x >> 15);
-        return x;
-    }
-    __device__ __forceinline__ float jitter01(unsigned int seed){
-        return (float)((wanghash(seed) >> 8) * (1.0f/16777216.0f)); // 24-bit / 2^24
     }
 
     __global__ void perturbKernel(
@@ -142,7 +129,6 @@ namespace {
         float2 delta = make_float2(0.f,0.f);
         int it = 0;
         const float esc2 = 4.0f;
-        const float deltaRelMax2 = deltaRelMax * deltaRelMax; // Vergleich auf Quadrate (schneller)
 
         for(int n=0; n<maxIter; ++n){
             const float2 zref = refOrbit[n];
@@ -151,55 +137,25 @@ namespace {
 
             const float2 z = f2_add(zref, delta);
             const float r2 = f2_abs2(z);
-            if (r2 > esc2){ it = n; 
-                // ---- Continuous Iteration (sqrt-frei): nu = n + 2 - log2( ln(|z|^2) )
-                float nu = (float)n + 2.0f - __log2f(__logf(r2));
-                // leichtes Dither: reduziert Restbanding, deterministisch per (idx,n)
-                float t  = fminf(1.f, fmaxf(0.f, nu / (float)maxIter));
-                t += (jitter01((unsigned int)idx ^ (unsigned int)(n*747796405u)) - 0.5f) * (1.0f / (float)maxIter);
-                const float3 col = shade_from_t(t);
-                out[idx] = make_uchar4((unsigned char)(255.f*col.x),
-                                       (unsigned char)(255.f*col.y),
-                                       (unsigned char)(255.f*col.z), 255);
-                iterOut[idx] = it; // int-Iterationszahl für Analysepfad beibehalten
-                return;
-            }
+            if (r2 > esc2){ it = n; goto ESCAPE; }
 
-            // Fallback-Schwelle ohne sqrtf: |δ|^2 > (δ_max^2) * max(|z_ref|^2, ε^2)
-            const float ref2 = fmaxf(f2_abs2(zref), 1e-24f);
-            const float del2 = f2_abs2(delta);
-            if (del2 > deltaRelMax2 * ref2){
+            const float refMag = fmaxf(sqrtf(f2_abs2(zref)), 1e-12f);
+            const float delMag = sqrtf(f2_abs2(delta));
+            if (delMag > deltaRelMax * refMag){
                 // Fallback: direkte Iteration ab aktuellem Zustand
                 float zx = z.x, zy = z.y;
                 for(int m=n+1; m<maxIter; ++m){
                     const float x2 = zx*zx, y2 = zy*zy;
-                    if (x2 + y2 > 4.f){ it = m;
-                        float r2m = x2 + y2;
-                        float nu  = (float)m + 2.0f - __log2f(__logf(r2m));
-                        float t   = fminf(1.f, fmaxf(0.f, nu / (float)maxIter));
-                        t += (jitter01((unsigned int)idx ^ (unsigned int)(m*747796405u)) - 0.5f) * (1.0f / (float)maxIter);
-                        const float3 col = shade_from_t(t);
-                        out[idx] = make_uchar4((unsigned char)(255.f*col.x),
-                                               (unsigned char)(255.f*col.y),
-                                               (unsigned char)(255.f*col.z), 255);
-                        iterOut[idx] = it;
-                        return;
-                    }
+                    if (x2 + y2 > 4.f){ it = m; goto ESCAPE; }
                     const float xt = x2 - y2 + c.x; zy = 2.f*zx*zy + c.y; zx = xt;
                 }
-                it = maxIter;
-                const float3 col = shade_from_t(1.f);
-                out[idx] = make_uchar4((unsigned char)(255.f*col.x),
-                                       (unsigned char)(255.f*col.y),
-                                       (unsigned char)(255.f*col.z), 255);
-                iterOut[idx] = it;
-                return;
+                it = maxIter; goto ESCAPE;
             }
         }
-        // Nicht entkommen
         it = maxIter;
+    ESCAPE:
         {
-            const float3 col = shade_from_t(1.f);
+            const float3 col = shade_from_iter(it, maxIter);
             out[idx] = make_uchar4((unsigned char)(255.f*col.x),
                                    (unsigned char)(255.f*col.y),
                                    (unsigned char)(255.f*col.z), 255);
@@ -261,7 +217,7 @@ extern "C" void launch_mandelbrotHybrid(
     // 4) Kernel
     const dim3 block(32, 8);
     const dim3 grid((w + block.x - 1)/block.x, (h + block.y - 1)/block.y);
-    const float deltaRelMax = 1e-3f; // Startwert; ggf. später adaptiv
+    const float deltaRelMax = 1e-3f; // Startwert; spaeter adaptiv
 
     perturbKernel<<<grid, block>>>(out, d_it, dRef, maxIter, w, h, zoom, offset, deltaRelMax);
     if (!ok(cudaGetLastError(), "perturbKernel launch")) return;
