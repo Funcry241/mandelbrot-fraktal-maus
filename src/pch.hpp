@@ -6,6 +6,13 @@
 #pragma once
 
 // ======================
+// CUDA 13: Vektor-Deprecation zentral stummschalten
+// (wir nutzen die Legacy-Typen nicht aktiv, aber Includes können warnen)
+#ifndef __NV_NO_VECTOR_DEPRECATION_DIAG
+  #define __NV_NO_VECTOR_DEPRECATION_DIAG 1
+#endif
+
+// ======================
 // C/C++ Standard (PCH)
 // ======================
 #include <algorithm>
