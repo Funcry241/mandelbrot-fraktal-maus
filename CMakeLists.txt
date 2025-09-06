@@ -1,6 +1,6 @@
-##### Otter: Kill D9025 noise — remove any legacy /D GLEW_STATIC; no /U workaround needed; dynamic GLEW clean.
-##### Schneefuchs: Static CUDA runtime enforced; /MT unified; separable compilation ON; host /WX; OpenGL::GLU + Boost explicit.
-##### Maus: Arch 80/86/89/90; CUDA C++20; zero GLEW policy warnings; deterministic, duplicate-free defines.
+##### Otter: CUDA 13 guard; use CUDAToolkit include dirs (CCCL/CUB/Thrust); drop custom cuda_gl_interop.h PATH scan; keep dynamic GLEW, kill D9025 by purging GLEW_STATIC.
+##### Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; explicit OpenGL::GLU + Boost; deterministic, duplicate-free defines.
+##### Maus: Arch 80/86/89/90; CUDA C++20; zero GLEW policy warnings; no late vcpkg hacks; fail early if CUDA < 13.0.
 ##### Datei: CMakeLists.txt
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
@@ -46,19 +46,16 @@ find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Boost CONFIG REQUIRED COMPONENTS container random system multiprecision)
 
-# cuda_gl_interop.h location (interop required)
-find_path(CUDA_GL_INTEROP_INCLUDE_DIR cuda_gl_interop.h
-  PATHS
-    "$ENV{CUDA_PATH}/include"
-    "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/include"
-    "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0/include"
-    "/usr/local/cuda/include" "/opt/cuda/include" "/usr/include"
-  DOC "Path to cuda_gl_interop.h"
-)
-if(NOT CUDA_GL_INTEROP_INCLUDE_DIR)
-  message(FATAL_ERROR "cuda_gl_interop.h not found - CUDA-OpenGL interop required")
+# ---- CUDA 13 guard & headers (CCCL lives under CUDAToolkit include dirs) --------
+if(CUDAToolkit_VERSION VERSION_LESS 13.0)
+  message(FATAL_ERROR "CUDA 13.0 or newer is required. Found: ${CUDAToolkit_VERSION}")
 endif()
-include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
+
+# Ensure cuda_gl_interop.h exists within the toolkit include paths (no manual PATHS scan)
+find_file(CUDA_GL_INTEROP_HEADER cuda_gl_interop.h HINTS ${CUDAToolkit_INCLUDE_DIRS})
+if(NOT CUDA_GL_INTEROP_HEADER)
+  message(FATAL_ERROR "cuda_gl_interop.h not found in CUDAToolkit include directories.")
+endif()
 
 # --- Purge any legacy GLEW_STATIC from cache/flags (kills MSVC D9025 noise) -----
 # We don't rely on /U hacks; we simply ensure no *_STATIC defines linger.
@@ -139,8 +136,11 @@ set_target_properties(mandelbrot_otterdream PROPERTIES
   CUDA_RUNTIME_LIBRARY Static
 )
 
-# Includes
-target_include_directories(mandelbrot_otterdream PRIVATE "${CMAKE_SOURCE_DIR}/src")
+# Includes (add project src and CUDAToolkit headers incl. CCCL/CUB/Thrust)
+target_include_directories(mandelbrot_otterdream PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+  ${CUDAToolkit_INCLUDE_DIRS}
+)
 
 # Explicit compiler options (no /U workaround needed)
 target_compile_options(mandelbrot_otterdream PRIVATE
