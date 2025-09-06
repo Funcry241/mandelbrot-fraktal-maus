@@ -153,7 +153,7 @@ target_compile_options(mandelbrot_otterdream PRIVATE
 
 # GLEW: lean build flags (do NOT define GLEW_STATIC)
 target_compile_definitions(mandelbrot_otterdream PRIVATE
-  GLEW_NO_IMAGING
+  GLEW_NO _IMAGING
   GLEW_NO_GLU
 )
 
