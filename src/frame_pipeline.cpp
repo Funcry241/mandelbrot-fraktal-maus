@@ -9,7 +9,6 @@
 #include <cstring>
 #include <vector_types.h>
 #include <vector_functions.h> // make_float2
-#include <GL/glew.h>          // glViewport, glIsEnabled(GL_SCISSOR_TEST)
 #include <cuda_runtime.h>     // CUDA events for timing (no device-wide sync)
 
 #include "renderer_resources.hpp"    // OpenGLUtils::setGLResourceContext(const char*), OpenGLUtils::updateTextureFromPBO(GLuint pbo, GLuint tex, int w, int h)
