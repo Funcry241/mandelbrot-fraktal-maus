@@ -5,7 +5,15 @@
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
 [![Build Status](https://github.com/Funcry241/mandelbrot-fraktal-maus/actions/workflows/ci.yml/badge.svg)](https://github.com/Funcry241/mandelbrot-fraktal-maus/actions/workflows/ci.yml)
+![CUDA](https://img.shields.io/badge/CUDA-13%2B-76b900?logo=nvidia)
+![C%2B%2B](https://img.shields.io/badge/C%2B%2B-20-blue)
+![OpenGL](https://img.shields.io/badge/OpenGL-4.3%2B-3D9DD6)
+![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-informational)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+<p align="center">
+  <img src="assets/hero_russelwarze.jpg" alt="Otterdream Mandelbrot – Rüsselwarze Mode" width="85%">
+</p>
 
 Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeige für moderne NVIDIA-GPUs. Der Renderer zoomt automatisch in interessante Regionen und erhöht fortlaufend die Detailtiefe.
 Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom — und kompakte **Epoch-Millis**-Logs.
@@ -129,7 +137,7 @@ cmake --install build --prefix ./dist
 > **Tipp:** Abweichende Compute Capability? Beim Konfigurieren überschreiben:
 >
 > ```bash
-> cmake -S . -B build -G Ninja -DCMAKE_CUDA_ARCHITECTURES=90 >   -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release
+> cmake -S . -B build -G Ninja >   -DCMAKE_CUDA_ARCHITECTURES=90 >   -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" >   -DCMAKE_BUILD_TYPE=Release
 > ```
 
 ---
