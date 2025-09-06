@@ -1,6 +1,6 @@
-///// Otter: Rueckkehr zur Einfachheit - Klartext-Logging, constexpr statt Makro.
-///// Schneefuchs: Determinismus durch statisch gepruefte Groessen - kein Bitmuell, keine Zufaelligkeit.
-///// Maus: Kein Makro-Murks mehr - stabil, sicher, sichtbar in allen Translation Units.
+///// Otter: 64-bit device log offset; simple ASCII; public API unchanged; constexpr sizes only.
+///// Schneefuchs: Deterministisch & thread-safe via atomic reservation; no varargs on device; host-only formatting.
+///// Maus: CUDA 13-ready; zero UB; single source of truth for buffer size; clean TU separation.
 ///// Datei: src/luchs_cuda_log_buffer.hpp
 
 #pragma once
@@ -10,43 +10,44 @@
 #include <cstdio>
 
 // ============================================================================
-// Konfiguration des CUDA-Logbuffers
+// Configuration of the CUDA device log buffer
 // ============================================================================
-static constexpr size_t LOG_BUFFER_SIZE = 1024 * 1024; // 1 MB Logpuffer (Empfehlung: 128 KB – 2 MB)
+static constexpr size_t LOG_BUFFER_SIZE = 1024 * 1024; // 1 MB device log buffer
+static constexpr size_t LOG_MESSAGE_MAX = 512;         // hard cap per single device log line
 
 // ============================================================================
-// Namespace: LuchsLogger fuer Device-Logging
+// Namespace: LuchsLogger for device logging
 // ============================================================================
 namespace LuchsLogger {
 
-    // Device-seitiger Funktionsaufruf, speichert Nachricht im Logpuffer
+    // Device-side call, stores message into the device log buffer (ASCII)
     __device__ void deviceLog(const char* file, int line, const char* msg);
 
-    // Kernel zum Zuruecksetzen des Logpuffers (nur intern verwendet)
+    // Kernel to reset the log buffer (internal use)
     __global__ void resetLogKernel();
 
-    // Host-seitig: Loescht den Logpuffer auf dem Device
+    // Host-side: reset the device log buffer
     void resetDeviceLog();
 
-    // Host-seitig: Uebertraegt den Device-Puffer via Stream auf den Host
+    // Host-side: transfer device buffer via stream to host and print through LUCHS_LOG_HOST
     void flushDeviceLogToHost(cudaStream_t stream);
 
-    // Convenience-Funktion ohne Stream – nutzt Default-Stream (0)
+    // Convenience without stream — uses default stream (0)
     inline void flushDeviceLogToHost() {
         flushDeviceLogToHost(0);
     }
 
     // -------------------------
-    // Luchs Baby Architektur: Initialisierungskontrolle
+    // Luchs Baby architecture: initialization control
     // -------------------------
 
-    // Initialisiert den CUDA-Logpuffer, muss vor flushDeviceLogToHost aufgerufen werden
+    // Initialize the CUDA log buffer; must be called before flushDeviceLogToHost
     void initCudaLogBuffer(cudaStream_t stream);
 
-    // Gibt Ressourcen frei, falls noetig (optional)
+    // Free resources if needed (optional)
     void freeCudaLogBuffer();
 
-    // Prueft, ob der Logbuffer initialisiert ist
+    // Check whether the log buffer is initialized
     bool isCudaLogBufferInitialized();
 
 } // namespace LuchsLogger

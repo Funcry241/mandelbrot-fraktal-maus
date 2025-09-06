@@ -1,89 +1,115 @@
-///// Otter: Rueckbau auf Klartext-Device-Logging; keine Varargs; robust, simpel, sicher.
-///// Schneefuchs: cudaMemcpyFromSymbolAsync statt ungueltiger Symbol-Zeiger; deterministisch & korrekt.
-///// Maus: ASCII-only; Host-orchestriert; Logs ausschliesslich via LUCHS_LOG_HOST.
+///// Otter: 64-bit atomic device logging with reservation; local format then copy; no overlap.
+///// Schneefuchs: Uses cuda::atomic_ref (CUDA 13) for thread_scope_device; ASCII-only; deterministic bounds.
+///// Maus: Flush copies only written bytes; reset kernel zeroes offset; host/device logs strictly separated.
 ///// Datei: src/luchs_cuda_log_buffer.cu
 
 #include "luchs_cuda_log_buffer.hpp"
 #include "luchs_log_host.hpp"
 #include "settings.hpp"
+
 #include <cstring>
+#include <cuda/atomic>
 
 namespace LuchsLogger {
 
     // =========================================================================
-    // Device-seitiger Logpuffer (1 MB) + Offset (nur hier definiert)
+    // Device-side log storage (1 MB) + 64-bit write offset
     // =========================================================================
 
-    __device__ char d_logBuffer[LOG_BUFFER_SIZE];
-    __device__ int d_logOffset = 0;
+    __device__ __align__(8) char d_logBuffer[LOG_BUFFER_SIZE];
+    __device__ __align__(8) unsigned long long d_logOffset = 0ULL;
 
-    // Hostseitiger Zwischenspeicher
+    // Host-side staging buffer
     static char h_logBuffer[LOG_BUFFER_SIZE] = {0};
 
     // =========================================================================
-    // Initialisierungsstatus und Stream speichern
+    // Initialization state and preferred stream (host-side)
     // =========================================================================
 
     static bool s_isInitialized = false;
     static cudaStream_t s_logStream = nullptr;
 
     // =========================================================================
-    // Device-Logfunktion – kein Format, nur Klartext (LUCHS_LOG_DEVICE)
+    // Device logging — reserve, then copy (no varargs on device)
     // =========================================================================
 
     __device__ void deviceLog(const char* file, int line, const char* msg) {
-        int idx = atomicAdd(&d_logOffset, 0);  // nur lesen (aktueller Offset)
-        if (idx >= LOG_BUFFER_SIZE - 256) return;
-
+        // Compose into a local buffer first to know the exact length.
+        char local[LOG_MESSAGE_MAX];
         int len = 0;
 
-        // Dateiname extrahieren (ohne Pfad)
+        // 1) filename (basename only)
         const char* filenameOnly = file;
         for (int i = 0; file[i] != '\0'; ++i) {
-            if (file[i] == '/' || file[i] == '\\')
-                filenameOnly = &file[i + 1];
+            if (file[i] == '/' || file[i] == '\\') filenameOnly = &file[i + 1];
+        }
+        for (int i = 0; filenameOnly[i] && len < int(LOG_MESSAGE_MAX) - 1; ++i) {
+            local[len++] = filenameOnly[i];
         }
 
-        // "file:line | " schreiben
-        for (int i = 0; filenameOnly[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
-            d_logBuffer[idx + len++] = filenameOnly[i];
-
-        if (len + 6 + idx < LOG_BUFFER_SIZE) {
-            d_logBuffer[idx + len++] = ':';
-            int l = line, div = 10000;
-            bool started = false;
-            for (; div > 0; div /= 10) {
-                int digit = (l / div) % 10;
-                if (digit != 0 || started || div == 1) {
-                    d_logBuffer[idx + len++] = '0' + digit;
-                    started = true;
-                }
+        // 2) ':' line ' ' separator
+        if (len < int(LOG_MESSAGE_MAX) - 1) {
+            local[len++] = ':';
+            // write decimal line number
+            int l = (line < 0) ? 0 : line;
+            // max 10 digits for 32-bit int
+            int digits[10]; int dcount = 0;
+            if (l == 0) { digits[dcount++] = 0; }
+            while (l > 0 && dcount < 10) { digits[dcount++] = l % 10; l /= 10; }
+            for (int k = dcount - 1; k >= 0 && len < int(LOG_MESSAGE_MAX) - 1; --k) {
+                local[len++] = char('0' + digits[k]);
             }
-            d_logBuffer[idx + len++] = ' ';
-            d_logBuffer[idx + len++] = '|';
-            d_logBuffer[idx + len++] = ' ';
+            if (len < int(LOG_MESSAGE_MAX) - 1) local[len++] = ' ';
         }
 
-        // Nachricht
-        for (int i = 0; msg[i] && len + idx < LOG_BUFFER_SIZE - 2; ++i)
-            d_logBuffer[idx + len++] = msg[i];
+        // 3) delimiter " | "
+        if (len + 3 < int(LOG_MESSAGE_MAX)) {
+            local[len++] = '|';
+            local[len++] = ' ';
+        }
 
-        // Zeilenende + Nullterminator
-        d_logBuffer[idx + len++] = '\n';
-        d_logBuffer[idx + len]   = 0;
+        // 4) message
+        for (int i = 0; msg[i] && len < int(LOG_MESSAGE_MAX) - 2; ++i) {
+            local[len++] = msg[i];
+        }
 
-        // neuen Offset publizieren
-        atomicAdd(&d_logOffset, len);
+        // 5) newline
+        if (len < int(LOG_MESSAGE_MAX) - 1) {
+            local[len++] = '\n';
+        }
+
+        // Reserve space atomically
+        auto ref = cuda::atomic_ref<unsigned long long, cuda::thread_scope_device>(d_logOffset);
+        unsigned long long idx = ref.fetch_add((unsigned long long)len, cuda::memory_order_relaxed);
+
+        // Bounds check and copy
+        if (idx >= (unsigned long long)LOG_BUFFER_SIZE) {
+            // reservation beyond buffer — drop silently
+            return;
+        }
+        unsigned long long maxCopy = (unsigned long long)LOG_BUFFER_SIZE - idx;
+        unsigned long long toCopy  = (unsigned long long)((len <= (int)maxCopy) ? len : (int)maxCopy);
+
+        // Copy byte-wise (simple & portable)
+        for (unsigned long long i = 0; i < toCopy; ++i) {
+            d_logBuffer[idx + i] = local[i];
+        }
+
+        // Attempt to 0-terminate next char if available (benign if overwritten later)
+        if (idx + toCopy < (unsigned long long)LOG_BUFFER_SIZE) {
+            d_logBuffer[idx + toCopy] = 0;
+        }
     }
 
     // =========================================================================
-    // Logbuffer zuruecksetzen (via Kernel)
+    // Reset log buffer via kernel
     // =========================================================================
 
     __global__ void resetLogKernel() {
-        d_logOffset = 0;
-        if (threadIdx.x == 0 && blockIdx.x == 0)
+        if (threadIdx.x == 0 && blockIdx.x == 0) {
+            d_logOffset = 0ULL;
             d_logBuffer[0] = 0;
+        }
     }
 
     void resetDeviceLog() {
@@ -93,37 +119,38 @@ namespace LuchsLogger {
             }
             return;
         }
-        resetLogKernel<<<1,1>>>();
+        resetLogKernel<<<1,1,0,s_logStream>>>();
         CUDA_CHECK(cudaStreamSynchronize(s_logStream));
     }
 
     // =========================================================================
-    // Initialisierung / Freigabe
+    // Initialization / teardown
     // =========================================================================
 
     void initCudaLogBuffer(cudaStream_t stream) {
-        if (s_isInitialized) {
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[LuchsBaby INFO] initCudaLogBuffer already called.");
-            }
-            return;
-        }
-        s_logStream = stream;
-        resetLogKernel<<<1,1>>>();
+        if (s_isInitialized) return;
+        s_logStream = (stream == nullptr) ? 0 : stream;
+
+        // Clear device state
+        resetLogKernel<<<1,1,0,s_logStream>>>();
+        CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaStreamSynchronize(s_logStream));
+
+        // Clear host staging
+        std::memset(h_logBuffer, 0, sizeof(h_logBuffer));
+
         s_isInitialized = true;
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[LuchsBaby] LogBuffer initialized on stream %p", (void*)stream);
+            LUCHS_LOG_HOST("[LuchsBaby] LogBuffer initialized (size=%zu, stream=%p)", (size_t)LOG_BUFFER_SIZE, (void*)s_logStream);
         }
     }
 
     void freeCudaLogBuffer() {
-        if (!s_isInitialized) {
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[LuchsBaby INFO] freeCudaLogBuffer called but not initialized.");
-            }
-            return;
-        }
+        if (!s_isInitialized) return;
+        // nothing to free (symbols are static), reset for good measure
+        resetLogKernel<<<1,1,0,s_logStream>>>();
+        (void)cudaGetLastError();
+        (void)cudaStreamSynchronize(s_logStream);
         s_isInitialized = false;
         s_logStream = nullptr;
         if constexpr (Settings::debugLogging) {
@@ -136,7 +163,7 @@ namespace LuchsLogger {
     }
 
     // =========================================================================
-    // Host: Device-Logbuffer auslesen und ueber LUCHS_LOG_HOST ausgeben
+    // Host: fetch device log and print via LUCHS_LOG_HOST
     // =========================================================================
 
     void flushDeviceLogToHost(cudaStream_t stream) {
@@ -147,44 +174,35 @@ namespace LuchsLogger {
             return;
         }
 
-        // Stream normalisieren
-        if (stream == nullptr) {
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[LuchsBaby] stream==nullptr, using default stream 0");
-            }
-            stream = 0;
-        }
+        // Normalize stream
+        cudaStream_t useStream = (stream == nullptr) ? s_logStream : stream;
 
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[DEBUG] flushDeviceLogToHost: using cudaMemcpyFromSymbolAsync (size=%zu)", LOG_BUFFER_SIZE);
-        }
+        // 1) Fetch current offset
+        unsigned long long used = 0ULL;
+        CUDA_CHECK(cudaMemcpyFromSymbolAsync(
+            &used, d_logOffset, sizeof(used), 0, cudaMemcpyDeviceToHost, useStream));
+        CUDA_CHECK(cudaStreamSynchronize(useStream));
 
-        // Pufferinhalt kopieren (Symbol -> Host)
-        cudaError_t copyErr = cudaMemcpyFromSymbolAsync(
-            h_logBuffer,
-            d_logBuffer,
-            LOG_BUFFER_SIZE,
-            0,
-            cudaMemcpyDeviceToHost,
-            stream
-        );
-        if (copyErr != cudaSuccess) {
+        if (used == 0ULL) {
             if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[CUDA ERROR] cudaMemcpyFromSymbolAsync failed: %s", cudaGetErrorString(copyErr));
+                LUCHS_LOG_HOST("[LuchsBaby] flush: no data");
             }
             return;
         }
 
-        // Warten, bis der Copy fertig ist
-        cudaError_t syncErr = cudaStreamSynchronize(stream);
-        if (syncErr != cudaSuccess) {
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[CUDA ERROR] cudaStreamSynchronize failed: %s", cudaGetErrorString(syncErr));
-            }
-            return;
-        }
+        // 2) Copy only the used bytes (cap at buffer size - 1)
+        size_t toCopy = (used > (unsigned long long)(LOG_BUFFER_SIZE - 1))
+                        ? (LOG_BUFFER_SIZE - 1)
+                        : (size_t)used;
 
-        // Zeilenweise ausgeben (nur im Debug-Modus, um Log-Spam zu vermeiden)
+        CUDA_CHECK(cudaMemcpyFromSymbolAsync(
+            h_logBuffer, d_logBuffer, toCopy, 0, cudaMemcpyDeviceToHost, useStream));
+        CUDA_CHECK(cudaStreamSynchronize(useStream));
+
+        // ensure 0-termination for safe host-side parsing
+        h_logBuffer[toCopy] = 0;
+
+        // 3) Print line-by-line (only when debugLogging to avoid spam)
         if constexpr (Settings::debugLogging) {
             char* ptr = h_logBuffer;
             while (*ptr) {
