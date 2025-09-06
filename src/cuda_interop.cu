@@ -16,7 +16,6 @@
 
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
-#include <device_launch_parameters.h>
 #include <vector_types.h>
 #include <vector_functions.h>
 #include <vector>
@@ -67,9 +66,44 @@ static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size
     }
 }
 
+// -- CUDA 13: Geräte-/Treiber-Log via Attribute (statt veralteter cudaDeviceProp-Felder)
+static inline int getAttrSafe(cudaDeviceAttr a, int dev) {
+    int v = 0;
+    const cudaError_t e = cudaDeviceGetAttribute(&v, a, dev);
+    if (e != cudaSuccess) { /* still 0 */ }
+    return v;
+}
+
 void registerPBO(const Hermelin::GLBuffer& pbo) {
     if (pboResource) { if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!"); return; }
     ensureDeviceOnce();
+
+    // Geräte-/Treiber-Kontext einmal sauber loggen
+    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
+        int dev=-1; (void)cudaGetDevice(&dev);
+        int rt=0, drv=0; cudaRuntimeGetVersion(&rt); cudaDriverGetVersion(&drv);
+
+        // Name über Runtime: cudaGetDeviceProperties(...).name
+        char name[256] = {0};
+        if (dev >= 0) {
+            cudaDeviceProp prop{};
+            if (cudaGetDeviceProperties(&prop, dev) == cudaSuccess) {
+                std::strncpy(name, prop.name, sizeof(name) - 1);
+            }
+        }
+
+        const int ccMaj = (dev>=0)?getAttrSafe(cudaDevAttrComputeCapabilityMajor, dev):0;
+        const int ccMin = (dev>=0)?getAttrSafe(cudaDevAttrComputeCapabilityMinor, dev):0;
+        const int sms   = (dev>=0)?getAttrSafe(cudaDevAttrMultiProcessorCount,    dev):0;
+        const int warp  = (dev>=0)?getAttrSafe(cudaDevAttrWarpSize,               dev):0;
+        const int thrSM = (dev>=0)?getAttrSafe(cudaDevAttrMaxThreadsPerMultiProcessor, dev):0;
+        const int thrBL = (dev>=0)?getAttrSafe(cudaDevAttrMaxThreadsPerBlock,     dev):0;
+        const int smBlk = (dev>=0)?getAttrSafe(cudaDevAttrMaxSharedMemoryPerBlockOptin, dev):0;
+        const int smSM  = (dev>=0)?getAttrSafe(cudaDevAttrMaxSharedMemoryPerMultiprocessor, dev):0;
+        size_t memFree=0, memTot=0; cudaMemGetInfo(&memFree, &memTot);
+        LUCHS_LOG_HOST("[CUDA] ctx: rt=%d drv=%d dev=%d name=\"%s\" cc=%d.%d sms=%d warp=%d thr/SM=%d thr/blk=%d smemBlk=%d smemSM=%d memMB free=%zu total=%zu",
+                       rt, drv, dev, name, ccMaj, ccMin, sms, warp, thrSM, thrBL, smBlk, smSM, (memFree>>20), (memTot>>20));
+    }
 
     GLint prev=0; glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prev);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo.id());
@@ -151,14 +185,13 @@ void renderCudaFrame(
         throw std::runtime_error("PBO byte size mismatch");
     }
 
-    // GPU launch (Nacktmull)
+    // GPU launch (Nacktmull) – reine Event-Timings, keine Device-weite Sync
     (void)cudaGetLastError(); // clear sticky
-
     cudaEvent_t ev0=nullptr, ev1=nullptr;
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
-        CUDA_CHECK(cudaEventCreate(&ev0));
-        CUDA_CHECK(cudaEventCreate(&ev1));
-        CUDA_CHECK(cudaEventRecord(ev0, 0));
+        cudaEventCreate(&ev0); // absichtlich ohne CUDA_CHECK → Fehlerpfad erlaubt fruehes Unmap
+        cudaEventCreate(&ev1);
+        cudaEventRecord(ev0, 0);
     }
 
     // *** KORREKTE REIHENFOLGE: (out, d_it, w, h, zoom, offset, maxIter, tile) ***
@@ -171,22 +204,35 @@ void renderCudaFrame(
         tileSize
     );
 
-    cudaError_t mbErr = cudaGetLastError();
+    // Fehlerstatus ohne Device-weite Synchronisation erfassen
+    cudaError_t mbErrLaunch = cudaGetLastError(); // Launch-Fehler (sofort)
+    cudaError_t mbErrSync   = cudaSuccess;        // Laufzeitfehler via Event-Wait
+    float ms = 0.0f;
+
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
-        cudaError_t syncErr = cudaDeviceSynchronize();
-        if (mbErr == cudaSuccess && syncErr != cudaSuccess) mbErr = syncErr;
+        cudaEventRecord(ev1, 0);
+        mbErrSync = cudaEventSynchronize(ev1); // wartet nur auf Stream 0
+        if (mbErrSync == cudaSuccess) {
+            cudaEventElapsedTime(&ms, ev0, ev1);
+#if !defined(__CUDA_ARCH__)
+            mbMs = (double)ms;
+#endif
+        }
+        if (ev0) cudaEventDestroy(ev0);
+        if (ev1) cudaEventDestroy(ev1);
     }
 
-    const bool ok = (mbErr == cudaSuccess);
+    const bool ok = (mbErrLaunch == cudaSuccess) && (mbErrSync == cudaSuccess);
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[MB] ok=%d err=%d w=%d h=%d tile=%d itMax=%d zoom=%.6f off=(%.6f,%.6f) surf=%p bytes=%zu it_bytes=%zu",
-                       ok?1:0, (int)mbErr, width, height, tileSize, maxIterations,
+        LUCHS_LOG_HOST("[MB] ok=%d errLaunch=%d errSync=%d w=%d h=%d tile=%d itMax=%d zoom=%.6f off=(%.6f,%.6f) surf=%p bytes=%zu it_bytes=%zu",
+                       ok?1:0, (int)mbErrLaunch, (int)mbErrSync, width, height, tileSize, maxIterations,
                        (double)zoom, (double)offset.x, (double)offset.y,
                        (void*)devSurface, surfBytes, it_bytes);
     }
 
     if (!ok) {
-        pboResource->unmap();
+        pboResource->unmap();             // stets zuerst entkoppeln
+        (void)cudaGetLastError();         // Fehlerstatus loesen
 #if !defined(__CUDA_ARCH__)
         const auto t1 = std::chrono::high_resolution_clock::now();
         const double totalMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
@@ -202,20 +248,8 @@ void renderCudaFrame(
             LUCHS_LOG_HOST("[PERF] path=gpu FAIL mp=%.2f tt=%.2f", mapMs, totalMs);
         }
 #endif
-        (void)cudaGetLastError();
         shouldZoom = false; newOffset = offset;
         throw std::runtime_error("CUDA failure: mandelbrot kernel");
-    }
-
-    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
-        CUDA_CHECK(cudaEventRecord(ev1, 0));
-        CUDA_CHECK(cudaEventSynchronize(ev1));
-        float ms=0.0f; CUDA_CHECK(cudaEventElapsedTime(&ms, ev0, ev1));
-#if !defined(__CUDA_ARCH__)
-        mbMs = (double)ms;
-#endif
-        CUDA_CHECK(cudaEventDestroy(ev0));
-        CUDA_CHECK(cudaEventDestroy(ev1));
     }
 
 #if !defined(__CUDA_ARCH__)
@@ -294,18 +328,38 @@ void unregisterPBO() {
     delete pboResource; pboResource = nullptr;
 }
 
+// CUDA 13-freundlicher Kontext-Log (Attribute-basiert)
 void logCudaDeviceContext(const char* tag) {
+    if constexpr (!(Settings::debugLogging || Settings::performanceLogging)) {
+        (void)tag; return;
+    }
     int dev=-1; cudaError_t e0=cudaGetDevice(&dev);
-    cudaDeviceProp prop{}; cudaError_t e1=(e0==cudaSuccess && dev>=0) ? cudaGetDeviceProperties(&prop, dev) : cudaErrorInvalidDevice;
-    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
-        if (e0==cudaSuccess && e1==cudaSuccess) {
-            LUCHS_LOG_HOST("[CUDA] ctx tag=%s device=%d name=\"%s\" cc=%d.%d sms=%d vram=%lluMB",
-                (tag?tag:"(null)"), dev, prop.name, prop.major, prop.minor, prop.multiProcessorCount,
-                (unsigned long long)(prop.totalGlobalMem / (1024ull*1024ull)));
-        } else {
-            LUCHS_LOG_HOST("[CUDA] ctx tag=%s deviceQuery failed e0=%d e1=%d dev=%d",
-                (tag?tag:"(null)"), (int)e0, (int)e1, dev);
+    int rt=0, drv=0; cudaRuntimeGetVersion(&rt); cudaDriverGetVersion(&drv);
+
+    // Name über Runtime: cudaGetDeviceProperties(...).name
+    char name[256] = {0};
+    if (dev >= 0) {
+        cudaDeviceProp prop{};
+        if (cudaGetDeviceProperties(&prop, dev) == cudaSuccess) {
+            std::strncpy(name, prop.name, sizeof(name) - 1);
         }
+    }
+
+    if (e0==cudaSuccess && dev>=0) {
+        const int ccMaj = getAttrSafe(cudaDevAttrComputeCapabilityMajor, dev);
+        const int ccMin = getAttrSafe(cudaDevAttrComputeCapabilityMinor, dev);
+        const int sms   = getAttrSafe(cudaDevAttrMultiProcessorCount,    dev);
+        const int warp  = getAttrSafe(cudaDevAttrWarpSize,               dev);
+        const int thrSM = getAttrSafe(cudaDevAttrMaxThreadsPerMultiProcessor, dev);
+        const int thrBL = getAttrSafe(cudaDevAttrMaxThreadsPerBlock,     dev);
+        const int smBlk = getAttrSafe(cudaDevAttrMaxSharedMemoryPerBlockOptin, dev);
+        const int smSM  = getAttrSafe(cudaDevAttrMaxSharedMemoryPerMultiprocessor, dev);
+        size_t memFree=0, memTot=0; cudaMemGetInfo(&memFree, &memTot);
+
+        LUCHS_LOG_HOST("[CUDA] ctx tag=%s rt=%d drv=%d dev=%d name=\"%s\" cc=%d.%d sms=%d warp=%d thr/SM=%d thr/blk=%d smemBlk=%d smemSM=%d memMB free=%zu total=%zu",
+                       (tag?tag:"(null)"), rt, drv, dev, name, ccMaj, ccMin, sms, warp, thrSM, thrBL, smBlk, smSM, (memFree>>20), (memTot>>20));
+    } else {
+        LUCHS_LOG_HOST("[CUDA] ctx tag=%s deviceQuery failed e0=%d dev=%d", (tag?tag:"(null)"), (int)e0, dev);
     }
 }
 
