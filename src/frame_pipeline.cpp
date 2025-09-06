@@ -10,6 +10,7 @@
 #include <vector_types.h>
 #include <vector_functions.h> // make_float2
 #include <GL/glew.h>          // glViewport, glIsEnabled(GL_SCISSOR_TEST)
+#include <cuda_runtime.h>     // CUDA events for timing (no device-wide sync)
 
 #include "renderer_resources.hpp"    // OpenGLUtils::setGLResourceContext(const char*), OpenGLUtils::updateTextureFromPBO(GLuint pbo, GLuint tex, int w, int h)
 #include "renderer_pipeline.hpp"     // RendererPipeline::drawFullscreenQuad(...)
@@ -102,6 +103,19 @@ namespace {
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prev));
     }
 
+    // --- CUDA 13 Vorbereitung: Events statt cudaDeviceSynchronize() -----------
+    static cudaEvent_t g_evStart = nullptr;
+    static cudaEvent_t g_evStop  = nullptr;
+    static bool        g_evInit  = false;
+
+    static inline void ensureCudaEvents() {
+        if (!g_evInit) {
+            CUDA_CHECK(cudaEventCreate(&g_evStart));
+            CUDA_CHECK(cudaEventCreate(&g_evStop));
+            g_evInit = true;
+        }
+    }
+
 #if SETTINGS_PROGRESSIVE_ENABLED
     // ---------------- Progressive: TU-lokaler Zustand & Helpers ----------------
     static prog::CudaProgressiveState g_progState;
@@ -167,7 +181,10 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
 
     // Device-Render (Iterations -> Shade) + E/C-Analyse (erzeugt Host-Arrays)
     try {
-        auto t0 = Clock::now();
+        ensureCudaEvents();
+
+        // GPU-Zeitmessung ohne deviceweite Synchronisation:
+        CUDA_CHECK(cudaEventRecord(g_evStart, /*stream=*/0));
 
         float2 gpuOffset    = make_float2((float)fctx.offset.x, (float)fctx.offset.y);
         float2 gpuNewOffset = gpuOffset;
@@ -188,10 +205,14 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
             fctx.tileSize,
             state
         );
-        CUDA_CHECK(cudaDeviceSynchronize());
 
-        auto t1 = Clock::now();
-        const double ms = std::chrono::duration_cast<msd>(t1 - t0).count();
+        // Stop-Event wird nach allen Kernel-Launches in Stream 0 eingereiht:
+        CUDA_CHECK(cudaEventRecord(g_evStop, /*stream=*/0));
+        CUDA_CHECK(cudaEventSynchronize(g_evStop)); // wartet nur auf Stream 0, nicht auf das gesamte Device
+
+        float msGpuF = 0.0f;
+        CUDA_CHECK(cudaEventElapsedTime(&msGpuF, g_evStart, g_evStop));
+        const double msGpu = static_cast<double>(msGpuF);
 
         if constexpr (Settings::debugLogging) {
             if (state.lastTimings.valid) {
@@ -206,7 +227,7 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
                     state.lastTimings.pboMap
                 );
             } else {
-                LUCHS_LOG_HOST("[TIME] CUDA kernel + sync: %.3f ms", ms);
+                LUCHS_LOG_HOST("[TIME] CUDA stream0 elapsed: %.3f ms", msGpu);
             }
         }
     } catch (const std::exception& ex) {
