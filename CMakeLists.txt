@@ -11,10 +11,10 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 80;86;89;90 CACHE STRING "Default architectures if none provided")
 endif()
 
-# vcpkg triplet - per platform
+# vcpkg triplet - per platform (Windows uses dynamic triplet to ensure dynamic GLEW)
 if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   if(WIN32)
-    set(VCPKG_TARGET_TRIPLET "x64-windows-static")
+    set(VCPKG_TARGET_TRIPLET "x64-windows")
   else()
     set(VCPKG_TARGET_TRIPLET "x64-linux")
   endif()
@@ -35,9 +35,12 @@ set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
+# Prefer dynamic GLEW explicitly (harmless with CONFIG packages; documents intent)
+set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
+
 # Packages
 find_package(OpenGL REQUIRED)
-find_package(glew CONFIG REQUIRED)           # vcpkg CONFIG package → GLEW::GLEW
+find_package(glew CONFIG REQUIRED)           # vcpkg CONFIG package → GLEW::GLEW (dynamic with x64-windows triplet)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
@@ -57,13 +60,15 @@ if(NOT CUDA_GL_INTEROP_INCLUDE_DIR)
 endif()
 include_directories(${CUDA_GL_INTEROP_INCLUDE_DIR})
 
-# --- Purge any legacy /D GLEW_STATIC coming from older config/caches -------------
-# (Prevents MSVC D9025 '/DGLEW_STATIC' overridden by '/UGLEW_STATIC')
+# --- Purge any legacy GLEW_STATIC from cache/flags (kills MSVC D9025 noise) -----
+# We don't rely on /U hacks; we simply ensure no *_STATIC defines linger.
 remove_definitions(-DGLEW_STATIC)
 foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
   if(DEFINED ${flag_var})
     string(REPLACE "/DGLEW_STATIC" "" ${flag_var} "${${flag_var}}")
     string(REPLACE "-DGLEW_STATIC" "" ${flag_var} "${${flag_var}}")
+    string(REPLACE "/UGLEW_STATIC" "" ${flag_var} "${${flag_var}}")
+    string(REPLACE "-UGLEW_STATIC" "" ${flag_var} "${${flag_var}}")
     set(${flag_var} "${${flag_var}}" CACHE STRING "" FORCE)
   endif()
 endforeach()
@@ -105,7 +110,7 @@ add_executable(mandelbrot_otterdream
   src/frame_budget_controller.cpp
 )
 
-# Unify CRT to /MT so PCH and NVCC host compiler match (fixes LNK2038)
+# Unify CRT to /MT so PCH and NVCC host compiler match (fixes LNK2038 on host)
 if(MSVC)
   set_property(TARGET mandelbrot_otterdream PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -113,7 +118,7 @@ if(MSVC)
     $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/MT$<$<CONFIG:Debug>:d>>)
 endif()
 
-# Link — prefer static cudart to match /MT (device runtime is expected with separable compilation)
+# Link — prefer static cudart to match /MT (device runtime with separable compilation)
 target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
   OpenGL::GLU
@@ -137,7 +142,7 @@ set_target_properties(mandelbrot_otterdream PROPERTIES
 # Includes
 target_include_directories(mandelbrot_otterdream PRIVATE "${CMAKE_SOURCE_DIR}/src")
 
-# Explicit compiler options (no /U hack needed anymore)
+# Explicit compiler options (no /U workaround needed)
 target_compile_options(mandelbrot_otterdream PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:--std=c++20 --expt-relaxed-constexpr>
   $<$<COMPILE_LANGUAGE:CXX>:
@@ -146,7 +151,7 @@ target_compile_options(mandelbrot_otterdream PRIVATE
   >
 )
 
-# GLEW: keep lean build flags (do NOT define GLEW_STATIC)
+# GLEW: lean build flags (do NOT define GLEW_STATIC)
 target_compile_definitions(mandelbrot_otterdream PRIVATE
   GLEW_NO_IMAGING
   GLEW_NO_GLU
