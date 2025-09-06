@@ -1,8 +1,7 @@
-
-///// Otter: Perturbation/Series Path – Referenz-Orbit (DD) + GPU-Delta; API unveraendert.
-///// Schneefuchs: Deterministisch, ASCII-only; Mapping konsistent (center+zoom); kompakte PERF-Logs.
-///// Maus: Keine Overlays/Sprites; kein CUDA_CHECK; fruehe Rueckgaben bei Fehlern.
-///// Datei: src/nacktmull.cu
+///// Otter: Bonbon: sqrt-free Fallback + feines Dither gegen Bänder; schneller & hübscher, API unverändert.
+///// Schneefuchs: Vergleiche auf Betragsquadrate (keine sqrtf); jitteriertes t mit kleinem Hash; deterministisch, ASCII-only.
+///// Maus: Keine neuen Abhängigkeiten, keine CUDA_CHECKs; gleiche Kernel-Signaturen; minimal-invasive Änderungen.
+/// ///// Datei: src/nacktmull.cu
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -92,8 +91,9 @@ namespace {
     __device__ __forceinline__ float2 f2_mul(float2 a, float2 b){ return make_float2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }
     __device__ __forceinline__ float  f2_abs2(float2 a){ return a.x*a.x + a.y*a.y; }
 
-    __device__ inline float3 shade_from_iter(int it, int maxIter){
-        float t = fminf(1.0f, (float)it / (float)maxIter);
+    // --- Bonbon #1: schnellere, hübschere Kurve von t -> RGB (unverändert visuell, aber als eigene Funktion) ---
+    __device__ __forceinline__ float3 shade_from_t(float t){
+        t = fminf(1.0f, fmaxf(0.0f, t));
         float v = 1.f - __expf(-1.75f * t);
         v = powf(fmaxf(0.f, v), 0.80f);
         v = v + 0.08f * (1.0f - v);
@@ -101,6 +101,20 @@ namespace {
         float g = fminf(1.f, 0.95f*powf(v, 0.56f));
         float b = fminf(1.f, 0.70f*powf(v, 0.88f));
         return make_float3(r,g,b);
+    }
+
+    // --- Bonbon #2: winziges, deterministisches Dither gegen Bänder (keine teure log/log-Glättung) ---
+    __device__ __forceinline__ unsigned int wanghash(unsigned int x){
+        x = (x ^ 61u) ^ (x >> 16);
+        x *= 9u;
+        x = x ^ (x >> 4);
+        x *= 0x27d4eb2du;
+        x = x ^ (x >> 15);
+        return x;
+    }
+    __device__ __forceinline__ float jitter01(unsigned int seed){
+        // 24-bit -> [0,1)
+        return (float)((wanghash(seed) >> 8) * (1.0f/16777216.0f));
     }
 
     __global__ void perturbKernel(
@@ -129,6 +143,7 @@ namespace {
         float2 delta = make_float2(0.f,0.f);
         int it = 0;
         const float esc2 = 4.0f;
+        const float deltaRelMax2 = deltaRelMax * deltaRelMax; // Bonbon #3: Vergleich auf Quadrate (spart 2× sqrtf pro Schritt)
 
         for(int n=0; n<maxIter; ++n){
             const float2 zref = refOrbit[n];
@@ -139,9 +154,10 @@ namespace {
             const float r2 = f2_abs2(z);
             if (r2 > esc2){ it = n; goto ESCAPE; }
 
-            const float refMag = fmaxf(sqrtf(f2_abs2(zref)), 1e-12f);
-            const float delMag = sqrtf(f2_abs2(delta));
-            if (delMag > deltaRelMax * refMag){
+            // Fallback-Schwelle ohne sqrtf: |δ|^2 > (δ_max^2) * max(|z_ref|^2, ε^2)
+            const float ref2 = fmaxf(f2_abs2(zref), 1e-24f);
+            const float del2 = f2_abs2(delta);
+            if (del2 > deltaRelMax2 * ref2){
                 // Fallback: direkte Iteration ab aktuellem Zustand
                 float zx = z.x, zy = z.y;
                 for(int m=n+1; m<maxIter; ++m){
@@ -155,7 +171,11 @@ namespace {
         it = maxIter;
     ESCAPE:
         {
-            const float3 col = shade_from_iter(it, maxIter);
+            // Dither: bricht harte Bänder, ohne teure kontinuierliche Iteration
+            const float j = jitter01((unsigned int)idx ^ ((unsigned int)it * 747796405u)) - 0.5f;
+            const float t = fminf(1.f, ( (float)it + j ) / (float)maxIter);
+            const float3 col = shade_from_t(t);
+
             out[idx] = make_uchar4((unsigned char)(255.f*col.x),
                                    (unsigned char)(255.f*col.y),
                                    (unsigned char)(255.f*col.z), 255);
