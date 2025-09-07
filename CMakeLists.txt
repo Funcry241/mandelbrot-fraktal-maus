@@ -154,8 +154,9 @@ if(MSVC)
     $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /permissive- /Zc:__cplusplus>
   )
 else()
+  # *** Host-Warnflags NUR für C++ (nicht für CUDA!) ***
   target_compile_options(mandelbrot_otterdream PRIVATE
-    -Wall -Wextra -Wpedantic -Werror
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic -Werror>
   )
 endif()
 
