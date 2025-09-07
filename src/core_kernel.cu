@@ -1,17 +1,23 @@
 ///// Otter: Minimal GPU E/C kernels; early guards; events only when logging enabled (no C4702).
 ///// Schneefuchs: Predictable occupancy (__launch_bounds__), warp-private histograms, ASCII logs, bounds-checked sizes; /WX-safe.
 ///// Maus: Rendering/shading removed; clear host wrapper API computeCudaEntropyContrast.
-///// Datei: src/core_kernel.cu
+//  CUDA 13 Tweaks:
+//   - __launch_bounds__ kept in sync with host config.
+//   - __ldg() read-only fetches for iteration buffer.
+//   - FMA/__log2f fast-math intrinsics in hot path.
+//   - Warp-private shared histograms to minimize contention.
+//   - Events allocated only when logging is enabled.
 
 #include "pch.hpp"
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <math.h>
+#include <cmath>
 
 #include "core_kernel.h"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
+#include "common.hpp"
 
 // --------------------------------- helpers -----------------------------------
 static __device__ __forceinline__ int clamp_int_0_255(int v) {
@@ -69,7 +75,8 @@ void entropyKernel(
         const int y  = startY + dy;
         if (x >= w || y >= h) continue;
 
-        int v = it[y * w + x];
+        // read-only cached fetch
+        int v = __ldg(&it[y * w + x]);
         v = (v < 0) ? 0 : v;
         int bin = __float2int_rz(float(v) * scale);
         bin = clamp_int_0_255(bin);
