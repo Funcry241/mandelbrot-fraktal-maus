@@ -25,85 +25,84 @@ namespace {
 #endif
     }
     inline void logGlError(const char* where) {
-        GLenum err = glGetError();
+        const GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
             LUCHS_LOG_HOST("[GL-ERROR] %s -> 0x%04X", where, err);
         }
     }
 
-    // Schneefuchs: hole kompletten Info-Log (nicht nur 512 Zeichen)
+    // Hole kompletten Shader-Info-Log (nicht nur 512 Zeichen)
     inline std::string getShaderInfoLog(GLuint shader) {
         GLint len = 0;
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
         if (len <= 1) return {};
-        std::string log;
-        log.resize(static_cast<size_t>(len));
+        std::string log(static_cast<size_t>(len), '\0');
         GLsizei written = 0;
         glGetShaderInfoLog(shader, len, &written, log.data());
         if (written > 0 && written < len) log.resize(static_cast<size_t>(written));
         return log;
     }
+    // Hole kompletten Program-Info-Log
     inline std::string getProgramInfoLog(GLuint prog) {
         GLint len = 0;
         glGetProgramiv(prog, GL_INFO_LOG_LENGTH, &len);
         if (len <= 1) return {};
-        std::string log;
-        log.resize(static_cast<size_t>(len));
+        std::string log(static_cast<size_t>(len), '\0');
         GLsizei written = 0;
         glGetProgramInfoLog(prog, len, &written, log.data());
         if (written > 0 && written < len) log.resize(static_cast<size_t>(written));
         return log;
     }
+
+    // Shader kompilieren; bei Fehler 0 zurück + vollständiges Log
+    static GLuint compileShader(GLenum type, const char* src) {
+        glDebugPush(type == GL_VERTEX_SHADER ? "compile vertex shader" : "compile fragment shader");
+
+        if (!src || !*src) {
+            LUCHS_LOG_HOST("[ShaderError] empty/null source (%s)", type == GL_VERTEX_SHADER ? "Vertex" : "Fragment");
+            glDebugPop();
+            return 0;
+        }
+
+        const GLuint s = glCreateShader(type);
+        if (!s) {
+            LUCHS_LOG_HOST("[ShaderError] glCreateShader failed (type=%u)", (unsigned)type);
+            glDebugPop();
+            return 0;
+        }
+
+        glShaderSource(s, 1, &src, nullptr);
+        glCompileShader(s);
+
+        GLint ok = GL_FALSE;
+        glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+        if (ok != GL_TRUE) {
+            const std::string log = getShaderInfoLog(s);
+            LUCHS_LOG_HOST("[ShaderError] Compilation failed (%s): %s",
+                           type == GL_VERTEX_SHADER ? "Vertex" : "Fragment",
+                           log.empty() ? "(no info log)" : log.c_str());
+            glDeleteShader(s);
+            glDebugPop();
+            return 0;
+        }
+
+        // Warnungen (Info-Log vorhanden, aber ok==true) loggen
+        const std::string warn = getShaderInfoLog(s);
+        if (!warn.empty()) {
+            LUCHS_LOG_HOST("[ShaderInfo] %s shader info: %s",
+                           type == GL_VERTEX_SHADER ? "Vertex" : "Fragment",
+                           warn.c_str());
+        }
+
+        logGlError("compileShader end");
+        glDebugPop();
+        return s;
+    }
 } // namespace
 
 // ─────────────────────────── shader compile/link ─────────────────────────────
 
-// Schneefuchs: Kompiliere Shader; bei Fehler -> 0 zurück + vollständiges Log.
-static GLuint compileShader(GLenum type, const char* src) {
-    glDebugPush(type == GL_VERTEX_SHADER ? "compile vertex shader" : "compile fragment shader");
-
-    if (!src || !*src) {
-        LUCHS_LOG_HOST("[ShaderError] empty/null source (%s)", type == GL_VERTEX_SHADER ? "Vertex" : "Fragment");
-        glDebugPop();
-        return 0;
-    }
-
-    GLuint s = glCreateShader(type);
-    if (!s) {
-        LUCHS_LOG_HOST("[ShaderError] glCreateShader failed (type=%u)", (unsigned)type);
-        glDebugPop();
-        return 0;
-    }
-
-    glShaderSource(s, 1, &src, nullptr);
-    glCompileShader(s);
-
-    GLint ok = GL_FALSE;
-    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-    if (ok != GL_TRUE) {
-        const std::string log = getShaderInfoLog(s);
-        LUCHS_LOG_HOST("[ShaderError] Compilation failed (%s): %s",
-                       type == GL_VERTEX_SHADER ? "Vertex" : "Fragment",
-                       log.empty() ? "(no info log)" : log.c_str());
-        glDeleteShader(s);
-        glDebugPop();
-        return 0;
-    }
-
-    // Warnungen (Info-Log vorhanden, aber ok==true) trotzdem loggen
-    const std::string warn = getShaderInfoLog(s);
-    if (!warn.empty()) {
-        LUCHS_LOG_HOST("[ShaderInfo] %s shader info: %s",
-                       type == GL_VERTEX_SHADER ? "Vertex" : "Fragment",
-                       warn.c_str());
-    }
-
-    logGlError("compileShader end");
-    glDebugPop();
-    return s;
-}
-
-GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) {
+GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) noexcept {
     glDebugPush("link program");
 
     if (!vertexSrc || !*vertexSrc || !fragmentSrc || !*fragmentSrc) {
@@ -112,13 +111,13 @@ GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) {
         return 0;
     }
 
-    GLuint v = compileShader(GL_VERTEX_SHADER,  vertexSrc);
+    const GLuint v = compileShader(GL_VERTEX_SHADER,  vertexSrc);
     if (v == 0) { glDebugPop(); return 0; }
 
-    GLuint f = compileShader(GL_FRAGMENT_SHADER, fragmentSrc);
+    const GLuint f = compileShader(GL_FRAGMENT_SHADER, fragmentSrc);
     if (f == 0) { glDeleteShader(v); glDebugPop(); return 0; }
 
-    GLuint prog = glCreateProgram();
+    const GLuint prog = glCreateProgram();
     if (!prog) {
         LUCHS_LOG_HOST("[ShaderError] glCreateProgram failed");
         glDeleteShader(v); glDeleteShader(f);
@@ -143,7 +142,7 @@ GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) {
         return 0;
     }
 
-    // Optional: Validate (ohne Crash, nur Log)
+    // Optional: Validate (nur Log, keine Exceptions)
     glValidateProgram(prog);
     GLint validated = GL_FALSE;
     glGetProgramiv(prog, GL_VALIDATE_STATUS, &validated);
@@ -166,7 +165,7 @@ GLuint createProgramFromSource(const char* vertexSrc, const char* fragmentSrc) {
 
 // ───────────────────────────── fullscreen quad ───────────────────────────────
 
-void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) {
+void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) noexcept {
     glDebugPush("create FSQ");
 
     if (!outVAO || !outVBO || !outEBO) {
@@ -184,7 +183,7 @@ void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) {
     };
     static constexpr unsigned idx[] = { 0, 1, 2, 2, 3, 0 };
 
-    // Vorherige Bindings sichern, damit wir keinen State hinterlassen.
+    // Vorherige Bindings sichern, damit kein State hinterlassen wird.
     GLint prevVAO = 0, prevArray = 0, prevElem = 0;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArray);
@@ -209,12 +208,12 @@ void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) {
     glBindVertexArray(*outVAO);
 
     glBindBuffer(GL_ARRAY_BUFFER, *outVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(sizeof(quad)), quad, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *outEBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(idx), idx, GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(sizeof(idx)), idx, GL_STATIC_DRAW);
 
-    constexpr GLsizei STRIDE = 4 * sizeof(float);
+    constexpr GLsizei STRIDE = 4 * static_cast<GLsizei>(sizeof(float));
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, STRIDE, (void*)(uintptr_t)0);
     glEnableVertexAttribArray(0);
 
@@ -222,9 +221,9 @@ void createFullscreenQuad(GLuint* outVAO, GLuint* outVBO, GLuint* outEBO) {
     glEnableVertexAttribArray(1);
 
     // VAO schließen und vorherigen State wiederherstellen
-    glBindVertexArray(prevVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, prevArray);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, prevElem);
+    glBindVertexArray(static_cast<GLuint>(prevVAO));
+    glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(prevArray));
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLuint>(prevElem));
 
     logGlError("createFullscreenQuad end");
     glDebugPop();
