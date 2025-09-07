@@ -1,17 +1,18 @@
-##### Otter: CUDA 13 guard; use CUDAToolkit include dirs (CCCL/CUB/Thrust); keep dynamic GLEW; purge GLEW_STATIC.
-##### Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; explicit OpenGL + Boost; deterministic, duplicate-free defines.
-##### Maus: Arch 80/86/89/90; CUDA C++20; zero GLEW policy warnings; no late vcpkg hacks; fail early if CUDA < 13.0.
-##### Datei: CMakeLists.txt
+# Otter: CUDA 13 guard; use CUDAToolkit include dirs (CCCL/CUB/Thrust); keep dynamic GLEW; purge GLEW_STATIC.
+# Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; explicit OpenGL + Boost; deterministic, duplicate-free defines.
+# Maus: Arch 80/86/89/90; CUDA C++20; zero GLEW policy warnings; no late vcpkg hacks; fail early if CUDA < 13.0.
+
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Architectures
+# ---------------------- Architectures ----------------------
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 80;86;89;90 CACHE STRING "Default architectures if none provided")
 endif()
 
-# vcpkg triplet - per platform (Windows uses dynamic triplet to ensure dynamic GLEW)
+# ---------------------- vcpkg Triplet ----------------------
+# Windows: dynamischer Triplet (für dynamisches GLEW), Linux: x64-linux
 if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   if(WIN32)
     set(VCPKG_TARGET_TRIPLET "x64-windows")
@@ -20,13 +21,14 @@ if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   endif()
 endif()
 
+# ---------------------- Project ----------------------------
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
-# --- CUDA runtime policy: force STATIC everywhere --------------------------------
-set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON)   # legacy toggle still honored
-set(CMAKE_CUDA_RUNTIME_LIBRARY Static)       # modern toggle used by generators
+# CUDA runtime policy: force STATIC everywhere
+set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON)
+set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
 
-# Language standards (respect CLI overrides)
+# ---------------------- Language Std -----------------------
 if(NOT DEFINED CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 23)
 endif()
@@ -39,35 +41,40 @@ endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
-# Prefer dynamic GLEW explicitly (harmless with CONFIG/MODULE; documents intent)
+# GLEW dynamisch (Dokumentation der Absicht; kein GLEW_STATIC)
 set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
 
-# ------------------------------------------------------------------------------
-# Packages
-# ------------------------------------------------------------------------------
+# ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
-find_package(OpenGL REQUIRED)                 # provides OpenGL::GL
+find_package(OpenGL REQUIRED)                 # OpenGL::GL
 
-# GLEW via vcpkg/CMake (no pkg-config on Linux, avoids opengl.pc/glu.pc issues)
-find_package(GLEW REQUIRED)                   # vcpkg advises this form → GLEW::GLEW
+# WICHTIG: GLEW im offiziellen CMake-Modus
+find_package(GLEW REQUIRED)
 
-find_package(glfw3 CONFIG REQUIRED)           # exposes target 'glfw'
+# Robust gegen Namensvarianten der importierten Targets
+if(TARGET GLEW::GLEW)
+  set(GLEW_TARGET GLEW::GLEW)
+elseif(TARGET glew::glew)
+  set(GLEW_TARGET glew::glew)
+else()
+  message(FATAL_ERROR "Kein GLEW-CMake-Ziel gefunden (weder GLEW::GLEW noch glew::glew).")
+endif()
+
+find_package(glfw3 CONFIG REQUIRED)           # 'glfw'
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Boost CONFIG REQUIRED COMPONENTS container random system multiprecision)
 
-# ---- CUDA 13 guard & headers (CCCL lives under CUDAToolkit include dirs) --------
+# CUDA 13 Guard + Header-Check
 if(CUDAToolkit_VERSION VERSION_LESS 13.0)
-  message(FATAL_ERROR "CUDA 13.0 or newer is required. Found: ${CUDAToolkit_VERSION}")
+  message(FATAL_ERROR "CUDA 13.0 oder neuer ist erforderlich. Gefunden: ${CUDAToolkit_VERSION}")
 endif()
-
-# Ensure cuda_gl_interop.h exists within the toolkit include paths (no manual PATHS scan)
 find_file(CUDA_GL_INTEROP_HEADER cuda_gl_interop.h HINTS ${CUDAToolkit_INCLUDE_DIRS})
 if(NOT CUDA_GL_INTEROP_HEADER)
-  message(FATAL_ERROR "cuda_gl_interop.h not found in CUDAToolkit include directories.")
+  message(FATAL_ERROR "cuda_gl_interop.h nicht im CUDAToolkit gefunden.")
 endif()
 
-# --- Purge any legacy GLEW_STATIC from cache/flags (kills MSVC D9025 noise) -----
+# Legacy-Defines säubern (keine GLEW_STATIC-Leaks)
 remove_definitions(-DGLEW_STATIC)
 foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
   if(DEFINED ${flag_var})
@@ -79,9 +86,7 @@ foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
   endif()
 endforeach()
 
-# ------------------------------------------------------------------------------
-# Executable
-# ------------------------------------------------------------------------------
+# ---------------------- Executable -------------------------
 add_executable(mandelbrot_otterdream
   src/main.cpp
   src/luchs_log_host.cpp
@@ -118,18 +123,49 @@ add_executable(mandelbrot_otterdream
   src/frame_budget_controller.cpp
 )
 
-# Unify CRT to /MT so PCH and NVCC host compiler match (fixes LNK2038 on host)
+# ---------------------- Compile-Options --------------------
+# Windows: einheitliche /MT, Host-Warnungen als Fehler
 if(MSVC)
   set_property(TARGET mandelbrot_otterdream PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   target_compile_options(mandelbrot_otterdream PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/MT$<$<CONFIG:Debug>:d>>)
+    $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/MT$<$<CONFIG:Debug>:d>>
+    $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /permissive- /Zc:__cplusplus>
+  )
+else()
+  target_compile_options(mandelbrot_otterdream PRIVATE
+    -Wall -Wextra -Wpedantic -Werror
+  )
 endif()
 
-# Link — prefer static cudart to match /MT (device runtime with separable compilation)
+# CUDA-spezifisch
+target_compile_options(mandelbrot_otterdream PRIVATE
+  $<$<COMPILE_LANGUAGE:CUDA>:--std=c++20 --expt-relaxed-constexpr>
+)
+
+# ---------------------- Target-Properties ------------------
+set_target_properties(mandelbrot_otterdream PROPERTIES
+  CUDA_SEPARABLE_COMPILATION ON
+  CUDA_RESOLVE_DEVICE_SYMBOLS ON
+  CUDA_RUNTIME_LIBRARY Static
+)
+
+# ---------------------- Includes ---------------------------
+target_include_directories(mandelbrot_otterdream PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+  ${CUDAToolkit_INCLUDE_DIRS}  # CCCL / CUB / Thrust
+)
+
+# ---------------------- Defines ----------------------------
+target_compile_definitions(mandelbrot_otterdream PRIVATE
+  GLEW_NO_IMAGING
+  GLEW_NO_GLU
+)
+
+# ---------------------- Link -------------------------------
 target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
-  GLEW::GLEW
+  ${GLEW_TARGET}
   glfw
   CUDA::cudart_static
   Threads::Threads
@@ -139,35 +175,12 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
   Boost::multiprecision
 )
 
-# Target properties
-set_target_properties(mandelbrot_otterdream PROPERTIES
-  CUDA_SEPARABLE_COMPILATION ON
-  CUDA_RESOLVE_DEVICE_SYMBOLS ON
-  CUDA_RUNTIME_LIBRARY Static
-)
+# Linux: -pthread explizit
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_link_options(mandelbrot_otterdream PRIVATE -pthread)
+endif()
 
-# Includes (add project src and CUDAToolkit headers incl. CCCL/CUB/Thrust)
-target_include_directories(mandelbrot_otterdream PRIVATE
-  "${CMAKE_SOURCE_DIR}/src"
-  ${CUDAToolkit_INCLUDE_DIRS}
-)
-
-# Explicit compiler options (no /U workaround needed)
-target_compile_options(mandelbrot_otterdream PRIVATE
-  $<$<COMPILE_LANGUAGE:CUDA>:--std=c++20 --expt-relaxed-constexpr>
-  $<$<COMPILE_LANGUAGE:CXX>:
-    $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /permissive- /Zc:__cplusplus>
-    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Werror>
-  >
-)
-
-# GLEW: lean build flags (do NOT define GLEW_STATIC)
-target_compile_definitions(mandelbrot_otterdream PRIVATE
-  GLEW_NO_IMAGING
-  GLEW_NO_GLU
-)
-
-# Control Flow Guard only for C++ sources (host compile), not CUDA
+# Windows: Host-Linker-Flags (nur C++-Host, nicht CUDA-Device-Link)
 if(MSVC)
   target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<COMPILE_LANGUAGE:CXX>>:/guard:cf>
@@ -178,11 +191,11 @@ if(MSVC)
     $<$<CONFIG:RelWithDebInfo>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
   )
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "HIGHENTROPYVA requires 64-bit (/MACHINE:X64). Use a 64-bit toolchain.")
+    message(FATAL_ERROR "HIGHENTROPYVA erfordert 64-bit (/MACHINE:X64). Bitte 64-bit Toolchain verwenden.")
   endif()
 endif()
 
-# Default build type
+# ---------------------- Defaults ---------------------------
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
