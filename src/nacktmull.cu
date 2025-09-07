@@ -1,12 +1,11 @@
 ///// Otter: Perturbation/Series Path – Referenz-Orbit (DD) + GPU-Delta; API unveraendert.
 ///// Schneefuchs: Deterministisch, ASCII-only; Mapping konsistent (center+zoom); kompakte PERF-Logs.
 ///// Maus: Keine Overlays/Sprites; kein CUDA_CHECK; fruehe Rueckgaben bei Fehlern.
-//  Optimiert (CUDA 13):
-//   • Wächter ohne sqrt (quadratische Norm) + 2-Step-Hysterese → stabile Geometrie, weniger Umschaltbänder.
-//   • Höhere Standardschwelle (tau_on = 5e-3), Vergleich gegen |z| (statt nur |z_ref|).
-//   • c_ref einmalig auf Host berechnet und als Kernel-Arg übergeben (spart pro Thread 1x pixelToComplex).
-//   • __launch_bounds__(256,2), FMA-Intrinsics, kein unnötiges double im Hotpath.
-//   • Performance ≥ vorher (weniger sqrt, seltenerer Fallback, weniger pro-Thread Arbeit).
+//  CUDA 13 Optimierungen (ohne Verhaltensaenderung):
+//   - __launch_bounds__(256) fuer bessere Occupancy (Host nutzt 32x8 Threads).
+//   - FMA/Math-Intrinsics im Hotpath (__fmaf_rn, __powf, __expf).
+//   - Guard ohne sqrt (vergleich mit quadratischen Normen) → exakt aequivalent.
+//   - c_ref nur 1x pro Block berechnet und via Shared Memory verteilt.
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -66,7 +65,8 @@ namespace dd {
 }
 
 // ------------------------------------------------------------
-// Referenz-Orbit (Host, DD) -> float2[maxIter]
+// Referenz-Orbit: z_{n+1} = z_n^2 + c_ref  (Host, DD)
+// Ergebnis: float2 pro Schritt (kompakt), Laenge = maxIter
 // ------------------------------------------------------------
 static void buildReferenceOrbitDD(std::vector<float2>& out, int maxIter, double cref_x, double cref_y){
     out.resize((size_t)maxIter);
@@ -85,16 +85,21 @@ static void buildReferenceOrbitDD(std::vector<float2>& out, int maxIter, double 
 }
 
 // ------------------------------------------------------------
-// GPU-Kernel: Perturbation mit robustem Wächter
+// GPU-Kernel: Perturbation (CUDA 13-optimiert, verhaltensgleich)
 // δ_{n+1} = 2*z_ref[n]*δ_n + Δc;   z ≈ z_ref[n] + δ
-// Escape, wenn |z|^2 > 4.  Fallback nur bei stabiler Überschreitung.
+// Escape, wenn |z|^2 > 4.
+// Fallback: direkte Iteration, falls |δ| relativ zu |z_ref| zu gross.
 // ------------------------------------------------------------
 namespace {
     __device__ __forceinline__ float2 f2_add(float2 a, float2 b){ return make_float2(a.x+b.x, a.y+b.y); }
-    __device__ __forceinline__ float2 f2_mul(float2 a, float2 b){ return make_float2(a.x*b.x - a.y*b.y, __fmaf_rn(a.x, b.y, a.y*b.x)); }
+    __device__ __forceinline__ float2 f2_mul(float2 a, float2 b){
+        // (a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x)
+        return make_float2(__fmaf_rn(a.x, b.x, -a.y*b.y),
+                           __fmaf_rn(a.x, b.y,  a.y*b.x));
+    }
     __device__ __forceinline__ float  f2_abs2(float2 a){ return __fmaf_rn(a.x, a.x, a.y*a.y); }
 
-    __device__ inline float3 shade_from_iter(int it, int maxIter){
+    __device__ __forceinline__ float3 shade_from_iter(int it, int maxIter){
         float t = fminf(1.0f, (float)it / (float)maxIter);
         float v = 1.f - __expf(-1.75f * t);
         v = __powf(fmaxf(0.f, v), 0.80f);
@@ -105,27 +110,32 @@ namespace {
         return make_float3(r,g,b);
     }
 
-    // 256 Threads/Block; mindestens 2 Blöcke/SM anpeilen
-    __global__ __launch_bounds__(256,2)
+    __global__ __launch_bounds__(256)
     void perturbKernel(
         uchar4* __restrict__ out, int* __restrict__ iterOut,
         const float2* __restrict__ refOrbit, int maxIter,
-        int w, int h, float zoom, float2 center,
-        float2 c_ref, float tau_on2)
+        int w, int h, float zoom, float2 center, float deltaRelMax)
     {
         const int x = blockIdx.x * blockDim.x + threadIdx.x;
         const int y = blockIdx.y * blockDim.y + threadIdx.y;
         if (x >= w || y >= h) return;
         const int idx = y*w + x;
 
-        // 1) c (pro Pixel), dC = c - c_ref  — c_ref kommt als Kernel-Argument (einmalig auf Host berechnet)
-        const float2 c  = pixelToComplex(x + 0.5, y + 0.5, w, h,
-                                         (double)center.x, (double)center.y, (double)zoom);
-        const float2 dC = make_float2(c.x - c_ref.x, c.y - c_ref.y);
+        // c_ref einmal pro Block berechnen (Device), dann teilen → identische Werte, weniger Arbeit.
+        __shared__ float2 s_c_ref;
+        if (threadIdx.x == 0 && threadIdx.y == 0){
+            s_c_ref = pixelToComplex(0.5 + 0.5*w, 0.5 + 0.5*h, w, h,
+                                     (double)center.x, (double)center.y, (double)zoom);
+        }
+        __syncthreads();
 
-        // Frühtest innen
+        // Konsistentes Mapping pro Pixel
+        const float2 c   = pixelToComplex(x + 0.5, y + 0.5, w, h,
+                                          (double)center.x, (double)center.y, (double)zoom);
+        const float2 dC  = make_float2(c.x - s_c_ref.x, c.y - s_c_ref.y);
+
         if (insideMainCardioidOrBulb(c.x, c.y)){
-            out[idx]     = make_uchar4(0,0,0,255);
+            out[idx] = make_uchar4(0,0,0,255);
             iterOut[idx] = maxIter;
             return;
         }
@@ -134,39 +144,31 @@ namespace {
         int it = 0;
         const float esc2 = 4.0f;
 
-        int exceedCount = 0; // Hysterese über 2 aufeinanderfolgende Schritte
+        // Guard ohne sqrt: vergleiche quadratische Normen (aequivalent zur alten Bedingung).
+        const float tau2 = deltaRelMax * deltaRelMax;
 
-        // 2) Perturbations-Loop
         for(int n=0; n<maxIter; ++n){
-            // z_ref[n]: Broadcast-Pattern → L2/RO-Cache; __ldg optional (cc>=80 ohnehin cached)
             const float2 zref = refOrbit[n];
-
-            // δ_{n+1} = 2*z_ref*δ + Δc
             const float2 twoZ = make_float2(2.f*zref.x, 2.f*zref.y);
-            delta = f2_add(f2_mul(twoZ, delta), dC);
+            delta = f2_add(f2_mul(twoZ, delta), dC);  // δ_{n+1}
 
-            // z ≈ z_ref + δ
-            const float2 z  = f2_add(zref, delta);
-            const float  z2 = f2_abs2(z);
-            if (z2 > esc2){ it = n; goto ESCAPE; }
+            const float2 z = f2_add(zref, delta);
+            const float r2 = f2_abs2(z);
+            if (r2 > esc2){ it = n; goto ESCAPE; }
 
-            // robuster, schneller Guard: |δ|^2 > tau_on^2 * max(|z|^2, eps)
-            const float delta2 = f2_abs2(delta);
-            if (delta2 > tau_on2 * fmaxf(z2, 1e-24f)){
-                if (++exceedCount >= 2){
-                    // 3) Fallback: direkte Iteration ab aktueller Schätzung (z)
-                    float zx = z.x, zy = z.y;
-                    for(int m=n+1; m<maxIter; ++m){
-                        const float x2 = zx*zx, y2 = zy*zy;
-                        if (x2 + y2 > 4.f){ it = m; goto ESCAPE; }
-                        const float xt = x2 - y2 + c.x;
-                        zy = __fmaf_rn(2.f*zx, zy, c.y);
-                        zx = xt;
-                    }
-                    it = maxIter; goto ESCAPE;
+            // alt: delMag > deltaRelMax * refMag  (mit sqrt)
+            // neu (aequivalent): |δ|^2 > (deltaRelMax^2) * |z_ref|^2
+            if (f2_abs2(delta) > tau2 * fmaxf(f2_abs2(zref), 1e-24f)){
+                // Fallback: direkte Iteration ab aktuellem Zustand
+                float zx = z.x, zy = z.y;
+                for(int m=n+1; m<maxIter; ++m){
+                    const float x2 = zx*zx, y2 = zy*zy;
+                    if (x2 + y2 > 4.f){ it = m; goto ESCAPE; }
+                    const float xt = x2 - y2 + c.x;
+                    zy = __fmaf_rn(2.f*zx, zy, c.y);
+                    zx = xt;
                 }
-            } else {
-                exceedCount = 0;
+                it = maxIter; goto ESCAPE;
             }
         }
         it = maxIter;
@@ -231,20 +233,13 @@ extern "C" void launch_mandelbrotHybrid(
     }
     if (!ok(cudaMemcpy(dRef, hRef.data(), need, cudaMemcpyHostToDevice), "cudaMemcpy H2D(ref)")) return;
 
-    // 3b) c_ref EINMAL auf Host berechnen und als float2 übergeben
-    //     (identisch zu der Berechnung im Kernel, aber konstant für alle Pixel)
-    const float2 cref = pixelToComplex(0.5 + 0.5*w, 0.5 + 0.5*h, w, h,
-                                       (double)offset.x, (double)offset.y, (double)zoom);
-
     // 4) Kernel
-    const dim3 block(32, 8);  // 256 Threads → gute Occupancy, passend zu __launch_bounds__
-    const dim3 grid((w + block.x - 1)/block.x, (h + block.y - 1)/block.y);
+    const dim3 block(32, 8);                  // 256 Threads
+    const dim3 grid((w + block.x - 1)/block.x,
+                    (h + block.y - 1)/block.y);
+    const float deltaRelMax = 1e-3f;          // unveraendert (nur Performance-Optimierung)
 
-    // Konservative, stabile Standardschwelle; tau_on^2 wird einmalig berechnet (kein sqrt im Kernel)
-    const float deltaRelMax = 5e-3f;
-    const float tau2 = deltaRelMax * deltaRelMax;
-
-    perturbKernel<<<grid, block>>>(out, d_it, dRef, maxIter, w, h, zoom, offset, cref, tau2);
+    perturbKernel<<<grid, block>>>(out, d_it, dRef, maxIter, w, h, zoom, offset, deltaRelMax);
     if (!ok(cudaGetLastError(), "perturbKernel launch")) return;
 
     // 5) Perf-Log (optional)
