@@ -12,7 +12,6 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
 endif()
 
 # ---------------------- vcpkg Triplet ----------------------
-# Windows: dynamischer Triplet (für dynamisches GLEW), Linux: x64-linux
 if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   if(WIN32)
     set(VCPKG_TARGET_TRIPLET "x64-windows")
@@ -41,23 +40,30 @@ endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
-# GLEW dynamisch (Dokumentation der Absicht; kein GLEW_STATIC)
+# GLEW dynamisch (nur Intent dokumentieren)
 set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
 
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
 find_package(OpenGL REQUIRED)                 # OpenGL::GL
 
-# WICHTIG: GLEW im offiziellen CMake-Modus
-find_package(GLEW REQUIRED)
+# WICHTIG: Unter Linux den CMake-MODULE-Mode erzwingen (um vcpkg-Wrapper-Bug zu umgehen).
+# Unter Windows bleibt CONFIG (vcpkg exportiert dort sauber GLEW::GLEW).
+if(WIN32)
+  find_package(GLEW CONFIG REQUIRED)
+else()
+  find_package(GLEW MODULE REQUIRED)
+endif()
 
 # Robust gegen Namensvarianten der importierten Targets
 if(TARGET GLEW::GLEW)
   set(GLEW_TARGET GLEW::GLEW)
+elseif(TARGET GLEW::glew)
+  set(GLEW_TARGET GLEW::glew)
 elseif(TARGET glew::glew)
   set(GLEW_TARGET glew::glew)
 else()
-  message(FATAL_ERROR "Kein GLEW-CMake-Ziel gefunden (weder GLEW::GLEW noch glew::glew).")
+  message(FATAL_ERROR "Kein GLEW-CMake-Ziel gefunden (GESUCHT: GLEW::GLEW / GLEW::glew / glew::glew).")
 endif()
 
 find_package(glfw3 CONFIG REQUIRED)           # 'glfw'
