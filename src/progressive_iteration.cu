@@ -1,6 +1,6 @@
 ///// Otter: Progressive Iteration & Resume (impl) + optional local Nacktmull-Settings (default off)
 ///// Schneefuchs: Messbare Pfade; ASCII-Logs; kein versteckter Funktionswechsel.
-///// Maus: Coalesced SoA, fixed block, chunked inner loop.
+///// Maus: Coalesced SoA, fixed block, chunked inner loop.  (CUDA 13: FMA, warp-aggregated atomics, __launch_bounds__)
 ///// Datei: src/progressive_iteration.cu
 
 #include "progressive_iteration.cuh"
@@ -12,12 +12,10 @@
 #include <vector_types.h>
 #include <cmath>
 #include <algorithm>
-#include <stdexcept>
 #include <cstdint>
 
 // -----------------------------------------------------------------------------
 // Local, headerless Nacktmull settings (functional, but default OFF)
-// This replaces the removed settings_nacktmull.hpp for this TU only.
 // -----------------------------------------------------------------------------
 namespace NacktmullSettings {
 struct ProgressivePolicy {
@@ -39,7 +37,6 @@ inline constexpr ProgressivePolicy Progressive_Default{
 namespace prog {
 
 // -------------------------- Device-side tiny formatter ------------------------
-// ASCII-only helpers for device logs (no snprintf in device code).
 static __device__ __forceinline__ int dev_append_lit(char* dst, int pos, int cap, const char* lit) {
     while (*lit && pos < cap - 1) dst[pos++] = *lit++;
     return pos;
@@ -55,27 +52,28 @@ static __device__ __forceinline__ int dev_append_int(char* dst, int pos, int cap
     return dev_append_uint(dst, pos, cap, (unsigned int)v);
 }
 
-// ------------------------------- Device kernels -------------------------------
+// --------------------------------- Kernels ------------------------------------
 
-__global__ __launch_bounds__(256)
+__global__ __launch_bounds__(256,2)
 void k_reset_state(float2* __restrict__ z,
                    uint32_t* __restrict__ it,
-                   uint8_t* __restrict__ flags,
+                   uint8_t*  __restrict__ flags,
                    uint32_t* __restrict__ esc,
                    int n)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
-    z[i] = make_float2(0.f, 0.f);
-    it[i] = 0u;
-    flags[i] = 0u;
-    esc[i] = 0u;
+    // Grid-stride für volle Auslastung bei jeder n-Größe
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
+        z[i]     = make_float2(0.f, 0.f);
+        it[i]    = 0u;
+        flags[i] = 0u;
+        esc[i]   = 0u;
+    }
 }
 
-__global__ __launch_bounds__(256)
+__global__ __launch_bounds__(256,2)
 void k_progressive_step(float2* __restrict__ z,
                         uint32_t* __restrict__ it,
-                        uint8_t* __restrict__ flags,
+                        uint8_t*  __restrict__ flags,
                         uint32_t* __restrict__ esc,
                         uint32_t* __restrict__ activeCount,
                         int width, int height,
@@ -83,54 +81,64 @@ void k_progressive_step(float2* __restrict__ z,
                         uint32_t addIter, uint32_t maxIterCap, float bailout2,
                         int debugDevice)
 {
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int lx = threadIdx.x;
+    const int ly = threadIdx.y;
+    const int ltid = ly * blockDim.x + lx;         // linear lane id im Block
+    const int x = blockIdx.x * blockDim.x + lx;
+    const int y = blockIdx.y * blockDim.y + ly;
+
+    // Out-of-bounds Threads verlassen den Kernel FRÜH → sie sind nicht in __activemask()
     if (x >= width || y >= height) return;
+
     const int i = y * width + x;
 
-    float2 zi = z[i];
+    // Register-Loads
+    float2   zi    = z[i];
     uint32_t iters = it[i];
-    uint8_t  fl = flags[i];
+    uint8_t  fl    = flags[i];
 
-    // finished (escaped or capped)
-    if (fl & 0x03u) return;
+    // Bereits beendet? (escaped oder cap erreicht)
+    if ((fl & 0x03u) == 0x01u || (fl & 0x03u) == 0x02u) {
+        // trotzdem am Ende in die Warp-Zählung einfließen (als "nicht-survivor")
+        // → hier einfach durchfallen ohne Arbeit
+    } else {
+        // Komplexe Konstante pro Thread (FMA spart Instruktion/Rundungsfehler)
+        const float cr = __fmaf_rn(dx, (float)x, x0);
+        const float ci = __fmaf_rn(dy, (float)y, y0);
 
-    const float cr = x0 + dx * (float)x;
-    const float ci = y0 + dy * (float)y;
+        // Chunked Inner Loop
+        uint32_t local = 0u;
+        while (local < addIter && iters < maxIterCap) {
+            // z = z^2 + c
+            const float x2 = zi.x * zi.x;
+            const float y2 = zi.y * zi.y;
+            const float xy = zi.x * zi.y;
+            zi.x = __fmaf_rn(-y2, 1.f, x2) + cr;       // (x2 - y2) + cr
+            zi.y = __fmaf_rn(2.f * xy, 1.f, ci);       // 2*xy + ci
 
-    // chunked inner loop
-    uint32_t local = 0u;
-    while (local < addIter && iters < maxIterCap) {
-        // z = z^2 + c (use 1 FMA for 2xy)
-        const float x2 = zi.x * zi.x;
-        const float y2 = zi.y * zi.y;
-        const float xy = zi.x * zi.y;
-        zi = make_float2((x2 - y2) + cr, fmaf(2.f, xy, ci));
+            ++iters;
+            ++local;
 
-        ++iters;
-        ++local;
-
-        // escape?
-        const float r2 = zi.x * zi.x + zi.y * zi.y;
-        if (r2 > bailout2) {
-            fl |= 0x01u;          // escaped
-            esc[i] = iters;
-            break;
+            // Escape?  r2 = x^2 + y^2
+            const float r2 = __fmaf_rn(zi.x, zi.x, zi.y * zi.y);
+            if (r2 > bailout2) {
+                fl |= 0x01u;          // escaped
+                esc[i] = iters;
+                break;
+            }
         }
-    }
 
-    if (iters >= maxIterCap) {
-        fl |= 0x02u;              // reached cap
-    }
+        if (iters >= maxIterCap) {
+            fl |= 0x02u;              // reached cap
+        }
 
-    z[i] = zi;
-    it[i] = iters;
-    flags[i] = fl;
+        // Stores (koalesziert, SoA)
+        z[i]     = zi;
+        it[i]    = iters;
+        flags[i] = fl;
 
-    // survivor counting + optional tiny device log
-    if ((fl & 0x03u) == 0u) {
-        atomicAdd(activeCount, 1u);
-        if (debugDevice) {
+        // Optionales Device-Logging pro Survivor
+        if (debugDevice && ((fl & 0x03u) == 0u)) {
             char msg[128];
             int p = 0;
             p = dev_append_lit (msg, p, (int)sizeof(msg), "[DEV] survivor x=");
@@ -145,18 +153,33 @@ void k_progressive_step(float2* __restrict__ z,
             LUCHS_LOG_DEVICE(msg);
         }
     }
+
+    // -------- Warp-aggregated atomics: 1 atomicAdd je Warp statt je Survivor --------
+    // Prädikat: 1 = noch aktiv (weder escaped noch capped), 0 sonst
+    const unsigned int isSurvivor = ((flags[i] & 0x03u) == 0u) ? 1u : 0u;
+
+    const unsigned int amask  = __activemask();               // aktive Lanes in diesem Warp
+    const unsigned int votes  = __ballot_sync(amask, isSurvivor);
+    const int          leader = __ffs((int)amask) - 1;        // erste aktive Lane in diesem Warp
+    const int          lane   = (ltid & 31);
+
+    if (lane == leader) {
+        atomicAdd(activeCount, (uint32_t)__popc(votes));
+    }
 }
 
-// ------------------------------- Host helpers --------------------------------
+// -------------------------------- Host-Utilities ------------------------------
 
-static inline dim3 chooseBlock() { return dim3(32, 8, 1); }
+static inline dim3 chooseBlock() { return dim3(32, 8, 1); }   // 256 Threads
 static inline dim3 chooseGrid(int w, int h, dim3 b) {
-    return dim3((w + (int)b.x - 1) / (int)b.x, (h + (int)b.y - 1) / (int)b.y, 1);
+    return dim3((w + (int)b.x - 1) / (int)b.x,
+                (h + (int)b.y - 1) / (int)b.y, 1);
 }
 
 struct PixelMap { float x0, y0, dx, dy; };
 static inline PixelMap makePixelMap(const ViewportParams& vp)
 {
+    // dy = scale / height; dx = dy (quadratische Pixel im Komplexraum)
     const double dy = vp.scale / (double)vp.height;
     const double dx = dy;
     const double x0 = vp.centerX - dx * (double)vp.width  * 0.5;
@@ -164,7 +187,7 @@ static inline PixelMap makePixelMap(const ViewportParams& vp)
     return PixelMap{ (float)x0, (float)y0, (float)dx, (float)dy };
 }
 
-// ------------------------------ RAII methods ---------------------------------
+// --------------------------------- RAII-Teil ---------------------------------
 
 CudaProgressiveState::~CudaProgressiveState()
 {
@@ -206,12 +229,16 @@ void CudaProgressiveState::reset(cudaStream_t stream)
 {
     const int n = width_ * height_;
     if (n <= 0) return;
+
+    // Zero init via Kernel (grid-stride) + Counter klarsetzen
     dim3 block(256);
     dim3 grid((n + (int)block.x - 1) / (int)block.x);
     k_reset_state<<<grid, block, 0, stream>>>(d_z_, d_it_, d_flags_, d_escapeIter_, n);
     CUDA_CHECK(cudaGetLastError());
+
     const uint32_t zero = 0u;
-    CUDA_CHECK(cudaMemcpyAsync(d_activeCount_, &zero, sizeof(uint32_t), cudaMemcpyHostToDevice, stream));
+    CUDA_CHECK(cudaMemcpyAsync(d_activeCount_, &zero, sizeof(uint32_t),
+                               cudaMemcpyHostToDevice, stream));
 }
 
 void CudaProgressiveState::maybeResetOnChange(const ViewportParams& vp, bool enableReset, cudaStream_t stream)
@@ -233,9 +260,10 @@ ProgressiveMetrics CudaProgressiveState::step(const ViewportParams& vp, const Pr
     maybeResetOnChange(vp, cfg.resetOnChange, stream);
 
     const uint32_t zero = 0u;
-    CUDA_CHECK(cudaMemcpyAsync(d_activeCount_, &zero, sizeof(uint32_t), cudaMemcpyHostToDevice, stream));
+    CUDA_CHECK(cudaMemcpyAsync(d_activeCount_, &zero, sizeof(uint32_t),
+                               cudaMemcpyHostToDevice, stream));
 
-    const auto map = makePixelMap(vp);
+    const auto map   = makePixelMap(vp);
     const dim3 block = chooseBlock();
     const dim3 grid  = chooseGrid(width_, height_, block);
 
@@ -285,8 +313,8 @@ ProgressiveMetrics CudaProgressiveState::step(const ViewportParams& vp, const Pr
     CUDA_CHECK(cudaMemcpy(&still, d_activeCount_, sizeof(uint32_t), cudaMemcpyDeviceToHost));
 
     ProgressiveMetrics m;
-    m.kernel_ms = ms;
-    m.stillActive = still;
+    m.kernel_ms      = ms;
+    m.stillActive    = still;
     m.addIterApplied = effAddIter;
 
     const double totalPx = (double)width_ * (double)height_;
@@ -299,7 +327,6 @@ ProgressiveMetrics CudaProgressiveState::step(const ViewportParams& vp, const Pr
         }
     }
 
-    // Optional: Schwellenhinweis (kein API-Wechsel, nur Log-Hinweis)
     if (P.enabled && survivorsPct < P.stopThresholdSurvivorsPct) {
         LUCHS_LOG_HOST("[PROG] HALT-SUGGEST thresh=%.3f%% survivors=%.3f%% w=%d h=%d",
                        (float)P.stopThresholdSurvivorsPct, (float)survivorsPct, width_, height_);
