@@ -1,4 +1,4 @@
-##### Otter: CUDA 13 guard; use CUDAToolkit include dirs (CCCL/CUB/Thrust); drop custom cuda_gl_interop.h PATH scan; keep dynamic GLEW, kill D9025 by purging GLEW_STATIC.
+##### Otter: CUDA 13 guard; use CUDAToolkit include dirs (CCCL/CUB/Thrust); drop custom cuda_gl_interop.h PATH scan; keep dynamic GLEW, kill D9025 by purging GLEW_STATIC. Use MODULE finder for GLEW to bypass vcpkg GLEW::glew wrapper.
 ##### Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; explicit OpenGL::GLU + Boost; deterministic, duplicate-free defines.
 ##### Maus: Arch 80/86/89/90; CUDA C++20; zero GLEW policy warnings; no late vcpkg hacks; fail early if CUDA < 13.0.
 ##### Datei: CMakeLists.txt
@@ -35,12 +35,13 @@ set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
-# Prefer dynamic GLEW explicitly (harmless with CONFIG packages; documents intent)
+# Prefer dynamic GLEW explicitly (harmless with CONFIG/MODULE; documents intent)
 set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
 
 # Packages
 find_package(OpenGL REQUIRED)
-find_package(glew CONFIG REQUIRED)           # vcpkg CONFIG package → GLEW::GLEW (dynamic with x64-windows triplet)
+# IMPORTANT: Use MODULE finder to avoid vcpkg wrapper expecting GLEW::glew target
+find_package(GLEW MODULE REQUIRED)            # provides GLEW::GLEW
 find_package(glfw3 CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
@@ -153,7 +154,7 @@ target_compile_options(mandelbrot_otterdream PRIVATE
 
 # GLEW: lean build flags (do NOT define GLEW_STATIC)
 target_compile_definitions(mandelbrot_otterdream PRIVATE
-  GLEW_NO _IMAGING
+  GLEW_NO_IMAGING
   GLEW_NO_GLU
 )
 
