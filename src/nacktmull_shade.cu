@@ -13,16 +13,20 @@ static __device__ __forceinline__ float saturatef(float x) {
     // CUDA-Intrinsic: meist 1 Instruktion, clamp auf [0,1]
     return __saturatef(x);
 }
+static __device__ __forceinline__ unsigned char u8_from01(float v) {
+    // Schneller 0..1 Clamp + rundungsfeste Umwandlung → 0..255
+    return (unsigned char)(255.0f * saturatef(v) + 0.5f);
+}
 static __device__ __forceinline__ uchar4 pack_rgba(unsigned char r, unsigned char g, unsigned char b, unsigned char a = 255u) {
     uchar4 c; c.x = r; c.y = g; c.z = b; c.w = a; return c;
 }
 
 // ----------------------------------------------------------------------------
 // Mandelbrot-Färbung aus Iterationsbild
-// Signatur muss exakt der Deklaration in nacktmull_shade.cuh entsprechen.
+// Signatur MUSS exakt der Deklaration in nacktmull_shade.cuh entsprechen.
 // ----------------------------------------------------------------------------
 extern "C" __global__ __launch_bounds__(256,2)
-void shade_from_iterations(uchar4* __restrict__ surface,
+void shade_from_iterations(uchar4* surface,
                            const int* __restrict__ iters,
                            int width, int height,
                            int maxIterations)
@@ -51,18 +55,19 @@ void shade_from_iterations(uchar4* __restrict__ surface,
     const float t = (float)it * s_invMax;
 
     // Kanäle (linear gemischt, leicht austauschbar) — rundungsfest via +0.5f
-    const unsigned char R = (unsigned char)(255.0f * saturatef(t)        + 0.5f);
-    const unsigned char G = (unsigned char)(255.0f * saturatef(1.0f - t) + 0.5f);
-    const unsigned char B = (unsigned char)(255.0f * saturatef(0.5f * t) + 0.5f);
-
-    surface[idx] = pack_rgba(R, G, B, 255u);
+    surface[idx] = pack_rgba(
+        u8_from01(t),
+        u8_from01(1.0f - t),
+        u8_from01(0.5f * t),
+        255u
+    );
 }
 
 // ----------------------------------------------------------------------------
 // Debug/Diagnose: weicher Farbverlauf + Checker-Overlay
 // ----------------------------------------------------------------------------
 extern "C" __global__ __launch_bounds__(256,2)
-void shade_test_pattern(uchar4* __restrict__ surface,
+void shade_test_pattern(uchar4* surface,
                         int width, int height,
                         int checkSize)
 {
@@ -82,13 +87,13 @@ void shade_test_pattern(uchar4* __restrict__ surface,
 
     const int idx = y * width + x;
 
-    // Normalisierte Koordinaten ohne weitere Includes
+    // Normalisierte Koordinaten
     const float u = (float)x * s_invW;
     const float v = (float)y * s_invH;
 
-    // Basisverlauf
+    // Basisverlauf (eine FMA spart Instruktionen in G)
     float r = u;
-    float g = 1.0f - 0.5f * u + 0.5f * v;
+    float g = fmaf(0.5f, (v - u), 1.0f); // 1.0 - 0.5*u + 0.5*v
     float b = v;
 
     // Checker-Overlay
@@ -99,9 +104,5 @@ void shade_test_pattern(uchar4* __restrict__ surface,
     r *= m; g *= m; b *= m;
 
     // clamp & pack (rundungsfest)
-    const unsigned char R = (unsigned char)(255.0f * saturatef(r) + 0.5f);
-    const unsigned char G = (unsigned char)(255.0f * saturatef(g) + 0.5f);
-    const unsigned char B = (unsigned char)(255.0f * saturatef(b) + 0.5f);
-
-    surface[idx] = pack_rgba(R, G, B, 255u);
+    surface[idx] = pack_rgba(u8_from01(r), u8_from01(g), u8_from01(b), 255u);
 }
