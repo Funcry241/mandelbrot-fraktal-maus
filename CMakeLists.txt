@@ -58,6 +58,7 @@ endif()
 # ---------------------- GLEW (dynamisch) -------------------
 # INTENT: dynamisch linken (kein GLEW_STATIC)
 set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
+
 # Alte Leaks säubern
 remove_definitions(-DGLEW_STATIC)
 foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
@@ -70,7 +71,7 @@ foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
   endif()
 endforeach()
 
-# Windows: regulär via CONFIG (vcpkg liefert GLEW::GLEW)
+# Windows: regulär via CONFIG (vcpkg liefert GLEW::GLEW / GLEW::glew)
 # Linux: Wrapper ist buggy -> manuell aus vcpkg_installed importieren (kein find_package für GLEW!)
 if(WIN32)
   find_package(GLEW CONFIG REQUIRED)
@@ -79,7 +80,7 @@ if(WIN32)
   elseif(TARGET GLEW::glew)
     set(GLEW_TARGET GLEW::glew)
   else()
-    message(FATAL_ERROR "GLEW CMake-Target nicht gefunden (erwartet GLEW::GLEW).")
+    message(FATAL_ERROR "GLEW CMake-Target nicht gefunden (erwartet GLEW::GLEW oder GLEW::glew).")
   endif()
 else()
   # vcpkg Installationswurzel im Buildbaum
@@ -149,18 +150,26 @@ if(MSVC)
   # Einheitliche /MT (und /MTd) – Host & NVCC-Host-Compiler
   set_property(TARGET mandelbrot_otterdream PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+  # Host (C++) streng, CUDA-Host nur /MT via -Xcompiler
   target_compile_options(mandelbrot_otterdream PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/MT$<$<CONFIG:Debug>:d>>
     $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /permissive- /Zc:__cplusplus>
+    $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/MT$<$<CONFIG:Debug>:d>>
   )
 else()
-  # *** Host-Warnflags NUR für C++ (nicht für CUDA!) ***
+  # Host-Warnflags NUR für C++ (nicht für NVCC!)
   target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic -Werror>
   )
+  # GCC/Clang: MSVC-Pragmas (#pragma warning ...) ignorieren, sonst mit -Werror fatal
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(mandelbrot_otterdream PRIVATE
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-unknown-pragmas>
+    )
+  endif()
 endif()
 
-# CUDA-spezifisch
+# CUDA-spezifisch (reine Device-Flags)
 target_compile_options(mandelbrot_otterdream PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:--std=c++20 --expt-relaxed-constexpr>
 )
