@@ -91,11 +91,31 @@ namespace {
     __device__ __forceinline__ float2 f2_mul(float2 a, float2 b){ return make_float2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }
     __device__ __forceinline__ float  f2_abs2(float2 a){ return a.x*a.x + a.y*a.y; }
 
-    __device__ inline float3 shade_from_iter(int it, int maxIter){
+    // --- Ordered 4x4 dither to reduce visible banding/rings (deterministic, tiny amplitude)
+    __device__ __forceinline__ float ordered_dither_4x4(int x, int y){
+        // Bayer 4x4 matrix (0..15)
+        const unsigned char M[16] = {
+            0,  8,  2, 10,
+           12,  4, 14,  6,
+            3, 11,  1,  9,
+           15,  7, 13,  5
+        };
+        int idx = (x & 3) | ((y & 3) << 2);
+        // Map to [-0.5, +0.5) and scale very small (~1/256)
+        float u = (float)M[idx] * (1.0f/16.0f);   // 0..0.9375
+        return (u - 0.5f) * (1.0f/256.0f);        // ~±0.002
+    }
+
+    __device__ inline float3 shade_from_iter(int it, int maxIter, float dither){
+        // Normalize iterations and apply a tiny ordered dither to break quantization bands.
         float t = fminf(1.0f, (float)it / (float)maxIter);
+        t = fminf(1.0f, fmaxf(0.0f, t + dither));
+
+        // Monotone tone-map (unchanged), now fed with slightly jittered t
         float v = 1.f - __expf(-1.75f * t);
         v = powf(fmaxf(0.f, v), 0.80f);
         v = v + 0.08f * (1.0f - v);
+
         float r = fminf(1.f, 1.15f*powf(v, 0.42f));
         float g = fminf(1.f, 0.95f*powf(v, 0.56f));
         float b = fminf(1.f, 0.70f*powf(v, 0.88f));
@@ -154,7 +174,10 @@ namespace {
         it = maxIter;
     ESCAPE:
         {
-            const float3 col = shade_from_iter(it, maxIter);
+            // Tiny ordered dither breaks banding/rings while staying deterministic
+            const float dither = ordered_dither_4x4(x, y);
+            const float3 col = shade_from_iter(it, maxIter, dither);
+
             out[idx] = make_uchar4((unsigned char)(255.f*col.x),
                                    (unsigned char)(255.f*col.y),
                                    (unsigned char)(255.f*col.z), 255);
