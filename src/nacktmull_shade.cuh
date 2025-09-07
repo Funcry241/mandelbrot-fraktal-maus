@@ -1,8 +1,3 @@
-///// Otter: Nacktmull-Shade (Header) - inline Device-Helfer + Kernel-Prototypen, keine Implementierungen.
-///// Schneefuchs: Deterministisch, ASCII-only; nur CUDA-Basics; Header/Source strikt getrennt.
-///// Maus: Keine eigenen Typ-Redefs (NV-Types verwenden); API stabil; mikro-optimierte Inlines.
-///// Datei: src/nacktmull_shade.cuh
-
 #pragma once
 
 // CUDA / Vektor-Typen
@@ -10,18 +5,18 @@
 #include <vector_types.h>
 #include <vector_functions.h> // make_float3, make_uchar4
 
-// Standard-Math (statt internal math_functions.h)
+// Standard-Math
 #include <cmath>
 
-// ------------------------ kleine Device-Helfer ---------------------------------
+// ------------------------ kleine Device-Helfer (CUDA 13, mikro-optimiert) ----
 #if defined(__CUDACC__)
 static __device__ __forceinline__ float clamp01(float x) {
-    // Bewusst simpel & stabil:
-    return x < 0.f ? 0.f : (x > 1.f ? 1.f : x);
+    // CUDA-Intrinsic: eine Instruktion, exakt [0,1] clamp
+    return __saturatef(x);
 }
 
 static __device__ __forceinline__ uchar4 make_rgba_01(float r, float g, float b, float a = 1.f) {
-    r = clamp01(r); g = clamp01(g); b = clamp01(b); a = clamp01(a);
+    r = __saturatef(r); g = __saturatef(g); b = __saturatef(b); a = __saturatef(a);
     return make_uchar4(
         (unsigned char)(r * 255.f + 0.5f),
         (unsigned char)(g * 255.f + 0.5f),
@@ -30,16 +25,21 @@ static __device__ __forceinline__ uchar4 make_rgba_01(float r, float g, float b,
     );
 }
 
+// HSV→RGB: h∈[0,1), s,v∈[0,1]; mit FMA-Formulierung für p/q/t
 static __device__ __forceinline__ float3 hsv2rgb(float h, float s, float v) {
-    // h in [0,1), s,v in [0,1]
     float r = v, g = v, b = v;
     if (s > 0.f) {
-        h = (h - ::floorf(h)) * 6.f; // [0,6)
-        const int   i = (int)h;
-        const float f = h - (float)i;
-        const float p = v * (1.f - s);
-        const float q = v * (1.f - s * f);
-        const float t = v * (1.f - s * (1.f - f));
+        // h6 in [0,6)
+        const float hf = h - floorf(h);     // sauberer Wrap ohne benötigte intrinsics
+        const float h6 = hf * 6.f;
+        const int   i  = (int)h6;           // 0..5
+        const float f  = h6 - (float)i;
+
+        const float vs = v * s;
+        const float p  = v - vs;
+        const float q  = __fmaf_rn(-vs, f, v);       // v - vs*f
+        const float t  = __fmaf_rn(vs, f, p);        // p + vs*f
+
         switch (i) {
             case 0: r = v; g = t; b = p; break;
             case 1: r = q; g = v; b = p; break;
@@ -53,16 +53,16 @@ static __device__ __forceinline__ float3 hsv2rgb(float h, float s, float v) {
 }
 #endif // __CUDACC__
 
-// ------------------------ Kernel-Prototypen ------------------------------------
+// ------------------------ Kernel-Prototypen (Signaturen stabil) --------------
 #if defined(__CUDACC__)
-extern "C" __global__
-void shade_from_iterations(uchar4* surface,
+extern "C" __global__ __launch_bounds__(256,2)
+void shade_from_iterations(uchar4* __restrict__ surface,
                            const int* __restrict__ iters,
                            int width, int height,
                            int maxIterations);
 
-extern "C" __global__
-void shade_test_pattern(uchar4* surface,
+extern "C" __global__ __launch_bounds__(256,2)
+void shade_test_pattern(uchar4* __restrict__ surface,
                         int width, int height,
                         int checkSize);
 #endif // __CUDACC__
