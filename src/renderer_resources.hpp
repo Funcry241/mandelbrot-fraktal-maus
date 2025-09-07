@@ -4,6 +4,9 @@
 ///// Datei: src/renderer_resources.hpp
 
 #pragma once
+#ifndef RENDERER_RESOURCES_HPP
+#define RENDERER_RESOURCES_HPP
+
 #include <GL/glew.h> // GLuint, GLsizei
 
 namespace OpenGLUtils {
@@ -29,3 +32,5 @@ void setGLResourceContext(GLuint textureId, GLuint pboId) noexcept;     // bind 
 
 void updateTextureFromPBO(GLuint textureId, GLsizei width, GLsizei height) noexcept;  // nutzt aktuell gebundenen PBO
 void updateTextureFromPBO(GLuint textureId, GLuint pboId, int width, int height) noexcept; // explizit (tex, pbo, w, h)
+
+#endif // RENDERER_RESOURCES_HPP
