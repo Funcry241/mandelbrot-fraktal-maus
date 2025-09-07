@@ -2,9 +2,9 @@
 ///// Schneefuchs: Predictable occupancy (__launch_bounds__), warp-private histograms, ASCII logs, bounds-checked sizes; /WX-safe.
 ///// Maus: Rendering/shading removed; clear host wrapper API computeCudaEntropyContrast.
 //  CUDA 13 Tweaks:
-//   - __launch_bounds__ kept in sync with host config.
+//   - __launch_bounds__(256,2) kept in sync with host config.
 //   - __ldg() read-only fetches for iteration buffer.
-//   - FMA/__log2f fast-math intrinsics in hot path.
+//   - __log2f fast-math intrinsic in hot path.
 //   - Warp-private shared histograms to minimize contention.
 //   - Events allocated only when logging is enabled.
 
@@ -27,7 +27,7 @@ static __device__ __forceinline__ int clamp_int_0_255(int v) {
 
 namespace {
     // Keep block size in one place so __launch_bounds__ and host launch stay in sync.
-    constexpr int EN_BLOCK_THREADS = 128;
+    constexpr int EN_BLOCK_THREADS = 256;   // 256 == EN_BINS → einfache, volle Parallelität
     constexpr int EN_BINS          = 256;
     constexpr int WARP_SIZE        = 32;
     constexpr int EN_WARPS         = EN_BLOCK_THREADS / WARP_SIZE;
@@ -36,7 +36,7 @@ namespace {
 
 // ------------------------------- entropy kernel ------------------------------
 // Warp-private histograms to reduce atomic contention (EN_WARPS × 256 bins in shared mem).
-__global__ __launch_bounds__(EN_BLOCK_THREADS)
+__global__ __launch_bounds__(EN_BLOCK_THREADS, 2)
 void entropyKernel(
     const int* __restrict__ it,
     float* __restrict__ eOut,
@@ -84,12 +84,12 @@ void entropyKernel(
     }
     __syncthreads();
 
-    // Reduce warp-local histograms into histo[0][*]
-    if (threadIdx.x < EN_BINS) {
+    // Reduce warp-local histograms into histo[0][*]  (STRIDED → deckt alle 256 Bins ab)
+    for (int b = threadIdx.x; b < EN_BINS; b += blockDim.x) {
         int sum = 0;
         #pragma unroll
-        for (int widx = 0; widx < EN_WARPS; ++widx) sum += histo[widx][threadIdx.x];
-        histo[0][threadIdx.x] = sum;
+        for (int widx = 0; widx < EN_WARPS; ++widx) sum += histo[widx][b];
+        histo[0][b] = sum;
     }
     __syncthreads();
 
@@ -114,7 +114,7 @@ void entropyKernel(
 
 // ------------------------------- contrast kernel -----------------------------
 // Launch with 16x16 (256 thr) blocks; predictable occupancy.
-__global__ __launch_bounds__(256)
+__global__ __launch_bounds__(256, 2)
 void contrastKernel(
     const float* __restrict__ e,
     float* __restrict__ cOut,
