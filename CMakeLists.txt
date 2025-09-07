@@ -1,5 +1,5 @@
-##### Otter: CUDA 13 guard; use CUDAToolkit include dirs (CCCL/CUB/Thrust); drop custom cuda_gl_interop.h PATH scan; keep dynamic GLEW; purge GLEW_STATIC. On Linux bind GLEW via pkg-config and alias to GLEW::GLEW to bypass vcpkg wrapper.
-##### Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; explicit OpenGL::GLU + Boost; deterministic, duplicate-free defines.
+##### Otter: CUDA 13 guard; use CUDAToolkit include dirs (CCCL/CUB/Thrust); keep dynamic GLEW; purge GLEW_STATIC.
+##### Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; explicit OpenGL + Boost; deterministic, duplicate-free defines.
 ##### Maus: Arch 80/86/89/90; CUDA C++20; zero GLEW policy warnings; no late vcpkg hacks; fail early if CUDA < 13.0.
 ##### Datei: CMakeLists.txt
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
@@ -46,19 +46,10 @@ set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
 # Packages
 # ------------------------------------------------------------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
-find_package(OpenGL REQUIRED)                 # provides OpenGL::GL and (if present) OpenGL::GLU
+find_package(OpenGL REQUIRED)                 # provides OpenGL::GL
 
-# GLEW: robust binding
-if(UNIX AND NOT APPLE)
-  # Linux/CI: use pkg-config to avoid vcpkg's glew wrapper (which expects GLEW::glew)
-  find_package(PkgConfig REQUIRED)
-  pkg_check_modules(GLEW_PC REQUIRED IMPORTED_TARGET glew)
-  add_library(GLEW::GLEW INTERFACE IMPORTED)
-  target_link_libraries(GLEW::GLEW INTERFACE PkgConfig::GLEW_PC)
-else()
-  # Windows (and others if desired): vcpkg CONFIG is fine and exposes GLEW::GLEW
-  find_package(GLEW CONFIG REQUIRED)
-endif()
+# GLEW via vcpkg/CMake (no pkg-config on Linux, avoids opengl.pc/glu.pc issues)
+find_package(GLEW REQUIRED)                   # vcpkg advises this form → GLEW::GLEW
 
 find_package(glfw3 CONFIG REQUIRED)           # exposes target 'glfw'
 find_package(CUDAToolkit REQUIRED)
@@ -138,7 +129,6 @@ endif()
 # Link — prefer static cudart to match /MT (device runtime with separable compilation)
 target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
-  OpenGL::GLU
   GLEW::GLEW
   glfw
   CUDA::cudart_static
