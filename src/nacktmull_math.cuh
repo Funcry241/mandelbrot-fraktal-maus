@@ -13,7 +13,7 @@
 // ---------- kleines FMA-Wrapper (arbeitet in double, host+device identisch) ----------
 __host__ __device__ __forceinline__
 static double dmadd(double a, double b, double c) {
-    // nutzt std::fma auf Host und entsprechende Device-Intrinsics
+    // nutzt std::fma auf Host und entsprechende Device-Intrinsics (CUDA 13 ok)
     return ::fma(a, b, c);
 }
 
@@ -31,11 +31,11 @@ __host__ __device__ __forceinline__ float2 pixelToComplex(
         return make_float2((float)centerX, (float)centerY);
     }
 
-    const double invW = 1.0 / (double)w;
-    const double invH = 1.0 / (double)h;
+    const double invW    = 1.0 / (double)w;
+    const double invH    = 1.0 / (double)h;
     const double invZoom = (zoom != 0.0) ? (1.0 / zoom) : 1.0;
-    const double ar = (double)w * invH;                  // w/h
-    const double invZoomAr = invZoom * ar;               // precombine
+    const double ar      = (double)w * invH;           // w/h
+    const double invZoomAr = invZoom * ar;             // precombine
 
     // ndc = px*(2/w)-1, py*(2/h)-1  → via FMA
     const double sx = 2.0 * invW;
