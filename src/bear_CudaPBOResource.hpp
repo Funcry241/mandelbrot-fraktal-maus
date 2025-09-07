@@ -14,40 +14,36 @@
 
 namespace CudaInterop {
 
-// Baer: Verwaltet das Lifetime des CUDA-GL-Interop-Resource-Handles
+// Verwaltet Lifetime & Mapping eines CUDA-GL PBO-Interop-Handles
 class bear_CudaPBOResource {
 public:
-    // Baer: Konstruktor registriert den PBO als CUDA-Resource
     explicit bear_CudaPBOResource(GLuint pboId);
-    
-    // Baer: Destruktor deregistriert automatisch die CUDA-Resource
     ~bear_CudaPBOResource();
 
-    // Baer: Liefert das CUDA-Resource-Handle fuer Mapping/Unmapping
-    [[nodiscard]] cudaGraphicsResource_t get() const noexcept;
-
-    // Baer: mappt CUDA-Resource und liefert Dev-Pointer zurueck, loggt Zustand
-    [[nodiscard]] void*   mapAndLog(size_t& sizeOut);
-
-    // Baer: Bequemer Overload: typisierter Pixelpointer (uchar4), Groesse wird intern geloggt
-    [[nodiscard]] uchar4* mapAndLog();
-
-    // Baer: unmappt CUDA-Resource
-    void unmap();
-
-    // Baer: unmappt mit Zeitmessung (PI/Perf-Logs konsistent zur Pipeline)
-    void unmapAndLog();
-
-    // Baer: Nicht kopierbar, um doppelte Registrierung zu vermeiden
+    // Nicht kopierbar; beweglich
     bear_CudaPBOResource(const bear_CudaPBOResource&) = delete;
     bear_CudaPBOResource& operator=(const bear_CudaPBOResource&) = delete;
-    
-    // Baer: Bewegbar, uebertraegt Ownership des Handles
     bear_CudaPBOResource(bear_CudaPBOResource&& other) noexcept;
     bear_CudaPBOResource& operator=(bear_CudaPBOResource&& other) noexcept;
 
+    // Handle & Status
+    [[nodiscard]] cudaGraphicsResource_t get() const noexcept;
+    [[nodiscard]] bool   isMapped() const noexcept;
+    [[nodiscard]] size_t lastSize() const noexcept;
+
+    // Mapping-API (kompatibel) + Guard-Overload
+    [[nodiscard]] void*   mapAndLog(size_t& sizeOut);
+    [[nodiscard]] uchar4* mapAndLog();
+    [[nodiscard]] uchar4* mapAndLogExpect(size_t expectedBytes); // neu: Größe prüfen
+
+    // Unmapping
+    void unmap();
+    void unmapAndLog();
+
 private:
     cudaGraphicsResource_t resource_{nullptr};
+    bool   mapped_{false};
+    size_t lastSize_{0};
 };
 
 } // namespace CudaInterop
