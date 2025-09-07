@@ -3,6 +3,7 @@
 # Maus: Arch 80/86/89/90; CUDA C++20; zero GLEW policy warnings; no late vcpkg hacks; fail early if CUDA < 13.0.
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
+project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -20,13 +21,6 @@ if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   endif()
 endif()
 
-# ---------------------- Project ----------------------------
-project(mandelbrot_otterdream LANGUAGES CXX CUDA)
-
-# CUDA runtime policy: force STATIC everywhere
-set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON)
-set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
-
 # ---------------------- Language Std -----------------------
 if(NOT DEFINED CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 23)
@@ -40,38 +34,19 @@ endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
-# GLEW dynamisch (nur Intent dokumentieren)
-set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
+# ---------------------- CUDA Runtime -----------------------
+set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON)
+set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
 
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
 find_package(OpenGL REQUIRED)                 # OpenGL::GL
-
-# WICHTIG: Unter Linux den CMake-MODULE-Mode erzwingen (um vcpkg-Wrapper-Bug zu umgehen).
-# Unter Windows bleibt CONFIG (vcpkg exportiert dort sauber GLEW::GLEW).
-if(WIN32)
-  find_package(GLEW CONFIG REQUIRED)
-else()
-  find_package(GLEW MODULE REQUIRED)
-endif()
-
-# Robust gegen Namensvarianten der importierten Targets
-if(TARGET GLEW::GLEW)
-  set(GLEW_TARGET GLEW::GLEW)
-elseif(TARGET GLEW::glew)
-  set(GLEW_TARGET GLEW::glew)
-elseif(TARGET glew::glew)
-  set(GLEW_TARGET glew::glew)
-else()
-  message(FATAL_ERROR "Kein GLEW-CMake-Ziel gefunden (GESUCHT: GLEW::GLEW / GLEW::glew / glew::glew).")
-endif()
-
-find_package(glfw3 CONFIG REQUIRED)           # 'glfw'
+find_package(glfw3 CONFIG REQUIRED)           # glfw
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Boost CONFIG REQUIRED COMPONENTS container random system multiprecision)
 
-# CUDA 13 Guard + Header-Check
+# ---------------------- CUDA 13 Guard ----------------------
 if(CUDAToolkit_VERSION VERSION_LESS 13.0)
   message(FATAL_ERROR "CUDA 13.0 oder neuer ist erforderlich. Gefunden: ${CUDAToolkit_VERSION}")
 endif()
@@ -80,7 +55,10 @@ if(NOT CUDA_GL_INTEROP_HEADER)
   message(FATAL_ERROR "cuda_gl_interop.h nicht im CUDAToolkit gefunden.")
 endif()
 
-# Legacy-Defines säubern (keine GLEW_STATIC-Leaks)
+# ---------------------- GLEW (dynamisch) -------------------
+# INTENT: dynamisch linken (kein GLEW_STATIC)
+set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
+# Alte Leaks säubern
 remove_definitions(-DGLEW_STATIC)
 foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
   if(DEFINED ${flag_var})
@@ -91,6 +69,43 @@ foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
     set(${flag_var} "${${flag_var}}" CACHE STRING "" FORCE)
   endif()
 endforeach()
+
+# Windows: regulär via CONFIG (vcpkg liefert GLEW::GLEW)
+# Linux: Wrapper ist buggy -> manuell aus vcpkg_installed importieren (kein find_package für GLEW!)
+if(WIN32)
+  find_package(GLEW CONFIG REQUIRED)
+  if(TARGET GLEW::GLEW)
+    set(GLEW_TARGET GLEW::GLEW)
+  elseif(TARGET GLEW::glew)
+    set(GLEW_TARGET GLEW::glew)
+  else()
+    message(FATAL_ERROR "GLEW CMake-Target nicht gefunden (erwartet GLEW::GLEW).")
+  endif()
+else()
+  # vcpkg Installationswurzel im Buildbaum
+  if(NOT DEFINED VCPKG_INSTALLED_DIR)
+    if(DEFINED ENV{VCPKG_INSTALLED_DIR})
+      set(VCPKG_INSTALLED_DIR "$ENV{VCPKG_INSTALLED_DIR}")
+    else()
+      set(VCPKG_INSTALLED_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed")
+    endif()
+  endif()
+  set(_VCPKG_PREFIX "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+
+  # Header + Lib aus vcpkg aufnehmen
+  find_path(GLEW_INCLUDE_DIR GL/glew.h
+    HINTS "${_VCPKG_PREFIX}/include" REQUIRED)
+  find_library(GLEW_LIBRARY NAMES GLEW glew
+    HINTS "${_VCPKG_PREFIX}/lib" "${_VCPKG_PREFIX}/debug/lib" REQUIRED)
+
+  # Importiertes Ziel bereitstellen wie von find_package erwartet
+  add_library(GLEW::GLEW UNKNOWN IMPORTED)
+  set_target_properties(GLEW::GLEW PROPERTIES
+    IMPORTED_LOCATION "${GLEW_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${GLEW_INCLUDE_DIR}"
+  )
+  set(GLEW_TARGET GLEW::GLEW)
+endif()
 
 # ---------------------- Executable -------------------------
 add_executable(mandelbrot_otterdream
@@ -130,8 +145,8 @@ add_executable(mandelbrot_otterdream
 )
 
 # ---------------------- Compile-Options --------------------
-# Windows: einheitliche /MT, Host-Warnungen als Fehler
 if(MSVC)
+  # Einheitliche /MT (und /MTd) – Host & NVCC-Host-Compiler
   set_property(TARGET mandelbrot_otterdream PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   target_compile_options(mandelbrot_otterdream PRIVATE
@@ -186,7 +201,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_link_options(mandelbrot_otterdream PRIVATE -pthread)
 endif()
 
-# Windows: Host-Linker-Flags (nur C++-Host, nicht CUDA-Device-Link)
+# Windows: Host-Linker-Härtung (nur C++-Host, nicht Device-Link)
 if(MSVC)
   target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<COMPILE_LANGUAGE:CXX>>:/guard:cf>
