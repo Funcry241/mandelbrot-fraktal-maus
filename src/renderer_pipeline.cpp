@@ -1,241 +1,210 @@
 ///// Otter: Fullscreen pipeline – stabile Bind-Reihenfolge, ASCII-Logs, optionaler GPU-Timer.
-///// Schneefuchs: State-Change-Diät; idempotentes init; Upload deterministisch; keine State-Leaks.
-///// Maus: Shader-Fehler sauber abgefangen; VAO/Program-Handling klar; HUD/Heatmap bleiben sichtbar.
-///// Datei: src/renderer_pipeline.cpp
+///// Schneefuchs: State-Change-Diät; idempotentes init; deterministische Uploads via RendererResources.
+///// Maus: Keine VAO-Daten außer einem Dummy-VAO; Shader-Fehler sauber abgefangen; /WX-fest.
+//  Datei: src/renderer_pipeline.cpp
 
 #include "pch.hpp"
 #include "renderer_pipeline.hpp"
-#include "opengl_utils.hpp"
+#include "renderer_resources.hpp"   // OpenGLUtils::updateTextureFromPBO(...)
 #include "common.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
+
+#include <GL/glew.h>
 #include <cstdlib>
 
+// ------------------------------- TU-Local State -------------------------------
 namespace RendererPipeline {
 
-static GLuint program = 0, VAO = 0, VBO = 0, EBO = 0;
-
-// 🐑 Schneefuchs: lokale GL-State-Caches (nur in dieser TU).
 namespace {
-    static GLuint s_lastProgram  = 0;
-    static GLuint s_lastVAO      = 0;
-    static GLuint s_lastTex2D    = 0;
-    static GLuint s_lastPBO      = 0;
-    static GLint  s_unpackAlign  = -1; // -1 = unknown
-    static GLint  s_unpackRowLen = -1;
+    static GLuint sProgram    = 0;
+    static GLint  sUTex       = -1;
+    static GLuint sDummyVAO   = 0;   // Core Profile verlangt ein gebundenes VAO
+    static GLuint sTimeQuery  = 0;   // optionaler GPU-Timer
 
-    static GLuint s_timeQuery = 0;
+    // kleine State-Caches (nur in dieser TU)
+    static GLuint s_lastProgram = 0;
+    static GLuint s_lastTex2D   = 0;
 
-    inline void bindProgram(GLuint p) { if (s_lastProgram != p) { glUseProgram(p); s_lastProgram = p; } }
-    inline void bindVAO(GLuint vao)   { if (s_lastVAO != vao)   { glBindVertexArray(vao); s_lastVAO = vao; } }
-    inline void bindTex2D(GLuint t)   { if (s_lastTex2D != t)   { glBindTexture(GL_TEXTURE_2D, t); s_lastTex2D = t; } }
-    inline void bindPBO(GLuint pbo)   { if (s_lastPBO != pbo)   { glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo); s_lastPBO = pbo; } }
-    inline void setUnpack(int a, int r){
-        if (s_unpackAlign!=a){ glPixelStorei(GL_UNPACK_ALIGNMENT,  a); s_unpackAlign  = a; }
-        if (s_unpackRowLen!=r){ glPixelStorei(GL_UNPACK_ROW_LENGTH, r); s_unpackRowLen = r; }
+    inline void bindProgram(GLuint p) {
+        if (s_lastProgram != p) { glUseProgram(p); s_lastProgram = p; }
     }
-}
+    inline void bindTex2D(GLuint t) {
+        if (s_lastTex2D != t)   { glBindTexture(GL_TEXTURE_2D, t); s_lastTex2D = t; }
+    }
 
-static constexpr const char* vShader = R"GLSL(
-#version 430 core
-layout(location=0) in vec2 aPos;
-layout(location=1) in vec2 aTex;
-out vec2 vTex;
-void main() { vTex = aTex; gl_Position = vec4(aPos, 0.0, 1.0); }
-)GLSL";
+    // --- Mini Shader Utils (ASCII-Logs, deterministisch) ---------------------
+    static GLuint compile(GLenum type, const char* src) {
+        GLuint id = glCreateShader(type);
+        glShaderSource(id, 1, &src, nullptr);
+        glCompileShader(id);
+        GLint ok = GL_FALSE;
+        glGetShaderiv(id, GL_COMPILE_STATUS, &ok);
+        if (!ok) {
+            char log[2048]; GLsizei n = 0;
+            glGetShaderInfoLog(id, (GLsizei)sizeof(log), &n, log);
+            LUCHS_LOG_HOST("[GL][ERR] shader compile failed: %.*s", (int)n, log);
+            glDeleteShader(id);
+            return 0;
+        }
+        return id;
+    }
+    static GLuint link(GLuint vs, GLuint fs) {
+        GLuint p = glCreateProgram();
+        glAttachShader(p, vs);
+        glAttachShader(p, fs);
+        glLinkProgram(p);
+        GLint ok = GL_FALSE;
+        glGetProgramiv(p, GL_LINK_STATUS, &ok);
+        if (!ok) {
+            char log[2048]; GLsizei n = 0;
+            glGetProgramInfoLog(p, (GLsizei)sizeof(log), &n, log);
+            LUCHS_LOG_HOST("[GL][ERR] program link failed: %.*s", (int)n, log);
+            glDeleteProgram(p);
+            return 0;
+        }
+        return p;
+    }
 
-static constexpr const char* fShader = R"GLSL(
-#version 430 core
-in vec2 vTex;
-out vec4 FragColor;
-uniform sampler2D uTex;
-void main() { FragColor = texture(uTex, vTex); }
-)GLSL";
+    // --- Fullscreen-Triangle Shaders (gl_VertexID) ---------------------------
+    static constexpr const char* VS = R"GLSL(#version 430 core
+    out vec2 vUV;
+    void main(){
+        const vec2 pos[3] = vec2[3](
+            vec2(-1.0, -1.0),
+            vec2( 3.0, -1.0),
+            vec2(-1.0,  3.0)
+        );
+        gl_Position = vec4(pos[gl_VertexID], 0.0, 1.0);
+        // grob [0,2] – clamped im FS; vermeidet Divisionen/Branches
+        vUV = 0.5 * (pos[gl_VertexID] + 1.0);
+    })GLSL";
+
+    static constexpr const char* FS = R"GLSL(#version 430 core
+    layout(location=0) out vec4 oColor;
+    in vec2 vUV;
+    uniform sampler2D uTex;
+    void main(){
+        vec2 uv = clamp(vUV, vec2(0.0), vec2(1.0));
+        oColor = texture(uTex, uv);
+    })GLSL";
+
+    // einmalige Initialisierung (idempotent)
+    static void ensurePipeline() {
+        if (sProgram) return;
+
+        GLuint vs = compile(GL_VERTEX_SHADER,   VS);
+        GLuint fs = compile(GL_FRAGMENT_SHADER, FS);
+        if (!vs || !fs) {
+            LUCHS_LOG_HOST("[FATAL] shader build failed");
+            std::exit(EXIT_FAILURE);
+        }
+        sProgram = link(vs, fs);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        if (!sProgram) {
+            LUCHS_LOG_HOST("[FATAL] program link failed");
+            std::exit(EXIT_FAILURE);
+        }
+
+        bindProgram(sProgram);
+        sUTex = glGetUniformLocation(sProgram, "uTex");
+        if (sUTex >= 0) glUniform1i(sUTex, 0);
+        bindProgram(0);
+
+        // Dummy-VAO fuer Core Profile
+        glGenVertexArrays(1, &sDummyVAO);
+
+        if constexpr (Settings::performanceLogging || Settings::debugLogging) {
+            glGenQueries(1, &sTimeQuery);
+            if constexpr (Settings::debugLogging)
+                LUCHS_LOG_HOST("[GL] pipeline ready prog=%u vao=%u timerQ=%u", sProgram, sDummyVAO, sTimeQuery);
+        }
+    }
+} // namespace
+
+// ---------------------------------- API --------------------------------------
 
 void init() {
-    // 🦊 Schneefuchs: idempotent – mehrfacher Aufruf erzeugt keine Ressourcen doppelt.
-    if (program != 0 && VAO != 0) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIPELINE] init skipped (already initialized)");
-        }
-        return;
-    }
-
-    program = OpenGLUtils::createProgramFromSource(vShader, fShader);
-    if (!program) {
-        LUCHS_LOG_HOST("[FATAL] Shader program creation failed - aborting");
-        std::exit(EXIT_FAILURE);
-    }
+    ensurePipeline();
+    // Upload-Pfad nutzt RendererResources; PixelStore ist dort bereits definiert.
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PIPELINE] Shader program created: %u", program);
+        LUCHS_LOG_HOST("[PIPELINE] init done");
     }
-
-    // Sampler auf Einheit 0 binden
-    bindProgram(program);
-    {
-        const GLint loc = glGetUniformLocation(program, "uTex");
-        if (loc >= 0) glUniform1i(loc, 0);
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIPELINE] Uniform 'uTex' set to texture unit 0 (loc=%d)", (int)loc);
-        }
-    }
-    bindProgram(0);
-
-    OpenGLUtils::createFullscreenQuad(&VAO, &VBO, &EBO);
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PIPELINE] Fullscreen quad VAO=%u VBO=%u EBO=%u created", VAO, VBO, EBO);
-    }
-
-    if constexpr (Settings::performanceLogging || Settings::debugLogging) {
-        if (s_timeQuery == 0) {
-            glGenQueries(1, &s_timeQuery);
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[PIPELINE] Created GL_TIME_ELAPSED query id=%u", s_timeQuery);
-            }
-        }
-    }
-
-    // Initiale PixelStore-Werte definieren (Upload erwartet 1/0)
-    setUnpack(1, 0);
 }
 
 void updateTexture(GLuint pbo, GLuint tex, int width, int height) {
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[GL-UPLOAD] Binding PBO=%u and Texture=%u for upload", pbo, tex);
-    }
-
-    setUnpack(1, 0);
-    bindPBO(pbo);
-    glActiveTexture(GL_TEXTURE0); // sicherheitshalber
-    bindTex2D(tex);
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[GL-UPLOAD] glTexSubImage2D %dx%d (PBO path)", width, height);
-    }
-
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
-                    GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-
-    if constexpr (Settings::debugLogging) {
-        const GLenum err = glGetError();
-        LUCHS_LOG_HOST("[GL-UPLOAD] glTexSubImage2D glGetError() = 0x%04X", err);
-    }
-
-    // State sauber lassen
-    bindTex2D(0);
-    bindPBO(0);
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[GL-UPLOAD] Texture update from PBO complete");
-    }
+    // deterministischer Upload (bind/order in RendererResources gekapselt)
+    OpenGLUtils::updateTextureFromPBO(pbo, tex, width, height);
 }
 
 void drawFullscreenQuad(GLuint tex) {
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[DRAW] About to draw fullscreen quad with Texture=%u", tex);
-    }
+    ensurePipeline();
 
-    bindProgram(program);
-
-    // **sRGB deaktiviert** für klare 1:1-Ausgabe (Fenster ist sRGB-fähig)
-    GLboolean srgbWas = GL_FALSE;
-#ifdef GL_FRAMEBUFFER_SRGB
-    srgbWas = glIsEnabled(GL_FRAMEBUFFER_SRGB);
-    if (srgbWas) glDisable(GL_FRAMEBUFFER_SRGB);
-#endif
+    // State sichern (minimal)
+    GLint prevProg = 0; glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
+    GLint prevActiveTex = 0; glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
+    GLint prevTex0 = 0; glActiveTexture(GL_TEXTURE0); glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex0);
 
     GLboolean wasDepth = glIsEnabled(GL_DEPTH_TEST);
     GLboolean wasCull  = glIsEnabled(GL_CULL_FACE);
+#ifdef GL_FRAMEBUFFER_SRGB
+    GLboolean wasSRGB  = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+#endif
+
     if (wasDepth) glDisable(GL_DEPTH_TEST);
     if (wasCull)  glDisable(GL_CULL_FACE);
+#ifdef GL_FRAMEBUFFER_SRGB
+    if (wasSRGB)  glDisable(GL_FRAMEBUFFER_SRGB); // 1:1 Ausgabe
+#endif
 
+    // Draw
+    bindProgram(sProgram);
     glActiveTexture(GL_TEXTURE0);
     bindTex2D(tex);
-    bindVAO(VAO);
-
-    // Debug: dunkler Clear, damit Draw sichtbar ist (nur im Debug)
-    if constexpr (Settings::debugLogging) {
-        glClearColor(0.05f, 0.06f, 0.08f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-    }
+    glBindVertexArray(sDummyVAO);
 
     if constexpr (Settings::performanceLogging || Settings::debugLogging) {
-        if (s_timeQuery) {
-            glBeginQuery(GL_TIME_ELAPSED, s_timeQuery);
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-            glEndQuery(GL_TIME_ELAPSED);
-
-            GLint available = 0;
-            glGetQueryObjectiv(s_timeQuery, GL_QUERY_RESULT_AVAILABLE, &available);
-            if (available) {
-                GLuint64 ns = 0;
-                glGetQueryObjectui64v(s_timeQuery, GL_QUERY_RESULT, &ns);
-                const double ms = (double)ns / 1.0e6;
-                LUCHS_LOG_HOST("[TIME] FSQ gpu=%.3f ms", ms);
-            }
-        } else {
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-        }
-    } else {
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        if (sTimeQuery) glBeginQuery(GL_TIME_ELAPSED, sTimeQuery);
     }
 
-    if constexpr (Settings::debugLogging) {
-        const GLenum err = glGetError();
-        LUCHS_LOG_HOST("[DRAW] glDrawElements glGetError() = 0x%04X", err);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    if constexpr (Settings::performanceLogging || Settings::debugLogging) {
+        if (sTimeQuery) {
+            glEndQuery(GL_TIME_ELAPSED);
+            GLint ready = 0;
+            glGetQueryObjectiv(sTimeQuery, GL_QUERY_RESULT_AVAILABLE, &ready);
+            if (ready) {
+                GLuint64 ns = 0;
+                glGetQueryObjectui64v(sTimeQuery, GL_QUERY_RESULT, &ns);
+                const double ms = double(ns) / 1.0e6;
+                LUCHS_LOG_HOST("[TIME] FSQ gpu=%.3f ms", ms);
+            }
+        }
     }
 
     // State wiederherstellen
-    bindVAO(0);
-    bindTex2D(0);
-    bindProgram(0);
+    glBindVertexArray(0);
+    bindTex2D((GLuint)prevTex0);
+    glActiveTexture((GLenum)prevActiveTex);
+    bindProgram((GLuint)prevProg);
+
     if (wasCull)  glEnable(GL_CULL_FACE);
     if (wasDepth) glEnable(GL_DEPTH_TEST);
 #ifdef GL_FRAMEBUFFER_SRGB
-    if (srgbWas) glEnable(GL_FRAMEBUFFER_SRGB);
+    if (wasSRGB)  glEnable(GL_FRAMEBUFFER_SRGB);
 #endif
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[DRAW] Fullscreen quad drawn");
-    }
 }
 
 void cleanup() {
-    if (s_timeQuery) {
-        glDeleteQueries(1, &s_timeQuery);
-        s_timeQuery = 0;
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[CLEANUP] Deleted GL_TIME_ELAPSED query");
-        }
-    }
-    if (program) {
-        glDeleteProgram(program);
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[CLEANUP] Deleted program %u", program);
-        }
-    }
-    if (VAO) {
-        glDeleteVertexArrays(1, &VAO);
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[CLEANUP] Deleted VAO %u", VAO);
-        }
-    }
-    if (VBO) {
-        glDeleteBuffers(1, &VBO);
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[CLEANUP] Deleted VBO %u", VBO);
-        }
-    }
-    if (EBO) {
-        glDeleteBuffers(1, &EBO);
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[CLEANUP] Deleted EBO %u", EBO);
-        }
-    }
+    if (sTimeQuery) { glDeleteQueries(1, &sTimeQuery); sTimeQuery = 0; }
+    if (sDummyVAO)  { glDeleteVertexArrays(1, &sDummyVAO); sDummyVAO = 0; }
+    if (sProgram)   { glDeleteProgram(sProgram); sProgram = 0; }
 
-    program = VAO = VBO = EBO = 0;
-    s_lastProgram = s_lastVAO = s_lastTex2D = s_lastPBO = 0;
-    s_unpackAlign = s_unpackRowLen = -1;
+    sUTex = -1;
+    s_lastProgram = 0;
+    s_lastTex2D   = 0;
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[CLEANUP] RendererPipeline resources cleaned up");
