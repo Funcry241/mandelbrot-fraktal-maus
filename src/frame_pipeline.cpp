@@ -216,7 +216,7 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
         if constexpr (Settings::debugLogging) {
             if (state.lastTimings.valid) {
                 LUCHS_LOG_HOST(
-                    "[FRAME] Mandelbrot=%.3f | Launch=%.3f | Sync=%.3f | Entropy=%.3f | Contrast=%.3f | LogFlush=%.3f | PBOMap=%.3f",
+                    "[FRAME] Mandelbrot=%.3f | Launch=%.3f | Sync=%.3f | Entropy=%.3f | Contrastgenre=%.3f | LogFlush=%.3f | PBOMap=%.3f",
                     state.lastTimings.mandelbrotTotal,
                     state.lastTimings.mandelbrotLaunch,
                     state.lastTimings.mandelbrotSync,
