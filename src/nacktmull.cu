@@ -1,7 +1,7 @@
 ///// Otter: Perturbation/Series Path – Referenz-Orbit (DD) + GPU-Delta; API unveraendert.
 ///// Schneefuchs: Deterministisch, ASCII-only; Mapping konsistent (center+zoom); kompakte PERF-Logs.
-///// Maus: Smooth-Iteration (μ) + leichtes Ordered-Dither gegen Banding; keine Overlays; fruehe Rueckgaben.
-//      CUDA 13: nutzt __logf/__log2f/__powf, nur-auf-Escape teure Funktionen, koaleszierte Zugriffe.
+///// Maus: Smooth-Iteration (μ) + hashbasiertes Dither (kein Grid); keine Overlays; fruehe Rueckgaben.
+//      CUDA 13: nutzt __logf/__log2f/__powf/__fsqrt_rn/__fmaf_rn; teure Funktionen nur auf Escape.
 //      Datei: src/nacktmull.cu
 
 #include <cuda_runtime.h>
@@ -84,32 +84,28 @@ static void buildReferenceOrbitDD(std::vector<float2>& out, int maxIter, double 
 // ------------------------------------------------------------
 // GPU-Kernel: Perturbation
 // δ_{n+1} = 2*z_ref[n]*δ_n + Δc;   z ≈ z_ref[n] + δ
-// Escape, wenn |z|^2 > 4.
-// Fallback: direkte Iteration, falls |δ| zu gross (Stabilitaet).
+// Escape, wenn |z|^2 > 4. Fallback auf Direktiteration bei Instabilität.
 // ------------------------------------------------------------
 namespace {
     __device__ __forceinline__ float2 f2_add(float2 a, float2 b){ return make_float2(a.x+b.x, a.y+b.y); }
     __device__ __forceinline__ float2 f2_mul(float2 a, float2 b){ return make_float2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }
     __device__ __forceinline__ float  f2_abs2(float2 a){ return a.x*a.x + a.y*a.y; }
 
-    // --- Ordered 4x4 Dither (deterministisch); sehr kleine Amplitude
-    __device__ __forceinline__ float ordered_dither_4x4(int x, int y){
-        const unsigned char M[16] = {
-             0,  8,  2, 10,
-            12,  4, 14,  6,
-             3, 11,  1,  9,
-            15,  7, 13,  5
-        };
-        int idx = (x & 3) | ((y & 3) << 2);
-        float u = (float)M[idx] * (1.0f/16.0f);   // 0..0.9375
-        return (u - 0.5f) * (1.0f/256.0f);        // ~±0.002
+    // Hashbasiertes, deterministisches Pixel-Dither in [-amp, +amp], ohne Grid-Artefakte.
+    __device__ __forceinline__ float pixel_dither(int x, int y, float amp = 1.0f/256.0f){
+        unsigned int h = (unsigned int)(x) * 0x9E3779B9u ^ (unsigned int)(y) * 0x85EBCA6Bu;
+        // Wang/PCG-Mix
+        h ^= h >> 16; h *= 0x7FEB352Du; h ^= h >> 15; h *= 0x846CA68Bu; h ^= h >> 16;
+        // 24 Bit -> [0,1)
+        float u = (float)(h & 0x00FFFFFFu) * (1.0f/16777216.0f);
+        return (u - 0.5f) * (2.0f * amp);
     }
 
-    // Monotone Heat-Palette auf μ in [0,1] (mit leichtem Gamma)
+    // Monotone Heat-Palette auf μ in [0,1]
     __device__ inline float3 shade_from_mu01(float mu01){
         float v = 1.f - __expf(-1.75f * mu01);
         v = __powf(fmaxf(0.f, v), 0.85f);
-        v = v + 0.06f * (1.0f - v);               // leichtes Lift der Schatten
+        v = v + 0.06f * (1.0f - v);
         float r = fminf(1.f, 1.15f*__powf(v, 0.42f));
         float g = fminf(1.f, 0.95f*__powf(v, 0.56f));
         float b = fminf(1.f, 0.70f*__powf(v, 0.88f));
@@ -126,7 +122,7 @@ namespace {
         if (x >= w || y >= h) return;
         const int idx = y*w + x;
 
-        // Konsistentes Mapping: center+zoom (wie in restlicher Pipeline)
+        // Mapping: center+zoom (konsistent zum Rest)
         const float2 c     = pixelToComplex(x + 0.5, y + 0.5, w, h,
                                             (double)center.x, (double)center.y, (double)zoom);
         const float2 c_ref = pixelToComplex(0.5 + 0.5*w, 0.5 + 0.5*h, w, h,
@@ -140,8 +136,8 @@ namespace {
         }
 
         float2 delta = make_float2(0.f,0.f);
-        int   it = maxIter;          // integer Iterationszahl fuer d_it
-        float mu = (float)maxIter;   // Smooth-Iteration (kontinuierlich) fuer Farbe
+        int   it = maxIter;          // für d_it
+        float mu = (float)maxIter;   // Smooth Iteration für Farbe
         const float esc2 = 4.0f;
 
         // Perturbations-Loop
@@ -153,8 +149,7 @@ namespace {
             const float2 z = f2_add(zref, delta);
             const float r2 = f2_abs2(z);
             if (r2 > esc2){
-                // Smooth iteration μ = n + 1 - log2(log |z|)
-                // r = sqrt(r2)  -> log(r) = 0.5*log(r2)
+                // μ = n + 1 - log2(log |z|)
                 const float log_r = 0.5f * __logf(r2);
                 mu = (float)n + 1.0f - __log2f(fmaxf(1e-30f, log_r));
                 it = n;
@@ -169,8 +164,8 @@ namespace {
                 float zx = z.x, zy = z.y;
                 for(int m=n+1; m<maxIter; ++m){
                     const float x2 = zx*zx, y2 = zy*zy;
-                    if (x2 + y2 > 4.f){
-                        const float r2_f = x2 + y2;
+                    const float r2_f = x2 + y2;
+                    if (r2_f > 4.f){
                         const float log_r_f = 0.5f * __logf(r2_f);
                         mu = (float)m + 1.0f - __log2f(fmaxf(1e-30f, log_r_f));
                         it = m;
@@ -178,18 +173,16 @@ namespace {
                     }
                     const float xt = x2 - y2 + c.x; zy = __fmaf_rn(2.f*zx, zy, c.y); zx = xt;
                 }
-                // Nicht entkommen:
                 it = maxIter; mu = (float)maxIter; goto ESCAPE;
             }
         }
-        // Nicht entkommen:
         it = maxIter; mu = (float)maxIter;
 
     ESCAPE:
         {
-            // μ normalisieren + leichtes Ordered-Dither → reduziert Banding sichtbar
+            // μ normalisieren + hashbasiertes Dither (kein Grid)
             float mu01 = fminf(1.0f, fmaxf(0.0f, mu / (float)maxIter));
-            mu01 = fminf(1.0f, fmaxf(0.0f, mu01 + ordered_dither_4x4(x, y)));
+            mu01 = fminf(1.0f, fmaxf(0.0f, mu01 + pixel_dither(x, y, 1.0f/256.0f)));
 
             const float3 col = shade_from_mu01(mu01);
             out[idx] = make_uchar4((unsigned char)(255.f*col.x),
@@ -201,9 +194,7 @@ namespace {
 }
 
 // ============================================================
-// Oeffentliche API – ersetzt alte Hybrid-Funktion
-// Signatur bleibt identisch: launch_mandelbrotHybrid(...)
-// Keine Exceptions (extern "C"); eigene Fehlerpruefung + early return.
+// Oeffentliche API – Signatur unveraendert
 // ============================================================
 extern "C" void launch_mandelbrotHybrid(
     uchar4* out, int* d_it,
@@ -227,7 +218,7 @@ extern "C" void launch_mandelbrotHybrid(
         return;
     }
 
-    // 1) Referenzpunkt = Kamera-Center (konsistent zum Mapping)
+    // 1) Referenzpunkt = Kamera-Center
     const double cref_x = (double)offset.x;
     const double cref_y = (double)offset.y;
 
