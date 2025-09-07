@@ -1,7 +1,8 @@
 ///// Otter: Perturbation/Series Path – Referenz-Orbit (DD) + GPU-Delta; API unveraendert.
-/// /// Schneefuchs: Deterministisch, ASCII-only; Mapping konsistent (center+zoom); kompakte PERF-Logs.
-///// Maus: Keine Overlays/Sprites; kein CUDA_CHECK; fruehe Rueckgaben bei Fehlern.
-///// Datei: src/nacktmull.cu
+///// Schneefuchs: Deterministisch, ASCII-only; Mapping konsistent (center+zoom); kompakte PERF-Logs.
+///// Maus: Smooth-Iteration (μ) + leichtes Ordered-Dither gegen Banding; keine Overlays; fruehe Rueckgaben.
+//      CUDA 13: nutzt __logf/__log2f/__powf, nur-auf-Escape teure Funktionen, koaleszierte Zugriffe.
+//      Datei: src/nacktmull.cu
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -91,6 +92,30 @@ namespace {
     __device__ __forceinline__ float2 f2_mul(float2 a, float2 b){ return make_float2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }
     __device__ __forceinline__ float  f2_abs2(float2 a){ return a.x*a.x + a.y*a.y; }
 
+    // --- Ordered 4x4 Dither (deterministisch); sehr kleine Amplitude
+    __device__ __forceinline__ float ordered_dither_4x4(int x, int y){
+        const unsigned char M[16] = {
+             0,  8,  2, 10,
+            12,  4, 14,  6,
+             3, 11,  1,  9,
+            15,  7, 13,  5
+        };
+        int idx = (x & 3) | ((y & 3) << 2);
+        float u = (float)M[idx] * (1.0f/16.0f);   // 0..0.9375
+        return (u - 0.5f) * (1.0f/256.0f);        // ~±0.002
+    }
+
+    // Monotone Heat-Palette auf μ in [0,1] (mit leichtem Gamma)
+    __device__ inline float3 shade_from_mu01(float mu01){
+        float v = 1.f - __expf(-1.75f * mu01);
+        v = __powf(fmaxf(0.f, v), 0.85f);
+        v = v + 0.06f * (1.0f - v);               // leichtes Lift der Schatten
+        float r = fminf(1.f, 1.15f*__powf(v, 0.42f));
+        float g = fminf(1.f, 0.95f*__powf(v, 0.56f));
+        float b = fminf(1.f, 0.70f*__powf(v, 0.88f));
+        return make_float3(r,g,b);
+    }
+
     __global__ void perturbKernel(
         uchar4* __restrict__ out, int* __restrict__ iterOut,
         const float2* __restrict__ refOrbit, int maxIter,
@@ -115,9 +140,11 @@ namespace {
         }
 
         float2 delta = make_float2(0.f,0.f);
-        int it = 0;
+        int   it = maxIter;          // integer Iterationszahl fuer d_it
+        float mu = (float)maxIter;   // Smooth-Iteration (kontinuierlich) fuer Farbe
         const float esc2 = 4.0f;
 
+        // Perturbations-Loop
         for(int n=0; n<maxIter; ++n){
             const float2 zref = refOrbit[n];
             const float2 twoZ = make_float2(2.f*zref.x, 2.f*zref.y);
@@ -125,33 +152,50 @@ namespace {
 
             const float2 z = f2_add(zref, delta);
             const float r2 = f2_abs2(z);
-            if (r2 > esc2){ it = n; goto ESCAPE; }
+            if (r2 > esc2){
+                // Smooth iteration μ = n + 1 - log2(log |z|)
+                // r = sqrt(r2)  -> log(r) = 0.5*log(r2)
+                const float log_r = 0.5f * __logf(r2);
+                mu = (float)n + 1.0f - __log2f(fmaxf(1e-30f, log_r));
+                it = n;
+                goto ESCAPE;
+            }
 
-            const float refMag = fmaxf(sqrtf(f2_abs2(zref)), 1e-12f);
-            const float delMag = sqrtf(f2_abs2(delta));
+            // Stabilitäts-Guard: relativer Fehler der δ-Dynamik
+            const float refMag = fmaxf(__fsqrt_rn(f2_abs2(zref)), 1e-12f);
+            const float delMag = __fsqrt_rn(f2_abs2(delta));
             if (delMag > deltaRelMax * refMag){
                 // Fallback: direkte Iteration ab aktuellem Zustand
                 float zx = z.x, zy = z.y;
                 for(int m=n+1; m<maxIter; ++m){
                     const float x2 = zx*zx, y2 = zy*zy;
-                    if (x2 + y2 > 4.f){ it = m; goto ESCAPE; }
-                    const float xt = x2 - y2 + c.x; zy = 2.f*zx*zy + c.y; zx = xt;
+                    if (x2 + y2 > 4.f){
+                        const float r2_f = x2 + y2;
+                        const float log_r_f = 0.5f * __logf(r2_f);
+                        mu = (float)m + 1.0f - __log2f(fmaxf(1e-30f, log_r_f));
+                        it = m;
+                        goto ESCAPE;
+                    }
+                    const float xt = x2 - y2 + c.x; zy = __fmaf_rn(2.f*zx, zy, c.y); zx = xt;
                 }
-                it = maxIter; goto ESCAPE;
+                // Nicht entkommen:
+                it = maxIter; mu = (float)maxIter; goto ESCAPE;
             }
         }
-        it = maxIter;
+        // Nicht entkommen:
+        it = maxIter; mu = (float)maxIter;
+
     ESCAPE:
         {
-            // MAGENTA-TEST:
-            // - Escape-Pixel (it < maxIter) werden knallig magenta eingefärbt.
-            // - Nicht-escapete Pixel (it == maxIter) bleiben schwarz.
-            if (it < maxIter) {
-                out[idx] = make_uchar4(255, 0, 255, 255);  // magenta
-            } else {
-                out[idx] = make_uchar4(0, 0, 0, 255);      // interior/unknown -> black
-            }
-            iterOut[idx] = it;
+            // μ normalisieren + leichtes Ordered-Dither → reduziert Banding sichtbar
+            float mu01 = fminf(1.0f, fmaxf(0.0f, mu / (float)maxIter));
+            mu01 = fminf(1.0f, fmaxf(0.0f, mu01 + ordered_dither_4x4(x, y)));
+
+            const float3 col = shade_from_mu01(mu01);
+            out[idx] = make_uchar4((unsigned char)(255.f*col.x),
+                                   (unsigned char)(255.f*col.y),
+                                   (unsigned char)(255.f*col.z), 255);
+            iterOut[idx] = it;  // E/C-Pfad bleibt integerbasiert
         }
     }
 }
@@ -189,9 +233,8 @@ extern "C" void launch_mandelbrotHybrid(
 
     // 2) Referenz-Orbit (Host, DD)
     static std::vector<float2> hRef;
-    try {
-        buildReferenceOrbitDD(hRef, maxIter, cref_x, cref_y);
-    } catch(...) {
+    try { buildReferenceOrbitDD(hRef, maxIter, cref_x, cref_y); }
+    catch(...) {
         LUCHS_LOG_HOST("[NACKTMULL][ERR] buildReferenceOrbitDD threw; aborting frame");
         return;
     }
