@@ -21,6 +21,7 @@
 #include <vector>
 #include <stdexcept>
 #include <cstdint>
+#include <cstring>   // std::strncpy
 #if !defined(__CUDA_ARCH__)
   #include <chrono>
 #endif
@@ -46,6 +47,11 @@ static size_t s_hostRegEntropyBytes = 0;
 static void*  s_hostRegContrastPtr  = nullptr;
 static size_t s_hostRegContrastBytes= 0;
 
+// Persistente Timing-Events (nur genutzt, wenn Logging aktiv ist)
+static cudaEvent_t s_evStart = nullptr;
+static cudaEvent_t s_evStop  = nullptr;
+static bool        s_evInit  = false;
+
 static inline void ensureDeviceOnce() {
     if (!s_deviceInitDone) { CUDA_CHECK(cudaSetDevice(0)); s_deviceInitDone = true; }
 }
@@ -64,6 +70,24 @@ static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size
         regPtr  = ptr; regBytes = bytes;
         if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[PIN] host-register ptr=%p bytes=%zu", ptr, bytes);
     }
+}
+
+static inline void ensureEventsOnce() {
+    if (s_evInit) return;
+    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
+        cudaEventCreate(&s_evStart);
+        cudaEventCreate(&s_evStop);
+        s_evInit = (s_evStart != nullptr && s_evStop != nullptr);
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[CUDA] timing events %s", s_evInit ? "created" : "FAILED");
+        }
+    }
+}
+static inline void destroyEventsIfAny() {
+    if (!s_evInit) return;
+    cudaEventDestroy(s_evStart); s_evStart = nullptr;
+    cudaEventDestroy(s_evStop);  s_evStop  = nullptr;
+    s_evInit = false;
 }
 
 // -- CUDA 13: Geräte-/Treiber-Log via Attribute (statt veralteter cudaDeviceProp-Felder)
@@ -121,6 +145,9 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
         if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[PBO] warm-up map/unmap done (%zu bytes)", warm);
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, (GLuint)prev);
+
+    // Timing-Events einmalig einrichten (nur falls Logging aktiv)
+    ensureEventsOnce();
 }
 
 void renderCudaFrame(
@@ -187,11 +214,11 @@ void renderCudaFrame(
 
     // GPU launch (Nacktmull) – reine Event-Timings, keine Device-weite Sync
     (void)cudaGetLastError(); // clear sticky
-    cudaEvent_t ev0=nullptr, ev1=nullptr;
+    float ms = 0.0f;
+
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
-        cudaEventCreate(&ev0); // absichtlich ohne CUDA_CHECK → Fehlerpfad erlaubt fruehes Unmap
-        cudaEventCreate(&ev1);
-        cudaEventRecord(ev0, 0);
+        ensureEventsOnce();
+        if (s_evInit) cudaEventRecord(s_evStart, 0);
     }
 
     // *** KORREKTE REIHENFOLGE: (out, d_it, w, h, zoom, offset, maxIter, tile) ***
@@ -207,19 +234,21 @@ void renderCudaFrame(
     // Fehlerstatus ohne Device-weite Synchronisation erfassen
     cudaError_t mbErrLaunch = cudaGetLastError(); // Launch-Fehler (sofort)
     cudaError_t mbErrSync   = cudaSuccess;        // Laufzeitfehler via Event-Wait
-    float ms = 0.0f;
+#if !defined(__CUDA_ARCH__)
+    // mbMs ist oben deklariert; hier nur befüllen
+#endif
 
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
-        cudaEventRecord(ev1, 0);
-        mbErrSync = cudaEventSynchronize(ev1); // wartet nur auf Stream 0
-        if (mbErrSync == cudaSuccess) {
-            cudaEventElapsedTime(&ms, ev0, ev1);
+        if (s_evInit) {
+            cudaEventRecord(s_evStop, 0);
+            mbErrSync = cudaEventSynchronize(s_evStop); // wartet nur auf Stream 0
+            if (mbErrSync == cudaSuccess) {
+                cudaEventElapsedTime(&ms, s_evStart, s_evStop);
 #if !defined(__CUDA_ARCH__)
-            mbMs = (double)ms;
+                mbMs = (double)ms;
 #endif
+            }
         }
-        if (ev0) cudaEventDestroy(ev0);
-        if (ev1) cudaEventDestroy(ev1);
     }
 
     const bool ok = (mbErrLaunch == cudaSuccess) && (mbErrSync == cudaSuccess);
@@ -264,7 +293,9 @@ void renderCudaFrame(
 #if !defined(__CUDA_ARCH__)
     const auto tEC1 = std::chrono::high_resolution_clock::now();
     const double ecMs = std::chrono::duration<double, std::milli>(tEC1 - tEC0).count();
-    entMs = ecMs * 0.5; conMs = ecMs * 0.5;
+    // entMs / conMs sind oben deklariert; hier nur befüllen
+    entMs = ecMs * 0.5;
+    conMs = ecMs * 0.5;
 #endif
 
     // Host copies
@@ -325,6 +356,7 @@ bool verifyCudaGetErrorStringSafe() {
 void unregisterPBO() {
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
+    destroyEventsIfAny();
     delete pboResource; pboResource = nullptr;
 }
 
