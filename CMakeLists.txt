@@ -1,4 +1,4 @@
-##### Otter: CUDA 13 guard; use CUDAToolkit include dirs (CCCL/CUB/Thrust); drop custom cuda_gl_interop.h PATH scan; keep dynamic GLEW, kill D9025 by purging GLEW_STATIC. Use MODULE finder for GLEW to bypass vcpkg GLEW::glew wrapper.
+##### Otter: CUDA 13 guard; use CUDAToolkit include dirs (CCCL/CUB/Thrust); drop custom cuda_gl_interop.h PATH scan; keep dynamic GLEW; purge GLEW_STATIC. On Linux bind GLEW via pkg-config and alias to GLEW::GLEW to bypass vcpkg wrapper.
 ##### Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; explicit OpenGL::GLU + Boost; deterministic, duplicate-free defines.
 ##### Maus: Arch 80/86/89/90; CUDA C++20; zero GLEW policy warnings; no late vcpkg hacks; fail early if CUDA < 13.0.
 ##### Datei: CMakeLists.txt
@@ -26,23 +26,41 @@ project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON)   # legacy toggle still honored
 set(CMAKE_CUDA_RUNTIME_LIBRARY Static)       # modern toggle used by generators
 
-# Language standards
-set(CMAKE_CXX_STANDARD 23)
+# Language standards (respect CLI overrides)
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 23)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CUDA_STANDARD 20)
+if(NOT DEFINED CMAKE_CUDA_STANDARD)
+  set(CMAKE_CUDA_STANDARD 20)
+endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
 # Prefer dynamic GLEW explicitly (harmless with CONFIG/MODULE; documents intent)
 set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
 
+# ------------------------------------------------------------------------------
 # Packages
-find_package(OpenGL REQUIRED)
-# IMPORTANT: Use MODULE finder to avoid vcpkg wrapper expecting GLEW::glew target
-find_package(GLEW MODULE REQUIRED)            # provides GLEW::GLEW
-find_package(glfw3 CONFIG REQUIRED)
+# ------------------------------------------------------------------------------
+set(OpenGL_GL_PREFERENCE GLVND)
+find_package(OpenGL REQUIRED)                 # provides OpenGL::GL and (if present) OpenGL::GLU
+
+# GLEW: robust binding
+if(UNIX AND NOT APPLE)
+  # Linux/CI: use pkg-config to avoid vcpkg's glew wrapper (which expects GLEW::glew)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(GLEW_PC REQUIRED IMPORTED_TARGET glew)
+  add_library(GLEW::GLEW INTERFACE IMPORTED)
+  target_link_libraries(GLEW::GLEW INTERFACE PkgConfig::GLEW_PC)
+else()
+  # Windows (and others if desired): vcpkg CONFIG is fine and exposes GLEW::GLEW
+  find_package(GLEW CONFIG REQUIRED)
+endif()
+
+find_package(glfw3 CONFIG REQUIRED)           # exposes target 'glfw'
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Boost CONFIG REQUIRED COMPONENTS container random system multiprecision)
@@ -59,7 +77,6 @@ if(NOT CUDA_GL_INTEROP_HEADER)
 endif()
 
 # --- Purge any legacy GLEW_STATIC from cache/flags (kills MSVC D9025 noise) -----
-# We don't rely on /U hacks; we simply ensure no *_STATIC defines linger.
 remove_definitions(-DGLEW_STATIC)
 foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
   if(DEFINED ${flag_var})
@@ -71,7 +88,9 @@ foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
   endif()
 endforeach()
 
-# Executable: core renderer files
+# ------------------------------------------------------------------------------
+# Executable
+# ------------------------------------------------------------------------------
 add_executable(mandelbrot_otterdream
   src/main.cpp
   src/luchs_log_host.cpp
