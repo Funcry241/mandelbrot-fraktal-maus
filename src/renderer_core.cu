@@ -1,4 +1,3 @@
-
 ///// Otter: Renderer-Core – GL-Init/Window, Loop-Delegation; keine Zoom-Logik hier.
 ///// Schneefuchs: CUDA/GL strikt getrennt; deterministische ASCII-Logs; Ressourcen klar besitzend.
 ///// Maus: Alpha 80 – Pipeline/Loop entscheidet; Renderer zeichnet/tauscht nur, ohne Doppelpfad.
@@ -14,33 +13,34 @@
 #include "settings.hpp"
 #include "cuda_interop.hpp"
 #include "heatmap_overlay.hpp"
-#include "warzenschwein_overlay.hpp"
-#include "luchs_log_host.hpp"
-#include "renderer_loop.hpp"
+#include "frame_pipeline.hpp"
+#include "luchs_log_host.hpp"   // <-- Logging-Makro verfügbar machen
 
-#define ENABLE_ZOOM_LOGGING 0
+#include <GL/glew.h>
+#include <GLFW/glfw3.h>
+#include <stdexcept>
 
 Renderer::Renderer(int width, int height)
-: state(width, height), glInitialized(false), glResourcesInitialized(false) {
-    if (Settings::debugLogging)
+: state(width, height)
+{
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] Renderer::Renderer() started");
-}
-
-Renderer::~Renderer() {
-    if (Settings::debugLogging && !glInitialized)
-        LUCHS_LOG_HOST("[DEBUG] Cleanup skipped - OpenGL not initialized");
-
-    if (glInitialized) {
-        if (Settings::debugLogging)
-            LUCHS_LOG_HOST("[DEBUG] Calling cleanup()");
-        cleanup();
     }
 }
 
-bool Renderer::initGL() {
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] initGL() called");
+Renderer::~Renderer() {
+    cleanup();
+}
 
+bool Renderer::initGL() {
+    if (glInitialized) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[WARN] Renderer::initGL() called twice; ignoring");
+        }
+        return true;
+    }
+
+    // Fenster + GL-Kontext
     state.window = RendererWindow::createWindow(state.width, state.height, this);
     if (!state.window) {
         LUCHS_LOG_HOST("[ERROR] Failed to create GLFW window");
@@ -49,7 +49,7 @@ bool Renderer::initGL() {
 
     // createWindow() macht den Kontext bereits current; zweiter Aufruf ist harmlos.
     glfwMakeContextCurrent(state.window);
-    if (Settings::debugLogging) {
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] OpenGL context made current");
         if (glfwGetCurrentContext() != state.window) {
             LUCHS_LOG_HOST("[ERROR] Current OpenGL context is not the GLFW window!");
@@ -58,47 +58,32 @@ bool Renderer::initGL() {
         }
     }
 
-    // GLEW dynamisch initialisieren (Projektpolicy). Für Core-Profiles nötig:
-    glewExperimental = GL_TRUE;
-    if (glewInit() != GLEW_OK) {
-        LUCHS_LOG_HOST("[ERROR] glewInit() failed");
+    // GLEW init (idempotent genug; Fehler sauber loggen)
+    GLenum glewErr = glewInit();
+    if (glewErr != GLEW_OK) {
+        LUCHS_LOG_HOST("[FATAL] glewInit failed: %s", reinterpret_cast<const char*>(glewGetErrorString(glewErr)));
         RendererWindow::destroyWindow(state.window);
         state.window = nullptr;
-        glfwTerminate();
         return false;
     }
 
-    if (Settings::debugLogging) {
-        const GLubyte* version = glGetString(GL_VERSION);
-        LUCHS_LOG_HOST("[CHECK] OpenGL version: %s", version ? reinterpret_cast<const char*>(version) : "unknown");
-        GLenum err = glGetError();
-        LUCHS_LOG_HOST("[CHECK] glGetError after context init = 0x%04X", err);
-    }
+    // Swap-Interval NICHT mehr an Settings koppeln (Settings::vsync fehlt im Build).
+    // Wir lassen den aktuell gesetzten GLFW-Default unangetastet.
 
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[CHECK] glPixelStorei set GL_UNPACK_ALIGNMENT = 1");
-
-    // Low-level Pipeline (FSQ/Shader etc.)
-    RendererPipeline::init();
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] RendererPipeline initialized");
-
-    // GL-Resourcen + CUDA-Interop
+    // GL-Ressourcen anlegen: PBO + Texture (immutable storage)
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
-        state.pbo.initAsPixelBuffer(state.width, state.height);
-        // Texture via Utils (immutable storage). Wrapper bleibt Eigentümer des Handles.
+        state.pbo = Hermelin::GLBuffer(OpenGLUtils::createPBO(state.width, state.height));
         state.tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(state.width, state.height));
 
-        // CUDA-Interop an PBO koppeln
+        // PBO bei CUDA registrieren (CUDA-13 kompatible Registrierung in CudaInterop)
         CudaInterop::registerPBO(state.pbo);
 
         // Saubere GL-State: PBO unbinden
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
         glResourcesInitialized = true;
-        if (Settings::debugLogging) {
+        if constexpr (Settings::debugLogging) {
             GLint boundPBO = 0;
             glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundPBO);
             LUCHS_LOG_HOST("[CHECK] initGL - GL PBO bound: %d | PBO ID: %u", boundPBO, state.pbo.id());
@@ -106,8 +91,15 @@ bool Renderer::initGL() {
     }
 
     glInitialized = true;
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DEBUG] OpenGL init complete");
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[INIT] GL init complete (w=%d h=%d)", state.width, state.height);
+    }
+
+    // GPU-Pipeline vorbereiten
+    RendererPipeline::init();
+
+    // Device-Buffer anlegen (tileSize bleibt in Pipeline/Zoom-Logik konfiguriert)
+    state.setupCudaBuffers(Settings::BASE_TILE_SIZE > 0 ? Settings::BASE_TILE_SIZE : 16);
 
     return true;
 }
@@ -117,50 +109,49 @@ bool Renderer::shouldClose() const {
 }
 
 void Renderer::renderFrame() {
-    glClear(GL_COLOR_BUFFER_BIT);
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] glClear called");
-
-    if (Settings::debugLogging)
+    // Delegation an Pipeline: komplette Reihenfolge (CUDA → Analyse → Upload → Draw → Logs)
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] Entering Renderer::renderFrame");
+    }
 
-    // Ab hier übernimmt die Loop die komplette Frame-Pipeline (Upload & Draw)
-    RendererLoop::renderFrame_impl(this->state);
+    // Frame ausführen (kein Device-wide Sync in diesem Pfad)
+    FramePipeline::execute(state);
 
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIPE] Returned from RendererLoop::renderFrame_impl");
-
-    // Kein doppelter Draw – die Pipeline zeichnet bereits.
+    // Fenster zeigen / Events pumpen
     glfwSwapBuffers(state.window);
-    if (Settings::debugLogging)
-        LUCHS_LOG_HOST("[DRAW] glfwSwapBuffers called");
-
-#if ENABLE_ZOOM_LOGGING
-    LUCHS_LOG_HOST("[ZOOM] post-frame: zoom=%.6f center=(%.6f,%.6f)",
-                   state.zoom, state.center.x, state.center.y);
-#endif
+    glfwPollEvents();
 }
 
 void Renderer::freeDeviceBuffers() {
-    state.h_entropy.clear();
-    state.h_contrast.clear();
+    // GPU/GL Buffers
+    state.d_iterations.free();
+    state.d_entropy.free();
+    state.d_contrast.free();
+
+    state.pbo.free();
+    state.tex.free();
 }
 
 void Renderer::resize(int newW, int newH) {
-    LUCHS_LOG_HOST("[INFO] Resize: %d x %d", newW, newH);
-    state.resize(newW, newH);
-    glViewport(0, 0, newW, newH);
-    if (Settings::debugLogging) {
-        GLint boundPBO = 0;
-        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundPBO);
-        LUCHS_LOG_HOST("[CHECK] resize - GL PBO bound: %d | PBO ID: %u", boundPBO, state.pbo.id());
+    if (newW <= 0 || newH <= 0) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[WARN] Renderer::resize ignored invalid size %dx%d", newW, newH);
+        }
+        return;
     }
+    if (newW == state.width && newH == state.height) return;
+
+    // State passt intern PBO/Tex/Device-Buffer an und registriert PBO ggf. neu.
+    state.resize(newW, newH);
+
+    // Swap-Interval nicht anfassen; vorhandene GLFW-Einstellung bleibt bestehen.
 }
 
 void Renderer::cleanup() {
-    // WICHTIG: Alle GL-Objekte löschen, solange ein gültiger Kontext existiert!
+    if (!glInitialized) return;
+
+    // GL abhängig: Pipeline zuerst
     RendererPipeline::cleanup();
-    WarzenschweinOverlay::cleanup();
     HeatmapOverlay::cleanup();
 
     // CUDA-Interop freigeben (benötigt keinen GL-Kontext)
