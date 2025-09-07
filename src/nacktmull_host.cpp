@@ -1,8 +1,3 @@
-///// Otter: Host-Mandelbrot (CPU) - schnelle Referenz mit inkrementeller NDC und Row-Ptr.
-///// Schneefuchs: Deterministisch, ASCII-only; keine iostreams; Guards fuer Edge-Cases.
-///// Maus: Keine versteckten Pfade; nur lokale Optimierungen, API unveraendert.
-///// Datei: src/nacktmull_host.cpp
-
 #include "nacktmull_host.hpp"
 #include <chrono>
 #include <cmath>
@@ -11,19 +6,30 @@
 
 namespace Nacktmull {
 
+// Likely-inline Kernel: minimal Arithmetik, FMA wo sinnvoll (Host-CPU)
 static inline int mandelbrotIter(double cx, double cy, int maxIter, double bailoutSq)
 {
     double zx = 0.0, zy = 0.0;
     int it = 0;
-    while (it < maxIter) {
-        // z = z^2 + c
-        const double zx_new = zx * zx - zy * zy + cx;
-        const double zy_new = 2.0 * zx * zy + cy;
-        zx = zx_new; zy = zy_new;
 
-        const double r2 = zx * zx + zy * zy;
+    while (it < maxIter) {
+        // z' = z^2 + c
+        // Berechne neues z aus altem z (x=zx, y=zy)
+        const double x2 = zx * zx;
+        const double y2 = zy * zy;
+
+        // zx' = (x^2 - y^2) + cx
+        const double zx_new = (x2 - y2) + cx;
+
+        // zy' = 2*x*y + cy  → per FMA: (zx+zx)*zy + cy  (eine Mul weniger, identisches Ergebnis)
+        const double zy_new = std::fma(zx + zx, zy, cy);
+
+        // |z'|^2  → FMA reduziert Rundungsfehler und Instruktionen
+        const double r2 = std::fma(zx_new, zx_new, zy_new * zy_new);
         if (r2 > bailoutSq) break;
 
+        zx = zx_new;
+        zy = zy_new;
         ++it;
     }
     return it;
@@ -38,7 +44,7 @@ double compute_host_iterations(int width, int height,
     using clock = std::chrono::high_resolution_clock;
     const auto t0 = clock::now();
 
-    // Edge-Cases: leere Flaeche oder kein Budget -> sofort zurueck
+    // Edge-Cases
     if (width <= 0 || height <= 0 || maxIter <= 0) {
         outIters.clear();
         const auto t1 = clock::now();
@@ -47,29 +53,36 @@ double compute_host_iterations(int width, int height,
 
     outIters.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
 
-    // Vorberechnungen
+    // Vorberechnungen (alles double, deterministisch)
     const double invZoom = (zoom != 0.0) ? (1.0 / zoom) : 1.0;
     const double ar      = static_cast<double>(width) / static_cast<double>(height);
     constexpr double bailoutSq = 4.0;
 
-    // Inkrementelle NDC-Abbildung: ndc = a*x + b
-    const double stepX = 2.0 / static_cast<double>(width);
-    const double baseX = (1.0 / static_cast<double>(width)) - 1.0;   // x=0 -> (0.5/width)*2 - 1
-    const double stepY = 2.0 / static_cast<double>(height);
-    const double baseY = (1.0 / static_cast<double>(height)) - 1.0;  // y=0 -> (0.5/height)*2 - 1
+    // Inkrementelle Abbildung ohne per-Pixel-Divisionen:
+    // ndcX = (2/w)*(x+0.5) - 1  → cx = offX + ndcX * invZoom * ar
+    // Wir laufen direkt über cx inkrementell:
+    const double stepX_ndc = 2.0 / static_cast<double>(width);
+    const double baseX_ndc = (1.0 / static_cast<double>(width)) - 1.0; // x=0 → (0.5/w)*2 - 1
+    const double cx_step   = stepX_ndc * invZoom * ar;
+    const double cx_row0   = offX + baseX_ndc * invZoom * ar;
+
+    // Für Y bleibt es pro Zeile konstant:
+    const double stepY_ndc = 2.0 / static_cast<double>(height);
+    const double baseY_ndc = (1.0 / static_cast<double>(height)) - 1.0;
 
     int* __restrict dst = outIters.data();
 
     for (int y = 0; y < height; ++y) {
-        const double ndcY = baseY + stepY * static_cast<double>(y);
+        // cy für diese Zeile
+        const double ndcY = baseY_ndc + stepY_ndc * static_cast<double>(y);
         const double cy   = offY + ndcY * invZoom;
 
+        // Zeilenzeiger + inkrementeller cx
         int* __restrict row = dst + static_cast<size_t>(y) * static_cast<size_t>(width);
+        double cx = cx_row0;
 
-        // x-Startwert pro Zeile und inkrementell laufen
-        double ndcX = baseX;
-        for (int x = 0; x < width; ++x, ndcX += stepX) {
-            const double cx = offX + ndcX * invZoom * ar;
+        // Innerer Loop: nur noch ein Add pro Pixel für cx
+        for (int x = 0; x < width; ++x, cx += cx_step) {
             row[x] = mandelbrotIter(cx, cy, maxIter, bailoutSq);
         }
     }
