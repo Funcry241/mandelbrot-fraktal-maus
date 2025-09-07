@@ -103,7 +103,7 @@ namespace {
         int idx = (x & 3) | ((y & 3) << 2);
         // Map to [-0.5, +0.5) and scale very small (~1/256)
         float u = (float)M[idx] * (1.0f/16.0f);   // 0..0.9375
-        return (u - 0.5f) * (1.0f/256.0f);        // ~±0.002
+        return (u - 0.5f) * (1.0f/64.0f);        // ~±0.002
     }
 
     __device__ inline float3 shade_from_iter(int it, int maxIter, float dither){
