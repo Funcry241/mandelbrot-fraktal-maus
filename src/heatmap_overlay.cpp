@@ -1,5 +1,4 @@
-///// Otter: Heatmap-Overlay – oben rechts wie zuvor (100 px hoch, 16 px Padding), Fenster-Aspect (width/height) -> keine Verzerrung.
-///  OpenGLUtils-Fallback aktiv, API toggle()/cleanup() vorhanden, /W4-/WX- & CUDA 13 clean.
+///// Otter: Heatmap-Overlay – oben rechts, keine Verzerrung (einheitliches Tile-Scaling); OpenGLUtils-Fallback; /W4 /WX; CUDA 13 ok.
 
 #pragma warning(push)
 #pragma warning(disable: 4100) // unused [[maybe_unused]] params in some builds
@@ -57,8 +56,8 @@ static const char* vertexShaderSrc = R"GLSL(
 layout(location = 0) in vec2 aPos;
 layout(location = 1) in float aValue;
 
-uniform vec2 uScale;   // von Kachel- in NDC-Skala
-uniform vec2 uOffset;  // NDC-Offset
+uniform vec2 uScale;   // Kachel->NDC-Skala (pro Tile)
+uniform vec2 uOffset;  // NDC-Offset der unteren linken Ecke des Overlays
 
 out float vValue;
 
@@ -253,7 +252,7 @@ void drawOverlay(const std::vector<float>& entropy,
         return;
     }
 
-    // Dimensionen der Heatmap-Kacheln
+    // Heatmap-Grid
     const int tilesX = std::max(1, width  / std::max(1, tileSize));
     const int tilesY = std::max(1, height / std::max(1, tileSize));
     const size_t numTiles = static_cast<size_t>(tilesX) * static_cast<size_t>(tilesY);
@@ -264,7 +263,7 @@ void drawOverlay(const std::vector<float>& entropy,
         return;
     }
 
-    // Werte normieren (einfach, deterministisch)
+    // Normierung
     float minV = +1e30f, maxV = -1e30f;
     for (size_t i = 0; i < numTiles; ++i) {
         const float v = entropy[i];
@@ -273,34 +272,9 @@ void drawOverlay(const std::vector<float>& entropy,
     }
     const float span = (maxV - minV) > 1e-20f ? (maxV - minV) : 1.0f;
 
-    // Finde Max-Index (nur Logging/Marker)
-    size_t maxIdx = 0;
-    float  maxVal = -1e30f;
-    for (size_t i = 0; i < numTiles; ++i) {
-        const float v = (entropy[i] - minV) / span;
-        if (v > maxVal) { maxVal = v; maxIdx = i; }
-    }
-
-    // ───────────── Ziel-Viewport: OBEN RECHTS – wie vorher ─────────────
-    constexpr int overlayHeightPx = 100;
-    // WICHTIG: Fenster-Aspect benutzen (width/height), NICHT tilesX/tilesY → sonst Verzerrung.
-    const double overlayWidthD = overlayHeightPx * (static_cast<double>(width) / static_cast<double>(height));
-    const int    overlayWidthPx = static_cast<int>(std::round(overlayWidthD));
-    constexpr int paddingX = 16;
-    constexpr int paddingY = 16;
-
-    // Von Kachel- in NDC-Skala (gesamte NDC-Breite/-Höhe = 2.0)
-    const float scaleX  = (float(overlayWidthPx)  / float(width)  / float(tilesX)) * 2.0f;
-    const float scaleY  = (float(overlayHeightPx) / float(height) / float(tilesY)) * 2.0f;
-
-    // Offset auf unteren linken Eckpunkt des OBEN-RECHTS-Viewports (Pixel → NDC)
-    const float offsetX = 1.0f - (float(overlayWidthPx  + paddingX) / float(width)  * 2.0f);
-    const float offsetY = 1.0f - (float(overlayHeightPx + paddingY) / float(height) * 2.0f);
-
-    // Vertexdaten für Dreiecks-Quads (pro Tile 6 Vertices, je (x,y,val))
+    // Datenaufbau: pro Tile 2 Dreiecke (x,y,val) in Kachelkoordinaten
     std::vector<float> data;
     data.reserve(6 * 3 * numTiles);
-
     for (int ty = 0; ty < tilesY; ++ty) {
         for (int tx = 0; tx < tilesX; ++tx) {
             const size_t i = static_cast<size_t>(ty) * static_cast<size_t>(tilesX) + static_cast<size_t>(tx);
@@ -319,6 +293,7 @@ void drawOverlay(const std::vector<float>& entropy,
         }
     }
 
+    // Programm/Buffer initialisieren
     if (overlayVAO == 0) {
         glGenVertexArrays(1, &overlayVAO);
         glGenBuffers(1, &overlayVBO);
@@ -326,7 +301,7 @@ void drawOverlay(const std::vector<float>& entropy,
         if (overlayShader == 0) {
             if constexpr (Settings::debugLogging)
                 LUCHS_LOG_HOST("[HM] ERROR: overlay shader creation failed.");
-            return; // Shader==0 on error -> no draw, kein State-Leak
+            return;
         }
         overlay_uScaleLoc  = glGetUniformLocation(overlayShader, "uScale");
         overlay_uOffsetLoc = glGetUniformLocation(overlayShader, "uOffset");
@@ -335,6 +310,33 @@ void drawOverlay(const std::vector<float>& entropy,
         }
     }
 
+    // ───────────── Viewport oben rechts ohne Verzerrung ─────────────
+    constexpr int overlayHeightPx = 100;
+    constexpr int paddingX = 16;
+    constexpr int paddingY = 16;
+
+    // Einheitliche Tile-Skalierung (in NDC) aus Höhe ableiten:
+    // s = NDC pro Tile = (overlayHeightPx / height) * 2 / tilesY
+    const float s = (static_cast<float>(overlayHeightPx) / static_cast<float>(height)) * 2.0f
+                    / static_cast<float>(tilesY);
+
+    // Daraus resultierende Overlay-Größe in NDC:
+    const float overlayHeightNDC = s * static_cast<float>(tilesY); // = 2 * overlayHeightPx / height
+    const float overlayWidthNDC  = s * static_cast<float>(tilesX); // AR exakt, Tiles bleiben quadratisch
+
+    // Pixel->NDC für Padding
+    const float padXNDC = (static_cast<float>(paddingX) / static_cast<float>(width))  * 2.0f;
+    const float padYNDC = (static_cast<float>(paddingY) / static_cast<float>(height)) * 2.0f;
+
+    // Untere linke Ecke des OBEN-RECHTS-Viewports
+    const float offsetX = 1.0f - padXNDC - overlayWidthNDC;
+    const float offsetY = 1.0f - padYNDC - overlayHeightNDC;
+
+    // Diese einheitliche Kachelskala in den Shader geben
+    const float scaleX = s;
+    const float scaleY = s;
+
+    // Render
     GLint prevVAO = 0, prevArray = 0, prevProg = 0;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArray);
@@ -364,9 +366,17 @@ void drawOverlay(const std::vector<float>& entropy,
     const GLenum errAfter  = glGetError();
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[HM] drawOverlay: verts=%zu  glErr=0x%x->0x%x  pos=top-right h=100px pad=16px w=%.1fpx",
-                       data.size()/3, errBefore, errAfter, float(overlayWidthPx));
+        LUCHS_LOG_HOST("[HM] drawOverlay: verts=%zu glErr=0x%x->0x%x s=%.6f off=(%.4f,%.4f) sizeNDC=(%.4f,%.4f)",
+                       data.size()/3, errBefore, errAfter, s, offsetX, offsetY,
+                       overlayWidthNDC, overlayHeightNDC);
     }
+
+#if HEATMAP_DRAW_MAX_MARKER
+    {
+        auto rc = tileIndexToPixelCenter(0, tilesX, tilesY, width, height);
+        (void)rc; // nur um ODR zu sichern, Marker standardmäßig aus
+    }
+#endif
 
     if (!wasBlend) glDisable(GL_BLEND);
     glDisableVertexAttribArray(0);
