@@ -23,10 +23,6 @@ struct DevLog {
         n = d_append_str(buf, (int)sizeof(buf), n, str);
         return *this;
     }
-    __device__ DevLog& sn(const char* str, int len) {
-        n = d_append_strn(buf, (int)sizeof(buf), n, str, len);
-        return *this;
-    }
     __device__ DevLog& c(char ch) {
         n = d_append_char(buf, (int)sizeof(buf), n, ch);
         return *this;
@@ -47,10 +43,6 @@ struct DevLog {
         n = d_append_hex_u64(buf, (int)sizeof(buf), n, v);
         return *this;
     }
-    __device__ DevLog& ptr(const void* p) {
-        n = d_append_ptr(buf, (int)sizeof(buf), n, p);
-        return *this;
-    }
     __device__ DevLog& b(bool v) {
         n = d_append_bool01(buf, (int)sizeof(buf), n, v);
         return *this;
@@ -67,18 +59,5 @@ struct DevLog {
 // -----------------------------------------------------------------------------
 // Public device logging macros
 // -----------------------------------------------------------------------------
-#if defined(__CUDA_ARCH__)
-// Simple: pass a ready-made C-string
-#define LUCHS_LOG_DEVICE(MSG) \
-    do { LuchsLogger::deviceLog(__FILE__, __LINE__, (MSG)); } while(0)
-
-// Builder: assemble a line without snprintf, then send
-// Example:
-//   LUCHS_LOG_DEVICE_BUILD( __dl.s("tile=").i(tile).s(" drop=").f(drop,4) );
-#define LUCHS_LOG_DEVICE_BUILD(BUILD_EXPR) \
-    do { luchs::DevLog __dl; BUILD_EXPR; __dl.send(__FILE__, __LINE__); } while(0)
-#else
-// Host-side no-ops to keep headers includable everywhere
-#define LUCHS_LOG_DEVICE(MSG)            do { (void)sizeof(MSG); } while(0)
-#define LUCHS_LOG_DEVICE_BUILD(EXPR)     do { } while(0)
-#endif
+#define LUCHS_LOG_DEVICE_BUILD(expr) do { ::luchs::DevLog __dl; expr; __dl.send(__FILE__, __LINE__); } while(0)
+#define LUCHS_LOG_DEVICE(msg)        do { LuchsLogger::deviceLog(__FILE__, __LINE__, (msg)); } while(0)
