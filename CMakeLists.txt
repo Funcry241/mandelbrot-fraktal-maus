@@ -135,8 +135,6 @@ add_executable(mandelbrot_otterdream
   src/hud_text.cpp
   src/nacktmull.cu
   src/nacktmull_anchor.cpp
-  src/progressive_iteration.cu
-  src/progressive_shade_impl.cu
 )
 
 # ---------------------- Compile-Options --------------------
