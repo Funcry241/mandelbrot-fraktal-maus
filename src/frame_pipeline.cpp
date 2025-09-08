@@ -1,6 +1,6 @@
 ///// Otter: Feste Aufrufreihenfolge - updateTextureFromPBO(PBO, TEX, W, H); ASCII-Logs; keine Compat-Wrapper.
-///// Schneefuchs: /WX-fest; keine toten TU-scope-Symbole bei deaktiviertem Progressive-Pfad.
-///// Maus: Progressive-Code nur bauen, wenn SETTINGS_PROGRESSIVE_ENABLED=1.
+///// Schneefuchs: /WX-fest; keine toten TU-scope-Symbole (Progressive komplett entfernt).
+///// Maus: Diese TU nutzt ausschließlich den klassischen Pfad; Progressive wird hier NICHT gebaut.
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
@@ -11,7 +11,7 @@
 #include <vector_functions.h> // make_float2
 #include <cuda_runtime.h>     // CUDA events for timing (no device-wide sync)
 
-#include "renderer_resources.hpp"    // OpenGLUtils::setGLResourceContext(const char*), OpenGLUtils::updateTextureFromPBO(GLuint pbo, GLuint tex, int w, int h)
+#include "renderer_resources.hpp"    // OpenGLUtils::setGLResourceContext(...), OpenGLUtils::updateTextureFromPBO(...)
 #include "renderer_pipeline.hpp"     // RendererPipeline::drawFullscreenQuad(...)
 #include "cuda_interop.hpp"          // CudaInterop::renderCudaFrame(...)
 #include "frame_context.hpp"
@@ -26,22 +26,6 @@
 #include "luchs_cuda_log_buffer.hpp"
 #include "common.hpp"
 #include "settings.hpp"
-
-#ifndef SETTINGS_PROGRESSIVE_ENABLED
-#define SETTINGS_PROGRESSIVE_ENABLED 0
-#endif
-
-#ifndef OTTER_ENABLE_PBO_MAP_AND_LOG
-#define OTTER_ENABLE_PBO_MAP_AND_LOG 0
-#endif
-
-#if SETTINGS_PROGRESSIVE_ENABLED
-  // Progressive-Iteration (Resume) – nur wenn gebaut
-  #include "progressive_iteration.cuh"
-  #include "progressive_shade.cuh"
-  #include "progressive_controller.hpp"
-  #include "bear_CudaPBOResource.hpp"
-#endif
 
 namespace FramePipeline
 {
@@ -76,7 +60,7 @@ namespace {
         }
     }
 
-    // --- Diagnose: GL-PBO kurz mappen und die ersten Bytes pruefen ---
+    // --- Diagnose: GL-PBO kurz mappen und die ersten Bytes prüfen (nur Debug) ---
     [[maybe_unused]] static void peekPBO(GLuint pbo) {
         if constexpr (!Settings::debugLogging) {
             (void)pbo;
@@ -102,7 +86,7 @@ namespace {
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prev));
     }
 
-    // --- CUDA 13 Vorbereitung: Events statt cudaDeviceSynchronize() -----------
+    // --- CUDA 13: Events statt cudaDeviceSynchronize() -----------
     static cudaEvent_t g_evStart = nullptr;
     static cudaEvent_t g_evStop  = nullptr;
     static bool        g_evInit  = false;
@@ -114,20 +98,7 @@ namespace {
             g_evInit = true;
         }
     }
-
-#if SETTINGS_PROGRESSIVE_ENABLED
-    // ---------------- Progressive: TU-lokaler Zustand & Helpers ----------------
-    static prog::CudaProgressiveState g_progState;
-    static prog::ProgressivePI        g_progPI;      // Ziel ~160 ms (Default)
-    static uint32_t                   g_progChunk = 512; // Startwert
-
-    // Mapping-Helfer: height-based scale; deterministisch
-    static inline double scaleFromZoom(double zoom) {
-        constexpr double BASE_HEIGHT_SPAN = 3.0;
-        return BASE_HEIGHT_SPAN / (zoom > 0.0 ? zoom : 1.0);
-    }
-#endif // SETTINGS_PROGRESSIVE_ENABLED
-}
+} // anon ns
 
 // --------------------------------- frame begin --------------------------------
 static void beginFrame(FrameContext& fctx, RendererState& state) {
@@ -234,7 +205,7 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
         LuchsLogger::flushDeviceLogToHost(0);
     }
 
-    // Device-Logs periodisch spuelen
+    // Device-Logs periodisch spülen
     {
         const cudaError_t err = cudaPeekAtLastError();
         if constexpr (Settings::debugLogging) {
@@ -284,95 +255,6 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
         }
     }
 }
-
-#if SETTINGS_PROGRESSIVE_ENABLED
-// ------------------------ CUDA + analysis (Progressive) -----------------------
-static void computeCudaFrame_progressive(FrameContext& fctx, RendererState& state) {
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PIPE][PROG] computeCudaFrame_progressive: %dx%d zoom=%.5f tilesz=%d chunk=%u",
-                       fctx.width, fctx.height, fctx.zoom, fctx.tileSize, (unsigned)g_progChunk);
-    }
-
-    const int tilesX   = (fctx.width  + fctx.tileSize - 1) / fctx.tileSize;
-    const int tilesY   = (fctx.height + fctx.tileSize - 1) / fctx.tileSize;
-    const int numTiles = tilesX * tilesY;
-
-    if (fctx.tileSize <= 0 || numTiles <= 0) {
-        LUCHS_LOG_HOST("[FATAL][PROG] invalid tileSize=%d or numTiles=%d", fctx.tileSize, numTiles);
-        return;
-    }
-
-    // Stelle sicher, dass Analysepuffer existieren (Overlay/HUD erwartet Groessen)
-    state.setupCudaBuffers(fctx.tileSize);
-    if ((int)fctx.h_entropy.size() != numTiles) fctx.h_entropy.assign((size_t)numTiles, 0.0f);
-    if ((int)fctx.h_contrast.size() != numTiles) fctx.h_contrast.assign((size_t)numTiles, 0.0f);
-
-    // 1) Progressive Step (Iterationsbudget hinzufuegen)
-    auto scaleFromZoom_local = [](double zoom) {
-        constexpr double BASE_HEIGHT_SPAN = 3.0;
-        return BASE_HEIGHT_SPAN / (zoom > 0.0 ? zoom : 1.0);
-    };
-
-    prog::ViewportParams vp;
-    vp.centerX = (double)fctx.offset.x;
-    vp.centerY = (double)fctx.offset.y;
-    vp.scale   = scaleFromZoom_local((double)fctx.zoom); // height-based
-    vp.width   = fctx.width;
-    vp.height  = fctx.height;
-
-    prog::ProgressiveConfig cfg;
-    cfg.maxIterCap    = (uint32_t)fctx.maxIterations;
-    cfg.chunkIter     = g_progChunk;
-    cfg.bailout2      = 4.0f;
-    cfg.resetOnChange = true;
-    cfg.debugDevice   = Settings::debugLogging ? true : false;
-
-    const auto met = g_progState.step(vp, cfg, /*stream=*/0);
-
-    // 2) Shade in den PBO (CUDA-Interop)
-  #if OTTER_ENABLE_PBO_MAP_AND_LOG
-    {
-        uchar4* d_pixels = state.pbo.mapAndLog();
-        if (!d_pixels) {
-            LUCHS_LOG_HOST("[ERROR][PROG] PBO map returned null; skipping shade");
-        } else {
-            prog::shade_progressive_to_rgba(g_progState, d_pixels, fctx.width, fctx.height, cfg.maxIterCap, /*stream=*/0);
-        }
-        state.pbo.unmapAndLog();
-    }
-  #else
-    LUCHS_LOG_HOST("[PROG] PBO map/unmap path disabled (OTTER_ENABLE_PBO_MAP_AND_LOG=0)");
-  #endif
-
-    // 3) Budgetregelung (PI)
-    g_progChunk = g_progPI.suggest(g_progChunk, met.kernel_ms);
-
-    // 4) Device-Logs periodisch spuelen (identisch zur klassischen Pipeline)
-    {
-        const cudaError_t err = cudaPeekAtLastError();
-        if constexpr (Settings::debugLogging) {
-            if (err != cudaSuccess || (g_frame % 30) == 0) {
-                LUCHS_LOG_HOST("[PIPE][PROG] Flushing device logs (err=%d, frame=%d)", (int)err, g_frame);
-                LuchsLogger::flushDeviceLogToHost(0);
-            }
-        } else {
-            if (err != cudaSuccess) {
-                LuchsLogger::flushDeviceLogToHost(0);
-            }
-        }
-    }
-
-    // 5) Zoom-Analyse (vorerst neutral: keine Zielauswahl ohne E/C)
-    fctx.shouldZoom  = false;
-    fctx.lastEntropy = 0.0f;
-    fctx.lastContrast= 0.0f;
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PROG] step addIter=%u ms=%.3f survivors=%u scale=%.17g",
-                       (unsigned)met.addIterApplied, met.kernel_ms, (unsigned)met.stillActive, vp.scale);
-    }
-}
-#endif // SETTINGS_PROGRESSIVE_ENABLED
 
 // ------------------------------- apply zoom step ------------------------------
 static void applyZoomStep(FrameContext& fctx, CommandBus& bus) {
@@ -459,22 +341,18 @@ void execute(RendererState& state) {
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
     g_ctx.zoom          = static_cast<float>(state.zoom);
-    // Nacktmull-Pullover: State haelt center (double2); FrameContext haelt offset (float2)
+    // Nacktmull-Pullover: State hält center (double2); FrameContext hält offset (float2)
     g_ctx.offset        = make_float2((float)state.center.x, (float)state.center.y);
     g_ctx.maxIterations = state.maxIterations;
     g_ctx.tileSize      = computeTileSizeFromZoom(g_ctx.zoom);
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
-    // Pfadwahl: Klassisch vs. Progressive-Resume (compile-time Flag)
-#if SETTINGS_PROGRESSIVE_ENABLED
-    computeCudaFrame_progressive(g_ctx, state);
-#else
+    // Klassischer Pfad (Progressive vollständig entfernt)
     computeCudaFrame(g_ctx, state);
-#endif
 
     applyZoomStep(g_ctx, g_zoomBus);
 
-    // Ergebnisse zurueck nach State
+    // Ergebnisse zurück nach State
     state.zoom   = g_ctx.zoom;
     state.center = { (double)g_ctx.offset.x, (double)g_ctx.offset.y };
 
@@ -488,7 +366,7 @@ void execute(RendererState& state) {
     g_frameTotal = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
     state.lastTimings.frameTotalMs = g_frameTotal;
 
-    // Exakte uncapped Framezeit -> FpsMeter (Anzeige im naechsten Frame)
+    // Exakte uncapped Framezeit -> FpsMeter (Anzeige im nächsten Frame)
     FpsMeter::updateCoreMs(g_frameTotal);
 
     if (perfShouldLog(g_frame)) {
