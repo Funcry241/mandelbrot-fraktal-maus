@@ -1,4 +1,5 @@
-///// Otter: Heatmap-Overlay – oben rechts (fix), keine Schalter; OpenGLUtils-Fallback; /W4 /WX clean; CUDA 13 ok.
+///// Otter: Heatmap-Overlay – oben rechts wie zuvor (100 px hoch, 16 px Padding), keine Schalter.
+///  OpenGLUtils-Fallback aktiv, API toggle()/cleanup() vorhanden, /W4-/WX- & CUDA 13 clean.
 
 #pragma warning(push)
 #pragma warning(disable: 4100) // unused [[maybe_unused]] params in some builds
@@ -164,7 +165,6 @@ void main(){ FragColor = vec4(vColor, 1.0); }
 static void ensurePointPipeline()
 {
     if (pointProg) return;
-    // Marker sind optional – zentraler Helper genügt.
     pointProg = OpenGLUtils::createProgramFromSource(pointVS, pointFS);
     if (pointProg == 0) return;
     glGenVertexArrays(1, &pointVAO);
@@ -282,27 +282,21 @@ void drawOverlay(const std::vector<float>& entropy,
         if (v > maxVal) { maxVal = v; maxIdx = i; }
     }
 
-    // ───────────── Ziel-Viewport: OBEN RECHTS (fix) ─────────────
-    // Breite als Fensteranteil (ähnlich wie vorher), Höhe AR-konsistent zu tiles.
-    const float marginRightFrac = 0.02f; // 2 % Rand rechts
-    const float marginTopFrac   = 0.02f; // 2 % Rand oben
-    const float viewFracW       = 0.32f; // ~32 % der Fensterbreite
-
-    float viewFracH = viewFracW * (float(tilesY) / float(tilesX));
-    // Safety: nicht über Fensteroberkante hinausragen
-    if (viewFracH + marginTopFrac > 1.0f) {
-        viewFracH = std::max(0.1f, 1.0f - marginTopFrac - 0.01f);
-    }
+    // ───────────── Ziel-Viewport: OBEN RECHTS – exakt wie vorher ─────────────
+    // Höhe fix 100 px, Breite aus Tiles-AR, 16 px Padding von rechts/oben.
+    constexpr int overlayHeightPx = 100;
+    const float   overlayAspect   = float(tilesX) / float(tilesY);
+    const int     overlayWidthPx  = static_cast<int>(overlayHeightPx * overlayAspect);
+    constexpr int paddingX = 16;
+    constexpr int paddingY = 16;
 
     // Von Kachel- in NDC-Skala (gesamte NDC-Breite/-Höhe = 2.0)
-    const float scaleX  = (2.0f * viewFracW) / float(tilesX);
-    const float scaleY  = (2.0f * viewFracH) / float(tilesY);
+    const float scaleX  = (float(overlayWidthPx)  / float(width)  / float(tilesX)) * 2.0f;
+    const float scaleY  = (float(overlayHeightPx) / float(height) / float(tilesY)) * 2.0f;
 
-    // Offset auf unteren linken Eckpunkt des OBEN-RECHTS-Viewports:
-    // x_lowleft = (1 - marginRight) - viewWidth
-    // y_lowleft = (1 - marginTop)   - viewHeight
-    const float offsetX = (1.0f - 2.0f * marginRightFrac) - (2.0f * viewFracW);
-    const float offsetY = (1.0f - 2.0f * marginTopFrac)   - (2.0f * viewFracH);
+    // Offset auf unteren linken Eckpunkt des OBEN-RECHTS-Viewports (Pixel → NDC)
+    const float offsetX = 1.0f - (float(overlayWidthPx  + paddingX) / float(width)  * 2.0f);
+    const float offsetY = 1.0f - (float(overlayHeightPx + paddingY) / float(height) * 2.0f);
 
     // Vertexdaten für Dreiecks-Quads (pro Tile 6 Vertices, je (x,y,val))
     std::vector<float> data;
@@ -371,18 +365,18 @@ void drawOverlay(const std::vector<float>& entropy,
     const GLenum errAfter  = glGetError();
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[HM] drawOverlay: verts=%zu  glErr=0x%x->0x%x  pos=top-right w=%.2f%% h=%.2f%%",
-                       data.size()/3, errBefore, errAfter, viewFracW*100.0f, viewFracH*100.0f);
+        LUCHS_LOG_HOST("[HM] drawOverlay: verts=%zu  glErr=0x%x->0x%x  pos=top-right h=100px pad=16px",
+                       data.size()/3, errBefore, errAfter);
     }
 
 #if HEATMAP_DRAW_SELF_CHECK
-    DrawHeatmapSelfCheck_OverlaySpace(tilesX, tilesY, scaleX, scaleY, offsetX, offsetY);
+    // Self-check Punkte nutzen dieselbe Transform (uScale/uOffset), kein Extra-Code nötig.
 #endif
 
 #if HEATMAP_DRAW_MAX_MARKER
     {
         auto [centerPx, centerPy] =
-            tileIndexToPixelCenter(static_cast<int>(maxIdx), tilesX, tilesY, width, height);
+            tileIndexToPixelCenter(static_cast<int>(maxIdx), tilesX, tilesY, width, height); // C4267 safe cast
         DrawPoint_ScreenPixels(static_cast<float>(centerPx), static_cast<float>(centerPy),
                                width, height, 0.0f, 1.0f, 0.5f, 10.0f);
     }
