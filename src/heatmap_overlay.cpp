@@ -1,7 +1,4 @@
-///// Otter: Heatmap-Overlay – sanfte Zentralisierung (OpenGLUtils-Fallback), 0-Warnungen unter /W4 /WX, CUDA 13-sauber.
-///// Schneefuchs: Keine Designänderung, nur minimale Ankopplung; Fallback bewahrt altes Verhalten; ASCII-Logs; deterministisch.
-///// Maus: API fix: toggle()/cleanup() implementiert; createOverlayProgram nutzt OpenGLUtils, fällt sonst auf lokale compile/link zurück.
-///// Datei: src/heatmap_overlay.cpp
+///// Otter: Heatmap-Overlay – oben rechts (fix), keine Schalter; OpenGLUtils-Fallback; /W4 /WX clean; CUDA 13 ok.
 
 #pragma warning(push)
 #pragma warning(disable: 4100) // unused [[maybe_unused]] params in some builds
@@ -130,8 +127,7 @@ static GLuint linkProgram(GLuint vs, GLuint fs)
     return prog;
 }
 
-// Nur H7.a: Erst zentral versuchen, bei 0 auf lokalen Pfad zurückfallen.
-// Keine weitere Logik/Seiteneffekte.
+// Erst zentral versuchen, bei 0 auf lokalen Pfad zurückfallen.
 static GLuint createOverlayProgram()
 {
     if (GLuint prog = OpenGLUtils::createProgramFromSource(vertexShaderSrc, fragmentShaderSrc))
@@ -168,7 +164,7 @@ void main(){ FragColor = vec4(vColor, 1.0); }
 static void ensurePointPipeline()
 {
     if (pointProg) return;
-    // Direkt zentral erzeugen (hier ohne Fallback – Marker sind optional)
+    // Marker sind optional – zentraler Helper genügt.
     pointProg = OpenGLUtils::createProgramFromSource(pointVS, pointFS);
     if (pointProg == 0) return;
     glGenVertexArrays(1, &pointVAO);
@@ -213,43 +209,6 @@ static void drawPoints(const float* pts, int count, float scaleX, float scaleY,
 }
 #endif // HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
 
-// ───────────────────────────── Optional-Helper ──────────────────────────────
-#if HEATMAP_DRAW_SELF_CHECK
-#pragma warning(push)
-#pragma warning(disable: 4505) // unreferenced static removed (wenn nicht genutzt)
-static void DrawHeatmapSelfCheck_OverlaySpace(int tilesX, int tilesY,
-                                              float scaleX, float scaleY,
-                                              float offsetX, float offsetY)
-{
-    const float pts[5][5] = {
-        { 0.5f,        0.5f,         0.0f, 0.0f, 1.0f },
-        { tilesX-0.5f, 0.5f,         0.0f, 1.0f, 0.0f },
-        { tilesX-0.5f, tilesY-0.5f,  1.0f, 1.0f, 0.0f },
-        { 0.5f,        tilesY-0.5f,  1.0f, 0.0f, 1.0f },
-        { tilesX*0.5f, tilesY*0.5f,  1.0f, 0.0f, 0.0f },
-    };
-    drawPoints(&pts[0][0], 5, scaleX, scaleY, offsetX, offsetY, 10.0f);
-}
-#pragma warning(pop)
-#endif
-
-#if HEATMAP_DRAW_MAX_MARKER
-#pragma warning(push)
-#pragma warning(disable: 4505)
-static void DrawPoint_ScreenPixels(float px, float py, int width, int height,
-                                   float r, float g, float b, float sizePx)
-{
-    const float scaleX =  2.0f / float(width);
-    const float scaleY =  2.0f / float(height);
-    const float offX   = -1.0f;
-    const float offY   = -1.0f;
-
-    const float pts[1][5] = { { px, py, r, g, b } };
-    drawPoints(&pts[0][0], 1, scaleX, scaleY, offX, offY, sizePx);
-}
-#pragma warning(pop)
-#endif
-
 // ───────────────────────────── Lifetime / Draw / API ────────────────────────
 static void releaseGLResources()
 {
@@ -265,17 +224,10 @@ static void releaseGLResources()
     overlay_uScaleLoc = overlay_uOffsetLoc = -1;
 }
 
-void cleanup()   // API erwartet "cleanup()" (siehe Linkerfehlermeldung)
-{
-    releaseGLResources();
-}
+void cleanup()   { releaseGLResources(); }
+void shutdown()  { releaseGLResources(); }
 
-void shutdown()  // optional; Alias auf cleanup (falls woanders verwendet)
-{
-    releaseGLResources();
-}
-
-void toggle(RendererState& ctx) // API erwartet "toggle(RendererState&)"
+void toggle(RendererState& ctx)
 {
     ctx.heatmapOverlayEnabled = !ctx.heatmapOverlayEnabled;
     if constexpr (Settings::debugLogging) {
@@ -330,21 +282,39 @@ void drawOverlay(const std::vector<float>& entropy,
         if (v > maxVal) { maxVal = v; maxIdx = i; }
     }
 
+    // ───────────── Ziel-Viewport: OBEN RECHTS (fix) ─────────────
+    // Breite als Fensteranteil (ähnlich wie vorher), Höhe AR-konsistent zu tiles.
+    const float marginRightFrac = 0.02f; // 2 % Rand rechts
+    const float marginTopFrac   = 0.02f; // 2 % Rand oben
+    const float viewFracW       = 0.32f; // ~32 % der Fensterbreite
+
+    float viewFracH = viewFracW * (float(tilesY) / float(tilesX));
+    // Safety: nicht über Fensteroberkante hinausragen
+    if (viewFracH + marginTopFrac > 1.0f) {
+        viewFracH = std::max(0.1f, 1.0f - marginTopFrac - 0.01f);
+    }
+
+    // Von Kachel- in NDC-Skala (gesamte NDC-Breite/-Höhe = 2.0)
+    const float scaleX  = (2.0f * viewFracW) / float(tilesX);
+    const float scaleY  = (2.0f * viewFracH) / float(tilesY);
+
+    // Offset auf unteren linken Eckpunkt des OBEN-RECHTS-Viewports:
+    // x_lowleft = (1 - marginRight) - viewWidth
+    // y_lowleft = (1 - marginTop)   - viewHeight
+    const float offsetX = (1.0f - 2.0f * marginRightFrac) - (2.0f * viewFracW);
+    const float offsetY = (1.0f - 2.0f * marginTopFrac)   - (2.0f * viewFracH);
+
     // Vertexdaten für Dreiecks-Quads (pro Tile 6 Vertices, je (x,y,val))
     std::vector<float> data;
     data.reserve(6 * 3 * numTiles);
-    const float scaleX = 2.0f / float(tilesX);
-    const float scaleY = 2.0f / float(tilesY);
-    const float offsetX = -1.0f;
-    const float offsetY = -1.0f;
 
     for (int ty = 0; ty < tilesY; ++ty) {
         for (int tx = 0; tx < tilesX; ++tx) {
             const size_t i = static_cast<size_t>(ty) * static_cast<size_t>(tilesX) + static_cast<size_t>(tx);
             const float v  = (entropy[i] - minV) / span;
 
-            const float x0 = float(tx) + 0.0f;
-            const float y0 = float(ty) + 0.0f;
+            const float x0 = float(tx);
+            const float y0 = float(ty);
             const float x1 = float(tx) + 1.0f;
             const float y1 = float(ty) + 1.0f;
 
@@ -359,7 +329,7 @@ void drawOverlay(const std::vector<float>& entropy,
     if (overlayVAO == 0) {
         glGenVertexArrays(1, &overlayVAO);
         glGenBuffers(1, &overlayVBO);
-        overlayShader = createOverlayProgram(); // H7.a
+        overlayShader = createOverlayProgram();
         if (overlayShader == 0) {
             if constexpr (Settings::debugLogging)
                 LUCHS_LOG_HOST("[HM] ERROR: overlay shader creation failed.");
@@ -401,7 +371,8 @@ void drawOverlay(const std::vector<float>& entropy,
     const GLenum errAfter  = glGetError();
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[HM] drawOverlay: verts=%zu  glErr=0x%x->0x%x", data.size()/3, errBefore, errAfter);
+        LUCHS_LOG_HOST("[HM] drawOverlay: verts=%zu  glErr=0x%x->0x%x  pos=top-right w=%.2f%% h=%.2f%%",
+                       data.size()/3, errBefore, errAfter, viewFracW*100.0f, viewFracH*100.0f);
     }
 
 #if HEATMAP_DRAW_SELF_CHECK
@@ -410,29 +381,12 @@ void drawOverlay(const std::vector<float>& entropy,
 
 #if HEATMAP_DRAW_MAX_MARKER
     {
-        // C4267 fix: index (size_t) -> int explicit cast (API erwartet int)
         auto [centerPx, centerPy] =
             tileIndexToPixelCenter(static_cast<int>(maxIdx), tilesX, tilesY, width, height);
         DrawPoint_ScreenPixels(static_cast<float>(centerPx), static_cast<float>(centerPy),
                                width, height, 0.0f, 1.0f, 0.5f, 10.0f);
     }
 #endif
-
-    if constexpr (Settings::debugLogging) {
-        const int bx = static_cast<int>(maxIdx % static_cast<size_t>(tilesX));
-        const int by = static_cast<int>(maxIdx / static_cast<size_t>(tilesX));
-        auto [centerPxLog, centerPyLog] =
-            tileIndexToPixelCenter(static_cast<int>(maxIdx), tilesX, tilesY, width, height); // C4267 safe
-        const double ndcX = ((centerPxLog) / double(width)  - 0.5) * 2.0;
-        const double ndcY = ((centerPyLog) / double(height) - 0.5) * 2.0;
-        // Keine Abhängigkeit auf screenToComplex() an dieser Stelle – Null-Risiko.
-        LUCHS_LOG_HOST("[HM] maxTile idx=%d (%d,%d) val=%.6f px=(%d,%d) ndc=(%.5f,%.5f) zoom=%.6e center=(%.9f, %.9f) ar=%.6f",
-                       static_cast<int>(maxIdx), bx, by, maxVal,
-                       static_cast<int>(centerPxLog), static_cast<int>(centerPyLog),
-                       ndcX, ndcY,
-                       RS_ZOOM(ctx), RS_OFFSET_X(ctx), RS_OFFSET_Y(ctx),
-                       double(width)/double(height));
-    }
 
     if (!wasBlend) glDisable(GL_BLEND);
     glDisableVertexAttribArray(0);
