@@ -27,7 +27,6 @@
 #endif
 
 #include "nacktmull_anchor.hpp"
-#include "nacktmull_host.hpp"
 
 // Nacktmull-Export: extern "C" + Signatur (out, d_it, w, h, zoom, offset, maxIter, tile)
 extern "C" void launch_mandelbrotHybrid(

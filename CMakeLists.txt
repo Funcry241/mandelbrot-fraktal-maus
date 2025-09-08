@@ -137,7 +137,6 @@ add_executable(mandelbrot_otterdream
   src/nacktmull_anchor.cpp
   src/nacktmull_engine.cpp
   src/nacktmull_shade.cu
-  src/nacktmull_host.cpp
   src/progressive_iteration.cu
   src/progressive_shade_impl.cu
   src/frame_budget_controller.cpp
