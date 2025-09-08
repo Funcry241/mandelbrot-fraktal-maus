@@ -1,4 +1,4 @@
-///// Otter: Heatmap-Overlay – oben rechts wie zuvor (100 px hoch, 16 px Padding), keine Schalter.
+///// Otter: Heatmap-Overlay – oben rechts wie zuvor (100 px hoch, 16 px Padding), Fenster-Aspect (width/height) -> keine Verzerrung.
 ///  OpenGLUtils-Fallback aktiv, API toggle()/cleanup() vorhanden, /W4-/WX- & CUDA 13 clean.
 
 #pragma warning(push)
@@ -29,7 +29,6 @@
 #define HEATMAP_DRAW_SELF_CHECK 0
 #endif
 
-// Quelle: RendererState – keine verdeckten Pfade.
 #define RS_OFFSET_X(ctx) ((ctx).center.x)
 #define RS_OFFSET_Y(ctx) ((ctx).center.y)
 #define RS_ZOOM(ctx)     ((ctx).zoom)
@@ -282,11 +281,11 @@ void drawOverlay(const std::vector<float>& entropy,
         if (v > maxVal) { maxVal = v; maxIdx = i; }
     }
 
-    // ───────────── Ziel-Viewport: OBEN RECHTS – exakt wie vorher ─────────────
-    // Höhe fix 100 px, Breite aus Tiles-AR, 16 px Padding von rechts/oben.
+    // ───────────── Ziel-Viewport: OBEN RECHTS – wie vorher ─────────────
     constexpr int overlayHeightPx = 100;
-    const float   overlayAspect   = float(tilesX) / float(tilesY);
-    const int     overlayWidthPx  = static_cast<int>(overlayHeightPx * overlayAspect);
+    // WICHTIG: Fenster-Aspect benutzen (width/height), NICHT tilesX/tilesY → sonst Verzerrung.
+    const double overlayWidthD = overlayHeightPx * (static_cast<double>(width) / static_cast<double>(height));
+    const int    overlayWidthPx = static_cast<int>(std::round(overlayWidthD));
     constexpr int paddingX = 16;
     constexpr int paddingY = 16;
 
@@ -365,22 +364,9 @@ void drawOverlay(const std::vector<float>& entropy,
     const GLenum errAfter  = glGetError();
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[HM] drawOverlay: verts=%zu  glErr=0x%x->0x%x  pos=top-right h=100px pad=16px",
-                       data.size()/3, errBefore, errAfter);
+        LUCHS_LOG_HOST("[HM] drawOverlay: verts=%zu  glErr=0x%x->0x%x  pos=top-right h=100px pad=16px w=%.1fpx",
+                       data.size()/3, errBefore, errAfter, float(overlayWidthPx));
     }
-
-#if HEATMAP_DRAW_SELF_CHECK
-    // Self-check Punkte nutzen dieselbe Transform (uScale/uOffset), kein Extra-Code nötig.
-#endif
-
-#if HEATMAP_DRAW_MAX_MARKER
-    {
-        auto [centerPx, centerPy] =
-            tileIndexToPixelCenter(static_cast<int>(maxIdx), tilesX, tilesY, width, height); // C4267 safe cast
-        DrawPoint_ScreenPixels(static_cast<float>(centerPx), static_cast<float>(centerPy),
-                               width, height, 0.0f, 1.0f, 0.5f, 10.0f);
-    }
-#endif
 
     if (!wasBlend) glDisable(GL_BLEND);
     glDisableVertexAttribArray(0);
