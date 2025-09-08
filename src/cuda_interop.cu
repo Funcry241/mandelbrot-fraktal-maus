@@ -12,7 +12,6 @@
 #include "renderer_state.hpp"
 #include "hermelin_buffer.hpp"
 #include "bear_CudaPBOResource.hpp"
-#include "nacktmull_shade.cuh"
 
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
@@ -25,8 +24,6 @@
 #if !defined(__CUDA_ARCH__)
   #include <chrono>
 #endif
-
-#include "nacktmull_anchor.hpp"
 
 // Nacktmull-Export: extern "C" + Signatur (out, d_it, w, h, zoom, offset, maxIter, tile)
 extern "C" void launch_mandelbrotHybrid(
