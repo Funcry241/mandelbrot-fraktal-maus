@@ -1,6 +1,7 @@
 ///// Otter: Perturbation/Series Path – Referenz-Orbit (DD) + GPU-Delta; API unveraendert.
 ///// Schneefuchs: Deterministisch, ASCII-only; Mapping konsistent (center+zoom); kompakte PERF-Logs.
 ///// Maus: Keine Overlays/Sprites; kein CUDA_CHECK; fruehe Rueckgaben bei Fehlern.
+///// Datei: src/nacktmull.cu
 //  CUDA 13 Optimierungen (ohne Verhaltensaenderung):
 //   - __launch_bounds__(256) fuer bessere Occupancy (Host nutzt 32x8 Threads).
 //   - FMA/Math-Intrinsics im Hotpath (__fmaf_rn, __powf, __expf).
