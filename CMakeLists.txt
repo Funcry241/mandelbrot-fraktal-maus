@@ -140,8 +140,6 @@ add_executable(mandelbrot_otterdream
   src/nacktmull_host.cpp
   src/progressive_iteration.cu
   src/progressive_shade_impl.cu
-  src/glfw_bootstrap.cpp
-  src/async_frame_writer.cpp
   src/frame_budget_controller.cpp
 )
 
