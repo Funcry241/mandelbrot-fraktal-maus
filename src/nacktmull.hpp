@@ -51,15 +51,4 @@ void init(const Params& p);
 void shutdown();
 void render(const Params& p, Buffers& out);
 
-// Optional: diagnostic
-inline void logParams(const Params& p) {
-    LUCHS_LOG_HOST("[NAK] center=(%.15f, %.15f) scale=%.9f it=%d",
-                   p.centerX, p.centerY, p.scale, p.maxIter);
-}
-
-// Device helpers (minimal inline utilities)
-__host__ __device__ inline float2 make_float2_add(float2 a, float2 b) {
-    return make_float2(a.x + b.x, a.y + b.y);
-}
-
 } // namespace Nacktmull
