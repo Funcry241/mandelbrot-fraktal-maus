@@ -134,7 +134,6 @@ add_executable(mandelbrot_otterdream
   src/fps_meter.cpp
   src/hud_text.cpp
   src/nacktmull.cu
-  src/nacktmull_anchor.cpp
 )
 
 # ---------------------- Compile-Options --------------------
