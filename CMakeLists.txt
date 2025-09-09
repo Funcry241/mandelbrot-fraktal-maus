@@ -119,7 +119,6 @@ add_executable(mandelbrot_otterdream
   src/renderer_pipeline.cpp
   src/renderer_window.cpp
   src/renderer_resources.cpp
-  src/opengl_utils.cpp
   src/heatmap_overlay.cpp
   src/warzenschwein_overlay.cpp
   src/cuda_interop.cu
