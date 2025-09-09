@@ -53,26 +53,11 @@ class CommandBus {
 public:
     void push(const ZoomCommand& cmd)            { commands.push_back(cmd); }
     void push(ZoomCommand&& cmd)                 { commands.emplace_back(std::move(cmd)); }
-
-    [[nodiscard]] const std::vector<ZoomCommand>& getHistory() const { return commands; }
+    
     void clear()                                 { commands.clear(); }
     [[nodiscard]] std::size_t size() const       { return commands.size(); }
     void reserve(std::size_t n)                  { commands.reserve(n); }
-    [[nodiscard]] std::size_t capacity() const   { return commands.capacity(); }
-
-    // Direkte CSV-Ausgabe (Header + alle Zeilen) in einen geoeffneten FILE*.
-    // Rueckgabe true bei Erfolg (fflush==0).
-    [[nodiscard]] bool dumpCSV(std::FILE* f) const {
-        if (!f) return false;
-        std::fputs(ZoomCommand::csvHeader().c_str(), f);
-        std::fputc('\n', f);
-        for (const auto& c : commands) {
-            const std::string line = c.toCSV();
-            std::fputs(line.c_str(), f);
-            std::fputc('\n', f);
-        }
-        return std::fflush(f) == 0;
-    }
+    [[nodiscard]] std::size_t capacity() const   { return commands.capacity(); }    
 
 private:
     std::vector<ZoomCommand> commands;
