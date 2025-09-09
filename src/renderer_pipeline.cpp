@@ -1,8 +1,7 @@
-///// Otter: Fullscreen pipeline – stabile Bind-Reihenfolge, ASCII-Logs, optionaler GPU-Timer.
-///// Schneefuchs: State-Change-Diät; idempotentes init; deterministische Uploads via RendererResources.
-///// Maus: Keine VAO-Daten außer einem Dummy-VAO; Shader-Fehler sauber abgefangen; /WX-fest.
-//  Datei: src/renderer_pipeline.cpp
-
+///// Otter: MAUS header normalized; ASCII-only; no functional changes.
+///// Schneefuchs: Header format per rules #60–62; path normalized.
+///// Maus: Keep this as the only top header block; exact four lines.
+///// Datei: src/renderer_pipeline.cpp
 #include "pch.hpp"
 #include "renderer_pipeline.hpp"
 #include "renderer_resources.hpp"   // OpenGLUtils::updateTextureFromPBO(...)

@@ -1,13 +1,7 @@
-///// Otter: Minimal GPU E/C kernels; early guards; events only when logging enabled (no C4702).
-///// Schneefuchs: Predictable occupancy (__launch_bounds__), warp-private histograms, ASCII logs, bounds-checked sizes; /WX-safe.
-///// Maus: Rendering/shading removed; clear host wrapper API computeCudaEntropyContrast.
-//  CUDA 13 Tweaks:
-//   - __launch_bounds__(256,2) kept in sync with host config.
-//   - __ldg() read-only fetches for iteration buffer.
-//   - __log2f fast-math intrinsic in hot path.
-//   - Warp-private shared histograms to minimize contention.
-//   - Events allocated only when logging is enabled.
-
+///// Otter: MAUS header normalized; ASCII-only; no functional changes.
+///// Schneefuchs: Header format per rules #60–62; path normalized.
+///// Maus: Keep this as the only top header block; exact four lines.
+///// Datei: src/core_kernel.cu
 #include "pch.hpp"
 
 #include <cuda_runtime.h>

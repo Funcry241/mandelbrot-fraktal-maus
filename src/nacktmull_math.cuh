@@ -1,3 +1,7 @@
+///// Otter: MAUS header normalized; ASCII-only; no functional changes.
+///// Schneefuchs: Header format per rules #60–62; path normalized.
+///// Maus: Keep this as the only top header block; exact four lines.
+///// Datei: src/nacktmull_math.cuh
 #pragma once
 
 #include <cuda_runtime.h>     // __host__/__device__

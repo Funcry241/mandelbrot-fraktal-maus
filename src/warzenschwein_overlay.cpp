@@ -1,8 +1,7 @@
-///// Otter: Orphaning + SubData; deterministischer Draw; ASCII-Logs nur bei Bedarf. (Bezug zu Otter)
-///// Schneefuchs: Pixel-Space im CPU-Pfad + px->NDC im VS; getrennte X/Y-Skalierung fixiert Aspect Ratio. (Bezug zu Schneefuchs)
-///// Maus: Vollstaendig gekapselt wie HeatmapOverlay – keine GL-State-Leaks; drawOverlay nutzt nur Zoom.
-// src/warzenschwein_overlay.cpp
-
+///// Otter: MAUS header normalized; ASCII-only; no functional changes.
+///// Schneefuchs: Header format per rules #60–62; path normalized.
+///// Maus: Keep this as the only top header block; exact four lines.
+///// Datei: src/warzenschwein_overlay.cpp
 #pragma warning(push)
 #pragma warning(disable: 4100)
 

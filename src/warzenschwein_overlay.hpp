@@ -1,8 +1,7 @@
-///// Otter: Overlay-API gekapselt; drawOverlay braucht nur zoom; ASCII-only.
-///// Schneefuchs: Keine Abhaengigkeit von RendererState; explizite Geometrie; /WX-fest.
-///// Maus: Text via setText(); Sichtbarkeit intern; OpenGL-Ressourcen sauber verwaltet.
-// src/warzenschwein_overlay.hpp
-
+///// Otter: MAUS header normalized; ASCII-only; no functional changes.
+///// Schneefuchs: Header format per rules #60–62; path normalized.
+///// Maus: Keep this as the only top header block; exact four lines.
+///// Datei: src/warzenschwein_overlay.hpp
 #pragma once
 #include <string>
 #include <vector>

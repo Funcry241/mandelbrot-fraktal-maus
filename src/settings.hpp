@@ -1,8 +1,7 @@
-///// Otter: settings.hpp – nur genutzte Toggles; stabil dokumentiert; ASCII-only.
-///*** Schneefuchs: Platzhalter entfernt (22 ungenutzt); keine Semantik-Änderung aktiver Pfade.
-///*** Maus: Klare Defaults (perfLog/AlwaysZoom an); Header-only; /WX-fest.
-///*** Datei: src/settings.hpp
-
+///// Otter: MAUS header normalized; ASCII-only; no functional changes.
+///// Schneefuchs: Header format per rules #60–62; path normalized.
+///// Maus: Keep this as the only top header block; exact four lines.
+///// Datei: src/settings.hpp
 #pragma once
 
 // ============================================================================
