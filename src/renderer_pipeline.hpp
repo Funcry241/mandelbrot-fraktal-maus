@@ -14,10 +14,6 @@ void init();
 // 🧽 Gibt alle OpenGL-Ressourcen wieder frei
 void cleanup();
 
-// 🔁 Überträgt CUDA-PBO-Daten auf OpenGL-Textur (ohne Zeichnen)
-//    Muss vor drawFullscreenQuad aufgerufen werden!
-void updateTexture(GLuint pbo, GLuint tex, int width, int height);
-
 // 🎥 Zeichnet die im Texturhandle gespeicherte OpenGL-Textur fullscreen auf das Fenster
 void drawFullscreenQuad(GLuint tex);
 

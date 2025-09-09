@@ -132,11 +132,6 @@ void init() {
     }
 }
 
-void updateTexture(GLuint pbo, GLuint tex, int width, int height) {
-    // deterministischer Upload (bind/order in RendererResources gekapselt)
-    OpenGLUtils::updateTextureFromPBO(pbo, tex, width, height);
-}
-
 void drawFullscreenQuad(GLuint tex) {
     ensurePipeline();
 
