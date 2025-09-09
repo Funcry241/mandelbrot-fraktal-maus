@@ -50,11 +50,3 @@
     t = std::clamp(t, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
     return t;
 }
-
-[[nodiscard]] inline bool getLocalTime(std::tm& outTm, std::time_t t) noexcept {
-#if defined(_WIN32)
-    return localtime_s(&outTm, &t) == 0;
-#else
-    return localtime_r(&t, &outTm) != nullptr;
-#endif
-}

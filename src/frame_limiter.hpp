@@ -94,9 +94,6 @@ public:
         }
     }
 
-    [[nodiscard]] inline double lastFrameSeconds() const noexcept { return _lastDt; }
-    [[nodiscard]] inline double lastSleepMilliseconds() const noexcept { return _lastSleep; }
-
     inline void reset() noexcept {
         _initialized = false;
         _logCounter  = 0;
