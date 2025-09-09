@@ -100,23 +100,4 @@ inline const Glyph& get(char c) {
     return (it != font.end()) ? it->second : empty;
 }
 
-inline std::string toHexString(const Glyph& g) {
-    std::string out;
-    char buf[5];
-    for (auto b : g) {
-        std::snprintf(buf, sizeof(buf), "%02X ", b);  // ASCII-only
-        out += buf;
-    }
-    return out;
-}
-
-inline void printGlyph(char c) {
-    for (auto row : get(c)) {
-        for (int b = 7; b >= 0; --b) {
-            std::putchar((row & (1 << b)) ? '#' : '.');
-        }
-        std::putchar('\n');
-    }
-}
-
 } // namespace WarzenschweinFont
