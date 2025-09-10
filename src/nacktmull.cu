@@ -100,15 +100,79 @@ namespace {
     }
     __device__ __forceinline__ float  f2_abs2(float2 a){ return __fmaf_rn(a.x, a.x, a.y*a.y); }
 
+    // --- Neu: GT-Palette (Cyan→Amber) als Drop-in, lerp in Linearraum (sRGB-Anker) ---
+    __device__ __forceinline__ float  _srgb_to_linear(float c) {
+        return (c <= 0.04045f) ? (c / 12.92f) : powf((c + 0.055f) / 1.055f, 2.4f);
+    }
+    __device__ __forceinline__ float  _linear_to_srgb(float c) {
+        return (c <= 0.0031308f) ? (12.92f * c) : (1.055f * powf(c, 1.0f / 2.4f) - 0.055f);
+    }
+    __device__ __forceinline__ float3 _srgb_to_linear3(const float3 c) {
+        return make_float3(_srgb_to_linear(c.x), _srgb_to_linear(c.y), _srgb_to_linear(c.z));
+    }
+    __device__ __forceinline__ float3 _linear_to_srgb3(const float3 c) {
+        return make_float3(_linear_to_srgb(c.x), _linear_to_srgb(c.y), _linear_to_srgb(c.z));
+    }
+    __device__ __forceinline__ float  _clamp01(float x){ return fminf(1.0f, fmaxf(0.0f, x)); }
+    __device__ __forceinline__ float  _mixf(float a, float b, float t){ return a + t*(b-a); }
+    __device__ __forceinline__ float3 _mix3(float3 a, float3 b, float t){
+        return make_float3(_mixf(a.x,b.x,t), _mixf(a.y,b.y,t), _mixf(a.z,b.z,t));
+    }
+
+    // Minimal-invasive Ersetzung: gleiche Signatur (float3 0..1), nur Farbraum/Palette neu.
     __device__ __forceinline__ float3 shade_from_iter(int it, int maxIter){
+        // vorhandene Helligkeitskurve beibehalten (kompatibel zum bisherigen Look)
         float t = fminf(1.0f, (float)it / (float)maxIter);
         float v = 1.f - __expf(-1.75f * t);
-        v = __powf(fmaxf(0.f, v), 0.80f);
-        v = v + 0.08f * (1.0f - v);
-        float r = fminf(1.f, 1.15f*__powf(v, 0.42f));
-        float g = fminf(1.f, 0.95f*__powf(v, 0.56f));
-        float b = fminf(1.f, 0.70f*__powf(v, 0.88f));
-        return make_float3(r,g,b);
+        v = __powf(fmaxf(0.f, v), 0.90f); // "gamma" ~ 0.90
+
+        // GT-Ankerfarben in sRGB
+        const float  p[8] = { 0.00f, 0.12f, 0.25f, 0.42f, 0.60f, 0.78f, 0.95f, 1.00f };
+        const float3 c[8] = {
+            make_float3( 8/255.f,  9/255.f, 15/255.f), // #08090F
+            make_float3(17/255.f, 45/255.f, 95/255.f), // #112D5F
+            make_float3(22/255.f, 84/255.f,159/255.f), // #16549F
+            make_float3(36/255.f,178/255.f,191/255.f), // #24B2BF
+            make_float3(255/255.f,210/255.f, 87/255.f),// #FFD257
+            make_float3(236/255.f,121/255.f, 44/255.f),// #EC792C
+            make_float3(171/255.f, 34/255.f, 61/255.f),// #AB223D
+            make_float3(250/255.f,250/255.f,250/255.f) // #FAFAFA
+        };
+
+        // Segment finden (in v)
+        int j = 0;
+        #pragma unroll
+        for (int i=0;i<7;++i){ if (v >= p[i]) j = i; }
+        const float span = fmaxf(p[j+1]-p[j], 1e-6f);
+        float tseg = _clamp01((v - p[j]) / span);
+        tseg = tseg*tseg*(3.f - 2.f*tseg); // smootherstep
+
+        // sRGB→Linear, lerp, Linear→sRGB
+        const float3 aLin = _srgb_to_linear3(c[j]);
+        const float3 bLin = _srgb_to_linear3(c[j+1]);
+        float3 rgbLin = _mix3(aLin, bLin, tseg);
+
+        // sehr dezente Isolinien (Highlight-betont, banding-arm)
+        const float stripes = 0.035f, stripeFreq = 6.5f;
+        if (stripes > 0.f){
+            const float s = 0.5f + 0.5f * __sinf(6.2831853f * (v * stripeFreq));
+            const float boost = 1.0f + stripes * (s*s*s*s);
+            rgbLin.x *= boost; rgbLin.y *= boost; rgbLin.z *= boost;
+        }
+
+        // leichte Vibrance/Warmshift (Linearraum)
+        const float vibr=1.06f, warm=1.00f;
+        const float luma = 0.2126f*rgbLin.x + 0.7152f*rgbLin.y + 0.0722f*rgbLin.z;
+        rgbLin = make_float3(
+            luma + (rgbLin.x - luma) * vibr * warm,
+            luma + (rgbLin.y - luma) * vibr * 1.0f,
+            luma + (rgbLin.z - luma) * vibr * (2.0f - warm)
+        );
+
+        float3 srgb = _linear_to_srgb3(make_float3(
+            _clamp01(rgbLin.x), _clamp01(rgbLin.y), _clamp01(rgbLin.z)
+        ));
+        return make_float3(_clamp01(srgb.x), _clamp01(srgb.y), _clamp01(srgb.z));
     }
 
     __global__ __launch_bounds__(256)
@@ -130,7 +194,7 @@ namespace {
         }
         __syncthreads();
 
-        // Konsistentes Mapping pro Pixel
+        // Konsistentes Mapping pro Pixel (pixelzentriert, projekteigene Funktion)
         const float2 c   = pixelToComplex(x + 0.5, y + 0.5, w, h,
                                           (double)center.x, (double)center.y, (double)zoom);
         const float2 dC  = make_float2(c.x - s_c_ref.x, c.y - s_c_ref.y);
