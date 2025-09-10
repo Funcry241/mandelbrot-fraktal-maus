@@ -13,6 +13,7 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "common.hpp"
+#include "nacktmull_math.cuh"  // <- zurück zum projektweiten Mapping (pixelToComplex)
 
 // ============================================================================
 // Device Utilities
@@ -159,13 +160,14 @@ void perturbKernel(
 
     const int idx = y * w + x;
 
-    // Pixel → c (center/zoom mapping)
-    const float invZoom = 1.0f / zoom;
-    const float sx = ((float)x / (float)w - 0.5f) * 3.2f;
-    const float sy = ((float)y / (float)h - 0.5f) * 2.0f;
-    const float2 c  = make_float2(center.x + sx * invZoom,
-                                  center.y + sy * invZoom);
-    const float2 c0 = center;
+    // --- ZURÜCK zum projekteinheitlichen Mapping (fix für Zoom/Aspect) ---
+    const float2 c = pixelToComplex(
+        (double)x + 0.5, (double)y + 0.5,
+        w, h,
+        (double)center.x, (double)center.y,
+        (double)zoom
+    );
+    const float2 c0    = make_float2(center.x, center.y);
     const float2 delta = sub(c, c0); // *** wichtig für Perturbation ***
 
     // Early interior exit (Cardioid/Bulb)
@@ -189,7 +191,7 @@ void perturbKernel(
         const float2 twoRefDz = muls(mul(ref, dz), 2.0f);
         dz = add(add(dz2, twoRefDz), delta);
 
-        // z_total = ref_{n+1}? Näherung mit ref_n+dz_n nach Update (bewährt in Praxis)
+        // z_total ~ ref_n + dz_n (nach Update)
         const float2 ztot = add(ref, dz);
 
         it = n + 1;
