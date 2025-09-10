@@ -1,12 +1,11 @@
-///// Otter: Perturbation/Series Path – Referenz-Orbit (DD) + GPU-Delta; API unveraendert.
-///// Schneefuchs: Deterministisch, ASCII-only; Mapping konsistent (center+zoom); kompakte PERF-Logs.
-///// Maus: Keine Overlays/Sprites; kein CUDA_CHECK; fruehe Rueckgaben bei Fehlern.
-///// Datei: src/nacktmull.cu
-//  CUDA 13 Optimierungen (ohne Verhaltensaenderung):
-//   - __launch_bounds__(256) fuer bessere Occupancy (Host nutzt 32x8 Threads).
-//   - FMA/Math-Intrinsics im Hotpath (__fmaf_rn, __powf, __expf).
-//   - Guard ohne sqrt (vergleich mit quadratischen Normen) → exakt aequivalent.
-//   - c_ref nur 1x pro Block berechnet und via Shared Memory verteilt.
+///// Otter: Vorsichtige Reparatur – Perturbation quadratisch; Smooth-Coloring; GT-Palette.
+///  Mapping/Zoom/Heatmap unberührt (pixelToComplex, iterOut); API & Signaturen unverändert.
+///  Fix: #pragma auf eigene Zeile; Innenbereich (it>=maxIter) wieder dunkel.
+///  Datei: src/nacktmull.cu
+//  CUDA 13 Optimierungen (ohne Verhaltensänderungen sonst):
+//   - __launch_bounds__(256) für Occupancy (Host nutzt 32x8 Threads).
+//   - FMA/Math-Intrinsics im Hotpath (__fmaf_rn).
+//   - Guards ohne sqrt (Vergleich quadrierter Normen).
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -34,7 +33,7 @@ static __host__ __device__ inline bool insideMainCardioidOrBulb(float x, float y
 }
 
 // ------------------------------------------------------------
-// Double-Double – minimal (add/mul) fuer Host-Referenz-Orbit
+// Double-Double – minimal (add/mul) für Host-Referenz-Orbit
 // ------------------------------------------------------------
 namespace dd {
     struct dd { double hi, lo; };
@@ -67,7 +66,7 @@ namespace dd {
 
 // ------------------------------------------------------------
 // Referenz-Orbit: z_{n+1} = z_n^2 + c_ref  (Host, DD)
-// Ergebnis: float2 pro Schritt (kompakt), Laenge = maxIter
+// Ergebnis: float2 pro Schritt (kompakt), Länge = maxIter
 // ------------------------------------------------------------
 static void buildReferenceOrbitDD(std::vector<float2>& out, int maxIter, double cref_x, double cref_y){
     out.resize((size_t)maxIter);
@@ -86,21 +85,21 @@ static void buildReferenceOrbitDD(std::vector<float2>& out, int maxIter, double 
 }
 
 // ------------------------------------------------------------
-// GPU-Kernel: Perturbation (CUDA 13-optimiert, verhaltensgleich)
-// δ_{n+1} = 2*z_ref[n]*δ_n + Δc;   z ≈ z_ref[n] + δ
-// Escape, wenn |z|^2 > 4.
-// Fallback: direkte Iteration, falls |δ| relativ zu |z_ref| zu gross.
+// GPU-Kernel: Perturbation (quadratisch, korrekt) + Smooth-Coloring
+// δ_{n+1} = δ_n^2 + 2*z_ref[n]*δ_n + Δc;   z ≈ z_ref[n] + δ
+// Escape, wenn |z|^2 > 4.  Fallback: direkte Iteration, wenn |δ| zu groß.
 // ------------------------------------------------------------
 namespace {
     __device__ __forceinline__ float2 f2_add(float2 a, float2 b){ return make_float2(a.x+b.x, a.y+b.y); }
+    __device__ __forceinline__ float2 f2_sub(float2 a, float2 b){ return make_float2(a.x-b.x, a.y-b.y); }
     __device__ __forceinline__ float2 f2_mul(float2 a, float2 b){
-        // (a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x)
         return make_float2(__fmaf_rn(a.x, b.x, -a.y*b.y),
                            __fmaf_rn(a.x, b.y,  a.y*b.x));
     }
+    __device__ __forceinline__ float2 f2_muls(float2 a, float s){ return make_float2(a.x*s, a.y*s); }
     __device__ __forceinline__ float  f2_abs2(float2 a){ return __fmaf_rn(a.x, a.x, a.y*a.y); }
 
-    // --- Neu: GT-Palette (Cyan→Amber) als Drop-in, lerp in Linearraum (sRGB-Anker) ---
+    // ---- GT-Palette: lerp in Linearraum (sRGB-Anker), kompakter Mapper auf float3 0..1 ----
     __device__ __forceinline__ float  _srgb_to_linear(float c) {
         return (c <= 0.04045f) ? (c / 12.92f) : powf((c + 0.055f) / 1.055f, 2.4f);
     }
@@ -119,14 +118,10 @@ namespace {
         return make_float3(_mixf(a.x,b.x,t), _mixf(a.y,b.y,t), _mixf(a.z,b.z,t));
     }
 
-    // Minimal-invasive Ersetzung: gleiche Signatur (float3 0..1), nur Farbraum/Palette neu.
-    __device__ __forceinline__ float3 shade_from_iter(int it, int maxIter){
-        // vorhandene Helligkeitskurve beibehalten (kompatibel zum bisherigen Look)
-        float t = fminf(1.0f, (float)it / (float)maxIter);
-        float v = 1.f - __expf(-1.75f * t);
-        v = __powf(fmaxf(0.f, v), 0.90f); // "gamma" ~ 0.90
+    __device__ __forceinline__ float3 gt_map_v_to_rgb(float v01){
+        float v = _clamp01(v01);
+        v = powf(v, 0.90f);
 
-        // GT-Ankerfarben in sRGB
         const float  p[8] = { 0.00f, 0.12f, 0.25f, 0.42f, 0.60f, 0.78f, 0.95f, 1.00f };
         const float3 c[8] = {
             make_float3( 8/255.f,  9/255.f, 15/255.f), // #08090F
@@ -139,20 +134,18 @@ namespace {
             make_float3(250/255.f,250/255.f,250/255.f) // #FAFAFA
         };
 
-        // Segment finden (in v)
         int j = 0;
         #pragma unroll
         for (int i=0;i<7;++i){ if (v >= p[i]) j = i; }
         const float span = fmaxf(p[j+1]-p[j], 1e-6f);
-        float tseg = _clamp01((v - p[j]) / span);
-        tseg = tseg*tseg*(3.f - 2.f*tseg); // smootherstep
+        float t = _clamp01((v - p[j]) / span);
+        t = t*t*(3.f - 2.f*t);
 
-        // sRGB→Linear, lerp, Linear→sRGB
-        const float3 aLin = _srgb_to_linear3(c[j]);
-        const float3 bLin = _srgb_to_linear3(c[j+1]);
-        float3 rgbLin = _mix3(aLin, bLin, tseg);
+        float3 aLin = _srgb_to_linear3(c[j]);
+        float3 bLin = _srgb_to_linear3(c[j+1]);
+        float3 rgbLin = _mix3(aLin, bLin, t);
 
-        // sehr dezente Isolinien (Highlight-betont, banding-arm)
+        // dezente Isolinien (nur Highlights)
         const float stripes = 0.035f, stripeFreq = 6.5f;
         if (stripes > 0.f){
             const float s = 0.5f + 0.5f * __sinf(6.2831853f * (v * stripeFreq));
@@ -160,7 +153,7 @@ namespace {
             rgbLin.x *= boost; rgbLin.y *= boost; rgbLin.z *= boost;
         }
 
-        // leichte Vibrance/Warmshift (Linearraum)
+        // leichte Vibrance/Warmshift im Linearraum
         const float vibr=1.06f, warm=1.00f;
         const float luma = 0.2126f*rgbLin.x + 0.7152f*rgbLin.y + 0.0722f*rgbLin.z;
         rgbLin = make_float3(
@@ -186,7 +179,7 @@ namespace {
         if (x >= w || y >= h) return;
         const int idx = y*w + x;
 
-        // c_ref einmal pro Block berechnen (Device), dann teilen → identische Werte, weniger Arbeit.
+        // Referenzpunkt (pro Block) – identisch zum Host-Referenzorbit
         __shared__ float2 s_c_ref;
         if (threadIdx.x == 0 && threadIdx.y == 0){
             s_c_ref = pixelToComplex(0.5 + 0.5*w, 0.5 + 0.5*h, w, h,
@@ -194,64 +187,81 @@ namespace {
         }
         __syncthreads();
 
-        // Konsistentes Mapping pro Pixel (pixelzentriert, projekteigene Funktion)
+        // Pixel → c (pixelzentriert; projektspezifisch konsistent)
         const float2 c   = pixelToComplex(x + 0.5, y + 0.5, w, h,
                                           (double)center.x, (double)center.y, (double)zoom);
-        const float2 dC  = make_float2(c.x - s_c_ref.x, c.y - s_c_ref.y);
+        const float2 dC  = f2_sub(c, s_c_ref);   // Δc = c - c_ref
 
         if (insideMainCardioidOrBulb(c.x, c.y)){
-            out[idx] = make_uchar4(0,0,0,255);
+            out[idx]     = make_uchar4(10,12,16,255); // tiefes Schwarzgrau innen
             iterOut[idx] = maxIter;
             return;
         }
 
-        float2 delta = make_float2(0.f,0.f);
+        float2 delta = make_float2(0.f,0.f);     // δ_0 = 0
         int it = 0;
+        float2 z_tot = make_float2(0.f,0.f);     // z_total zum Smooth-Coloring
         const float esc2 = 4.0f;
-
-        // Guard ohne sqrt: vergleiche quadratische Normen (aequivalent zur alten Bedingung).
         const float tau2 = deltaRelMax * deltaRelMax;
 
+        #pragma unroll 1
         for(int n=0; n<maxIter; ++n){
             const float2 zref = refOrbit[n];
-            const float2 twoZ = make_float2(2.f*zref.x, 2.f*zref.y);
-            delta = f2_add(f2_mul(twoZ, delta), dC);  // δ_{n+1}
 
-            const float2 z = f2_add(zref, delta);
-            const float r2 = f2_abs2(z);
-            if (r2 > esc2){ it = n; goto ESCAPE; }
+            // Quadratische Perturbation (Details!)
+            const float2 dz2      = f2_mul(delta, delta);
+            const float2 twoRefDz = f2_muls(f2_mul(zref, delta), 2.0f);
+            delta = f2_add(f2_add(dz2, twoRefDz), dC);   // δ_{n+1}
 
-            // alt: delMag > deltaRelMax * refMag  (mit sqrt)
-            // neu (aequivalent): |δ|^2 > (deltaRelMax^2) * |z_ref|^2
+            z_tot = f2_add(zref, delta);                 // z ≈ z_ref + δ
+            it = n + 1;
+
+            const float r2 = f2_abs2(z_tot);
+            if (r2 > esc2) break;
+
+            // Stabilitäts-Fallback: direkte Iteration, wenn δ relativ zu groß
             if (f2_abs2(delta) > tau2 * fmaxf(f2_abs2(zref), 1e-24f)){
-                // Fallback: direkte Iteration ab aktuellem Zustand
-                float zx = z.x, zy = z.y;
+                float zx = z_tot.x, zy = z_tot.y;
                 for(int m=n+1; m<maxIter; ++m){
                     const float x2 = zx*zx, y2 = zy*zy;
-                    if (x2 + y2 > 4.f){ it = m; goto ESCAPE; }
+                    if (x2 + y2 > 4.f){ it = m; z_tot = make_float2(zx,zy); goto ESCAPE; }
                     const float xt = x2 - y2 + c.x;
                     zy = __fmaf_rn(2.f*zx, zy, c.y);
                     zx = xt;
                 }
-                it = maxIter; goto ESCAPE;
+                it = maxIter; z_tot = make_float2(zx,zy); goto ESCAPE;
             }
         }
-        it = maxIter;
-    ESCAPE:
-        {
-            const float3 col = shade_from_iter(it, maxIter);
-            out[idx] = make_uchar4((unsigned char)(255.f*col.x),
-                                   (unsigned char)(255.f*col.y),
-                                   (unsigned char)(255.f*col.z), 255);
+ESCAPE:
+        // Nicht entkommen? → tief dunkel (Innenbereich wie gehabt)
+        if (it >= maxIter){
+            out[idx]     = make_uchar4(10,12,16,255);
             iterOut[idx] = it;
+            return;
         }
+
+        // Smooth-Coloring: v = (it - log2(log|z|)) / maxIter
+        float v01;
+        {
+            const float r2 = f2_abs2(z_tot);
+            if (r2 <= 1.0f){
+                v01 = (float)it / (float)maxIter; // Fallback, numerisch knapp
+            } else {
+                const float r  = sqrtf(r2);
+                const float nu = (float)it - __log2f(__log2f(r));
+                v01 = _clamp01(nu / (float)maxIter);
+            }
+        }
+        const float3 rgb = gt_map_v_to_rgb(v01);
+        out[idx] = make_uchar4((unsigned char)(255.f*rgb.x),
+                               (unsigned char)(255.f*rgb.y),
+                               (unsigned char)(255.f*rgb.z), 255);
+        iterOut[idx] = it;
     }
 }
 
 // ============================================================
-// Oeffentliche API – ersetzt alte Hybrid-Funktion
-// Signatur bleibt identisch: launch_mandelbrotHybrid(...)
-// Keine Exceptions (extern "C"); eigene Fehlerpruefung + early return.
+// Öffentliche API – Signatur unverändert
 // ============================================================
 extern "C" void launch_mandelbrotHybrid(
     uchar4* out, int* d_it,
@@ -302,7 +312,7 @@ extern "C" void launch_mandelbrotHybrid(
     const dim3 block(32, 8);                  // 256 Threads
     const dim3 grid((w + block.x - 1)/block.x,
                     (h + block.y - 1)/block.y);
-    const float deltaRelMax = 1e-3f;          // unveraendert (nur Performance-Optimierung)
+    const float deltaRelMax = 1e-3f;          // unverändert
 
     perturbKernel<<<grid, block>>>(out, d_it, dRef, maxIter, w, h, zoom, offset, deltaRelMax);
     if (!ok(cudaGetLastError(), "perturbKernel launch")) return;
