@@ -13,7 +13,7 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "common.hpp"
-#include "nacktmull_math.cuh"  // <- zurück zum projektweiten Mapping (pixelToComplex)
+#include "nacktmull_math.cuh"  // pixelToComplex(...)
 
 // ============================================================================
 // Device Utilities
@@ -160,7 +160,7 @@ void perturbKernel(
 
     const int idx = y * w + x;
 
-    // --- ZURÜCK zum projekteinheitlichen Mapping (fix für Zoom/Aspect) ---
+    // --- projekteinheitliches Mapping (pixelToComplex) ---
     const float2 c = pixelToComplex(
         (double)x + 0.5, (double)y + 0.5,
         w, h,
@@ -220,6 +220,9 @@ extern "C" void launch_mandelbrotHybrid(
 {
     using clk = std::chrono::high_resolution_clock;
     auto t0 = clk::now();
+
+    // Mindest-Iterationszahl (Heatmap-/Detail-Fix, minimal-invasiv)
+    if (maxIter < 128) maxIter = 128;
 
     const dim3 block(32, 8);
     const dim3 grid((w + block.x - 1) / block.x,
