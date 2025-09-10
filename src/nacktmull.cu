@@ -1,7 +1,7 @@
-///// Otter: GT-Palette (Cyan→Amber) integriert; Perturbation korrekt (dz + ref, delta=c-c0); API unverändert.
-/// ///// Schneefuchs: Host/Device strikt getrennt; keine Device-Intrinsics im Hostcode; ASCII-Logs; deterministisches Mapping.
-/// ///// Maus: Schwarzes Bild gefixt: Escape-Test auf |ref+dz|, nicht auf dz; Smooth-Coloring mit finalem z_total.
-/// ///// Datei: src/nacktmull.cu
+///// Otter: Aspect-fixe Projektion & GT-Palette; pixel-zentriertes Sampling; keine neuen Dateien.
+///// Schneefuchs: Perturbation korrekt (delta=c-c0); Escape auf |ref+dz|; Host/Device sauber getrennt.
+///// Maus: Verzerrung behoben (viewHeight = viewWidth*h/w); Bild bleibt zentriert beim Zoomen.
+/// //// Datei: src/nacktmull.cu
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <vector_types.h>      // float2, uchar4
@@ -65,7 +65,7 @@ __device__ __forceinline__ uchar4 gtPalette_u8(float x, bool inSet) {
     // tuning knobs
     const float gamma     = 0.90f;  // midtone punch
     const float vibr      = 1.06f;  // slight vibrance
-    const float warmShift = 1.00f;  // >1 warmer, <1 cooler
+    const float warmShift = 1.00f;  // >1 warmer, <1 kuehler
     const float stripes   = 0.035f; // subtle iso-lines; 0..0.08
     const float stripeFreq= 6.5f;   // 5..9 recommended
 
@@ -144,7 +144,7 @@ __device__ __forceinline__ uchar4 gtColor_fromSmoothState(
 }
 
 // ============================================================================
-// Kernel – Perturbation (korrekt): dz_{n+1} = 2*ref_n*dz_n + dz_n^2 + (c - c0)
+// Kernel – Perturbation (korrekt): dz_{n+1} = dz_n^2 + 2*ref_n*dz_n + (c - c0)
 // Escape-Test auf |z_total| mit z_total = ref_n + dz_n
 // ============================================================================
 __global__ __launch_bounds__(256)
@@ -159,14 +159,19 @@ void perturbKernel(
 
     const int idx = y * w + x;
 
-    // Pixel → c (center/zoom mapping)
-    const float invZoom = 1.0f / zoom;
-    const float sx = ((float)x / (float)w - 0.5f) * 3.2f;
-    const float sy = ((float)y / (float)h - 0.5f) * 2.0f;
-    const float2 c  = make_float2(center.x + sx * invZoom,
-                                  center.y + sy * invZoom);
-    const float2 c0 = center;
-    const float2 delta = sub(c, c0); // *** wichtig für Perturbation ***
+    // --- aspect-korrekte Projektion (pixel-zentriert) ---
+    const float viewWidth  = 3.2f;                          // Basisbreite (real-Achse)
+    const float viewHeight = viewWidth * (float)h / (float)w;// Hoehe passend zur Fenster-Aspect
+    const float invZoom    = 1.0f / zoom;
+
+    const float u = ((float)x + 0.5f) / (float)w - 0.5f;    // -0.5 .. +0.5
+    const float v = ((float)y + 0.5f) / (float)h - 0.5f;    // -0.5 .. +0.5
+
+    const float2 offs = make_float2(u * viewWidth, v * viewHeight);
+    const float2 c    = make_float2(center.x + offs.x * invZoom,
+                                    center.y + offs.y * invZoom);
+    const float2 c0   = center;
+    const float2 delta= sub(c, c0); // Perturbation-Delta
 
     // Early interior exit (Cardioid/Bulb)
     if (insideMainCardioidOrBulb(c.x, c.y)) {
@@ -189,19 +194,14 @@ void perturbKernel(
         const float2 twoRefDz = muls(mul(ref, dz), 2.0f);
         dz = add(add(dz2, twoRefDz), delta);
 
-        // z_total = ref_{n+1}? Näherung mit ref_n+dz_n nach Update (bewährt in Praxis)
+        // z_total ~ ref_n + dz_n (nach Update)
         const float2 ztot = add(ref, dz);
-
         it = n + 1;
         zFinal = ztot;
 
-        // Escape auf |z_total| > 2
-        if (dot2(ztot) > 4.0f) {
-            break;
-        }
+        if (dot2(ztot) > 4.0f) break; // Escape bei |z|>2
     }
 
-    // Farbe schreiben (Smooth-Coloring mit finalem z_total)
     out[idx]     = gtColor_fromSmoothState(it, maxIter, zFinal.x, zFinal.y);
     iterOut[idx] = it;
 }
