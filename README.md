@@ -18,6 +18,9 @@
 Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeige für moderne NVIDIA-GPUs. Der Renderer zoomt automatisch in interessante Regionen und erhöht fortlaufend die Detailtiefe.
 Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom — und kompakte **Epoch-Millis**-Logs.
 
+> **Wichtig (Änderung)**: Ab diesem Stand verwendet OtterDream im Kern **direkte Iteration** (`z_{n+1} = z_n^2 + c`).  
+> Es gibt **keinen Referenz-Orbit / keine Perturbation** mehr im aktiven Pfad. Die API bleibt unverändert.
+
 ---
 
 ## 🧠 Features
@@ -40,8 +43,9 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
 * **📈 Progressive Iterationen (Zoom-abhängig)**
   Iterationszahl steigt automatisch mit dem Zoom-Level (Progressive/Resume optional).
 
-* **🎨 Rüsselwarze-Farbmodus**
-  Innen dunkel, außen strukturierte Chaoswellen (Smooth Coloring mit Streifen-Shading).
+* **🎨 GT-Palette (Cyan→Amber) + Smooth Coloring**
+  Interpolation im **Linearraum** gegen Banding, **Smooth Coloring** via `it - log2(log2(|z|))`.  
+  **Streifen-Shading** optional – **standardmäßig aus** (`stripes = 0.0f`) für ringfreie Darstellung.
 
 * **🔍 Adaptive Tile-Größe**
   Automatische Tile-Anpassung für bessere Detailauswertung bei starkem Zoom.
@@ -50,7 +54,8 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
   Anzeige via Fullscreen-Quad, direkte PBO-Verbindung (`cudaGraphicsGLRegisterBuffer`).
 
 * **📊 Heatmap-Overlay (Projekt Eule)**
-  Visualisierung von Entropie/Kontrast pro Tile (GPU-Shader-Variante in Arbeit).
+  Visualisierung von Entropie/Kontrast pro Tile (GPU-Shader-Variante in Arbeit).  
+  **Heatmap-Vertrag**: *Innenpunkte schreiben `iterOut = maxIter`*, Escape schreibt die Iterationsnummer.
 
 * **🧰 HUD & ASCII-Debug (Warzenschwein)**
   FPS, Zoom, Offset – optional. **Logging ist ASCII-only** und wirkt nicht auf Berechnungs-/Render-Pfade.
@@ -62,6 +67,7 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
 
 ## 🆕 Neu in dieser Version (Alpha 81+)
 
+* **Direkte Iteration** als Standardpfad (kein Referenz-Orbit / keine Perturbation im aktiven Code)
 * **Sliced Survivor Finish** mit **Survivor-Black** (ghosting-frei)
 * **Event-Timing** per CUDA-Events (kostenarm & präzise)
 * **Anti-Black-Guard** (Warm-up-Drift + Void-Bias gegen Cardioid/Bulb-Hänger)
@@ -106,7 +112,7 @@ cd mandelbrot-fraktal-maus
 # vcpkg lokal bootstrappen (unter Windows .bat verwenden)
 git clone https://github.com/microsoft/vcpkg.git
 cd vcpkg
-./bootstrap-vcpkg.sh   # Windows: .\bootstrap-vcpkg.bat
+./bootstrap-vcpkg.sh   # Windows: .ootstrap-vcpkg.bat
 cd ..
 ```
 

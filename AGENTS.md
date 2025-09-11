@@ -6,8 +6,9 @@
 
 Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln rund um Build, Logging und Pflege des **OtterDream Mandelbrot‑Renderers**.
 
-**Seit Alpha 41** gilt das **Robbe‑Prinzip**: *Header & Source bleiben synchron. Kein Drift, kein API‑Bruch.*
-**Seit Alpha 81** zusätzlich relevant: *Silk‑Lite Zoom*, *Frame‑Budget‑Pacing* und **ASCII‑only Logs** ohne Seiteneffekt.
+**Seit Alpha 41** gilt das **Robbe‑Prinzip**: *Header & Source bleiben synchron. Kein Drift, kein API‑Bruch.*  
+**Seit Alpha 81** zusätzlich relevant: *Silk‑Lite Zoom*, *Frame‑Budget‑Pacing* und **ASCII‑only Logs** ohne Seiteneffekt.  
+**Neu (Renderer‑Pfad)**: Aktiver Renderweg ist **direkte Iteration** (`z_{n+1}=z_n^2+c`). *Kein Referenz‑Orbit / keine Perturbation mehr im aktiven Code.*
 
 ---
 
@@ -70,6 +71,18 @@ Der Mandelbrot‑Pfad hält sich an ein weiches Zeitbudget pro Frame. Silk‑Lit
 
 ---
 
+## 🎨 Renderer‑Pfad & Farbgebung (Status)
+
+* **Aktiver Pfad**: **Direkte Iteration** (Float), Escape‑Test **vor** dem Update (`|z|^2 > 4`).  
+  → Heatmap‑Vertrag: *Innen* schreibt `iterOut = maxIter`, *Escape* schreibt Iterationsindex.  
+* **Palette**: **GT (Cyan→Amber)** mit Interpolation im **Linearraum** gegen Banding.  
+  **Stripes** sind **standardmäßig aus** (`stripes = 0.0f`) für ringfreie Darstellung.  
+* **Mapping**: Projektweit über `pixelToComplex(...)`, keine Abweichungen pro Kernel.
+
+> Hinweis: Historische Referenz‑Orbit/Perturbation‑Spuren wurden aus dem aktiven Pfad entfernt. API blieb unverändert.
+
+---
+
 ## ⌨️ Hotkeys (Runtime)
 
 | Taste   | Funktion                       |
@@ -78,7 +91,7 @@ Der Mandelbrot‑Pfad hält sich an ein weiches Zeitbudget pro Frame. Silk‑Lit
 | `H`     | Heatmap‑Overlay toggeln        |
 | `T`     | HUD (Warzenschwein) toggeln    |
 
-> Hinweis: `Space` kann optional zusätzlich gemappt werden – Standard ist **nur `P`**.
+> Optional: `Space` kann zusätzlich als Alias für `P` gemappt werden – Standard ist **nur `P`**.
 
 ---
 
@@ -109,10 +122,8 @@ cmake --install build\windows --prefix .\dist
 
 ```bash
 sudo apt update
-sudo apt install build-essential cmake git ninja-build   libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config libcuda1-545
+sudo apt install build-essential cmake git ninja-build   libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config
 ```
-
-> Je nach Treiber ggf. `libcuda1-55x` o. ä.
 
 2. Klonen & vcpkg bootstrap:
 
@@ -149,6 +160,14 @@ cmake --install build/linux --prefix ./dist
 
 * Kein schleichender Drift
 * Saubere öffentliche API
+* Referenzsignatur (stabil):
+
+```cpp
+extern "C" void launch_mandelbrotHybrid(
+    uchar4* out, int* d_it,
+    int w, int h, float zoom, float2 offset,
+    int maxIter, int /*tile*/);
+```
 
 ---
 
