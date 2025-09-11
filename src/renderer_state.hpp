@@ -1,8 +1,7 @@
 ///// Otter: Einheitliche, klare Struktur – nur aktive Zustaende; Header schlank, keine PCH; Nacktmull-Pullover.
-///// Schneefuchs: Speicher/Buffer exakt definiert; Host-Timings zentral – eine Quelle; /WX-fest; ASCII-only.
-///// Maus: tileSize bleibt in Pipelines explizit; hier nur Zustand & Ressourcen; keine versteckten Semantikwechsel.
-///// Datei: src/renderer_state.hpp
-
+///// Schneefuchs: Speicher/Buffer exakt definiert; State entkoppelt; MSVC-Align-Warnung lokal gekapselt.
+///  Maus: tileSize bleibt explizit; Progressive-State (z,it) als eigene RAII-Buffer; ASCII-only.
+///  Datei: src/renderer_state.hpp
 #pragma once
 
 // Leichte Includes im Header (keine PCH)
@@ -57,13 +56,14 @@ public:
     std::vector<float>  h_contrast;
 
     // 🔗 Analyse/Iteration (Device) mit RAII
-    Hermelin::CudaDeviceBuffer d_iterations;
-    Hermelin::CudaDeviceBuffer d_entropy;
-    Hermelin::CudaDeviceBuffer d_contrast;
+    Hermelin::CudaDeviceBuffer d_iterations; // int[width*height]
+    Hermelin::CudaDeviceBuffer d_entropy;    // float[numTiles]
+    Hermelin::CudaDeviceBuffer d_contrast;   // float[numTiles]
 
-    // ➕ Progressive-State (Keks 4) – nur genutzt, wenn Settings::progressiveEnabled == true
-    Hermelin::CudaDeviceBuffer d_stateZ;   // float2 per Pixel (Z-State)
-    Hermelin::CudaDeviceBuffer d_stateIt;  // int per Pixel (Iterationszaehler)
+    // ➕ Progressive-State (Per-Pixel Resume) – Keks 4/5
+    Hermelin::CudaDeviceBuffer d_stateZ;     // float2[width*height] – letzter z
+    Hermelin::CudaDeviceBuffer d_stateIt;    // int   [width*height] – akk. Iterationen
+    bool                       progressiveEnabled = true; // Host-Schalter (sanft)
 
     // 🎥 OpenGL-Zielpuffer (Interop via CUDA) mit RAII
     Hermelin::GLBuffer pbo;

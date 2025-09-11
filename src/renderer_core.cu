@@ -5,12 +5,13 @@
 
 #include "pch.hpp"
 
+#include "nacktmull_api.hpp"
+#include "renderer_state.hpp"
+#include "settings.hpp"
 #include "renderer_core.hpp"
 #include "renderer_window.hpp"
 #include "renderer_pipeline.hpp"
-#include "renderer_state.hpp"
 #include "renderer_resources.hpp"
-#include "settings.hpp"
 #include "cuda_interop.hpp"
 #include "heatmap_overlay.hpp"
 #include "frame_pipeline.hpp"
@@ -114,6 +115,33 @@ void Renderer::renderFrame() {
         LUCHS_LOG_HOST("[PIPE] Entering Renderer::renderFrame");
     }
 
+    // *** Progressive-Resume: __constant__-State pro Frame setzen ***
+    {
+        const bool progReady =
+            Settings::progressiveEnabled &&
+            state.progressiveEnabled &&
+            (state.d_stateZ.get() != nullptr) &&
+            (state.d_stateIt.get() != nullptr);
+
+        const int addIter = Settings::progressiveAddIter; // Budget pro Frame
+        const int iterCap = state.maxIterations;
+        const int enabled = progReady ? 1 : 0;
+
+        nacktmull_set_progressive(
+            state.d_stateZ.get(),
+            state.d_stateIt.get(),
+            addIter,
+            iterCap,
+            enabled
+        );
+
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[PROG] set_progressive enabled=%d addIter=%d cap=%d z=%p it=%p",
+                           enabled, addIter, iterCap,
+                           (void*)state.d_stateZ.get(), (void*)state.d_stateIt.get());
+        }
+    }
+
     // Frame ausführen (kein Device-wide Sync in diesem Pfad)
     FramePipeline::execute(state);
 
@@ -127,6 +155,10 @@ void Renderer::freeDeviceBuffers() {
     state.d_iterations.free();
     state.d_entropy.free();
     state.d_contrast.free();
+
+    // Progressive-State ebenfalls freigeben
+    state.d_stateZ.free();
+    state.d_stateIt.free();
 
     state.pbo.free();
     state.tex.free();

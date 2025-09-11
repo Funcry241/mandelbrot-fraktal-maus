@@ -1,15 +1,15 @@
-///// Otter: Einheitliche, klare Struktur – nur aktive Zustaende; Header schlank, keine PCH; Nacktmull-Pullover.
-///// Schneefuchs: Speicher/Buffer exakt definiert; Host-Timings zentral – eine Quelle; /WX-fest; ASCII-only.
-///// Maus: tileSize bleibt in Pipelines explizit; hier nur Zustand & Ressourcen; keine versteckten Semantikwechsel.
+///// Otter: Progressive-State integriert (d_stateZ/d_stateIt); Only-Grow + Zero-on-Grow.
+///  Schneefuchs: Fast-Path prüft jetzt auch Progressive-Buffer; Resize free() ergänzt; ASCII-Logs.
+/** Maus: Keine Semantikänderung im Renderpfad – nur Ressourcenverwaltung erweitert; tileSize explizit. */
 ///// Datei: src/renderer_state.cpp
 
+#include "pch.hpp"
 #include "renderer_state.hpp"
 #include "settings.hpp"
 #include "cuda_interop.hpp"
 #include "common.hpp"
 #include "renderer_resources.hpp"
 #include <algorithm>        // std::clamp
-#include <GLFW/glfw3.h>     // glfwGetTime
 
 // 🦊 Schneefuchs: interne Helfer in anonymer NS, noexcept – klarer Scope.
 namespace {
@@ -35,7 +35,7 @@ RendererState::RendererState(int w, int h)
 }
 
 void RendererState::reset() {
-    // Kamera (Nacktmull-Pullover: doubles)
+    // Kamera (double)
     zoom   = static_cast<double>(Settings::initialZoom);
     center = make_double2(static_cast<double>(Settings::initialOffsetX),
                           static_cast<double>(Settings::initialOffsetY));
@@ -63,8 +63,11 @@ void RendererState::reset() {
     h_entropy.clear();
     h_contrast.clear();
 
-    // Zoom V3 Silk-Lite: persistenter Zustand auf Default
+    // Zoom V3 Silk-Lite
     zoomV3State = {};
+
+    // Progressive: Standard-Schalter aus Settings
+    progressiveEnabled = Settings::progressiveDefault;
 
     // CUDA/Host-Timings: Default (valid=false) + Host-Frame-Nullung
     lastTimings = CudaPhaseTimings{};
@@ -87,29 +90,22 @@ void RendererState::setupCudaBuffers(int tileSize) {
     int tilesX = 0, tilesY = 0, numTiles = 0;
     computeTiles(width, height, tileSize, tilesX, tilesY, numTiles);
 
-    const size_t it_bytes       = totalPixels * sizeof(int);
-    const size_t entropy_bytes  = size_t(numTiles) * sizeof(float);
-    const size_t contrast_bytes = size_t(numTiles) * sizeof(float);
+    const size_t it_bytes        = totalPixels * sizeof(int);
+    const size_t entropy_bytes   = size_t(numTiles) * sizeof(float);
+    const size_t contrast_bytes  = size_t(numTiles) * sizeof(float);
+    const size_t progZ_bytes     = totalPixels * sizeof(float2);
+    const size_t progIt_bytes    = totalPixels * sizeof(int);
 
-    // Progressive bytes (nur relevant, wenn Flag an)
-    const bool progressiveOn = Settings::progressiveEnabled;
-    const size_t z_bytes     = progressiveOn ? (totalPixels * sizeof(float2)) : 0;
-    const size_t it_bytes2   = progressiveOn ? (totalPixels * sizeof(int))    : 0;
-
-    // 🦦 Otter: Fast-Path – wenn alles schon passt, sofort raus (keine Logs)
-    bool sizesOk =
-        d_iterations.size() >= it_bytes      &&
-        d_entropy.size()    >= entropy_bytes &&
+    // 🦦 Otter: Fast-Path – wenn alles schon passt, sofort raus
+    const bool sizesOk =
+        d_iterations.size() >= it_bytes       &&
+        d_entropy.size()    >= entropy_bytes  &&
         d_contrast.size()   >= contrast_bytes &&
+        d_stateZ.size()     >= progZ_bytes    &&
+        d_stateIt.size()    >= progIt_bytes   &&
         h_entropy.size()    == size_t(numTiles) &&
         h_contrast.size()   == size_t(numTiles) &&
         lastTileSize        == tileSize;
-
-    if (progressiveOn) {
-        sizesOk = sizesOk &&
-                  d_stateZ.size()  >= z_bytes &&
-                  d_stateIt.size() >= it_bytes2;
-    }
 
     if (sizesOk) {
         return;
@@ -125,97 +121,76 @@ void RendererState::setupCudaBuffers(int tileSize) {
         CudaInterop::logCudaDeviceContext("setupCudaBuffers");
     }
 
-    // --- grow decisions BEFORE allocation (für korrektes Zeroing) ---
-    const size_t have_it        = d_iterations.size();
-    const size_t have_entropy   = d_entropy.size();
-    const size_t have_contrast  = d_contrast.size();
-    const bool   grow_it        = have_it       < it_bytes;
-    const bool   grow_entropy   = have_entropy  < entropy_bytes;
-    const bool   grow_contrast  = have_contrast < contrast_bytes;
-
-    // Progressive grow decisions
-    const size_t have_z         = progressiveOn ? d_stateZ.size()  : 0;
-    const size_t have_it2       = progressiveOn ? d_stateIt.size() : 0;
-    const bool   grow_z         = progressiveOn && (have_z  < z_bytes);
-    const bool   grow_it2       = progressiveOn && (have_it2 < it_bytes2);
-
     // --- iterations buffer (only-grow policy) ---
-    if (grow_it) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_iterations grow: have=%zu -> need=%zu", have_it, it_bytes);
+    {
+        const size_t have = d_iterations.size();
+        const bool   needGrow = have < it_bytes;
+        if (needGrow) {
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ALLOC] d_iterations grow: %zu -> %zu", have, it_bytes);
+            }
+            d_iterations.allocate(it_bytes);
+            CUDA_CHECK(cudaMemset(d_iterations.get(), 0, it_bytes));
+        } else if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ALLOC] d_iterations ok: have=%zu need=%zu", have, it_bytes);
         }
-        d_iterations.allocate(it_bytes);
-    } else if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ALLOC] d_iterations ok: have=%zu need=%zu (no realloc)", have_it, it_bytes);
     }
 
     // --- entropy buffer (only-grow policy) ---
-    if (grow_entropy) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_entropy grow: have=%zu -> need=%zu (tiles %d)", have_entropy, entropy_bytes, numTiles);
-        }
-        d_entropy.allocate(entropy_bytes);
-
-        // Optional: Pointer-Attribute prüfen – nur wenn wirklich neu allokiert
-        if constexpr (Settings::debugLogging) {
-            cudaPointerAttributes attr{};
-            const cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_entropy.get());
-            if (attrErr == cudaSuccess) {
-                LUCHS_LOG_HOST("[CHECK] d_entropy attr: type=%d device=%d hostPtr=%p devicePtr=%p",
-                               (int)attr.type, (int)attr.device,
-                               (void*)attr.hostPointer, (void*)attr.devicePointer);
-            } else {
-                LUCHS_LOG_HOST("[CHECK] d_entropy attr query failed: err=%d", (int)attrErr);
+    {
+        const size_t have = d_entropy.size();
+        const bool   needGrow = have < entropy_bytes;
+        if (needGrow) {
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ALLOC] d_entropy grow: %zu -> %zu (tiles %d)", have, entropy_bytes, numTiles);
             }
+            d_entropy.allocate(entropy_bytes);
+            CUDA_CHECK(cudaMemset(d_entropy.get(), 0, entropy_bytes));
+        } else if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ALLOC] d_entropy ok: have=%zu need=%zu (tiles %d)", have, entropy_bytes, numTiles);
         }
-    } else if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ALLOC] d_entropy ok: have=%zu need=%zu (tiles %d, no realloc)", have_entropy, entropy_bytes, numTiles);
     }
 
     // --- contrast buffer (only-grow policy) ---
-    if (grow_contrast) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_contrast grow: have=%zu -> need=%zu (tiles %d)", have_contrast, contrast_bytes, numTiles);
+    {
+        const size_t have = d_contrast.size();
+        const bool   needGrow = have < contrast_bytes;
+        if (needGrow) {
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ALLOC] d_contrast grow: %zu -> %zu (tiles %d)", have, contrast_bytes, numTiles);
+            }
+            d_contrast.allocate(contrast_bytes);
+            CUDA_CHECK(cudaMemset(d_contrast.get(), 0, contrast_bytes));
+        } else if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ALLOC] d_contrast ok: have=%zu need=%zu (tiles %d)", have, contrast_bytes, numTiles);
         }
-        d_contrast.allocate(contrast_bytes);
-    } else if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ALLOC] d_contrast ok: have=%zu need=%zu (tiles %d, no realloc)", have_contrast, contrast_bytes, numTiles);
     }
 
-    // 🐭 Maus: Zeroing nur bei NEU-Allocation (oder in Debug immer)
-    const bool clearIterations = grow_it      || Settings::debugLogging;
-    const bool clearEntropy    = grow_entropy || Settings::debugLogging;
-    const bool clearContrast   = grow_contrast|| Settings::debugLogging;
+    // --- progressive buffers (only-grow policy) ---
+    {
+        const size_t haveZ  = d_stateZ.size();
+        const size_t haveIt = d_stateIt.size();
+        const bool   growZ  = haveZ  < progZ_bytes;
+        const bool   growIt = haveIt < progIt_bytes;
 
-    if (clearIterations) CUDA_CHECK(cudaMemset(d_iterations.get(), 0, it_bytes));
-    if (clearEntropy)    CUDA_CHECK(cudaMemset(d_entropy.get(),    0, entropy_bytes));
-    if (clearContrast)   CUDA_CHECK(cudaMemset(d_contrast.get(),   0, contrast_bytes));
-
-    // -------------------- Progressive state buffers (Keks 4) --------------------
-    if (progressiveOn) {
-        if (grow_z) {
+        if (growZ) {
             if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ALLOC] d_stateZ grow: have=%zu -> need=%zu (pixels %zu)", have_z, z_bytes, totalPixels);
+                LUCHS_LOG_HOST("[ALLOC] d_stateZ grow: %zu -> %zu", haveZ, progZ_bytes);
             }
-            d_stateZ.allocate(z_bytes);
-            CUDA_CHECK(cudaMemset(d_stateZ.get(), 0, z_bytes));
+            d_stateZ.allocate(progZ_bytes);
+            CUDA_CHECK(cudaMemset(d_stateZ.get(), 0, progZ_bytes));
         } else if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_stateZ ok: have=%zu need=%zu (no realloc)", have_z, z_bytes);
+            LUCHS_LOG_HOST("[ALLOC] d_stateZ ok: have=%zu need=%zu", haveZ, progZ_bytes);
         }
 
-        if (grow_it2) {
+        if (growIt) {
             if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ALLOC] d_stateIt grow: have=%zu -> need=%zu (pixels %zu)", have_it2, it_bytes2, totalPixels);
+                LUCHS_LOG_HOST("[ALLOC] d_stateIt grow: %zu -> %zu", haveIt, progIt_bytes);
             }
-            d_stateIt.allocate(it_bytes2);
-            CUDA_CHECK(cudaMemset(d_stateIt.get(), 0, it_bytes2));
+            d_stateIt.allocate(progIt_bytes);
+            CUDA_CHECK(cudaMemset(d_stateIt.get(), 0, progIt_bytes));
         } else if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_stateIt ok: have=%zu need=%zu (no realloc)", have_it2, it_bytes2);
-        }
-
-        if constexpr (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[MEM] progressive: stateZ=%zuB stateIt=%zuB totalPixels=%zu",
-                           z_bytes, it_bytes2, totalPixels);
+            LUCHS_LOG_HOST("[ALLOC] d_stateIt ok: have=%zu need=%zu", haveIt, progIt_bytes);
         }
     }
 
@@ -230,11 +205,12 @@ void RendererState::setupCudaBuffers(int tileSize) {
     h_contrast.resize(size_t(numTiles));
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ALLOC] buffers ready: it=%p(%zu) entropy=%p(%zu) contrast=%p(%zu)%s | %dx%d px, tileSize=%d -> tiles=%d",
+        LUCHS_LOG_HOST("[ALLOC] buffers ready: it=%p(%zu) entropy=%p(%zu) contrast=%p(%zu) progZ=%p(%zu) progIt=%p(%zu) | %dx%d px, tileSize=%d -> tiles=%d",
                        d_iterations.get(), d_iterations.size(),
                        d_entropy.get(),    d_entropy.size(),
                        d_contrast.get(),   d_contrast.size(),
-                       progressiveOn ? " + progressive state" : "",
+                       d_stateZ.get(),     d_stateZ.size(),
+                       d_stateIt.get(),    d_stateIt.size(),
                        width, height, tileSize, numTiles);
     }
 
@@ -254,7 +230,7 @@ void RendererState::resize(int newWidth, int newHeight) {
     d_entropy.free();
     d_contrast.free();
 
-    // Progressive: beim Resize ebenfalls freigeben (sauberer Neustart der States)
+    // Progressive-State freigeben
     d_stateZ.free();
     d_stateIt.free();
 
@@ -289,11 +265,16 @@ void RendererState::resize(int newWidth, int newHeight) {
 
     setupCudaBuffers(lastTileSize);
 
+    // Progressive nach Resize: optional eine Ruhe-Frame (sanft) oder State-Zeroing
+    progressiveEnabled = Settings::progressiveDefault;
+    // (Hard reset ist optional, falls gewünscht:)
+    // CUDA_CHECK(cudaMemset(d_stateZ.get(),  0, d_stateZ.size()));
+    // CUDA_CHECK(cudaMemset(d_stateIt.get(), 0, d_stateIt.size()));
+
     // Host-Timings fuer neues Frame auf Null
     lastTimings.resetHostFrame();
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[RESIZE] %d x %d buffers reallocated (progressive=%d)",
-                       width, height, (int)Settings::progressiveEnabled);
+        LUCHS_LOG_HOST("[RESIZE] %d x %d buffers reallocated", width, height);
     }
 }

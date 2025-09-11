@@ -158,7 +158,10 @@ namespace Settings {
     // Empfehlung: false .. true (bool) – standardmäßig aus, erst testen/tunen.
     // Effekt: true = weniger Iterationen bei bounded Orbits; false = unverändert.
     // ------------------------------------------------------------------------
-    inline constexpr bool periodicityEnabled = false;
+    inline constexpr bool periodicityEnabled = true;
+
+    inline constexpr int  progressiveAddIter = 128;   // Budget pro Frame
+    inline constexpr bool progressiveDefault = true;  // Host darf es jederzeit auf 0 setzen
 
     // ------------------------------------------------------------------------
     // periodicityCheckInterval
