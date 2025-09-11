@@ -155,38 +155,36 @@ namespace Settings {
     // ------------------------------------------------------------------------
     // periodicityEnabled
     // Wirkung: Aktiviert Periodizitäts-Probe im Kernel (frühzeitiger Abbruch bei (nahe) zyklischer Bahn).
+    // Empfehlung: false .. true (bool) – standardmäßig aus, erst testen/tunen.
     // Effekt: true = weniger Iterationen bei bounded Orbits; false = unverändert.
     // ------------------------------------------------------------------------
-    inline constexpr bool   periodicityEnabled     = true;
+    inline constexpr bool periodicityEnabled = true;
+
+    inline constexpr int  progressiveAddIter = 128;   // Budget pro Frame
+    inline constexpr bool progressiveDefault = true;  // Host darf es jederzeit auf 0 setzen
 
     // ------------------------------------------------------------------------
     // periodicityCheckInterval
     // Wirkung: Prüfintervall N (Iterationen) zwischen zwei Proben von z.
-    // Empfehlung: 32 .. 128 (int)
+    // Empfehlung: 32 .. 128 (int) – größer = seltener, schneller; kleiner = häufiger, genauer.
     // ------------------------------------------------------------------------
-    inline constexpr int    periodicityCheckInterval = 64;
+    inline constexpr int periodicityCheckInterval = 64;
 
     // ------------------------------------------------------------------------
     // periodicityEps2
     // Wirkung: Schwellwert für Abstand² zwischen z-Proben (kleiner = strenger).
-    // Empfehlung: 1e-16 .. 1e-12 (double)
+    // Empfehlung: 1e-16 .. 1e-12 (double) – Startwert konservativ.
     // ------------------------------------------------------------------------
-    inline constexpr double periodicityEps2        = 1e-14;
+    inline constexpr double periodicityEps2 = 1e-14;
 
 // ============================== Progressive / State ==========================
 
     // ------------------------------------------------------------------------
     // progressiveEnabled
     // Wirkung: Allokiert persistente Per-Pixel-States (Z, it) für progressive Iteration.
+    // Hinweis: In Keks 4 werden die Puffer nur angelegt (Renderpfad folgt in Keks 6/7).
     // **AN**: true
     // ------------------------------------------------------------------------
     inline constexpr bool progressiveEnabled = true;
-
-    // ------------------------------------------------------------------------
-    // progressiveAddIter
-    // Wirkung: Inkrementelles Iterationsbudget pro Frame (nur bei progressiveEnabled).
-    // Empfehlung: 64 .. 256 (int)
-    // ------------------------------------------------------------------------
-    inline constexpr int  progressiveAddIter = 128;
 
 } // namespace Settings

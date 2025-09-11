@@ -1,7 +1,7 @@
 ///// Otter: Einheitliche, klare Struktur – nur aktive Zustaende; Header schlank, keine PCH; Nacktmull-Pullover.
 ///// Schneefuchs: Speicher/Buffer exakt definiert; State entkoppelt; MSVC-Align-Warnung lokal gekapselt.
 ///  Maus: tileSize bleibt explizit; Progressive-State (z,it) + Cooldown-Mechanik; ASCII-only.
-///  Datei: src/renderer_state.hpp
+///// Datei: src/renderer_state.hpp
 #pragma once
 
 // Leichte Includes im Header (keine PCH)
@@ -34,17 +34,17 @@ public:
     double2     pixelScale{0.0, 0.0}; // Delta pro Pixel in Real/Imag (double)
 
     // 📌 Referenz-Orbit-Basis (Perturbation)
-    double2     orbitCenter{0.0, 0.0};     // Basis fuer Referenz-Orbit (Tile/Frame)
-    bool        orbitRebuildRequested = false; // Host-Trigger fuer Orbit-Neuaufbau
+    double2     orbitCenter{0.0, 0.0};
+    bool        orbitRebuildRequested = false;
 
     // 🛡️ Precision-Guards (Host-seitig ausgewertet)
-    bool        precisionGuardTriggered = false; // (delta_cx/ulp) < Schwelle
-    double      precisionGuardRatioLast = 0.0;   // letzte Ratio-Messung
-    bool        rebaseRequested         = false; // Center-Rebase anfordern (Ausloeschungsschutz)
+    bool        precisionGuardTriggered = false;
+    double      precisionGuardRatioLast = 0.0;
+    bool        rebaseRequested         = false;
 
     // 🧮 Iterationsparameter
-    int baseIterations = 100;   // Startbudget
-    int maxIterations  = 1000;  // aktuell verwendete harte Obergrenze
+    int baseIterations = 100;
+    int maxIterations  = 1000;
 
     // 📈 Anzeige/Timing (Frame)
     float  fps       = 0.0f;
@@ -60,7 +60,7 @@ public:
     Hermelin::CudaDeviceBuffer d_entropy;    // float[numTiles]
     Hermelin::CudaDeviceBuffer d_contrast;   // float[numTiles]
 
-    // ➕ Progressive-State (Per-Pixel Resume)
+    // ➕ Progressive-State (Per-Pixel Resume) – Keks 4/5
     Hermelin::CudaDeviceBuffer d_stateZ;     // float2[width*height] – letzter z
     Hermelin::CudaDeviceBuffer d_stateIt;    // int   [width*height] – akk. Iterationen
     bool                       progressiveEnabled = true; // Host-Schalter (sanft)
@@ -95,25 +95,23 @@ public:
         double pboMap           = 0.0;
 
         // HOST (gesetzt in frame_pipeline)
-        double uploadMs         = 0.0; // PBO->Texture + FSQ
-        double overlaysMs       = 0.0; // Heatmap + Warzenschwein
-        double frameTotalMs     = 0.0; // beginFrame->Ende execute (ohne Swap)
+        double uploadMs         = 0.0;
+        double overlaysMs       = 0.0;
+        double frameTotalMs     = 0.0;
 
-        // Pro-Frame-Reset nur fuer Host-Anteile.
         void resetHostFrame() noexcept {
             uploadMs     = 0.0;
             overlaysMs   = 0.0;
             frameTotalMs = 0.0;
-            // CUDA-Messwerte bleiben vom Renderpfad gesetzt.
         }
     };
     CudaPhaseTimings lastTimings;
 
     // 🧽 Setup & Verwaltung
     RendererState(int w, int h);
-    void reset();                             // stellt Initialzustand her
-    void setupCudaBuffers(int tileSize);      // allokiert/verifiziert Device-Buffer – tileSize explizit
-    void resize(int newWidth, int newHeight); // Fenstergroesse aendern
+    void reset();
+    void setupCudaBuffers(int tileSize);
+    void resize(int newWidth, int newHeight);
 
     // 🧯 Progressive-State vorsichtig invalidieren (1-Frame-Cooldown, optional Hard-Reset)
     void invalidateProgressiveState(bool hardReset) noexcept;
