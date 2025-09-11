@@ -1,6 +1,6 @@
-///// Otter: Keks 3 – Periodizitäts-Probe via Flag; Keks-0 ms-Timing bleibt; kein Default-Verhaltenswechsel.
-///// Schneefuchs: Check alle N Iter.; EPS² aus Settings; Treffer ⇒ it=maxIter (bounded), escaped=false.
-///  Maus: ASCII-Logs, deterministisch; if constexpr-Gate eliminiert Overhead, wenn disabled.
+///// Otter: Keks 4+5 – Progressive Resume via __constant__-State; Keks 3 bleibt optional; kein ABI-Bruch.
+///// Schneefuchs: Auswahl Progressive vs. Direkt im Export; DE-Alpha bei Escape per Recompute; ASCII-only Logs.
+///  Maus: State-Writeback (z,it) pro Frame; View-Reset extern; deterministisch; Launch-Bounds unverändert.
 ///// Datei: src/nacktmull.cu
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -41,7 +41,7 @@ __device__ __forceinline__ float3 linear_to_srgb3(const float3 c){
     return make_float3(linear_to_srgb(c.x), linear_to_srgb(c.y), linear_to_srgb(c.z));
 }
 
-// Cardioid / Period-2-Bulb (Early-Out) – Routine vorhanden (Keks 2 übersprungen)
+// Cardioid / Period-2-Bulb (Early-Out)
 __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y){
     const float x1 = x - 0.25f;
     const float y2 = y*y;
@@ -180,11 +180,36 @@ __device__ __forceinline__ void shade_color_alpha(
     const float F  = clamp01(1.0f - 0.80f*l2);
     A = clamp01(A * (0.60f + 0.40f*F));
 
-    // Breathing in (1-A): Transparenz „atmet“ dezent, Kante bleibt stabil
+    // Breathing in (1-A)
     const float breathe = 0.12f * __sinf(0.60f * t);
     float transp = clamp01(1.0f - A);
     transp = clamp01(transp * (1.0f + breathe));
     out_alpha = clamp01(1.0f - transp);
+}
+
+// ============================================================================
+// Progressive State (__constant__) + Setter (Host) – Keks 4
+// ============================================================================
+struct NacktmullProgState {
+    float2* z;     // d_stateZ
+    int*    it;    // d_stateIt
+    int     addIter;
+    int     iterCap;
+    int     enabled; // 0|1
+};
+__device__ __constant__ NacktmullProgState g_prog = { nullptr, nullptr, 0, 0, 0 };
+
+extern "C" void nacktmull_set_progressive(const void* zDev,
+                                          const void* itDev,
+                                          int addIter, int iterCap, int enabled)
+{
+    NacktmullProgState h{};
+    h.z       = (float2*)zDev;
+    h.it      = (int*)itDev;
+    h.addIter = addIter;
+    h.iterCap = iterCap;
+    h.enabled = enabled ? 1 : 0;
+    CUDA_CHECK(cudaMemcpyToSymbol(g_prog, &h, sizeof(h)));
 }
 
 // ============================================================================
@@ -208,7 +233,7 @@ void mandelbrotKernel(
         (double)zoom
     );
 
-    // Early interior exit (Cardioid/Bulb) – vorhanden
+    // Early interior exit (Cardioid/Bulb)
     if (insideMainCardioidOrBulb(c.x, c.y)){
         const float u = ((float)x + 0.5f) / (float)w;
         const float v = ((float)y + 0.5f) / (float)h;
@@ -314,7 +339,136 @@ void mandelbrotKernel(
 }
 
 // ============================================================================
+// Progressive Fortsetzungs-Kernel (Keks 4)
+// - liest/aktualisiert z und it aus g_prog.{z,it}
+// - führt bis zu addIter weitere Schritte aus (oder bis Escape / iterCap)
+// - DE (für Alpha) wird *nur* im Escape-Moment einmalig recomputed
+// ============================================================================
+__global__ __launch_bounds__(256)
+void mandelbrotProgressiveKernel(
+    uchar4* __restrict__ out, int* __restrict__ iterOut,
+    int w, int h, float zoom, float2 center, int maxIter, float tSec)
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= w || y >= h) return;
+
+    const int idx = y*w + x;
+
+    const float2 c = pixelToComplex(
+        (double)x + 0.5, (double)y + 0.5,
+        w, h, (double)center.x, (double)center.y, (double)zoom);
+
+    // Early interior exit (Cardioid/Bulb)
+    if (insideMainCardioidOrBulb(c.x, c.y)){
+        const float u = ((float)x + 0.5f) / (float)w;
+        const float v = ((float)y + 0.5f) / (float)h;
+        const float3 bgLn   = background_linear(u, v, tSec);
+        const float3 glassS = gtPalette_srgb(0.0f, true, tSec);
+        const float3 glassL = srgb_to_linear3(glassS);
+        const float  A      = 0.18f;
+        float3 compLn = make_float3(
+            A*glassL.x + (1.0f - A)*bgLn.x,
+            A*glassL.y + (1.0f - A)*bgLn.y,
+            A*glassL.z + (1.0f - A)*bgLn.z
+        );
+        const float3 compS = linear_to_srgb3(compLn);
+        out[idx] = make_uchar4(
+            (unsigned char)(255.0f*clamp01(compS.x) + 0.5f),
+            (unsigned char)(255.0f*clamp01(compS.y) + 0.5f),
+            (unsigned char)(255.0f*clamp01(compS.z) + 0.5f),
+            255);
+        iterOut[idx] = maxIter;
+        if (g_prog.enabled) {
+            if (g_prog.it) g_prog.it[idx] = maxIter;
+            if (g_prog.z)  g_prog.z[idx]  = make_float2(0.0f, 0.0f);
+        }
+        return;
+    }
+
+    // Lade Progressive-Start
+    int   it = 0;
+    float zx = 0.0f, zy = 0.0f;
+    if (g_prog.enabled && g_prog.it && g_prog.z) {
+        it = g_prog.it[idx];
+        float2 z0 = g_prog.z[idx];
+        if (it > 0) { zx = z0.x; zy = z0.y; }
+    }
+
+    const int addIter = g_prog.enabled ? g_prog.addIter : 0;
+    const int iterCap = g_prog.enabled ? g_prog.iterCap : maxIter;
+
+    int stepLimit = iterCap - it;
+    if (addIter < stepLimit) stepLimit = addIter;
+    if (stepLimit < 0) stepLimit = 0;
+
+    bool escaped = false;
+    const float esc2 = 4.0f;
+
+    #pragma unroll 1
+    for (int s = 0; s < stepLimit; ++s) {
+        const float x2 = zx*zx, y2 = zy*zy;
+        if (x2 + y2 > esc2) { escaped = true; break; }
+        const float xt = x2 - y2 + c.x;
+        zy = __fmaf_rn(2.0f*zx, zy, c.y);
+        zx = xt;
+        ++it;
+    }
+
+    // State zurückschreiben
+    if (g_prog.enabled && g_prog.it && g_prog.z) {
+        g_prog.it[idx] = it;
+        g_prog.z[idx]  = make_float2(zx, zy);
+    }
+
+    // Farbe + Alpha
+    float3 frag_srgb; float alpha;
+
+    if (escaped) {
+        // Ableitung einmalig bis it recomputen (DE für Alpha)
+        float rzx=0.0f, rzy=0.0f, dx=0.0f, dy=0.0f;
+        for (int k=0; k<it; ++k) {
+            const float x2 = rzx*rzx, y2 = rzy*rzy;
+            if (x2 + y2 > esc2) break;
+            const float twx = 2.0f*rzx;
+            const float twy = 2.0f*rzy;
+            const float ndx = twx*dx - twy*dy + 1.0f;
+            const float ndy = twx*dy + twy*dx;
+            const float xt  = x2 - y2 + c.x;
+            rzy = __fmaf_rn(2.0f*rzx, rzy, c.y);
+            rzx = xt;
+            dx = ndx; dy = ndy;
+        }
+        shade_color_alpha(it, iterCap, zx, zy, dx, dy, /*escaped=*/true, tSec, frag_srgb, alpha);
+    } else {
+        float dummyDx=0.0f, dummyDy=0.0f;
+        shade_color_alpha(it, iterCap, zx, zy, dummyDx, dummyDy, /*escaped=*/false, tSec, frag_srgb, alpha);
+    }
+
+    // Hintergrund + Komposition
+    const float u = ((float)x + 0.5f) / (float)w;
+    const float v = ((float)y + 0.5f) / (float)h;
+    const float3 bgLn = background_linear(u, v, tSec);
+    const float3 fgLn = srgb_to_linear3(frag_srgb);
+    float3 compLn = make_float3(
+        alpha*fgLn.x + (1.0f - alpha)*bgLn.x,
+        alpha*fgLn.y + (1.0f - alpha)*bgLn.y,
+        alpha*fgLn.z + (1.0f - alpha)*bgLn.z
+    );
+    const float3 compS = linear_to_srgb3(compLn);
+
+    out[idx] = make_uchar4(
+        (unsigned char)(255.0f*clamp01(compS.x) + 0.5f),
+        (unsigned char)(255.0f*clamp01(compS.y) + 0.5f),
+        (unsigned char)(255.0f*clamp01(compS.z) + 0.5f),
+        255
+    );
+    iterOut[idx] = it;
+}
+
+// ============================================================================
 // Öffentliche API (Signatur unverändert) – Keks-0: korrektes ms-Timing
+//  + Umschaltung Direkt/Progressive (Keks 4)
 // ============================================================================
 extern "C" void launch_mandelbrotHybrid(
     uchar4* out, int* d_it,
@@ -338,12 +492,21 @@ extern "C" void launch_mandelbrotHybrid(
     const dim3 grid((w + block.x - 1) / block.x,
                     (h + block.y - 1) / block.y);
 
-    mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter, tSec);
+    // Progressive aktiv?
+    NacktmullProgState g{};
+    cudaError_t cpy = cudaMemcpyFromSymbol(&g, ::g_prog, sizeof(g));
+    bool useProg = (cpy == cudaSuccess) && (g.enabled != 0) && g.z && g.it && (g.addIter > 0);
+
+    if (useProg) {
+        mandelbrotProgressiveKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter, tSec);
+    } else {
+        mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter, tSec);
+    }
 
     if constexpr (Settings::performanceLogging){
         cudaDeviceSynchronize();
         const double ms = 1e-3 * (double)std::chrono::duration_cast<std::chrono::microseconds>(clk::now() - tStart).count();
-        LUCHS_LOG_HOST("[PERF] nacktmull direct+transp kern=%.2f ms itMax=%d", ms, maxIter);
+        LUCHS_LOG_HOST("[PERF] nacktmull direct+transp kern=%.2f ms itMax=%d prog=%d", ms, maxIter, (int)useProg);
     }
 
     if constexpr (Settings::debugLogging){
