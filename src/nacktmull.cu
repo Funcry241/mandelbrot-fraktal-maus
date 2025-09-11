@@ -1,6 +1,6 @@
-///// Otter: Log fix (ms vs. absolute uptime); no visual change.
-///// Schneefuchs: Use local tStart for kernel duration; keep tSec from static anim origin.
-///// Maus: Deterministic ASCII logs; [PERF] kern=.. ms now accurate per frame.
+///// Otter: Keks 3 – Periodizitäts-Probe via Flag; keine Bildänderung bei Default (aus).
+///// Schneefuchs: Check alle N Iterationen; EPS² aus Settings; bei Treffer it=maxIter (bounded), escaped=false.
+///  Maus: Keks 0 bleibt erhalten (ms-Timing mit lokalem tStart); ASCII-Logs, deterministisch.
 ///// Datei: src/nacktmull.cu
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -41,7 +41,7 @@ __device__ __forceinline__ float3 linear_to_srgb3(const float3 c){
     return make_float3(linear_to_srgb(c.x), linear_to_srgb(c.y), linear_to_srgb(c.z));
 }
 
-// Cardioid / Period-2-Bulb (Early-Out)
+// Cardioid / Period-2-Bulb (Early-Out) – (Keks 2 wäre aktivierbar; aktuell nur vorhandene Routine)
 __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y){
     const float x1 = x - 0.25f;
     const float y2 = y*y;
@@ -189,6 +189,7 @@ __device__ __forceinline__ void shade_color_alpha(
 
 // ============================================================================
 // Direkter Mandelbrot-Kernel (Iteration + Ableitung), Komposition mit Hintergrund
+//  + Periodizitäts-Probe (Keks 3) optional via Settings::periodicityEnabled
 // ============================================================================
 __global__ __launch_bounds__(256)
 void mandelbrotKernel(
@@ -208,7 +209,7 @@ void mandelbrotKernel(
         (double)zoom
     );
 
-    // Early interior exit (Cardioid/Bulb)
+    // Early interior exit (Cardioid/Bulb) – bereits vorhanden; kein Keks-2-Umbau nötig
     if (insideMainCardioidOrBulb(c.x, c.y)){
         const float u = ((float)x + 0.5f) / (float)w;
         const float v = ((float)y + 0.5f) / (float)h;
@@ -239,6 +240,12 @@ void mandelbrotKernel(
     bool  escaped = false;
     const float esc2 = 4.0f;
 
+    // ---------- Keks 3: Periodizitäts-Probe (optional via Settings-Flag) ----------
+    float px = 0.0f, py = 0.0f;   // gespeicherte Probe von z
+    int   lastProbe = 0;
+    const int   perN  = Settings::periodicityCheckInterval;     // z. B. 64
+    const float eps2  = (float)Settings::periodicityEps2;       // z. B. 1e-14
+
     #pragma unroll 1
     for (int i=0; i<maxIter; ++i){
         const float x2 = zx*zx, y2 = zy*zy;
@@ -262,6 +269,24 @@ void mandelbrotKernel(
         zx = xt;
 
         dx = ndx; dy = ndy;
+
+        // -------- Periodizität (compile-time via constexpr Flag) --------
+        if constexpr (Settings::periodicityEnabled){
+            const int step = i - lastProbe;
+            if (step >= perN){
+                const float dxp = zx - px;
+                const float dyp = zy - py;
+                const float d2  = dxp*dxp + dyp*dyp;
+                if (d2 <= eps2){
+                    // (Nahe) periodisch → bounded: als „innen“ behandeln
+                    it = maxIter;
+                    escaped = false;
+                    break;
+                }
+                px = zx; py = zy;
+                lastProbe = i;
+            }
+        }
     }
 
     // Farbe + Alpha
@@ -290,7 +315,7 @@ void mandelbrotKernel(
 }
 
 // ============================================================================
-// Öffentliche API (Signatur unverändert)
+// Öffentliche API (Signatur unverändert) – Keks 0 ms-Timing bleibt erhalten
 // ============================================================================
 extern "C" void launch_mandelbrotHybrid(
     uchar4* out, int* d_it,
@@ -320,5 +345,12 @@ extern "C" void launch_mandelbrotHybrid(
         cudaDeviceSynchronize();
         const double ms = 1e-3 * (double)std::chrono::duration_cast<std::chrono::microseconds>(clk::now() - tStart).count();
         LUCHS_LOG_HOST("[PERF] nacktmull direct+transp kern=%.2f ms itMax=%d", ms, maxIter);
+    }
+
+    if constexpr (Settings::debugLogging){
+        LUCHS_LOG_HOST("[INFO] periodicity enabled=%d N=%d eps2=%.3e",
+                       (int)Settings::periodicityEnabled,
+                       (int)Settings::periodicityCheckInterval,
+                       (double)Settings::periodicityEps2);
     }
 }

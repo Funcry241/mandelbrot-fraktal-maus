@@ -150,4 +150,28 @@ namespace Settings {
     inline constexpr int MIN_TILE_SIZE  = 8;
     inline constexpr int MAX_TILE_SIZE  = 64;
 
+// ============================== Checks / Periodizität ========================
+
+    // ------------------------------------------------------------------------
+    // periodicityEnabled
+    // Wirkung: Aktiviert Periodizitäts-Probe im Kernel (frühzeitiger Abbruch bei (nahe) zyklischer Bahn).
+    // Empfehlung: false .. true (bool) – standardmäßig aus, erst testen/tunen.
+    // Effekt: true = weniger Iterationen bei bounded Orbits; false = unverändert.
+    // ------------------------------------------------------------------------
+    inline constexpr bool periodicityEnabled = false;
+
+    // ------------------------------------------------------------------------
+    // periodicityCheckInterval
+    // Wirkung: Prüfintervall N (Iterationen) zwischen zwei Proben von z.
+    // Empfehlung: 32 .. 128 (int) – größer = seltener, schneller; kleiner = häufiger, genauer.
+    // ------------------------------------------------------------------------
+    inline constexpr int periodicityCheckInterval = 64;
+
+    // ------------------------------------------------------------------------
+    // periodicityEps2
+    // Wirkung: Schwellwert für Abstand² zwischen z-Proben (kleiner = strenger).
+    // Empfehlung: 1e-16 .. 1e-12 (double) – Startwert konservativ.
+    // ------------------------------------------------------------------------
+    inline constexpr double periodicityEps2 = 1e-14;
+
 } // namespace Settings
