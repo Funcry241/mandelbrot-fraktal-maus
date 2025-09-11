@@ -61,6 +61,10 @@ public:
     Hermelin::CudaDeviceBuffer d_entropy;
     Hermelin::CudaDeviceBuffer d_contrast;
 
+    // ➕ Progressive-State (Keks 4) – nur genutzt, wenn Settings::progressiveEnabled == true
+    Hermelin::CudaDeviceBuffer d_stateZ;   // float2 per Pixel (Z-State)
+    Hermelin::CudaDeviceBuffer d_stateIt;  // int per Pixel (Iterationszaehler)
+
     // 🎥 OpenGL-Zielpuffer (Interop via CUDA) mit RAII
     Hermelin::GLBuffer pbo;
     Hermelin::GLBuffer tex;

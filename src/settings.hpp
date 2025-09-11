@@ -174,4 +174,14 @@ namespace Settings {
     // ------------------------------------------------------------------------
     inline constexpr double periodicityEps2 = 1e-14;
 
+// ============================== Progressive / State ==========================
+
+    // ------------------------------------------------------------------------
+    // progressiveEnabled
+    // Wirkung: Allokiert persistente Per-Pixel-States (Z, it) für progressive Iteration.
+    // Hinweis: In Keks 4 werden die Puffer nur angelegt (Renderpfad folgt in Keks 6/7).
+    // **AN**: true
+    // ------------------------------------------------------------------------
+    inline constexpr bool progressiveEnabled = true;
+
 } // namespace Settings
