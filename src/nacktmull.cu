@@ -1,7 +1,7 @@
 ///// Otter: Direkte Mandelbrot-Iteration (ohne Referenz-Orbit), GT-Palette (Cyan→Amber), Smooth-Coloring.
 ///  Schneefuchs: API & Mapping unverändert (pixelToComplex), deterministisch.
 ///  Maus: Heatmap-Vertrag bleibt (innen = maxIter).
-///  Bonus: Eye-Candy-Animation (sanft, monotone Farbabbildung bleibt erhalten).
+///  Bonus: Eye-Candy-Animation (sanft).
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -48,40 +48,36 @@ __device__ __forceinline__ float3 linear_to_srgb3(float3 c){
 }
 
 // ============================================================================
-// GT-Palette (Cyan→Amber), Interpolation im Linearraum + sanfte Animation
+// GT-Palette (breiter Farbbogen), Interpolation im Linearraum + sanfte Animation
 // ============================================================================
 __device__ __forceinline__ uchar4 gtPalette_u8(float x, bool inSet, float t){
-    // Tuning (Eye-Candy, aber konservativ/monoton):
-    // - gamma etwas niedriger für mehr Mittenton-Zeichnung
-    // - "lift" hebt dunkle Tiefen leicht an (mehr Struktur im Außenbereich)
-    // - warmShift driftet sanft über Zeit
-    // - ultrafeine dynamische Mikro-Isolinien (sehr geringe Amplitude)
-    const float gamma        = 0.86f;
-    const float lift         = 0.07f;                         // 0.05..0.10
-    const float baseVibr     = 1.04f;                         // Grundvibrance
-    const float addVibrMax   = 0.06f;                         // Zusatzvibrance (x-abhängig)
-    const float warmDriftAmp = 0.06f;                         // zeitl. Warmdrift ±6%
+    // Tuning: dunkle Tiefen heben, mehr Mittenton-Zeichnung, sanftes Breathing/Warmdrift
+    const float gamma        = 0.84f;                   // etwas flacher → mehr Mittentöne
+    const float lift         = 0.08f;                   // 0.05..0.10 hebt dunkle Tiefen
+    const float baseVibr     = 1.05f;                   // Grundvibrance
+    const float addVibrMax   = 0.06f;                   // Zusatzvibrance ab x≈0.1
+    const float warmDriftAmp = 0.06f;                   // ±6% Warmdrift
     const float warmShift    = 1.00f + warmDriftAmp * __sinf(0.30f * t);
-    const float stripes      = 0.012f;                        // ultrafein
+    const float stripes      = 0.0f;                    // AUS: keine Ringe
     const float stripeFreq   = 6.2f;
 
     if (inSet) return make_uchar4(10, 12, 16, 255);
 
     // Eingangsshaping
     x = clamp01(powf(clamp01(x), gamma));
-    x = clamp01((x + lift) / (1.0f + lift));                  // Low-End anheben
+    x = clamp01((x + lift) / (1.0f + lift));           // Low-End anheben
 
-    // Anchors (dezent heller im dunklen Bereich)
-    const float  p[8] = { 0.00f, 0.12f, 0.25f, 0.42f, 0.60f, 0.78f, 0.95f, 1.00f };
+    // Mehr Farbbogen: Indigo → Cyan → Mint → Sand → Amber → Rose → Off-White
+    const float  p[8] = { 0.00f, 0.10f, 0.22f, 0.38f, 0.55f, 0.72f, 0.88f, 1.00f };
     const float3 c[8] = {
-        make_float3(11/255.f, 14/255.f, 26/255.f), // #0B0E1A (vorher #08090F)
-        make_float3(20/255.f, 54/255.f,102/255.f), // #143666 (vorher #112D5F)
-        make_float3(22/255.f, 84/255.f,159/255.f), // #16549F
-        make_float3(36/255.f,178/255.f,191/255.f), // #24B2BF
-        make_float3(255/255.f,210/255.f, 87/255.f),// #FFD257
-        make_float3(236/255.f,121/255.f, 44/255.f),// #EC792C
-        make_float3(171/255.f, 34/255.f, 61/255.f),// #AB223D
-        make_float3(250/255.f,250/255.f,250/255.f) // #FAFAFA
+        make_float3(11/255.f, 14/255.f, 26/255.f), // #0B0E1A (Deep Navy)
+        make_float3(26/255.f, 43/255.f,111/255.f), // #1A2B6F (Indigo)
+        make_float3(30/255.f,166/255.f,209/255.f), // #1EA6D1 (Cyan)
+        make_float3(123/255.f,228/255.f,195/255.f),// #7BE4C3 (Mint/Aqua)
+        make_float3(255/255.f,224/255.f,138/255.f),// #FFE08A (Sand)
+        make_float3(247/255.f,165/255.f, 58/255.f),// #F7A53A (Amber)
+        make_float3(200/255.f, 72/255.f,122/255.f),// #C8487A (Rose/Magenta)
+        make_float3(250/255.f,249/255.f,246/255.f) // #FAF9F6 (Off-White)
     };
 
     int j = 0;
@@ -89,20 +85,18 @@ __device__ __forceinline__ uchar4 gtPalette_u8(float x, bool inSet, float t){
     for (int i=0; i<7; ++i) { if (x >= p[i]) j = i; }
     const float span = fmaxf(p[j+1] - p[j], 1e-6f);
     float tseg = clamp01((x - p[j]) / span);
-    tseg = tseg*tseg*(3.0f - 2.0f*tseg); // smootherstep
+    tseg = tseg*tseg*(3.0f - 2.0f*tseg);               // smootherstep
 
     float3 aLin  = srgb_to_linear3(c[j]);
     float3 bLin  = srgb_to_linear3(c[j+1]);
     float3 rgbLn = mix3(aLin, bLin, tseg);
 
-    // Sanfte „Breathing“-Bewegung: x -> x'
-    // Monotonie bleibt erhalten, Amplitude klein.
+    // Sanftes Breathing (monoton, kleine Amplitude)
     {
-        const float breath = 0.08f * __sinf(0.80f * t);       // ±0.08
+        const float breath = 0.08f * __sinf(0.80f * t); // ±0.08
         const float xprime = clamp01(x + breath * x * (1.0f - x));
-        // leicht auf Sättigung wirken (x-abhängig)
-        const float vibr = baseVibr + addVibrMax * clamp01((xprime - 0.10f) * (1.0f / 0.40f));
-        const float luma = 0.2126f*rgbLn.x + 0.7152f*rgbLn.y + 0.0722f*rgbLn.z;
+        const float vibr   = baseVibr + addVibrMax * clamp01((xprime - 0.10f) * (1.0f / 0.40f));
+        const float luma   = 0.2126f*rgbLn.x + 0.7152f*rgbLn.y + 0.0722f*rgbLn.z;
         rgbLn = make_float3(
             luma + (rgbLn.x - luma) * vibr * warmShift,
             luma + (rgbLn.y - luma) * vibr * 1.00f,
@@ -110,16 +104,14 @@ __device__ __forceinline__ uchar4 gtPalette_u8(float x, bool inSet, float t){
         );
     }
 
-    // Ultraf eine dynamische Mikro-Isolinien (nur mittlere Tonwerte, minimal)
-    {
-        const float mid = 4.0f * x * (1.0f - x);              // 0..1, peak bei x=0.5
-        const float amp = stripes * mid;                      // nur Mitte betonen
-        if (amp > 0.0f){
-            const float phase = 6.2831853f * (x * stripeFreq + 0.10f * t);
-            const float s = 0.5f + 0.5f * __sinf(phase);
-            const float boost = 1.0f + amp * (s*s*s*s);       // Highlights biasen
-            rgbLn.x *= boost; rgbLn.y *= boost; rgbLn.z *= boost;
-        }
+    // Stripes AUS (keine Ringe). Code bleibt als Option:
+    if (stripes > 0.0f){
+        const float mid = 4.0f * x * (1.0f - x);
+        const float amp = stripes * mid;
+        const float phase = 6.2831853f * (x * stripeFreq + 0.10f * t);
+        const float s = 0.5f + 0.5f * __sinf(phase);
+        const float boost = 1.0f + amp * (s*s*s*s);
+        rgbLn.x *= boost; rgbLn.y *= boost; rgbLn.z *= boost;
     }
 
     const float3 srgb = linear_to_srgb3(make_float3(
@@ -146,7 +138,7 @@ __device__ __forceinline__ uchar4 gtColor_fromSmoothState(int it, int maxIterati
         float x = ((float)it - l2) / (float)maxIterations;
 
         // Edge-Glow: nahe Escape-Grenze leicht boosten, monoton halten
-        float edge = clamp01(1.0f - 0.75f * l2);             // 0..1
+        float edge = clamp01(1.0f - 0.75f * l2);
         x = clamp01(x + 0.15f * edge * (1.0f - x));
         return gtPalette_u8(x, false, t);
     } else {
@@ -169,7 +161,6 @@ void mandelbrotKernel(
 
     const int idx = y * w + x;
 
-    // Mapping via Projektfunktion (konsistent, keine Verzerrung)
     const float2 c = pixelToComplex(
         (double)x + 0.5, (double)y + 0.5,
         w, h,
@@ -177,25 +168,22 @@ void mandelbrotKernel(
         (double)zoom
     );
 
-    // Early interior exit
     if (insideMainCardioidOrBulb(c.x, c.y)){
         out[idx]     = make_uchar4(10,12,16,255);
-        iterOut[idx] = maxIter;   // innen = maxIter (Heatmap-Vertrag)
+        iterOut[idx] = maxIter;
         return;
     }
 
-    // Direkte Iteration z_{n+1} = z_n^2 + c
     float zx = 0.0f, zy = 0.0f;
-    int   it = maxIter;           // default: gilt als "innen"
+    int   it = maxIter;
     const float esc2 = 4.0f;
 
     #pragma unroll 1
     for (int i=0; i<maxIter; ++i){
         const float x2 = zx*zx, y2 = zy*zy;
 
-        // Escape testen vor dem Update
         if (x2 + y2 > esc2){
-            it = i;               // Iteration der Flucht
+            it = i;
             break;
         }
 
@@ -209,7 +197,7 @@ void mandelbrotKernel(
 }
 
 // ============================================================================
-// Öffentliche API (wie im funktionierenden Build, Call-Sites unverändert)
+// Öffentliche API
 // ============================================================================
 extern "C" void launch_mandelbrotHybrid(
     uchar4* out, int* d_it,
