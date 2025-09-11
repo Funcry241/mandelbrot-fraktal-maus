@@ -1,6 +1,6 @@
-///// Otter: GT-Palette (Cyan→Amber) beibehalten; direkte Iteration (ohne Referenz-Orbit).
-///// Schneefuchs: API & Mapping wie zuvor; kompakt; deterministisch; ASCII-Logs.
-///  Maus: Ringe entfernt (Stripes=0.0); Heatmap-Vertrag unverändert (innen=maxIter).
+///// Otter: Direkte Mandelbrot-Iteration (ohne Referenz-Orbit), GT-Palette (Cyan→Amber), Smooth-Coloring.
+///  Schneefuchs: API & Mapping unverändert (pixelToComplex), deterministisch, ASCII-Logs.
+///  Maus: Ringe entfernt (Stripes=0.0), Heatmap-Vertrag unverändert (innen = maxIter).
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -17,11 +17,9 @@
 // ============================================================================
 // Device Utilities
 // ============================================================================
-__device__ __forceinline__ float  clamp01(float x){ return fminf(1.0f, fmaxf(0.0f, x)); }
-__device__ __forceinline__ float  mixf(float a, float b, float t){ return a + t*(b-a); }
-__device__ __forceinline__ float3 mix3(float3 a, float3 b, float t){
-    return make_float3(mixf(a.x,b.x,t), mixf(a.y,b.y,t), mixf(a.z,b.z,t));
-}
+__device__ __forceinline__ float  clamp01(float x)                  { return fminf(1.0f, fmaxf(0.0f, x)); }
+__device__ __forceinline__ float  mixf(float a, float b, float t)   { return a + t * (b - a); }
+__device__ __forceinline__ float3 mix3(float3 a, float3 b, float t) { return make_float3(mixf(a.x,b.x,t), mixf(a.y,b.y,t), mixf(a.z,b.z,t)); }
 
 // Cardioid / Period-2-Bulb (Early-Out)
 __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y){
@@ -52,7 +50,7 @@ __device__ __forceinline__ float3 linear_to_srgb3(float3 c){
 // GT-Palette (Cyan→Amber), Interpolation im Linearraum
 // ============================================================================
 __device__ __forceinline__ uchar4 gtPalette_u8(float x, bool inSet){
-    // Tuning (Ringe aus: stripes = 0.0f)
+    // Tuning – Ringe aus (stripes = 0.0f)
     const float gamma      = 0.90f;
     const float vibr       = 1.06f;
     const float warmShift  = 1.00f;
@@ -77,36 +75,36 @@ __device__ __forceinline__ uchar4 gtPalette_u8(float x, bool inSet){
 
     int j = 0;
     #pragma unroll
-    for (int i=0;i<7;++i){ if (x >= p[i]) j = i; }
-    const float span = fmaxf(p[j+1]-p[j], 1e-6f);
+    for (int i=0; i<7; ++i) { if (x >= p[i]) j = i; }
+    const float span = fmaxf(p[j+1] - p[j], 1e-6f);
     float t = clamp01((x - p[j]) / span);
-    t = t*t*(3.0f - 2.0f*t);
+    t = t*t*(3.0f - 2.0f*t); // smootherstep
 
-    float3 aLin = srgb_to_linear3(c[j]);
-    float3 bLin = srgb_to_linear3(c[j+1]);
-    float3 rgbLin = mix3(aLin, bLin, t);
+    float3 aLin  = srgb_to_linear3(c[j]);
+    float3 bLin  = srgb_to_linear3(c[j+1]);
+    float3 rgbLn = mix3(aLin, bLin, t);
 
     if (stripes > 0.0f){
-        const float s = 0.5f + 0.5f * __sinf(6.2831853f * (x * stripeFreq));
-        const float sat = 1.0f + stripes*(s*s*s*s);
-        const float L = 0.2126f*rgbLin.x + 0.7152f*rgbLin.y + 0.0722f*rgbLin.z;
-        rgbLin.x = L + (rgbLin.x - L)*sat;
-        rgbLin.y = L + (rgbLin.y - L)*sat;
-        rgbLin.z = L + (rgbLin.z - L)*sat;
+        const float s   = 0.5f + 0.5f * __sinf(6.2831853f * (x * stripeFreq));
+        const float sat = 1.0f + stripes * (s*s*s*s); // Sättigungsboost (Luma-neutral)
+        const float L   = 0.2126f*rgbLn.x + 0.7152f*rgbLn.y + 0.0722f*rgbLn.z;
+        rgbLn.x = L + (rgbLn.x - L)*sat;
+        rgbLn.y = L + (rgbLn.y - L)*sat;
+        rgbLn.z = L + (rgbLn.z - L)*sat;
     }
 
     // leichte Vibrance/Warmth im Linearraum
     {
-        const float luma = 0.2126f*rgbLin.x + 0.7152f*rgbLin.y + 0.0722f*rgbLin.z;
-        rgbLin = make_float3(
-            luma + (rgbLin.x - luma) * vibr * warmShift,
-            luma + (rgbLin.y - luma) * vibr * 1.00f,
-            luma + (rgbLin.z - luma) * vibr * (2.0f - warmShift)
+        const float luma = 0.2126f*rgbLn.x + 0.7152f*rgbLn.y + 0.0722f*rgbLn.z;
+        rgbLn = make_float3(
+            luma + (rgbLn.x - luma) * vibr * warmShift,
+            luma + (rgbLn.y - luma) * vibr * 1.00f,
+            luma + (rgbLn.z - luma) * vibr * (2.0f - warmShift)
         );
     }
 
     const float3 srgb = linear_to_srgb3(make_float3(
-        clamp01(rgbLin.x), clamp01(rgbLin.y), clamp01(rgbLin.z)
+        clamp01(rgbLn.x), clamp01(rgbLn.y), clamp01(rgbLn.z)
     ));
 
     return make_uchar4(
@@ -147,7 +145,7 @@ void mandelbrotKernel(
 
     const int idx = y * w + x;
 
-    // Mapping via Projektfunktion (keine Verzerrung, konsistent)
+    // Mapping via Projektfunktion (konsistent, keine Verzerrung)
     const float2 c = pixelToComplex(
         (double)x + 0.5, (double)y + 0.5,
         w, h,
