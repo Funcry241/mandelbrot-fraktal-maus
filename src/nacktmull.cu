@@ -1,6 +1,7 @@
 ///// Otter: Direkte Mandelbrot-Iteration (ohne Referenz-Orbit), GT-Palette (Cyan→Amber), Smooth-Coloring.
-///  Schneefuchs: API & Mapping unverändert (pixelToComplex), deterministisch, ASCII-Logs.
-///  Maus: Ringe entfernt (Stripes=0.0), Heatmap-Vertrag unverändert (innen = maxIter).
+///  Schneefuchs: API & Mapping unverändert (pixelToComplex), deterministisch.
+///  Maus: Heatmap-Vertrag bleibt (innen = maxIter).
+///  Bonus: Eye-Candy-Animation (sanft, monotone Farbabbildung bleibt erhalten).
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -47,24 +48,34 @@ __device__ __forceinline__ float3 linear_to_srgb3(float3 c){
 }
 
 // ============================================================================
-// GT-Palette (Cyan→Amber), Interpolation im Linearraum
+// GT-Palette (Cyan→Amber), Interpolation im Linearraum + sanfte Animation
 // ============================================================================
-__device__ __forceinline__ uchar4 gtPalette_u8(float x, bool inSet){
-    // Tuning – Ringe aus (stripes = 0.0f)
-    const float gamma      = 0.90f;
-    const float vibr       = 1.06f;
-    const float warmShift  = 1.00f;
-    const float stripes    = 0.0f;  // dekorative Isolinien deaktiviert
-    const float stripeFreq = 6.5f;
+__device__ __forceinline__ uchar4 gtPalette_u8(float x, bool inSet, float t){
+    // Tuning (Eye-Candy, aber konservativ/monoton):
+    // - gamma etwas niedriger für mehr Mittenton-Zeichnung
+    // - "lift" hebt dunkle Tiefen leicht an (mehr Struktur im Außenbereich)
+    // - warmShift driftet sanft über Zeit
+    // - ultrafeine dynamische Mikro-Isolinien (sehr geringe Amplitude)
+    const float gamma        = 0.86f;
+    const float lift         = 0.07f;                         // 0.05..0.10
+    const float baseVibr     = 1.04f;                         // Grundvibrance
+    const float addVibrMax   = 0.06f;                         // Zusatzvibrance (x-abhängig)
+    const float warmDriftAmp = 0.06f;                         // zeitl. Warmdrift ±6%
+    const float warmShift    = 1.00f + warmDriftAmp * __sinf(0.30f * t);
+    const float stripes      = 0.012f;                        // ultrafein
+    const float stripeFreq   = 6.2f;
 
     if (inSet) return make_uchar4(10, 12, 16, 255);
 
+    // Eingangsshaping
     x = clamp01(powf(clamp01(x), gamma));
+    x = clamp01((x + lift) / (1.0f + lift));                  // Low-End anheben
 
+    // Anchors (dezent heller im dunklen Bereich)
     const float  p[8] = { 0.00f, 0.12f, 0.25f, 0.42f, 0.60f, 0.78f, 0.95f, 1.00f };
     const float3 c[8] = {
-        make_float3( 8/255.f,  9/255.f, 15/255.f), // #08090F
-        make_float3(17/255.f, 45/255.f, 95/255.f), // #112D5F
+        make_float3(11/255.f, 14/255.f, 26/255.f), // #0B0E1A (vorher #08090F)
+        make_float3(20/255.f, 54/255.f,102/255.f), // #143666 (vorher #112D5F)
         make_float3(22/255.f, 84/255.f,159/255.f), // #16549F
         make_float3(36/255.f,178/255.f,191/255.f), // #24B2BF
         make_float3(255/255.f,210/255.f, 87/255.f),// #FFD257
@@ -77,30 +88,38 @@ __device__ __forceinline__ uchar4 gtPalette_u8(float x, bool inSet){
     #pragma unroll
     for (int i=0; i<7; ++i) { if (x >= p[i]) j = i; }
     const float span = fmaxf(p[j+1] - p[j], 1e-6f);
-    float t = clamp01((x - p[j]) / span);
-    t = t*t*(3.0f - 2.0f*t); // smootherstep
+    float tseg = clamp01((x - p[j]) / span);
+    tseg = tseg*tseg*(3.0f - 2.0f*tseg); // smootherstep
 
     float3 aLin  = srgb_to_linear3(c[j]);
     float3 bLin  = srgb_to_linear3(c[j+1]);
-    float3 rgbLn = mix3(aLin, bLin, t);
+    float3 rgbLn = mix3(aLin, bLin, tseg);
 
-    if (stripes > 0.0f){
-        const float s   = 0.5f + 0.5f * __sinf(6.2831853f * (x * stripeFreq));
-        const float sat = 1.0f + stripes * (s*s*s*s); // Sättigungsboost (Luma-neutral)
-        const float L   = 0.2126f*rgbLn.x + 0.7152f*rgbLn.y + 0.0722f*rgbLn.z;
-        rgbLn.x = L + (rgbLn.x - L)*sat;
-        rgbLn.y = L + (rgbLn.y - L)*sat;
-        rgbLn.z = L + (rgbLn.z - L)*sat;
-    }
-
-    // leichte Vibrance/Warmth im Linearraum
+    // Sanfte „Breathing“-Bewegung: x -> x'
+    // Monotonie bleibt erhalten, Amplitude klein.
     {
+        const float breath = 0.08f * __sinf(0.80f * t);       // ±0.08
+        const float xprime = clamp01(x + breath * x * (1.0f - x));
+        // leicht auf Sättigung wirken (x-abhängig)
+        const float vibr = baseVibr + addVibrMax * clamp01((xprime - 0.10f) * (1.0f / 0.40f));
         const float luma = 0.2126f*rgbLn.x + 0.7152f*rgbLn.y + 0.0722f*rgbLn.z;
         rgbLn = make_float3(
             luma + (rgbLn.x - luma) * vibr * warmShift,
             luma + (rgbLn.y - luma) * vibr * 1.00f,
             luma + (rgbLn.z - luma) * vibr * (2.0f - warmShift)
         );
+    }
+
+    // Ultraf eine dynamische Mikro-Isolinien (nur mittlere Tonwerte, minimal)
+    {
+        const float mid = 4.0f * x * (1.0f - x);              // 0..1, peak bei x=0.5
+        const float amp = stripes * mid;                      // nur Mitte betonen
+        if (amp > 0.0f){
+            const float phase = 6.2831853f * (x * stripeFreq + 0.10f * t);
+            const float s = 0.5f + 0.5f * __sinf(phase);
+            const float boost = 1.0f + amp * (s*s*s*s);       // Highlights biasen
+            rgbLn.x *= boost; rgbLn.y *= boost; rgbLn.z *= boost;
+        }
     }
 
     const float3 srgb = linear_to_srgb3(make_float3(
@@ -115,19 +134,24 @@ __device__ __forceinline__ uchar4 gtPalette_u8(float x, bool inSet){
     );
 }
 
-// Smooth-Iterations → Farbwert
-__device__ __forceinline__ uchar4 gtColor_fromSmoothState(int it, int maxIterations, float zx, float zy){
+// Smooth-Iterations → Farbwert (+ Edge-Glow & Animation)
+__device__ __forceinline__ uchar4 gtColor_fromSmoothState(int it, int maxIterations, float zx, float zy, float t){
     const bool inSet = (it >= maxIterations);
-    if (inSet) return gtPalette_u8(0.0f, true);
+    if (inSet) return gtPalette_u8(0.0f, true, t);
 
     const float mag2 = zx*zx + zy*zy;
     if (mag2 > 1.0000001f && it > 0){
         const float mag = sqrtf(mag2);
-        float x = ((float)it - __log2f(__log2f(mag))) / (float)maxIterations;
-        return gtPalette_u8(clamp01(x), false);
+        const float l2  = __log2f(__log2f(mag));
+        float x = ((float)it - l2) / (float)maxIterations;
+
+        // Edge-Glow: nahe Escape-Grenze leicht boosten, monoton halten
+        float edge = clamp01(1.0f - 0.75f * l2);             // 0..1
+        x = clamp01(x + 0.15f * edge * (1.0f - x));
+        return gtPalette_u8(x, false, t);
     } else {
         float x = clamp01((float)it / (float)maxIterations);
-        return gtPalette_u8(x, false);
+        return gtPalette_u8(x, false, t);
     }
 }
 
@@ -137,7 +161,7 @@ __device__ __forceinline__ uchar4 gtColor_fromSmoothState(int it, int maxIterati
 __global__ __launch_bounds__(256)
 void mandelbrotKernel(
     uchar4* __restrict__ out, int* __restrict__ iterOut,
-    int w, int h, float zoom, float2 center, int maxIter)
+    int w, int h, float zoom, float2 center, int maxIter, float tSec)
 {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -169,9 +193,9 @@ void mandelbrotKernel(
     for (int i=0; i<maxIter; ++i){
         const float x2 = zx*zx, y2 = zy*zy;
 
-        // Escape testen wie im stabilen Build: vor dem Update
+        // Escape testen vor dem Update
         if (x2 + y2 > esc2){
-            it = i;               // Iteration, in der Escape festgestellt wurde
+            it = i;               // Iteration der Flucht
             break;
         }
 
@@ -180,7 +204,7 @@ void mandelbrotKernel(
         zx = xt;
     }
 
-    out[idx]     = gtColor_fromSmoothState(it, maxIter, zx, zy);
+    out[idx]     = gtColor_fromSmoothState(it, maxIter, zx, zy, tSec);
     iterOut[idx] = it;
 }
 
@@ -193,7 +217,10 @@ extern "C" void launch_mandelbrotHybrid(
     int maxIter, int /*tile*/)
 {
     using clk = std::chrono::high_resolution_clock;
-    const auto t0 = clk::now();
+    static clk::time_point t0;
+    static bool t0_init = false;
+    if (!t0_init){ t0 = clk::now(); t0_init = true; }
+    const float tSec = (float)std::chrono::duration<double>(clk::now() - t0).count();
 
     if (!out || !d_it || w <= 0 || h <= 0 || maxIter <= 0){
         LUCHS_LOG_HOST("[NACKTMULL][ERR] invalid args out=%p it=%p w=%d h=%d itMax=%d",
@@ -205,11 +232,11 @@ extern "C" void launch_mandelbrotHybrid(
     const dim3 grid((w + block.x - 1) / block.x,
                     (h + block.y - 1) / block.y);
 
-    mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter);
+    mandelbrotKernel<<<grid, block>>>(out, d_it, w, h, zoom, offset, maxIter, tSec);
 
     if constexpr (Settings::performanceLogging){
         cudaDeviceSynchronize();
         const double ms = 1e-3 * (double)std::chrono::duration_cast<std::chrono::microseconds>(clk::now() - t0).count();
-        LUCHS_LOG_HOST("[PERF] nacktmull direct kern=%.2f ms itMax=%d", ms, maxIter);
+        LUCHS_LOG_HOST("[PERF] nacktmull direct+anim kern=%.2f ms itMax=%d", ms, maxIter);
     }
 }
