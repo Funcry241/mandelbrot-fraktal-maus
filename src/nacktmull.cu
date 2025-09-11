@@ -1,6 +1,6 @@
-///// Otter: Keks 3 – Periodizitäts-Probe via Flag; keine Bildänderung bei Default (aus).
-///// Schneefuchs: Check alle N Iterationen; EPS² aus Settings; bei Treffer it=maxIter (bounded), escaped=false.
-///  Maus: Keks 0 bleibt erhalten (ms-Timing mit lokalem tStart); ASCII-Logs, deterministisch.
+///// Otter: Keks 3 – Periodizitäts-Probe via Flag; Keks-0 ms-Timing bleibt; kein Default-Verhaltenswechsel.
+///// Schneefuchs: Check alle N Iter.; EPS² aus Settings; Treffer ⇒ it=maxIter (bounded), escaped=false.
+///  Maus: ASCII-Logs, deterministisch; if constexpr-Gate eliminiert Overhead, wenn disabled.
 ///// Datei: src/nacktmull.cu
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -41,7 +41,7 @@ __device__ __forceinline__ float3 linear_to_srgb3(const float3 c){
     return make_float3(linear_to_srgb(c.x), linear_to_srgb(c.y), linear_to_srgb(c.z));
 }
 
-// Cardioid / Period-2-Bulb (Early-Out) – (Keks 2 wäre aktivierbar; aktuell nur vorhandene Routine)
+// Cardioid / Period-2-Bulb (Early-Out) – Routine vorhanden (Keks 2 übersprungen)
 __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y){
     const float x1 = x - 0.25f;
     const float y2 = y*y;
@@ -95,14 +95,14 @@ __device__ __forceinline__ float3 gtPalette_srgb(float x, bool inSet, float t){
     // Indigo → Cyan → Mint → Sand → Amber → Rose → Off-White
     const float  p[8] = { 0.00f, 0.10f, 0.22f, 0.38f, 0.55f, 0.72f, 0.88f, 1.00f };
     const float3 c[8] = {
-        make_float3(11/255.f, 14/255.f, 26/255.f), // #0B0E1A
-        make_float3(26/255.f, 43/255.f,111/255.f), // #1A2B6F
-        make_float3(30/255.f,166/255.f,209/255.f), // #1EA6D1
-        make_float3(123/255.f,228/255.f,195/255.f),// #7BE4C3
-        make_float3(255/255.f,224/255.f,138/255.f),// #FFE08A
-        make_float3(247/255.f,165/255.f, 58/255.f),// #F7A53A
-        make_float3(200/255.f, 72/255.f,122/255.f),// #C8487A
-        make_float3(250/255.f,249/255.f,246/255.f) // #FAF9F6
+        make_float3(11/255.f, 14/255.f, 26/255.f),
+        make_float3(26/255.f, 43/255.f,111/255.f),
+        make_float3(30/255.f,166/255.f,209/255.f),
+        make_float3(123/255.f,228/255.f,195/255.f),
+        make_float3(255/255.f,224/255.f,138/255.f),
+        make_float3(247/255.f,165/255.f, 58/255.f),
+        make_float3(200/255.f, 72/255.f,122/255.f),
+        make_float3(250/255.f,249/255.f,246/255.f)
     };
 
     int j = 0;
@@ -188,8 +188,7 @@ __device__ __forceinline__ void shade_color_alpha(
 }
 
 // ============================================================================
-// Direkter Mandelbrot-Kernel (Iteration + Ableitung), Komposition mit Hintergrund
-//  + Periodizitäts-Probe (Keks 3) optional via Settings::periodicityEnabled
+// Direkter Mandelbrot-Kernel (Iteration + Ableitung) + optional Periodizität (Keks 3)
 // ============================================================================
 __global__ __launch_bounds__(256)
 void mandelbrotKernel(
@@ -209,7 +208,7 @@ void mandelbrotKernel(
         (double)zoom
     );
 
-    // Early interior exit (Cardioid/Bulb) – bereits vorhanden; kein Keks-2-Umbau nötig
+    // Early interior exit (Cardioid/Bulb) – vorhanden
     if (insideMainCardioidOrBulb(c.x, c.y)){
         const float u = ((float)x + 0.5f) / (float)w;
         const float v = ((float)y + 0.5f) / (float)h;
@@ -240,11 +239,11 @@ void mandelbrotKernel(
     bool  escaped = false;
     const float esc2 = 4.0f;
 
-    // ---------- Keks 3: Periodizitäts-Probe (optional via Settings-Flag) ----------
+    // -------- Keks 3: Periodizitäts-Probe (optional via constexpr-Flag) --------
     float px = 0.0f, py = 0.0f;   // gespeicherte Probe von z
     int   lastProbe = 0;
-    const int   perN  = Settings::periodicityCheckInterval;     // z. B. 64
-    const float eps2  = (float)Settings::periodicityEps2;       // z. B. 1e-14
+    const int   perN  = Settings::periodicityCheckInterval; // z. B. 64
+    const float eps2  = (float)Settings::periodicityEps2;   // z. B. 1e-14
 
     #pragma unroll 1
     for (int i=0; i<maxIter; ++i){
@@ -270,7 +269,7 @@ void mandelbrotKernel(
 
         dx = ndx; dy = ndy;
 
-        // -------- Periodizität (compile-time via constexpr Flag) --------
+        // Periodizitäts-Check: nur wenn aktiviert, compile-time entfernt wenn false
         if constexpr (Settings::periodicityEnabled){
             const int step = i - lastProbe;
             if (step >= perN){
@@ -278,7 +277,7 @@ void mandelbrotKernel(
                 const float dyp = zy - py;
                 const float d2  = dxp*dxp + dyp*dyp;
                 if (d2 <= eps2){
-                    // (Nahe) periodisch → bounded: als „innen“ behandeln
+                    // (nahe) periodisch → bounded: als „innen“ behandeln
                     it = maxIter;
                     escaped = false;
                     break;
@@ -315,7 +314,7 @@ void mandelbrotKernel(
 }
 
 // ============================================================================
-// Öffentliche API (Signatur unverändert) – Keks 0 ms-Timing bleibt erhalten
+// Öffentliche API (Signatur unverändert) – Keks-0: korrektes ms-Timing
 // ============================================================================
 extern "C" void launch_mandelbrotHybrid(
     uchar4* out, int* d_it,
