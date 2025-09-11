@@ -1,7 +1,7 @@
 ///// Otter: Renderer-Core – GL-Init/Window, Loop-Delegation; keine Zoom-Logik hier.
 ///// Schneefuchs: CUDA/GL strikt getrennt; deterministische ASCII-Logs; Ressourcen klar besitzend.
-///// Maus: Alpha 80 – Pipeline/Loop entscheidet; Renderer zeichnet/tauscht nur, ohne Doppelpfad.
-///// Datei: src/renderer_core.cu
+///// Maus: Progressive-Cooldown beachtet (1 Frame Pause), danach Auto-Reenable; ASCII-only.
+///  Datei: src/renderer_core.cu
 
 #include "pch.hpp"
 
@@ -15,7 +15,7 @@
 #include "cuda_interop.hpp"
 #include "heatmap_overlay.hpp"
 #include "frame_pipeline.hpp"
-#include "luchs_log_host.hpp"   // <-- Logging-Makro verfügbar machen
+#include "luchs_log_host.hpp"
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -68,16 +68,13 @@ bool Renderer::initGL() {
         return false;
     }
 
-    // Swap-Interval NICHT mehr an Settings koppeln (Settings::vsync fehlt im Build).
-    // Wir lassen den aktuell gesetzten GLFW-Default unangetastet.
-
     // GL-Ressourcen anlegen: PBO + Texture (immutable storage)
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
         state.pbo = Hermelin::GLBuffer(OpenGLUtils::createPBO(state.width, state.height));
         state.tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(state.width, state.height));
 
-        // PBO bei CUDA registrieren (CUDA-13 kompatible Registrierung in CudaInterop)
+        // PBO bei CUDA registrieren
         CudaInterop::registerPBO(state.pbo);
 
         // Saubere GL-State: PBO unbinden
@@ -115,13 +112,15 @@ void Renderer::renderFrame() {
         LUCHS_LOG_HOST("[PIPE] Entering Renderer::renderFrame");
     }
 
-    // *** Progressive-Resume: __constant__-State pro Frame setzen ***
+    // *** Progressive-Resume: __constant__-State pro Frame setzen (Cooldown beachten) ***
     {
+        const bool inCooldown = (state.progressiveCooldownFrames > 0);
         const bool progReady =
             Settings::progressiveEnabled &&
             state.progressiveEnabled &&
             (state.d_stateZ.get() != nullptr) &&
-            (state.d_stateIt.get() != nullptr);
+            (state.d_stateIt.get() != nullptr) &&
+            !inCooldown;
 
         const int addIter = Settings::progressiveAddIter; // Budget pro Frame
         const int iterCap = state.maxIterations;
@@ -136,14 +135,25 @@ void Renderer::renderFrame() {
         );
 
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PROG] set_progressive enabled=%d addIter=%d cap=%d z=%p it=%p",
-                           enabled, addIter, iterCap,
+            LUCHS_LOG_HOST("[PROG] set_progressive enabled=%d cooldown=%d addIter=%d cap=%d z=%p it=%p",
+                           enabled, state.progressiveCooldownFrames, addIter, iterCap,
                            (void*)state.d_stateZ.get(), (void*)state.d_stateIt.get());
         }
     }
 
     // Frame ausführen (kein Device-wide Sync in diesem Pfad)
     FramePipeline::execute(state);
+
+    // Cooldown herunterzählen und ggf. wieder aktivieren
+    if (state.progressiveCooldownFrames > 0) {
+        --state.progressiveCooldownFrames;
+        if (state.progressiveCooldownFrames == 0) {
+            state.progressiveEnabled = true;
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[PROG] cooldown finished → progressiveEnabled=true");
+            }
+        }
+    }
 
     // Fenster zeigen / Events pumpen
     glfwSwapBuffers(state.window);
@@ -175,8 +185,6 @@ void Renderer::resize(int newW, int newH) {
 
     // State passt intern PBO/Tex/Device-Buffer an und registriert PBO ggf. neu.
     state.resize(newW, newH);
-
-    // Swap-Interval nicht anfassen; vorhandene GLFW-Einstellung bleibt bestehen.
 }
 
 void Renderer::cleanup() {

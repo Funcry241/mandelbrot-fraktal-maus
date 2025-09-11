@@ -164,7 +164,14 @@ extern "C" void nacktmull_set_progressive(const void* zDev,const void* itDev,
 {
     NacktmullProgState h{};
     h.z=(float2*)zDev; h.it=(int*)itDev; h.addIter=addIter; h.iterCap=iterCap; h.enabled=enabled?1:0;
-    CUDA_CHECK(cudaMemcpyToSymbol(g_prog,&h,sizeof(h)));
+
+    // No-throw variant: avoid exceptions in extern "C" under /EHc
+    cudaError_t err = cudaMemcpyToSymbol(g_prog,&h,sizeof(h));
+    if constexpr (Settings::debugLogging) {
+        if (err != cudaSuccess) {
+            LUCHS_LOG_HOST("[NACKTMULL][WARN] memcpyToSymbol(g_prog) failed: err=%d", (int)err);
+        }
+    }
 }
 
 // ============================================================================
@@ -218,7 +225,7 @@ void mandelbrotUnifiedKernel(
 
         float3 rgb; float alpha;
         if (escaped){
-            // Recompute derivative up to 'it' for proper DE alpha
+            // Recompute derivative up to 'it' for DE alpha and pass matching (rx,ry)
             float rx=0.f, ry=0.f, dx=0.f, dy=0.f;
             for (int k=0;k<it;++k){
                 const float x2=rx*rx, y2=ry*ry; if (x2+y2>esc2) break;
@@ -227,7 +234,8 @@ void mandelbrotUnifiedKernel(
                 const float ndy=twx*dy + twy*dx;
                 const float xt=x2-y2+c.x; ry=__fmaf_rn(2.0f*rx,ry,c.y); rx=xt; dx=ndx; dy=ndy;
             }
-            shade_color_alpha(it, iterCap, zx, zy, dx, dy, true, tSec, rgb, alpha);
+            // Use (rx,ry) together with (dx,dy) for consistent DE
+            shade_color_alpha(it, iterCap, rx, ry, dx, dy, true, tSec, rgb, alpha);
         } else {
             float ddx=0.f, ddy=0.f;
             shade_color_alpha(it, iterCap, zx, zy, ddx, ddy, false, tSec, rgb, alpha);

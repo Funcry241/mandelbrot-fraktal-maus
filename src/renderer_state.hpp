@@ -1,6 +1,6 @@
 ///// Otter: Einheitliche, klare Struktur – nur aktive Zustaende; Header schlank, keine PCH; Nacktmull-Pullover.
 ///// Schneefuchs: Speicher/Buffer exakt definiert; State entkoppelt; MSVC-Align-Warnung lokal gekapselt.
-///  Maus: tileSize bleibt explizit; Progressive-State (z,it) als eigene RAII-Buffer; ASCII-only.
+///  Maus: tileSize bleibt explizit; Progressive-State (z,it) + Cooldown-Mechanik; ASCII-only.
 ///  Datei: src/renderer_state.hpp
 #pragma once
 
@@ -64,6 +64,7 @@ public:
     Hermelin::CudaDeviceBuffer d_stateZ;     // float2[width*height] – letzter z
     Hermelin::CudaDeviceBuffer d_stateIt;    // int   [width*height] – akk. Iterationen
     bool                       progressiveEnabled = true; // Host-Schalter (sanft)
+    int                        progressiveCooldownFrames = 0; // 0=aktiv, >0=Pause
 
     // 🎥 OpenGL-Zielpuffer (Interop via CUDA) mit RAII
     Hermelin::GLBuffer pbo;
@@ -113,6 +114,9 @@ public:
     void reset();                             // stellt Initialzustand her
     void setupCudaBuffers(int tileSize);      // allokiert/verifiziert Device-Buffer – tileSize explizit
     void resize(int newWidth, int newHeight); // Fenstergroesse aendern
+
+    // 🧯 Progressive-State vorsichtig invalidieren (1-Frame-Cooldown, optional Hard-Reset)
+    void invalidateProgressiveState(bool hardReset) noexcept;
 };
 
 #if defined(_MSC_VER)

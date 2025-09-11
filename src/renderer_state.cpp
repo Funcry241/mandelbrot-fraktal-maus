@@ -1,6 +1,6 @@
-///// Otter: Progressive-State integriert (d_stateZ/d_stateIt); Only-Grow + Zero-on-Grow.
-///  Schneefuchs: Fast-Path prüft jetzt auch Progressive-Buffer; Resize free() ergänzt; ASCII-Logs.
-/** Maus: Keine Semantikänderung im Renderpfad – nur Ressourcenverwaltung erweitert; tileSize explizit. */
+///// Otter: Progressive-State integriert (d_stateZ/d_stateIt) + Cooldown-API.
+///  Schneefuchs: Only-Grow + Zero-on-Grow; Resize ruft invalide+Zero; ASCII-Logs.
+/** Maus: Keine Semantikänderung im Renderpfad – nur Ressourcenverwaltung & Reset. */
 ///// Datei: src/renderer_state.cpp
 
 #include "pch.hpp"
@@ -10,6 +10,7 @@
 #include "common.hpp"
 #include "renderer_resources.hpp"
 #include <algorithm>        // std::clamp
+#include <cuda_runtime_api.h> // non-throwing cudaMemset prototypes
 
 // 🦊 Schneefuchs: interne Helfer in anonymer NS, noexcept – klarer Scope.
 namespace {
@@ -68,6 +69,7 @@ void RendererState::reset() {
 
     // Progressive: Standard-Schalter aus Settings
     progressiveEnabled = Settings::progressiveDefault;
+    progressiveCooldownFrames = 0;
 
     // CUDA/Host-Timings: Default (valid=false) + Host-Frame-Nullung
     lastTimings = CudaPhaseTimings{};
@@ -265,16 +267,46 @@ void RendererState::resize(int newWidth, int newHeight) {
 
     setupCudaBuffers(lastTileSize);
 
-    // Progressive nach Resize: optional eine Ruhe-Frame (sanft) oder State-Zeroing
-    progressiveEnabled = Settings::progressiveDefault;
-    // (Hard reset ist optional, falls gewünscht:)
-    // CUDA_CHECK(cudaMemset(d_stateZ.get(),  0, d_stateZ.size()));
-    // CUDA_CHECK(cudaMemset(d_stateIt.get(), 0, d_stateIt.size()));
+    // Nach Resize: Progressive-States sicher invalidieren und für 1 Frame pausieren
+    invalidateProgressiveState(/*hardReset=*/true);
 
     // Host-Timings fuer neues Frame auf Null
     lastTimings.resetHostFrame();
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[RESIZE] %d x %d buffers reallocated", width, height);
+    }
+}
+
+void RendererState::invalidateProgressiveState(bool hardReset) noexcept {
+    // 1-Frame-Cooldown aktivieren (no-throw)
+    progressiveEnabled = false;
+    progressiveCooldownFrames = 1;
+
+    if (hardReset) {
+        // *** WICHTIG: keine CUDA_CHECK in noexcept – non-throwing Pfad + Log ***
+        if (d_stateZ.get() && d_stateZ.size() > 0) {
+            cudaError_t e = cudaMemset(d_stateZ.get(),  0, d_stateZ.size());
+            if constexpr (Settings::debugLogging) {
+                if (e != cudaSuccess) {
+                    LUCHS_LOG_HOST("[PROG][WARN] cudaMemset(d_stateZ) failed: err=%d", (int)e);
+                }
+            }
+        }
+        if (d_stateIt.get() && d_stateIt.size() > 0) {
+            cudaError_t e = cudaMemset(d_stateIt.get(), 0, d_stateIt.size());
+            if constexpr (Settings::debugLogging) {
+                if (e != cudaSuccess) {
+                    LUCHS_LOG_HOST("[PROG][WARN] cudaMemset(d_stateIt) failed: err=%d", (int)e);
+                }
+            }
+        }
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[PROG] invalidate: hard reset (zero z/it), cooldown=1");
+        }
+    } else {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[PROG] invalidate: soft pause, cooldown=1");
+        }
     }
 }
