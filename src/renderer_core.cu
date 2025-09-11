@@ -120,7 +120,7 @@ void Renderer::renderFrame() {
         const bool progReady =
             Settings::progressiveEnabled &&
             state.progressiveEnabled &&
-            (state.d_stateZ.get() != nullptr) &&
+            (state.d_stateZ.get()  != nullptr) &&
             (state.d_stateIt.get() != nullptr) &&
             !inCooldown;
 
@@ -149,23 +149,21 @@ void Renderer::renderFrame() {
     // ---------- Tatze 7: Soft-Invalidate bei Sichtsprung (nach Pipeline) ----------
     // Prüfe, ob center/zoom sprunghaft geändert wurden → 1-Frame-Pause (kein memset).
     {
-        static bool   havePrev = false;
-        static double prevZoom = 0.0;
-        static double prevCx   = 0.0;
-        static double prevCy   = 0.0;
+        struct PrevView { bool have=false; double zoom=0.0, cx=0.0, cy=0.0; };
+        static PrevView prev;
 
         bool justInvalidated = false;
 
-        if (havePrev) {
-            const double z0 = std::max(prevZoom, 1e-30);
+        if (prev.have) {
+            const double z0 = std::max(prev.zoom, 1e-30);
             const double z1 = std::max((double)state.zoom, 1e-30);
             const double zoomRatio = (z1 > z0) ? (z1 / z0) : (z0 / z1);
 
             // Pixel-Shift in Screen-Space
             const double psx = std::max(std::abs(state.pixelScale.x), 1e-30);
             const double psy = std::max(std::abs(state.pixelScale.y), 1e-30);
-            const double dxPix = std::abs(((double)state.center.x - prevCx) / psx);
-            const double dyPix = std::abs(((double)state.center.y - prevCy) / psy);
+            const double dxPix = std::abs(((double)state.center.x - prev.cx) / psx);
+            const double dyPix = std::abs(((double)state.center.y - prev.cy) / psy);
             const double panPix = std::max(dxPix, dyPix);
 
             const bool jump = (zoomRatio >= 1.5) || (panPix >= 8.0);
@@ -174,7 +172,7 @@ void Renderer::renderFrame() {
                 state.invalidateProgressiveState(/*hardReset=*/false);
                 justInvalidated = true;
                 if constexpr (Settings::debugLogging) {
-                    LUCHS_LOG_HOST("[PROG] soft-invalidate: zoomRatio=%.3f panPix=%.2f (th:1.5/8)",
+                    LUCHS_LOG_HOST("[PROG] soft-invalidate: zoomRatio=%.3f panPix=%.2f (th=1.5/8)",
                                    zoomRatio, panPix);
                 }
             }
@@ -199,10 +197,10 @@ void Renderer::renderFrame() {
         }
 
         // Prev-State aktualisieren (am Ende des Frames)
-        prevZoom = (double)state.zoom;
-        prevCx   = (double)state.center.x;
-        prevCy   = (double)state.center.y;
-        havePrev = true;
+        prev.zoom = (double)state.zoom;
+        prev.cx   = (double)state.center.x;
+        prev.cy   = (double)state.center.y;
+        prev.have = true;
     }
     // ---------- Ende Tatze 7 ------------------------------------------------------
 

@@ -60,7 +60,7 @@ public:
     Hermelin::CudaDeviceBuffer d_entropy;    // float[numTiles]
     Hermelin::CudaDeviceBuffer d_contrast;   // float[numTiles]
 
-    // ➕ Progressive-State (Per-Pixel Resume) – Keks 4/5
+    // ➕ Progressive-State (Per-Pixel Resume)
     Hermelin::CudaDeviceBuffer d_stateZ;     // float2[width*height] – letzter z
     Hermelin::CudaDeviceBuffer d_stateIt;    // int   [width*height] – akk. Iterationen
     bool                       progressiveEnabled = true; // Host-Schalter (sanft)
