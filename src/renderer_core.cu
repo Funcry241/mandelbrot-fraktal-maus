@@ -1,7 +1,7 @@
 ///// Otter: Renderer-Core – GL-Init/Window, Loop-Delegation; keine Zoom-Logik hier.
 ///// Schneefuchs: CUDA/GL strikt getrennt; deterministische ASCII-Logs; Ressourcen klar besitzend.
-///// Maus: Progressive-Cooldown beachtet (1 Frame Pause), danach Auto-Reenable; ASCII-only.
-///  Datei: src/renderer_core.cu
+///// Maus: Progressive-Cooldown + Tatze 7 Soft-Invalidate bei Sichtsprung (nach Pipeline, ohne Memset).
+///// Datei: src/renderer_core.cu
 
 #include "pch.hpp"
 
@@ -20,6 +20,8 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <stdexcept>
+#include <algorithm> // std::max
+#include <cmath>     // std::abs
 
 Renderer::Renderer(int width, int height)
 : state(width, height)
@@ -144,16 +146,65 @@ void Renderer::renderFrame() {
     // Frame ausführen (kein Device-wide Sync in diesem Pfad)
     FramePipeline::execute(state);
 
-    // Cooldown herunterzählen und ggf. wieder aktivieren
-    if (state.progressiveCooldownFrames > 0) {
-        --state.progressiveCooldownFrames;
-        if (state.progressiveCooldownFrames == 0) {
-            state.progressiveEnabled = true;
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[PROG] cooldown finished → progressiveEnabled=true");
+    // ---------- Tatze 7: Soft-Invalidate bei Sichtsprung (nach Pipeline) ----------
+    // Prüfe, ob center/zoom sprunghaft geändert wurden → 1-Frame-Pause (kein memset).
+    {
+        static bool   havePrev = false;
+        static double prevZoom = 0.0;
+        static double prevCx   = 0.0;
+        static double prevCy   = 0.0;
+
+        bool justInvalidated = false;
+
+        if (havePrev) {
+            const double z0 = std::max(prevZoom, 1e-30);
+            const double z1 = std::max((double)state.zoom, 1e-30);
+            const double zoomRatio = (z1 > z0) ? (z1 / z0) : (z0 / z1);
+
+            // Pixel-Shift in Screen-Space
+            const double psx = std::max(std::abs(state.pixelScale.x), 1e-30);
+            const double psy = std::max(std::abs(state.pixelScale.y), 1e-30);
+            const double dxPix = std::abs(((double)state.center.x - prevCx) / psx);
+            const double dyPix = std::abs(((double)state.center.y - prevCy) / psy);
+            const double panPix = std::max(dxPix, dyPix);
+
+            const bool jump = (zoomRatio >= 1.5) || (panPix >= 8.0);
+
+            if (jump) {
+                state.invalidateProgressiveState(/*hardReset=*/false);
+                justInvalidated = true;
+                if constexpr (Settings::debugLogging) {
+                    LUCHS_LOG_HOST("[PROG] soft-invalidate: zoomRatio=%.3f panPix=%.2f (th:1.5/8)",
+                                   zoomRatio, panPix);
+                }
             }
         }
+
+        // Cooldown herunterzählen – aber NICHT, wenn wir eben invalidiert haben.
+        if (state.progressiveCooldownFrames > 0) {
+            if (!justInvalidated) {
+                --state.progressiveCooldownFrames;
+                if (state.progressiveCooldownFrames == 0) {
+                    state.progressiveEnabled = true;
+                    if constexpr (Settings::debugLogging) {
+                        LUCHS_LOG_HOST("[PROG] cooldown finished → progressiveEnabled=true");
+                    }
+                }
+            } else {
+                if constexpr (Settings::debugLogging) {
+                    LUCHS_LOG_HOST("[PROG] cooldown kept at %d (fresh invalidate this frame)",
+                                   state.progressiveCooldownFrames);
+                }
+            }
+        }
+
+        // Prev-State aktualisieren (am Ende des Frames)
+        prevZoom = (double)state.zoom;
+        prevCx   = (double)state.center.x;
+        prevCy   = (double)state.center.y;
+        havePrev = true;
     }
+    // ---------- Ende Tatze 7 ------------------------------------------------------
 
     // Fenster zeigen / Events pumpen
     glfwSwapBuffers(state.window);
