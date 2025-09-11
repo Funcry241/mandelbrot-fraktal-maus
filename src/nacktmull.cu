@@ -1,6 +1,6 @@
 ///// Otter: GT-Palette (Cyan→Amber) integriert; Perturbation korrekt (dz + ref, delta=c-c0); API unverändert.
 /// ///// Schneefuchs: Host/Device strikt getrennt; keine Device-Intrinsics im Hostcode; ASCII-Logs; deterministisches Mapping.
-/// ///// Maus: Schwarzes Bild gefixt: Escape-Test auf |ref+dz|, nicht auf dz; Smooth-Coloring mit finalem z_total.
+/// ///// Maus: Heatmap/Zoom-Vertrag wiederhergestellt: kein internes maxIter-Clamping; Guard+Fallback wie im stabilen Build.
 /// ///// Datei: src/nacktmull.cu
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -145,14 +145,62 @@ __device__ __forceinline__ uchar4 gtColor_fromSmoothState(
 }
 
 // ============================================================================
-// Kernel – Perturbation (korrekt): dz_{n+1} = 2*ref_n*dz_n + dz_n^2 + (c - c0)
-// Escape-Test auf |z_total| mit z_total = ref_n + dz_n
+// Host: Double-Double für Referenz-Orbit (stabil wie im funktionierenden Build)
+// ============================================================================
+namespace dd {
+    struct dd { double hi, lo; };
+
+    inline dd make(double x){ return {x, 0.0}; }
+
+    inline dd two_sum(double a, double b){
+        double s = a + b;
+        double bb = s - a;
+        double e = (a - (s - bb)) + (b - bb);
+        return {s, e};
+    }
+    inline dd quick_two_sum(double a, double b){
+        double s = a + b;
+        double e = b - (s - a);
+        return {s, e};
+    }
+    inline dd add(dd a, dd b){
+        dd s = two_sum(a.hi, b.hi);
+        double t = a.lo + b.lo + s.lo;
+        return quick_two_sum(s.hi, t);
+    }
+    inline dd mul(dd a, dd b){
+        double p = a.hi * b.hi;
+        double e = std::fma(a.hi, b.hi, -p);
+        e += a.hi * b.lo + a.lo * b.hi;
+        return quick_two_sum(p, e);
+    }
+}
+
+static void buildReferenceOrbitDD(std::vector<float2>& out, int maxIter, double cref_x, double cref_y){
+    out.resize((size_t)maxIter);
+    dd::dd zx = dd::make(0.0), zy = dd::make(0.0);
+    dd::dd cr = dd::make(cref_x), ci = dd::make(cref_y);
+
+    for(int i=0;i<maxIter;i++){
+        dd::dd x2 = dd::mul(zx, zx);
+        dd::dd y2 = dd::mul(zy, zy);
+        dd::dd xy = dd::mul(zx, zy);
+        dd::dd zr = dd::add(dd::add(x2, dd::make(-y2.hi)), cr);      // (x^2 - y^2) + cr
+        dd::dd zi = dd::add(dd::make(2.0 * xy.hi), ci);               // 2*x*y + ci
+        zx = zr; zy = zi;
+        out[(size_t)i] = make_float2((float)zx.hi, (float)zy.hi);
+    }
+}
+
+// ============================================================================
+// Kernel – Perturbation (mit Guard+Fallback): dz_{n+1} = dz^2 + 2*ref*dz + (c - c0)
+// Escape-Test auf |z_total| mit z_total = ref + dz
 // ============================================================================
 __global__ __launch_bounds__(256)
 void perturbKernel(
     uchar4* __restrict__ out, int* __restrict__ iterOut,
     const float2* __restrict__ refOrbit, int maxIter,
-    int w, int h, float zoom, float2 center, float /*deltaRelMax*/)
+    int w, int h, float zoom, float2 center, float deltaRelMax)
 {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -160,7 +208,7 @@ void perturbKernel(
 
     const int idx = y * w + x;
 
-    // --- projekteinheitliches Mapping (pixelToComplex) ---
+    // Mapping (projektweit konsistent)
     const float2 c = pixelToComplex(
         (double)x + 0.5, (double)y + 0.5,
         w, h,
@@ -168,48 +216,63 @@ void perturbKernel(
         (double)zoom
     );
     const float2 c0    = make_float2(center.x, center.y);
-    const float2 delta = sub(c, c0); // *** wichtig für Perturbation ***
+    const float2 delta = sub(c, c0); // Δc = c - c0
 
     // Early interior exit (Cardioid/Bulb)
     if (insideMainCardioidOrBulb(c.x, c.y)) {
         out[idx]     = make_uchar4(10, 12, 16, 255);
-        iterOut[idx] = maxIter;
+        iterOut[idx] = maxIter;   // Innen wie im funktionierenden Build
         return;
     }
 
-    // Perturbation: dz starts at 0
     float2 dz = make_float2(0.0f, 0.0f);
     float2 zFinal = make_float2(0.0f, 0.0f);
     int it = 0;
+
+    const float esc2 = 4.0f;
+    const float tau2 = deltaRelMax * deltaRelMax; // Guard-Schwelle (relativ zu |ref|)
 
     #pragma unroll 1
     for (int n=0; n<maxIter; ++n) {
         const float2 ref = refOrbit[n];
 
-        // dz_{n+1} = dz_n^2 + 2*ref_n*dz_n + delta
+        // dz_{n+1} = dz^2 + 2*ref*dz + delta
         const float2 dz2      = mul(dz, dz);
         const float2 twoRefDz = muls(mul(ref, dz), 2.0f);
         dz = add(add(dz2, twoRefDz), delta);
 
-        // z_total ~ ref_n + dz_n (nach Update)
+        // z_total ~ ref + dz (nach Update)
         const float2 ztot = add(ref, dz);
 
         it = n + 1;
         zFinal = ztot;
 
         // Escape auf |z_total| > 2
-        if (dot2(ztot) > 4.0f) {
-            break;
+        if (dot2(ztot) > esc2) { goto ESCAPE; }
+
+        // Stabilitäts-Guard → Fallback auf direkte Iteration ab ztot
+        if (dot2(dz) > tau2 * fmaxf(dot2(ref), 1e-24f)) {
+            float zx = ztot.x, zy = ztot.y;
+            for (int m=n+1; m<maxIter; ++m){
+                const float x2 = zx*zx, y2 = zy*zy;
+                if (x2 + y2 > 4.f){ it = m; zFinal = make_float2(zx,zy); goto ESCAPE; }
+                const float xt = x2 - y2 + c.x;
+                zy = __fmaf_rn(2.f*zx, zy, c.y);
+                zx = xt;
+            }
+            it = maxIter; zFinal = make_float2(zx,zy); goto ESCAPE;
         }
     }
-
-    // Farbe schreiben (Smooth-Coloring mit finalem z_total)
-    out[idx]     = gtColor_fromSmoothState(it, maxIter, zFinal.x, zFinal.y);
-    iterOut[idx] = it;
+    it = maxIter; // nicht entkommen
+ESCAPE:
+    {
+        out[idx]     = gtColor_fromSmoothState(it, maxIter, zFinal.x, zFinal.y);
+        iterOut[idx] = it;
+    }
 }
 
 // ============================================================================
-// Host – Build reference orbit (float), launch kernel
+// Host – Referenz-Orbit (DD), Launch
 // ============================================================================
 extern "C" void launch_mandelbrotHybrid(
     unsigned char* pboPtr,
@@ -221,29 +284,16 @@ extern "C" void launch_mandelbrotHybrid(
     using clk = std::chrono::high_resolution_clock;
     auto t0 = clk::now();
 
-    // Mindest-Iterationszahl (Heatmap-/Detail-Fix, minimal-invasiv)
-    if (maxIter < 128) maxIter = 128;
+    // WICHTIG: kein internes Clamping von maxIter → Vertrag mit Pipeline bleibt erhalten
 
     const dim3 block(32, 8);
     const dim3 grid((w + block.x - 1) / block.x,
                     (h + block.y - 1) / block.y);
 
-    // Reference orbit around c0=(centerX,centerY) (host, float)
+    // Referenz-Orbit um c0=(centerX,centerY) (Host, Double-Double → float2)
     std::vector<float2> hostOrbit;
-    hostOrbit.resize(maxIter);
-    {
-        float2 z = make_float2(0,0);
-        const float2 c0 = make_float2(centerX, centerY);
-        for (int i=0; i<maxIter; ++i){
-            // z = z^2 + c0
-            const float zx2 = z.x*z.x, zy2 = z.y*z.y;
-            const float xt  = zx2 - zy2 + c0.x;
-            // Host: std::fma statt __fmaf_rn
-            z.y = std::fma(2.f*z.x, z.y, c0.y);
-            z.x = xt;
-            hostOrbit[i] = make_float2(z.x, z.y);
-        }
-    }
+    hostOrbit.reserve((size_t)maxIter);
+    buildReferenceOrbitDD(hostOrbit, maxIter, (double)centerX, (double)centerY);
 
     // Upload orbit
     float2* d_orbit = nullptr;
