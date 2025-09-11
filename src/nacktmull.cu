@@ -2,6 +2,7 @@
 /// ///// Schneefuchs: Host/Device strikt getrennt; keine Device-Intrinsics im Hostcode; ASCII-Logs; deterministisches Mapping.
 /// ///// Maus: Heatmap/Zoom-Vertrag wiederhergestellt: kein internes maxIter-Clamping; Guard+Fallback wie im stabilen Build.
 /// ///// Datei: src/nacktmull.cu
+
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <vector_types.h>      // float2, uchar4
@@ -25,8 +26,10 @@ __device__ __forceinline__ float3 mix3(const float3 a, const float3 b, float t) 
 }
 __device__ __forceinline__ float2 add(const float2 a, const float2 b){ return make_float2(a.x+b.x, a.y+b.y); }
 __device__ __forceinline__ float2 sub(const float2 a, const float2 b){ return make_float2(a.x-b.x, a.y-b.y); }
-__device__ __forceinline__ float2 mul(const float2 a, const float2 b){ return make_float2(__fmaf_rn(a.x, b.x, -a.y*b.y),
-                                                                                           __fmaf_rn(a.x, b.y,  a.y*b.x)); }
+__device__ __forceinline__ float2 mul(const float2 a, const float2 b){
+    return make_float2(__fmaf_rn(a.x, b.x, -a.y*b.y),
+                       __fmaf_rn(a.x, b.y,  a.y*b.x));
+}
 __device__ __forceinline__ float2 muls(const float2 a, float s){ return make_float2(a.x*s, a.y*s); }
 __device__ __forceinline__ float  dot2(const float2 a){ return __fmaf_rn(a.x, a.x, a.y*a.y); }
 
@@ -274,45 +277,43 @@ ESCAPE:
 // ============================================================================
 // Host – Referenz-Orbit (DD), Launch
 // ============================================================================
+// *** WICHTIG: API exakt wie im funktionierenden Build ***
 extern "C" void launch_mandelbrotHybrid(
-    unsigned char* pboPtr,
-    int* outIterations,
-    int w, int h, float zoom,
-    float centerX, float centerY,
-    int maxIter)
+    uchar4* out, int* d_it,
+    int w, int h, float zoom, float2 offset,
+    int maxIter, int /*tile*/)
 {
     using clk = std::chrono::high_resolution_clock;
-    auto t0 = clk::now();
+    const auto t0 = clk::now();
 
-    // WICHTIG: kein internes Clamping von maxIter → Vertrag mit Pipeline bleibt erhalten
+    if (!out || !d_it || w <= 0 || h <= 0 || maxIter <= 0) {
+        LUCHS_LOG_HOST("[NACKTMULL][ERR] invalid args out=%p it=%p w=%d h=%d itMax=%d",
+                       (void*)out, (void*)d_it, w, h, maxIter);
+        return;
+    }
 
     const dim3 block(32, 8);
     const dim3 grid((w + block.x - 1) / block.x,
                     (h + block.y - 1) / block.y);
 
-    // Referenz-Orbit um c0=(centerX,centerY) (Host, Double-Double → float2)
+    // Referenz-Orbit um c0=(offset.x, offset.y) (Host, Double-Double → float2)
     std::vector<float2> hostOrbit;
     hostOrbit.reserve((size_t)maxIter);
-    buildReferenceOrbitDD(hostOrbit, maxIter, (double)centerX, (double)centerY);
+    buildReferenceOrbitDD(hostOrbit, maxIter, (double)offset.x, (double)offset.y);
 
     // Upload orbit
     float2* d_orbit = nullptr;
     cudaMalloc(&d_orbit, sizeof(float2)*maxIter);
     cudaMemcpy(d_orbit, hostOrbit.data(), sizeof(float2)*maxIter, cudaMemcpyHostToDevice);
 
-    // Outputs
-    uchar4* d_out = reinterpret_cast<uchar4*>(pboPtr);
-    int*    d_it  = outIterations;
-
     // Kernel
-    perturbKernel<<<grid, block>>>(d_out, d_it, d_orbit, maxIter, w, h, zoom,
-                                   make_float2(centerX, centerY), 0.02f);
+    perturbKernel<<<grid, block>>>(out, d_it, d_orbit, maxIter, w, h, zoom, offset, 0.02f);
 
     // Cleanup
     cudaFree(d_orbit);
 
     if constexpr (Settings::performanceLogging){
         const double ms = 1e-3 * (double)std::chrono::duration_cast<std::chrono::microseconds>(clk::now() - t0).count();
-        LUCHS_LOG_HOST("[PERF] nacktmull kern=%.2f ms it=%d", ms, maxIter);
+        LUCHS_LOG_HOST("[PERF] nacktmull kern=%.2f ms itMax=%d", ms, maxIter);
     }
 }
