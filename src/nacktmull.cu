@@ -1,7 +1,7 @@
-///// Otter: Direkte Iteration + Transparenz-Theme (DE-Alpha, Fresnel, Background-Through, Breathing)
-///  Schneefuchs: API & Mapping unverändert (pixelToComplex), deterministisch; Host/Device sauber getrennt
-///  Maus: Heatmap-Vertrag bleibt (innen -> iterOut = maxIter), Stripes aus (keine Ringe)
-
+///// Otter: Log fix (ms vs. absolute uptime); no visual change.
+///// Schneefuchs: Use local tStart for kernel duration; keep tSec from static anim origin.
+///// Maus: Deterministic ASCII logs; [PERF] kern=.. ms now accurate per frame.
+///// Datei: src/nacktmull.cu
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <vector_types.h>      // float2, uchar4
@@ -298,10 +298,11 @@ extern "C" void launch_mandelbrotHybrid(
     int maxIter, int /*tile*/)
 {
     using clk = std::chrono::high_resolution_clock;
-    static clk::time_point t0;
-    static bool t0_init = false;
-    if (!t0_init){ t0 = clk::now(); t0_init = true; }
-    const float tSec = (float)std::chrono::duration<double>(clk::now() - t0).count();
+    static clk::time_point anim0;
+    static bool anim_init = false;
+    if (!anim_init){ anim0 = clk::now(); anim_init = true; }
+    const float tSec = (float)std::chrono::duration<double>(clk::now() - anim0).count();
+    const auto tStart = clk::now();
 
     if (!out || !d_it || w <= 0 || h <= 0 || maxIter <= 0){
         LUCHS_LOG_HOST("[NACKTMULL][ERR] invalid args out=%p it=%p w=%d h=%d itMax=%d",
@@ -317,7 +318,7 @@ extern "C" void launch_mandelbrotHybrid(
 
     if constexpr (Settings::performanceLogging){
         cudaDeviceSynchronize();
-        const double ms = 1e-3 * (double)std::chrono::duration_cast<std::chrono::microseconds>(clk::now() - t0).count();
+        const double ms = 1e-3 * (double)std::chrono::duration_cast<std::chrono::microseconds>(clk::now() - tStart).count();
         LUCHS_LOG_HOST("[PERF] nacktmull direct+transp kern=%.2f ms itMax=%d", ms, maxIter);
     }
 }
