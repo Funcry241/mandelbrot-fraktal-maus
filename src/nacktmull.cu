@@ -261,45 +261,71 @@ void mandelbrotUnifiedKernel(
 extern "C" void launch_mandelbrotHybrid(
     uchar4* out,uint16_t* d_it,int w,int h,float zoom,float2 offset,int maxIter,int /*tile*/) noexcept
 {
-    using clk=std::chrono::high_resolution_clock;
-    static clk::time_point anim0; static bool anim_init=false;
-    if(!anim_init){ anim0=clk::now(); anim_init=true; }
-    const float tSec=(float)std::chrono::duration<double>(clk::now()-anim0).count();
-    const float sinA = sinf(0.30f * tSec);
-    const float sinB = sinf(0.80f * tSec);
-    cudaMemcpyToSymbol(g_sinA, &sinA, sizeof(float));
-    cudaMemcpyToSymbol(g_sinB, &sinB, sizeof(float));
-    
-    const auto tStart=clk::now();
+    using clk = std::chrono::high_resolution_clock;
+    try {
+        static clk::time_point anim0; static bool anim_init=false;
+        if(!anim_init){ anim0=clk::now(); anim_init=true; }
+        const float tSec=(float)std::chrono::duration<double>(clk::now()-anim0).count();
 
-    if(!out||!d_it||w<=0||h<=0||maxIter<=0){
-        LUCHS_LOG_HOST("[NACKTMULL][ERR] invalid args out=%p it=%p w=%d h=%d itMax=%d",(void*)out,(void*)d_it,w,h,maxIter);
+        if(!out||!d_it||w<=0||h<=0||maxIter<=0){
+            LUCHS_LOG_HOST("[NACKTMULL][ERR] invalid args out=%p it=%p w=%d h=%d itMax=%d",
+                           (void*)out,(void*)d_it,w,h,maxIter);
+            return;
+        }
+
+        // anim uniforms (ignorieren Fehler, nur loggen):
+        {
+            const float sinA = sinf(0.30f * tSec);
+            const float sinB = sinf(0.80f * tSec);
+            cudaError_t e1 = cudaMemcpyToSymbol(g_sinA, &sinA, sizeof(float));
+            cudaError_t e2 = cudaMemcpyToSymbol(g_sinB, &sinB, sizeof(float));
+            if (e1 != cudaSuccess || e2 != cudaSuccess) {
+                LUCHS_LOG_HOST("[NACKTMULL][WARN] memcpyToSymbol failed: a=%d b=%d",(int)e1,(int)e2);
+                // weiterlaufen ist ok – nur Farben atmen evtl. nicht
+            }
+        }
+
+        const dim3 block(Settings::MANDEL_BLOCK_X, Settings::MANDEL_BLOCK_Y);
+        const dim3 grid((w+block.x-1)/block.x,(h+block.y-1)/block.y);
+
+        if constexpr (Settings::performanceLogging) {
+            cudaEvent_t evStart=nullptr, evStop=nullptr;
+            // **ohne** Werfen: prüfen, loggen, früh raus
+            if (cudaEventCreate(&evStart) != cudaSuccess) {
+                LUCHS_LOG_HOST("[PERF][ERR] cudaEventCreate(evStart) failed");
+                return;
+            }
+            if (cudaEventCreate(&evStop)  != cudaSuccess) {
+                LUCHS_LOG_HOST("[PERF][ERR] cudaEventCreate(evStop) failed");
+                cudaEventDestroy(evStart);
+                return;
+            }
+
+            cudaEventRecord(evStart, 0);
+            mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
+            cudaEventRecord(evStop, 0);
+            cudaEventSynchronize(evStop);
+
+            float ms=0.0f;
+            if (cudaEventElapsedTime(&ms, evStart, evStop) != cudaSuccess) {
+                LUCHS_LOG_HOST("[PERF][WARN] cudaEventElapsedTime failed");
+            } else {
+                LUCHS_LOG_HOST("[PERF] nacktmull unified kern=%.2f ms itMax=%d bx=%d by=%d unroll=%d",
+                               ms, maxIter, (int)block.x, (int)block.y, (int)Settings::MANDEL_UNROLL);
+            }
+            cudaEventDestroy(evStart);
+            cudaEventDestroy(evStop);
+        } else {
+            mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
+        }
+
+        if constexpr (Settings::debugLogging){
+            LUCHS_LOG_HOST("[INFO] periodicity enabled=%d N=%d eps2=%.3e",
+                (int)Settings::periodicityEnabled,(int)Settings::periodicityCheckInterval,(double)Settings::periodicityEps2);
+        }
+    } catch (...) {
+        // **niemals** weiterwerfen – extern "C" + /EHsc!
+        LUCHS_LOG_HOST("[NACKTMULL][ERR] unexpected exception in launch_mandelbrotHybrid");
         return;
-    }
-
-    // Einheitliche Block/Grid-Definition (eine Stelle; kein Doppel):
-    const dim3 block(Settings::MANDEL_BLOCK_X, Settings::MANDEL_BLOCK_Y);
-    const dim3 grid((w+block.x-1)/block.x,(h+block.y-1)/block.y);
-
-    if constexpr (Settings::performanceLogging) {
-        cudaEvent_t evStart = nullptr, evStop = nullptr;
-        CUDA_CHECK(cudaEventCreate(&evStart));
-        CUDA_CHECK(cudaEventCreate(&evStop));
-        CUDA_CHECK(cudaEventRecord(evStart, 0));
-        mandelbrotUnifiedKernel<<<grid,block>>>(out, d_it, w, h, zoom, offset, maxIter, tSec);
-        CUDA_CHECK(cudaEventRecord(evStop, 0));
-        CUDA_CHECK(cudaEventSynchronize(evStop));
-        float ms = 0.0f;
-        CUDA_CHECK(cudaEventElapsedTime(&ms, evStart, evStop));
-        LUCHS_LOG_HOST("[PERF] nacktmull unified kern=%.2f ms itMax=%d", ms, maxIter);
-        CUDA_CHECK(cudaEventDestroy(evStart));
-        CUDA_CHECK(cudaEventDestroy(evStop));
-    } else {
-        mandelbrotUnifiedKernel<<<grid,block>>>(out, d_it, w, h, zoom, offset, maxIter, tSec);
-    }
-
-    if constexpr (Settings::debugLogging){
-        LUCHS_LOG_HOST("[INFO] periodicity enabled=%d N=%d eps2=%.3e",
-            (int)Settings::periodicityEnabled,(int)Settings::periodicityCheckInterval,(double)Settings::periodicityEps2);
     }
 }
