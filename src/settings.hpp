@@ -38,7 +38,7 @@ namespace Settings {
     // Empfehlung: false .. true (bool)
     // Effekt: true = mehr Einblick, leicht geringere FPS.
     // ------------------------------------------------------------------------
-    inline constexpr bool debugLogging  = false;
+    inline constexpr bool debugLogging  = true;
 
     // ------------------------------------------------------------------------
     // performanceLogging
