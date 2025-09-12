@@ -176,11 +176,10 @@ void mandelbrotUnifiedKernel(
         if (g_prog.addIter < stepLimit) stepLimit = g_prog.addIter;
         if (stepLimit < 0) stepLimit = 0;
 
-        bool escaped=false;
         #pragma unroll 1
         for (int s=0;s<stepLimit;++s){
             const float x2=zx*zx, y2=zy*zy;
-            if (x2+y2>esc2){ escaped=true; break; }
+            if (x2+y2>esc2){ break; }
             const float xt=x2-y2+c.x; zy=__fmaf_rn(2.0f*zx,zy,c.y); zx=xt; ++it;
         }
         g_prog.it[idx]=it; g_prog.z[idx]=make_float2(zx,zy);
@@ -196,7 +195,7 @@ void mandelbrotUnifiedKernel(
     }
 
     // ----------------------- Direct path (with periodicity) -------------------
-    float zx=0.f, zy=0.f; bool escaped=false;
+    float zx=0.f, zy=0.f;
     int it = maxIter; // default: bounded
     float px=0.f, py=0.f; int lastProbe=0;
     const int perN  = Settings::periodicityCheckInterval;
@@ -205,14 +204,14 @@ void mandelbrotUnifiedKernel(
     #pragma unroll 1
     for (int i=0;i<maxIter;++i){
         const float x2=zx*zx, y2=zy*zy;
-        if (x2+y2>esc2){ it=i; escaped=true; break; }
+        if (x2+y2>esc2){ it=i; break; }
         const float xt=x2-y2+c.x; zy=__fmaf_rn(2.0f*zx,zy,c.y); zx=xt;
         if constexpr (Settings::periodicityEnabled){
             const int step=i-lastProbe;
             if (step>=perN){
                 const float ddx=zx-px, ddy=zy-py;
                 const float d2=ddx*ddx+ddy*ddy;
-                if (d2<=eps2){ it=maxIter; escaped=false; break; }
+                if (d2<=eps2){ it=maxIter; break; }
                 px=zx; py=zy; lastProbe=i;
             }
         }
