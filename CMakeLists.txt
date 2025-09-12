@@ -44,7 +44,6 @@ find_package(OpenGL REQUIRED)                 # OpenGL::GL
 find_package(glfw3 CONFIG REQUIRED)           # glfw
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
-find_package(Boost CONFIG REQUIRED COMPONENTS container random system multiprecision)
 
 # ---------------------- CUDA 13 Guard ----------------------
 if(CUDAToolkit_VERSION VERSION_LESS 13.0)
@@ -190,10 +189,6 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
   glfw
   CUDA::cudart_static
   Threads::Threads
-  Boost::container
-  Boost::random
-  Boost::system
-  Boost::multiprecision
 )
 
 # Linux: -pthread explizit
