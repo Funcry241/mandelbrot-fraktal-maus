@@ -206,4 +206,18 @@ namespace Settings {
     // ------------------------------------------------------------------------
     inline constexpr bool progressiveEnabled = true;
 
+
+// ============================== Mandelbrot Kernel ============================
+// Block geometry (affects occupancy & coalescing).
+// Recommendation: (32,8) balanced; (32,16) higher ILP (watch registers).
+// ----------------------------------------------------------------------------
+inline constexpr int MANDEL_BLOCK_X = 32;   // threads in X (multiple of 32)
+inline constexpr int MANDEL_BLOCK_Y = 8;    // threads in Y (tune vs. registers)
+
+// Unroll hint for inner iteration loop (compute-bound).
+// 1..8; 4 is a safe sweet-spot.
+inline constexpr int MANDEL_UNROLL  = 4;
+
+// Enable fused multiply-add in the iteration updates (zy and zx path).
+inline constexpr bool MANDEL_USE_FMA = true;
 } // namespace Settings

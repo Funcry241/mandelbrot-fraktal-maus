@@ -171,15 +171,15 @@ void mandelbrotUnifiedKernel(
     if (insideMainCardioidOrBulb(c.x,c.y)){
         const float3 rgb = gtPalette_srgb(0.0f,true,tSec);
         {
-        const float d = bayer8x8_dither(x,y);
-        float r = fmaf(255.0f, clamp01(rgb.x), 0.5f + d);
-        float g = fmaf(255.0f, clamp01(rgb.y), 0.5f + d);
-        float b = fmaf(255.0f, clamp01(rgb.z), 0.5f + d);
-        r = fminf(255.0f, fmaxf(0.0f, r));
-        g = fminf(255.0f, fmaxf(0.0f, g));
-        b = fminf(255.0f, fmaxf(0.0f, b));
-        out[idx] = make_uchar4((unsigned char)r,(unsigned char)g,(unsigned char)b,255);
-    }
+            const float d = bayer8x8_dither(x,y);
+            float r = fmaf(255.0f, clamp01(rgb.x), 0.5f + d);
+            float g = fmaf(255.0f, clamp01(rgb.y), 0.5f + d);
+            float b = fmaf(255.0f, clamp01(rgb.z), 0.5f + d);
+            r = fminf(255.0f, fmaxf(0.0f, r));
+            g = fminf(255.0f, fmaxf(0.0f, g));
+            b = fminf(255.0f, fmaxf(0.0f, b));
+            out[idx] = make_uchar4((unsigned char)r,(unsigned char)g,(unsigned char)b,255);
+        }
         iterOut[idx] = (uint16_t)min(maxIter, 65535);
         if (g_prog.enabled && g_prog.it && g_prog.z){ g_prog.it[idx]=maxIter; g_prog.z[idx]=make_float2(0,0); }
         return;
@@ -210,15 +210,15 @@ void mandelbrotUnifiedKernel(
 
         const float3 rgb = shade_color_only(it, iterCap, zx, zy, tSec);
         {
-        const float d = bayer8x8_dither(x,y);
-        float r = fmaf(255.0f, clamp01(rgb.x), 0.5f + d);
-        float g = fmaf(255.0f, clamp01(rgb.y), 0.5f + d);
-        float b = fmaf(255.0f, clamp01(rgb.z), 0.5f + d);
-        r = fminf(255.0f, fmaxf(0.0f, r));
-        g = fminf(255.0f, fmaxf(0.0f, g));
-        b = fminf(255.0f, fmaxf(0.0f, b));
-        out[idx] = make_uchar4((unsigned char)r,(unsigned char)g,(unsigned char)b,255);
-    }
+            const float d = bayer8x8_dither(x,y);
+            float r = fmaf(255.0f, clamp01(rgb.x), 0.5f + d);
+            float g = fmaf(255.0f, clamp01(rgb.y), 0.5f + d);
+            float b = fmaf(255.0f, clamp01(rgb.z), 0.5f + d);
+            r = fminf(255.0f, fmaxf(0.0f, r));
+            g = fminf(255.0f, fmaxf(0.0f, g));
+            b = fminf(255.0f, fmaxf(0.0f, b));
+            out[idx] = make_uchar4((unsigned char)r,(unsigned char)g,(unsigned char)b,255);
+        }
         iterOut[idx]=(uint16_t)min(it,65535);
         return;
     }
@@ -230,7 +230,7 @@ void mandelbrotUnifiedKernel(
     const int perN  = Settings::periodicityCheckInterval;
     const float eps2= (float)Settings::periodicityEps2;
 
-    #pragma unroll 1
+    #pragma unroll 4
     for (int i=0;i<maxIter;++i){
         const float x2=zx*zx, y2=zy*zy;
         if (x2+y2>esc2){ it=i; break; }
@@ -277,14 +277,16 @@ extern "C" void launch_mandelbrotHybrid(
         return;
     }
 
-    const dim3 block(32,8);
+    // Einheitliche Block/Grid-Definition (eine Stelle; kein Doppel):
+    const dim3 block(Settings::MANDEL_BLOCK_X, Settings::MANDEL_BLOCK_Y);
     const dim3 grid((w+block.x-1)/block.x,(h+block.y-1)/block.y);
+
     if constexpr (Settings::performanceLogging) {
         cudaEvent_t evStart = nullptr, evStop = nullptr;
         CUDA_CHECK(cudaEventCreate(&evStart));
         CUDA_CHECK(cudaEventCreate(&evStop));
         CUDA_CHECK(cudaEventRecord(evStart, 0));
-        mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
+        mandelbrotUnifiedKernel<<<grid,block>>>(out, d_it, w, h, zoom, offset, maxIter, tSec);
         CUDA_CHECK(cudaEventRecord(evStop, 0));
         CUDA_CHECK(cudaEventSynchronize(evStop));
         float ms = 0.0f;
@@ -293,8 +295,9 @@ extern "C" void launch_mandelbrotHybrid(
         CUDA_CHECK(cudaEventDestroy(evStart));
         CUDA_CHECK(cudaEventDestroy(evStop));
     } else {
-        mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
+        mandelbrotUnifiedKernel<<<grid,block>>>(out, d_it, w, h, zoom, offset, maxIter, tSec);
     }
+
     if constexpr (Settings::debugLogging){
         LUCHS_LOG_HOST("[INFO] periodicity enabled=%d N=%d eps2=%.3e",
             (int)Settings::periodicityEnabled,(int)Settings::periodicityCheckInterval,(double)Settings::periodicityEps2);
