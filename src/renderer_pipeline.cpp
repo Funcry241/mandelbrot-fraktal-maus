@@ -149,7 +149,7 @@ void drawFullscreenQuad(GLuint tex) {
     if (wasDepth) glDisable(GL_DEPTH_TEST);
     if (wasCull)  glDisable(GL_CULL_FACE);
 #ifdef GL_FRAMEBUFFER_SRGB
-    if (wasSRGB)  glDisable(GL_FRAMEBUFFER_SRGB); // 1:1 Ausgabe
+    if (!wasSRGB)  glEnable(GL_FRAMEBUFFER_SRGB); // ensure linear->sRGB at FB
 #endif
 
     // Draw
@@ -187,7 +187,7 @@ void drawFullscreenQuad(GLuint tex) {
     if (wasCull)  glEnable(GL_CULL_FACE);
     if (wasDepth) glEnable(GL_DEPTH_TEST);
 #ifdef GL_FRAMEBUFFER_SRGB
-    if (wasSRGB)  glEnable(GL_FRAMEBUFFER_SRGB);
+    if (!wasSRGB)  glDisable(GL_FRAMEBUFFER_SRGB);
 #endif
 }
 

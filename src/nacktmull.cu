@@ -14,6 +14,8 @@
 #include "common.hpp"
 #include "nacktmull_math.cuh"  // pixelToComplex(...)
 
+__constant__ float g_sinA = 0.0f;  // sin(0.30*t)
+__constant__ float g_sinB = 0.0f;  // sin(0.80*t)
 // ============================================================================
 // Device utilities
 // ============================================================================
@@ -24,10 +26,10 @@ __device__ __forceinline__ float3 mix3(const float3 a, const float3 b, float t){
 }
 // sRGB <-> Linear (für Palettenmischung im Linearraum)
 __device__ __forceinline__ float  srgb_to_linear(float c){
-    return (c <= 0.04045f) ? (c/12.92f) : powf((c + 0.055f)/1.055f, 2.4f);
+    return (c <= 0.04045f) ? (c/12.92f) : __powf((c + 0.055f)/1.055f, 2.4f);
 }
 __device__ __forceinline__ float  linear_to_srgb(float c){
-    return (c <= 0.0031308f) ? (12.92f*c) : (1.055f*powf(c, 1.0f/2.4f) - 0.055f);
+    return (c <= 0.0031308f) ? (12.92f*c) : (1.055f*__powf(c, 1.0f/2.4f) - 0.055f);
 }
 __device__ __forceinline__ float3 srgb_to_linear3(const float3 c){
     return make_float3(srgb_to_linear(c.x), srgb_to_linear(c.y), srgb_to_linear(c.z));
@@ -52,24 +54,24 @@ __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y){
 // ============================================================================
 __device__ __forceinline__ float3 gtPalette_srgb(float x, bool inSet, float t){
     const float gamma=0.84f, lift=0.08f, baseVibr=1.05f, addVibrMax=0.06f, warmDriftAmp=0.06f;
-    const float warmShift = 1.00f + warmDriftAmp*__sinf(0.30f*t);
+    const float warmShift = 1.00f + warmDriftAmp*g_sinA;
     const float breathAmp = 0.08f;
     if (inSet) return make_float3(12/255.f,14/255.f,20/255.f); // solides dunkles Set
 
-    x = clamp01(powf(clamp01(x), gamma));
+    x = clamp01(__powf(clamp01(x), gamma));
     x = clamp01((x + lift) / (1.0f + lift));
-    const float xprime = clamp01(x + breathAmp*__sinf(0.80f*t)*x*(1.0f - x));
+    const float xprime = clamp01(x + breathAmp*g_sinB*x*(1.0f - x));
 
     const float  p[8] = {0.00f,0.10f,0.22f,0.38f,0.55f,0.72f,0.88f,1.00f};
-    const float3 c[8] = {
-        make_float3(11/255.f,14/255.f,26/255.f),
-        make_float3(26/255.f,43/255.f,111/255.f),
-        make_float3(30/255.f,166/255.f,209/255.f),
-        make_float3(123/255.f,228/255.f,195/255.f),
-        make_float3(255/255.f,224/255.f,138/255.f),
-        make_float3(247/255.f,165/255.f,58/255.f),
-        make_float3(200/255.f,72/255.f,122/255.f),
-        make_float3(250/255.f,249/255.f,246/255.f)
+    const float3 cLn[8] = {
+        make_float3(0.0033465f,0.0043914f,0.0103298f),
+        make_float3(0.0103298f,0.0241576f,0.1589608f),
+        make_float3(0.0129830f,0.3813260f,0.6375969f),
+        make_float3(0.1980693f,0.7758222f,0.5457245f),
+        make_float3(1.0000000f,0.7454042f,0.2541521f),
+        make_float3(0.9301109f,0.3762621f,0.0423114f),
+        make_float3(0.5775804f,0.0648033f,0.1946178f),
+        make_float3(0.9559734f,0.9473065f,0.9215819f)
     };
     int j=0;
     #pragma unroll
@@ -78,7 +80,7 @@ __device__ __forceinline__ float3 gtPalette_srgb(float x, bool inSet, float t){
     float tseg=clamp01((xprime-p[j])/span);
     tseg=tseg*tseg*(3.f-2.f*tseg);
 
-    float3 aLn=srgb_to_linear3(c[j]), bLn=srgb_to_linear3(c[j+1]);
+    float3 aLn=cLn[j], bLn=cLn[j+1];
     float3 rgbLn=mix3(aLn,bLn,tseg);
 
     const float luma=0.2126f*rgbLn.x+0.7152f*rgbLn.y+0.0722f*rgbLn.z;
@@ -88,7 +90,7 @@ __device__ __forceinline__ float3 gtPalette_srgb(float x, bool inSet, float t){
         luma+(rgbLn.y-luma)*vibr*1.00f,
         luma+(rgbLn.z-luma)*vibr*(2.0f-warmShift)
     );
-    return linear_to_srgb3(make_float3(clamp01(rgbLn.x),clamp01(rgbLn.y),clamp01(rgbLn.z)));
+    return make_float3(clamp01(rgbLn.x),clamp01(rgbLn.y),clamp01(rgbLn.z));
 }
 
 // ============================================================================
@@ -236,6 +238,11 @@ extern "C" void launch_mandelbrotHybrid(
     static clk::time_point anim0; static bool anim_init=false;
     if(!anim_init){ anim0=clk::now(); anim_init=true; }
     const float tSec=(float)std::chrono::duration<double>(clk::now()-anim0).count();
+    const float sinA = sinf(0.30f * tSec);
+    const float sinB = sinf(0.80f * tSec);
+    cudaMemcpyToSymbol(g_sinA, &sinA, sizeof(float));
+    cudaMemcpyToSymbol(g_sinB, &sinB, sizeof(float));
+    
     const auto tStart=clk::now();
 
     if(!out||!d_it||w<=0||h<=0||maxIter<=0){
@@ -245,12 +252,17 @@ extern "C" void launch_mandelbrotHybrid(
 
     const dim3 block(32,8);
     const dim3 grid((w+block.x-1)/block.x,(h+block.y-1)/block.y);
+    cudaEvent_t evStart, evStop;
+    if constexpr (Settings::performanceLogging) {
+        cudaEventCreate(&evStart);
+        cudaEventCreate(&evStop);
+        cudaEventRecord(evStart, 0);
+    }
     mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
+    
 
     if constexpr (Settings::performanceLogging){
-        cudaDeviceSynchronize();
-        const double ms=1e-3*(double)std::chrono::duration_cast<std::chrono::microseconds>(clk::now()-tStart).count();
-        LUCHS_LOG_HOST("[PERF] nacktmull unified kern=%.2f ms itMax=%d", ms, maxIter);
+        
     }
     if constexpr (Settings::debugLogging){
         LUCHS_LOG_HOST("[INFO] periodicity enabled=%d N=%d eps2=%.3e",

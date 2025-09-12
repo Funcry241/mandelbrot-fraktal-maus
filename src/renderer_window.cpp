@@ -80,6 +80,11 @@ static GLFWwindow* createGLFWWindow(int width, int height) {
     }
 
     glfwMakeContextCurrent(window);
+    #ifdef GLFW_SRGB_CAPABLE
+    int srgbCap = glfwGetWindowAttrib(window, GLFW_SRGB_CAPABLE);
+    LUCHS_LOG_HOST("[GL] Default FB sRGB capable: %d", srgbCap);
+    #endif
+
 
     // VSync: im Perf-Logging-Modus aus, sonst an (kein C4127, da ?:)
     glfwSwapInterval(Settings::performanceLogging ? 0 : 1);
