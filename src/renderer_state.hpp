@@ -33,15 +33,6 @@ public:
     double2     center{0.0, 0.0};     // Weltzentrum c0 (double-Genauigkeit)
     double2     pixelScale{0.0, 0.0}; // Delta pro Pixel in Real/Imag (double)
 
-    // 📌 Referenz-Orbit-Basis (Perturbation)
-    double2     orbitCenter{0.0, 0.0};
-    bool        orbitRebuildRequested = false;
-
-    // 🛡️ Precision-Guards (Host-seitig ausgewertet)
-    bool        precisionGuardTriggered = false;
-    double      precisionGuardRatioLast = 0.0;
-    bool        rebaseRequested         = false;
-
     // 🧮 Iterationsparameter
     int baseIterations = 100;
     int maxIterations  = 1000;

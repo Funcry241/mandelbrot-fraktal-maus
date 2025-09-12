@@ -1,6 +1,6 @@
-///// Otter: Renderer-Core – GL-Init/Window, Loop-Delegation; keine Zoom-Logik hier.
-///// Schneefuchs: CUDA/GL strikt getrennt; deterministische ASCII-Logs; Ressourcen klar besitzend.
-///// Maus: Progressive-Cooldown + Tatze 7 Soft-Invalidate bei Sichtsprung (nach Pipeline, ohne Memset).
+///// Otter: Renderer-Core – GL init + window, delegates to pipeline; no zoom logic here.
+///// Schneefuchs: Strict CUDA/GL separation; deterministic ASCII logs; resources clearly owned.
+///// Maus: Progressive cooldown + Tatze 7 soft-invalidate on view jumps (post-pipeline, no memset).
 ///// Datei: src/renderer_core.cu
 
 #include "pch.hpp"
@@ -43,14 +43,14 @@ bool Renderer::initGL() {
         return true;
     }
 
-    // Fenster + GL-Kontext
+    // Create window + GL context
     state.window = RendererWindow::createWindow(state.width, state.height, this);
     if (!state.window) {
         LUCHS_LOG_HOST("[ERROR] Failed to create GLFW window");
         return false;
     }
 
-    // createWindow() macht den Kontext bereits current; zweiter Aufruf ist harmlos.
+    // createWindow() already makes context current; second call is harmless.
     glfwMakeContextCurrent(state.window);
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] OpenGL context made current");
@@ -61,7 +61,7 @@ bool Renderer::initGL() {
         }
     }
 
-    // GLEW init (idempotent genug; Fehler sauber loggen)
+    // GLEW init (idempotent enough; log errors clearly)
     GLenum glewErr = glewInit();
     if (glewErr != GLEW_OK) {
         LUCHS_LOG_HOST("[FATAL] glewInit failed: %s", reinterpret_cast<const char*>(glewGetErrorString(glewErr)));
@@ -70,16 +70,19 @@ bool Renderer::initGL() {
         return false;
     }
 
-    // GL-Ressourcen anlegen: PBO + Texture (immutable storage)
+    // Note: VSync preference is initialized exactly once in renderer_loop.cpp (initVSyncOnce).
+    // Renderer core does not touch swap interval here to avoid conflicting policies.
+
+    // Create GL resources: PBO + texture (immutable storage)
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
         state.pbo = Hermelin::GLBuffer(OpenGLUtils::createPBO(state.width, state.height));
         state.tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(state.width, state.height));
 
-        // PBO bei CUDA registrieren
+        // Register PBO with CUDA (CudaInterop encapsulates CUDA-13 compatible path)
         CudaInterop::registerPBO(state.pbo);
 
-        // Saubere GL-State: PBO unbinden
+        // Clean GL state: unbind PBO
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
         glResourcesInitialized = true;
@@ -95,10 +98,10 @@ bool Renderer::initGL() {
         LUCHS_LOG_HOST("[INIT] GL init complete (w=%d h=%d)", state.width, state.height);
     }
 
-    // GPU-Pipeline vorbereiten
+    // Prepare GPU pipeline
     RendererPipeline::init();
 
-    // Device-Buffer anlegen (tileSize bleibt in Pipeline/Zoom-Logik konfiguriert)
+    // Allocate device buffers (tileSize stays configured in pipeline/zoom logic)
     state.setupCudaBuffers(Settings::BASE_TILE_SIZE > 0 ? Settings::BASE_TILE_SIZE : 16);
 
     return true;
@@ -109,12 +112,13 @@ bool Renderer::shouldClose() const {
 }
 
 void Renderer::renderFrame() {
-    // Delegation an Pipeline: komplette Reihenfolge (CUDA → Analyse → Upload → Draw → Logs)
+    // Delegate to pipeline: CUDA → analysis → upload → draw → logs
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] Entering Renderer::renderFrame");
     }
 
-    // *** Progressive-Resume: __constant__-State pro Frame setzen (Cooldown beachten) ***
+    // Progressive resume: set __constant__ program state once per frame (gated by cooldown)
+    // Enables kernel-side "resume" only if: global + runtime flags true, state buffers present, and not in cooldown.
     {
         const bool inCooldown = (state.progressiveCooldownFrames > 0);
         const bool progReady =
@@ -124,7 +128,7 @@ void Renderer::renderFrame() {
             (state.d_stateIt.get() != nullptr) &&
             !inCooldown;
 
-        const int addIter = Settings::progressiveAddIter; // Budget pro Frame
+        const int addIter = Settings::progressiveAddIter; // per-frame budget
         const int iterCap = state.maxIterations;
         const int enabled = progReady ? 1 : 0;
 
@@ -143,11 +147,12 @@ void Renderer::renderFrame() {
         }
     }
 
-    // Frame ausführen (kein Device-wide Sync in diesem Pfad)
+    // Execute one frame (no device-wide sync in this path)
     FramePipeline::execute(state);
 
-    // ---------- Tatze 7: Soft-Invalidate bei Sichtsprung (nach Pipeline) ----------
-    // Prüfe, ob center/zoom sprunghaft geändert wurden → 1-Frame-Pause (kein memset).
+    // ---------- Tatze 7: Soft-invalidate on abrupt view change (post-pipeline) ----------
+    // Detect large jumps in zoom or center (screen-space) and pause progressive resume for one frame.
+    // Thresholds: zoomRatio >= 1.5 OR pan >= 8.0 px → soft invalidate (no memset).
     {
         struct PrevView { bool have=false; double zoom=0.0, cx=0.0, cy=0.0; };
         static PrevView prev;
@@ -159,7 +164,7 @@ void Renderer::renderFrame() {
             const double z1 = std::max((double)state.zoom, 1e-30);
             const double zoomRatio = (z1 > z0) ? (z1 / z0) : (z0 / z1);
 
-            // Pixel-Shift in Screen-Space
+            // Screen-space pan in pixels
             const double psx = std::max(std::abs(state.pixelScale.x), 1e-30);
             const double psy = std::max(std::abs(state.pixelScale.y), 1e-30);
             const double dxPix = std::abs(((double)state.center.x - prev.cx) / psx);
@@ -178,14 +183,14 @@ void Renderer::renderFrame() {
             }
         }
 
-        // Cooldown herunterzählen – aber NICHT, wenn wir eben invalidiert haben.
+        // Decrement cooldown unless we invalidated just now; when it hits zero, re-enable progressive.
         if (state.progressiveCooldownFrames > 0) {
             if (!justInvalidated) {
                 --state.progressiveCooldownFrames;
                 if (state.progressiveCooldownFrames == 0) {
                     state.progressiveEnabled = true;
                     if constexpr (Settings::debugLogging) {
-                        LUCHS_LOG_HOST("[PROG] cooldown finished → progressiveEnabled=true");
+                        LUCHS_LOG_HOST("[PROG] cooldown finished -> progressiveEnabled=true");
                     }
                 }
             } else {
@@ -196,26 +201,26 @@ void Renderer::renderFrame() {
             }
         }
 
-        // Prev-State aktualisieren (am Ende des Frames)
+        // Update previous view state at end of frame
         prev.zoom = (double)state.zoom;
         prev.cx   = (double)state.center.x;
         prev.cy   = (double)state.center.y;
         prev.have = true;
     }
-    // ---------- Ende Tatze 7 ------------------------------------------------------
+    // ---------- End Tatze 7 --------------------------------------------------------
 
-    // Fenster zeigen / Events pumpen
+    // Present window / pump events
     glfwSwapBuffers(state.window);
     glfwPollEvents();
 }
 
 void Renderer::freeDeviceBuffers() {
-    // GPU/GL Buffers
+    // GPU/GL buffers
     state.d_iterations.free();
     state.d_entropy.free();
     state.d_contrast.free();
 
-    // Progressive-State ebenfalls freigeben
+    // Progressive per-pixel state
     state.d_stateZ.free();
     state.d_stateIt.free();
 
@@ -232,24 +237,24 @@ void Renderer::resize(int newW, int newH) {
     }
     if (newW == state.width && newH == state.height) return;
 
-    // State passt intern PBO/Tex/Device-Buffer an und registriert PBO ggf. neu.
+    // State updates PBO/texture/device buffers and re-registers PBO if needed.
     state.resize(newW, newH);
 }
 
 void Renderer::cleanup() {
     if (!glInitialized) return;
 
-    // GL abhängig: Pipeline zuerst
+    // GL-dependent: pipeline first
     RendererPipeline::cleanup();
     HeatmapOverlay::cleanup();
 
-    // CUDA-Interop freigeben (benötigt keinen GL-Kontext)
+    // Release CUDA interop (no GL context required)
     CudaInterop::unregisterPBO();
 
-    // Fenster (und damit GL-Kontext) zerstören
+    // Destroy window (and GL context)
     RendererWindow::destroyWindow(state.window);
 
-    // Host-Seite
+    // Host-side
     freeDeviceBuffers();
     glfwTerminate();
 

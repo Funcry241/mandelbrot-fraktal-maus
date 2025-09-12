@@ -160,8 +160,7 @@ namespace Settings {
     // ------------------------------------------------------------------------
     inline constexpr bool periodicityEnabled = true;
 
-    inline constexpr int  progressiveAddIter = 128;   // Budget pro Frame
-    inline constexpr bool progressiveDefault = true;  // Host darf es jederzeit auf 0 setzen
+    inline constexpr int  progressiveAddIter = 128;   // Budget pro Frame    
 
     // ------------------------------------------------------------------------
     // periodicityCheckInterval

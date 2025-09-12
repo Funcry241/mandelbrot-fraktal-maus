@@ -1,6 +1,6 @@
 ///// Otter: Einheitliche, klare Struktur – nur aktive Zustaende; Header schlank, keine PCH; Nacktmull-Pullover.
 ///// Schneefuchs: Speicher/Buffer exakt definiert; Host-Timings zentral – eine Quelle; /WX-fest; ASCII-only.
-///// Maus: Progressive-Defaults aus Settings::progressiveEnabled (kein progressiveDefault); Cooldown/State robust.
+///// Maus: Progressive-Defaults aus Settings::progressiveEnabled; Cooldown/State robust.
 ///// Datei: src/renderer_state.cpp
 
 #include "pch.hpp"
@@ -65,8 +65,7 @@ void RendererState::reset() {
 
     // Zoom V3 Silk-Lite: persistenter Zustand auf Default
     zoomV3State = {};
-
-    // Progressive: Defaults aus Settings (kein progressiveDefault!)
+    
     progressiveEnabled         = Settings::progressiveEnabled;
     progressiveCooldownFrames  = 0;
 
