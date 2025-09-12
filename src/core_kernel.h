@@ -6,6 +6,7 @@
 #pragma once
 #ifndef CORE_KERNEL_H
 #define CORE_KERNEL_H
+#include <cstdint>
 
 // ----------------------------------------------------------------------------
 // computeCudaEntropyContrast
@@ -20,7 +21,7 @@
 //
 // Erwartet valide Groessen/Allokationen gemaess width,height,tileSize (C++-Linkage).
 void computeCudaEntropyContrast(
-    const int* d_iterations,
+    const uint16_t* d_iterations,
     float*     d_entropyOut,
     float*     d_contrastOut,
     int        width,

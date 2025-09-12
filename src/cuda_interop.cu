@@ -27,7 +27,7 @@
 
 // Nacktmull-Export: extern "C" + Signatur (out, d_it, w, h, zoom, offset, maxIter, tile)
 extern "C" void launch_mandelbrotHybrid(
-    uchar4* out, int* d_it,
+    uchar4* out, uint16_t* d_it,
     int w, int h, float zoom, float2 offset,
     int maxIter, int tile
 );
@@ -47,6 +47,8 @@ static size_t s_hostRegContrastBytes= 0;
 static cudaEvent_t s_evStart = nullptr;
 static cudaEvent_t s_evStop  = nullptr;
 static bool        s_evInit  = false;
+
+static cudaStream_t s_copyStream = nullptr;
 
 static inline void ensureDeviceOnce() {
     if (!s_deviceInitDone) { CUDA_CHECK(cudaSetDevice(0)); s_deviceInitDone = true; }
@@ -180,7 +182,7 @@ void renderCudaFrame(
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int numTiles = tilesX * tilesY;
 
-    const size_t it_bytes       = totalPixels * sizeof(int);
+    const size_t it_bytes       = totalPixels * sizeof(uint16_t);
     const size_t entropy_bytes  = size_t(numTiles) * sizeof(float);
     const size_t contrast_bytes = size_t(numTiles) * sizeof(float);
 
@@ -220,7 +222,7 @@ void renderCudaFrame(
     // *** KORREKTE REIHENFOLGE: (out, d_it, w, h, zoom, offset, maxIter, tile) ***
     launch_mandelbrotHybrid(
         devSurface,
-        static_cast<int*>(d_iterations.get()),
+        static_cast<uint16_t*>(d_iterations.get()),
         width, height,
         zoom, offset,
         maxIterations,
@@ -278,10 +280,12 @@ void renderCudaFrame(
     }
 
 #if !defined(__CUDA_ARCH__)
-    const auto tEC0 = std::chrono::high_resolution_clock::now();
+    
+    if (!s_copyStream) { CUDA_CHECK(cudaStreamCreateWithFlags(&s_copyStream, cudaStreamNonBlocking)); }
+const auto tEC0 = std::chrono::high_resolution_clock::now();
 #endif
     ::computeCudaEntropyContrast(
-        static_cast<const int*>(d_iterations.get()),
+        static_cast<const uint16_t*>(d_iterations.get()),
         static_cast<float*>(d_entropy.get()),
         static_cast<float*>(d_contrast.get()),
         width, height, tileSize, maxIterations
@@ -302,8 +306,9 @@ void renderCudaFrame(
     h_entropy.resize(size_t(numTiles));
     h_contrast.resize(size_t(numTiles));
 
-    CUDA_CHECK(cudaMemcpy(h_entropy.data(),  d_entropy.get(),  entropy_bytes,  cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(h_contrast.data(), d_contrast.get(), contrast_bytes, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpyAsync(h_entropy.data(),  d_entropy.get(),  entropy_bytes,  cudaMemcpyDeviceToHost, s_copyStream));
+    CUDA_CHECK(cudaMemcpyAsync(h_contrast.data(), d_contrast.get(), contrast_bytes, cudaMemcpyDeviceToHost, s_copyStream));
+    CUDA_CHECK(cudaStreamSynchronize(s_copyStream));
 
     shouldZoom = false; newOffset = offset;
 

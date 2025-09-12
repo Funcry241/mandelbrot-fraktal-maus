@@ -32,7 +32,7 @@ namespace {
 // Warp-private histograms to reduce atomic contention (EN_WARPS × 256 bins in shared mem).
 __global__ __launch_bounds__(EN_BLOCK_THREADS, 2)
 void entropyKernel(
-    const int* __restrict__ it,
+    const uint16_t* __restrict__ it,
     float* __restrict__ eOut,
     int w, int h, int tile, int maxIter)
 {
@@ -70,7 +70,7 @@ void entropyKernel(
         if (x >= w || y >= h) continue;
 
         // read-only cached fetch
-        int v = __ldg(&it[y * w + x]);
+        int v = (int)__ldg(&it[y * w + x]);
         v = (v < 0) ? 0 : v;
         int bin = __float2int_rz(float(v) * scale);
         bin = clamp_int_0_255(bin);
@@ -143,7 +143,7 @@ void contrastKernel(
 
 // --------------------------- host wrapper: E/C only ---------------------------
 void computeCudaEntropyContrast(
-    const int* d_it, float* d_e, float* d_c,
+    const uint16_t* d_it, float* d_e, float* d_c,
     int w, int h, int tile, int maxIter)
 {
     // Early guards: robust zeroing for invalid sizes.

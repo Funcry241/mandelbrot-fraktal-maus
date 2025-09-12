@@ -10,7 +10,7 @@ extern "C" {
 
 // Progressive state setter (Keks 4/5)
 // zDev: device pointer to float2[z] per pixel (resume state z)
-// itDev: device pointer to int[it] per pixel   (resume iterations)
+// itDev: device pointer to uint16_t[it] per pixel (resume iterations)
 // addIter: iteration budget per frame
 // iterCap: hard cap for iterations (usually maxIter of render call)
 // enabled: 1 = progressive on, 0 = off (direct path)
@@ -19,7 +19,7 @@ void nacktmull_set_progressive(const void* zDev,
                                int addIter, int iterCap, int enabled);
 
 // Unified Mandelbrot renderer (direct/progressive auto branch)
-void launch_mandelbrotHybrid(uchar4* out, int* d_it,
+void launch_mandelbrotHybrid(uchar4* out, uint16_t* d_it,
                              int w, int h, float zoom, float2 offset,
                              int maxIter, int tile);
 

@@ -8,6 +8,7 @@
 #include <vector_functions.h>
 #include <cmath>
 #include <chrono>
+#include <cstdint>
 
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
@@ -16,6 +17,22 @@
 
 __constant__ float g_sinA = 0.0f;  // sin(0.30*t)
 __constant__ float g_sinB = 0.0f;  // sin(0.80*t)
+
+__device__ __constant__ unsigned char DITHER_BAYER8[64] = {
+     0, 48, 12, 60,  3, 51, 15, 63,
+    32, 16, 44, 28, 35, 19, 47, 31,
+     8, 56,  4, 52, 11, 59,  7, 55,
+    40, 24, 36, 20, 43, 27, 39, 23,
+     2, 50, 14, 62,  1, 49, 13, 61,
+    34, 18, 46, 30, 33, 17, 45, 29,
+    10, 58,  6, 54,  9, 57,  5, 53,
+    42, 26, 38, 22, 41, 25, 37, 21
+};
+__device__ __forceinline__ float bayer8x8_dither(int x, int y){
+    const int idx = ((y & 7) << 3) | (x & 7);
+    // returns offset in [-0.5, +0.5]
+    return (float(DITHER_BAYER8[idx]) * (1.0f/64.0f)) - 0.5f;
+}
 // ============================================================================
 // Device utilities
 // ============================================================================
@@ -119,14 +136,14 @@ __device__ __forceinline__ float3 shade_color_only(
 // ============================================================================
 // Progressive state (__constant__) + setter (unverändert)
 // ============================================================================
-struct NacktmullProgState { float2* z; int* it; int addIter; int iterCap; int enabled; };
+struct NacktmullProgState { float2* z; uint16_t* it; int addIter; int iterCap; int enabled; };
 __device__ __constant__ NacktmullProgState g_prog = { nullptr,nullptr,0,0,0 };
 
 extern "C" void nacktmull_set_progressive(const void* zDev,const void* itDev,
                                           int addIter,int iterCap,int enabled)
 {
     NacktmullProgState h{};
-    h.z=(float2*)zDev; h.it=(int*)itDev; h.addIter=addIter; h.iterCap=iterCap; h.enabled=enabled?1:0;
+    h.z=(float2*)zDev; h.it=(uint16_t*)itDev; h.addIter=addIter; h.iterCap=iterCap; h.enabled=enabled?1:0;
     cudaError_t err = cudaMemcpyToSymbol(g_prog,&h,sizeof(h));
     if constexpr (Settings::debugLogging) {
         if (err != cudaSuccess) {
@@ -140,7 +157,7 @@ extern "C" void nacktmull_set_progressive(const void* zDev,const void* itDev,
 // ============================================================================
 __global__ __launch_bounds__(256)
 void mandelbrotUnifiedKernel(
-    uchar4* __restrict__ out, int* __restrict__ iterOut,
+    uchar4* __restrict__ out, uint16_t* __restrict__ iterOut,
     int w,int h,float zoom,float2 center,int maxIter,float tSec)
 {
     const int x=blockIdx.x*blockDim.x+threadIdx.x;
@@ -153,12 +170,17 @@ void mandelbrotUnifiedKernel(
     // Interior shortcut
     if (insideMainCardioidOrBulb(c.x,c.y)){
         const float3 rgb = gtPalette_srgb(0.0f,true,tSec);
-        out[idx] = make_uchar4(
-            (unsigned char)(255.0f*clamp01(rgb.x)+0.5f),
-            (unsigned char)(255.0f*clamp01(rgb.y)+0.5f),
-            (unsigned char)(255.0f*clamp01(rgb.z)+0.5f),
-            255);
-        iterOut[idx] = maxIter;
+        {
+        const float d = bayer8x8_dither(x,y);
+        float r = fmaf(255.0f, clamp01(rgb.x), 0.5f + d);
+        float g = fmaf(255.0f, clamp01(rgb.y), 0.5f + d);
+        float b = fmaf(255.0f, clamp01(rgb.z), 0.5f + d);
+        r = fminf(255.0f, fmaxf(0.0f, r));
+        g = fminf(255.0f, fmaxf(0.0f, g));
+        b = fminf(255.0f, fmaxf(0.0f, b));
+        out[idx] = make_uchar4((unsigned char)r,(unsigned char)g,(unsigned char)b,255);
+    }
+        iterOut[idx] = (uint16_t)min(maxIter, 65535);
         if (g_prog.enabled && g_prog.it && g_prog.z){ g_prog.it[idx]=maxIter; g_prog.z[idx]=make_float2(0,0); }
         return;
     }
@@ -168,7 +190,7 @@ void mandelbrotUnifiedKernel(
 
     if (prog){
         // Progressive path (resume)
-        int it = g_prog.it[idx];
+        int it = (int)g_prog.it[idx];
         float2 z0 = g_prog.z[idx];
         float zx = (it>0) ? z0.x : 0.f;
         float zy = (it>0) ? z0.y : 0.f;
@@ -184,15 +206,20 @@ void mandelbrotUnifiedKernel(
             if (x2+y2>esc2){ break; }
             const float xt=x2-y2+c.x; zy=__fmaf_rn(2.0f*zx,zy,c.y); zx=xt; ++it;
         }
-        g_prog.it[idx]=it; g_prog.z[idx]=make_float2(zx,zy);
+        g_prog.it[idx]=(uint16_t)min(it,65535); g_prog.z[idx]=make_float2(zx,zy);
 
         const float3 rgb = shade_color_only(it, iterCap, zx, zy, tSec);
-        out[idx] = make_uchar4(
-            (unsigned char)(255.0f*clamp01(rgb.x)+0.5f),
-            (unsigned char)(255.0f*clamp01(rgb.y)+0.5f),
-            (unsigned char)(255.0f*clamp01(rgb.z)+0.5f),
-            255);
-        iterOut[idx]=it;
+        {
+        const float d = bayer8x8_dither(x,y);
+        float r = fmaf(255.0f, clamp01(rgb.x), 0.5f + d);
+        float g = fmaf(255.0f, clamp01(rgb.y), 0.5f + d);
+        float b = fmaf(255.0f, clamp01(rgb.z), 0.5f + d);
+        r = fminf(255.0f, fmaxf(0.0f, r));
+        g = fminf(255.0f, fmaxf(0.0f, g));
+        b = fminf(255.0f, fmaxf(0.0f, b));
+        out[idx] = make_uchar4((unsigned char)r,(unsigned char)g,(unsigned char)b,255);
+    }
+        iterOut[idx]=(uint16_t)min(it,65535);
         return;
     }
 
@@ -225,14 +252,14 @@ void mandelbrotUnifiedKernel(
         (unsigned char)(255.0f*clamp01(rgb.y)+0.5f),
         (unsigned char)(255.0f*clamp01(rgb.z)+0.5f),
         255);
-    iterOut[idx]=it;
+    iterOut[idx]=(uint16_t)min(it,65535);
 }
 
 // ============================================================================
 // Public API (unchanged) – ms timing + unified kernel
 // ============================================================================
 extern "C" void launch_mandelbrotHybrid(
-    uchar4* out,int* d_it,int w,int h,float zoom,float2 offset,int maxIter,int /*tile*/)
+    uchar4* out,uint16_t* d_it,int w,int h,float zoom,float2 offset,int maxIter,int /*tile*/)
 {
     using clk=std::chrono::high_resolution_clock;
     static clk::time_point anim0; static bool anim_init=false;
@@ -252,17 +279,21 @@ extern "C" void launch_mandelbrotHybrid(
 
     const dim3 block(32,8);
     const dim3 grid((w+block.x-1)/block.x,(h+block.y-1)/block.y);
-    cudaEvent_t evStart, evStop;
     if constexpr (Settings::performanceLogging) {
-        cudaEventCreate(&evStart);
-        cudaEventCreate(&evStop);
-        cudaEventRecord(evStart, 0);
-    }
-    mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
-    
-
-    if constexpr (Settings::performanceLogging){
-        
+        cudaEvent_t evStart = nullptr, evStop = nullptr;
+        CUDA_CHECK(cudaEventCreate(&evStart));
+        CUDA_CHECK(cudaEventCreate(&evStop));
+        CUDA_CHECK(cudaEventRecord(evStart, 0));
+        mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
+        CUDA_CHECK(cudaEventRecord(evStop, 0));
+        CUDA_CHECK(cudaEventSynchronize(evStop));
+        float ms = 0.0f;
+        CUDA_CHECK(cudaEventElapsedTime(&ms, evStart, evStop));
+        LUCHS_LOG_HOST("[PERF] nacktmull unified kern=%.2f ms itMax=%d", ms, maxIter);
+        CUDA_CHECK(cudaEventDestroy(evStart));
+        CUDA_CHECK(cudaEventDestroy(evStop));
+    } else {
+        mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
     }
     if constexpr (Settings::debugLogging){
         LUCHS_LOG_HOST("[INFO] periodicity enabled=%d N=%d eps2=%.3e",

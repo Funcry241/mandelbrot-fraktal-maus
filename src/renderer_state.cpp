@@ -90,14 +90,14 @@ void RendererState::setupCudaBuffers(int tileSize) {
     int tilesX = 0, tilesY = 0, numTiles = 0;
     computeTiles(width, height, tileSize, tilesX, tilesY, numTiles);
 
-    const size_t it_bytes       = totalPixels * sizeof(int);
+    const size_t it_bytes       = totalPixels * sizeof(uint16_t);
     const size_t entropy_bytes  = size_t(numTiles) * sizeof(float);
     const size_t contrast_bytes = size_t(numTiles) * sizeof(float);
 
     // Progressive-States (nur wenn Feature global aktiviert)
     const bool   wantProg       = Settings::progressiveEnabled;
     const size_t z_bytes        = totalPixels * sizeof(float2);
-    const size_t it2_bytes      = totalPixels * sizeof(int);
+    const size_t it2_bytes      = totalPixels * sizeof(uint16_t);
 
     // 🦦 Otter: Fast-Path – wenn alles schon passt, sofort raus
     const bool sizesOk =

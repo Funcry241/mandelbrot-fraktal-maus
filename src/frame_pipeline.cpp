@@ -140,7 +140,7 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
 
     if constexpr (Settings::debugLogging) {
         const size_t totalPixels         = size_t(fctx.width) * size_t(fctx.height);
-        const size_t need_it_bytes       = totalPixels * sizeof(int);
+        const size_t need_it_bytes       = totalPixels * sizeof(uint16_t);
         const size_t need_entropy_bytes  = size_t(numTiles) * sizeof(float);
         const size_t need_contrast_bytes = size_t(numTiles) * sizeof(float);
         LUCHS_LOG_HOST("[SANITY] tiles=%d (%d x %d) pixels=%zu need(it=%zu entropy=%zu contrast=%zu) alloc(it=%zu entropy=%zu contrast=%zu)",

@@ -8,7 +8,8 @@
 #define CUDA_INTEROP_HPP
 
 #include <vector>
-#include <vector_types.h>         // float2
+#include <vector_types.h>
+#include <cstdint>         // float2
 
 #include "core_kernel.h"          // computeCudaEntropyContrast(...)
 #include "hermelin_buffer.hpp"    // Hermelin::CudaDeviceBuffer, Hermelin::GLBuffer
@@ -50,7 +51,7 @@ void logCudaDeviceContext(const char* context);
 
 // Bequemer Inline-Forwarder für die E/C-Pipeline (keine neue ABI-Oberfläche).
 inline void computeCudaEntropyContrast(
-    const int* d_iterations,
+    const uint16_t* d_iterations,
     float* d_entropyOut,
     float* d_contrastOut,
     int width,
