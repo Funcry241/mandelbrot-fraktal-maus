@@ -140,7 +140,7 @@ struct NacktmullProgState { float2* z; uint16_t* it; int addIter; int iterCap; i
 __device__ __constant__ NacktmullProgState g_prog = { nullptr,nullptr,0,0,0 };
 
 extern "C" void nacktmull_set_progressive(const void* zDev,const void* itDev,
-                                          int addIter,int iterCap,int enabled)
+                                          int addIter,int iterCap,int enabled) noexcept
 {
     NacktmullProgState h{};
     h.z=(float2*)zDev; h.it=(uint16_t*)itDev; h.addIter=addIter; h.iterCap=iterCap; h.enabled=enabled?1:0;
@@ -259,7 +259,7 @@ void mandelbrotUnifiedKernel(
 // Public API (unchanged) – ms timing + unified kernel
 // ============================================================================
 extern "C" void launch_mandelbrotHybrid(
-    uchar4* out,uint16_t* d_it,int w,int h,float zoom,float2 offset,int maxIter,int /*tile*/)
+    uchar4* out,uint16_t* d_it,int w,int h,float zoom,float2 offset,int maxIter,int /*tile*/) noexcept
 {
     using clk=std::chrono::high_resolution_clock;
     static clk::time_point anim0; static bool anim_init=false;
