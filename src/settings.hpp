@@ -160,7 +160,27 @@ namespace Settings {
     // ------------------------------------------------------------------------
     inline constexpr bool periodicityEnabled = true;
 
-    inline constexpr int  progressiveAddIter = 128;   // Budget pro Frame    
+    // ------------------------------------------------------------------------
+    // progressiveAddIter
+    // Wirkung: Progressives Iterations-Budget pro Frame und Pixel (nur im Resume-Pfad).
+    // Bedeutung:
+    //   - Dieser Wert bestimmt die verpflichtende Rechenarbeit jedes Frames:
+    //       cost_pro_frame  ~  width * height * progressiveAddIter
+    //     (zzgl. kleiner Overheads). Bei 1024x768 und 32 ⇒ ~25.2 Mio. Iterationen/Frame.
+    //   - Hoeherer Wert = schneller konvergierende Kanten/Alpha, aber niedrigere FPS.
+    //   - Niedrigerer Wert = hoehere FPS, dafuer sichtbarere "Weichheit", die ueber mehrere
+    //     Frames verschwindet.
+    // Praxisrichtwerte:
+    //   - Interaktiv (GPU geteilt / Hintergrundlast):   16 .. 48
+    //   - Standard-Sichtprobe (1024x768, Solo-GPU):     32 .. 64
+    //   - Offline / "fix Bild in wenigen Frames":       96 .. 256
+    // Hinweise:
+    //   - Wirkt nur, wenn progressiveEnabled==true und die State-Puffer aktiv sind.
+    //   - MAX_ITERATIONS_CAP bleibt die absolute Obergrenze pro Pixel.
+    //   - Debug-/Perf-Logging kann den wahrgenommenen Konvergenztakt beeinflussen,
+    //     die reine Iterationsmenge bleibt jedoch durch diesen Wert definiert.
+    // ------------------------------------------------------------------------
+    inline constexpr int  progressiveAddIter = 32;
 
     // ------------------------------------------------------------------------
     // periodicityCheckInterval
