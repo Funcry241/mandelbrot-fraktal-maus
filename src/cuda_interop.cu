@@ -97,6 +97,7 @@ static inline int getAttrSafe(cudaDeviceAttr a, int dev) {
 }
 
 void registerPBO(const Hermelin::GLBuffer& pbo) {
+    ensureDeviceOnce();
     static GLuint s_currentPboId = 0;
     const GLuint newId = pbo.id();
     if (newId == 0) {
