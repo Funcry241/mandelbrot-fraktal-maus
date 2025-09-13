@@ -255,7 +255,7 @@ void RendererState::resize(int newWidth, int newHeight) {
     CudaInterop::unregisterPBO();
 
     // Free GL buffers via RAII
-    pbo.free();
+    for (auto& b : pboRing) { b.free(); }
     tex.free();
 
     // Apply new size
@@ -265,10 +265,11 @@ void RendererState::resize(int newWidth, int newHeight) {
     OpenGLUtils::setGLResourceContext("resize");
 
     // Create fresh GL buffers
-    pbo = Hermelin::GLBuffer(OpenGLUtils::createPBO(width, height));
+    for (auto& b : pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(width, height)); }
+    pboIndex = 0;
     tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
 
-    CudaInterop::registerPBO(pbo);
+    CudaInterop::registerPBO(currentPBO());
 
     // PixelScale hängt von Größe/Zoom ab → neu berechnen
     recomputePixelScale(*this);

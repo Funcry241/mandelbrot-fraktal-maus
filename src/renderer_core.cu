@@ -76,11 +76,12 @@ bool Renderer::initGL() {
     // Create GL resources: PBO + texture (immutable storage)
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
-        state.pbo = Hermelin::GLBuffer(OpenGLUtils::createPBO(state.width, state.height));
+        for (auto& b : state.pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(state.width, state.height)); }
+    state.pboIndex = 0;
         state.tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(state.width, state.height));
 
         // Register PBO with CUDA (CudaInterop encapsulates CUDA-13 compatible path)
-        CudaInterop::registerPBO(state.pbo);
+        CudaInterop::registerPBO(state.currentPBO());
 
         // Clean GL state: unbind PBO
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -89,7 +90,7 @@ bool Renderer::initGL() {
         if constexpr (Settings::debugLogging) {
             GLint boundPBO = 0;
             glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundPBO);
-            LUCHS_LOG_HOST("[CHECK] initGL - GL PBO bound: %d | PBO ID: %u", boundPBO, state.pbo.id());
+            LUCHS_LOG_HOST("[CHECK] initGL - GL PBO bound: %d | PBO ID: %u", boundPBO, state.currentPBO().id());
         }
     }
 
@@ -224,7 +225,7 @@ void Renderer::freeDeviceBuffers() {
     state.d_stateZ.free();
     state.d_stateIt.free();
 
-    state.pbo.free();
+    for (auto& b : state.pboRing) { b.free(); }
     state.tex.free();
 }
 

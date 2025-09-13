@@ -121,7 +121,11 @@ static void beginFrame(FrameContext& fctx, RendererState& state) {
 
 // ------------------------------- CUDA + analysis ------------------------------
 static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
-    if constexpr (Settings::debugLogging) {
+    
+    // Rotate PBO ring for this frame and ensure CUDA uses the current PBO
+    state.advancePboRing();
+    CudaInterop::registerPBO(state.currentPBO());
+if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] computeCudaFrame: dimensions=%dx%d, zoom=%.5f, tileSize=%d",
                        fctx.width, fctx.height, fctx.zoom, fctx.tileSize);
     }
@@ -292,13 +296,13 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] drawFrame begin: tex=%u pbo=%u %dx%d",
-                       state.tex.id(), state.pbo.id(), fctx.width, fctx.height);
-        peekPBO(state.pbo.id());
+                       state.tex.id(), state.currentPBO().id(), fctx.width, fctx.height);
+        peekPBO(state.currentPBO().id());
     }
 
     OpenGLUtils::setGLResourceContext("draw");
     // Feste Aufrufreihenfolge: updateTextureFromPBO(PBO, TEX, W, H)
-    OpenGLUtils::updateTextureFromPBO(state.pbo.id(), state.tex.id(), fctx.width, fctx.height);
+    OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(), state.tex.id(), fctx.width, fctx.height);
 
     RendererPipeline::drawFullscreenQuad(state.tex.id());
 

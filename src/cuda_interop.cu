@@ -97,55 +97,33 @@ static inline int getAttrSafe(cudaDeviceAttr a, int dev) {
 }
 
 void registerPBO(const Hermelin::GLBuffer& pbo) {
-    if (pboResource) { if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[ERROR] registerPBO: already registered!"); return; }
-    ensureDeviceOnce();
-
-    // Geräte-/Treiber-Kontext einmal sauber loggen
-    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
-        int dev=-1; (void)cudaGetDevice(&dev);
-        int rt=0, drv=0; cudaRuntimeGetVersion(&rt); cudaDriverGetVersion(&drv);
-
-        // Name über Runtime: cudaGetDeviceProperties(...).name
-        char name[256] = {0};
-        if (dev >= 0) {
-            cudaDeviceProp prop{};
-            if (cudaGetDeviceProperties(&prop, dev) == cudaSuccess) {
-                std::strncpy(name, prop.name, sizeof(name) - 1);
-            }
+    static GLuint s_currentPboId = 0;
+    const GLuint newId = pbo.id();
+    if (newId == 0) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ERROR] registerPBO: invalid PBO id=0");
         }
-
-        const int ccMaj = (dev>=0)?getAttrSafe(cudaDevAttrComputeCapabilityMajor, dev):0;
-        const int ccMin = (dev>=0)?getAttrSafe(cudaDevAttrComputeCapabilityMinor, dev):0;
-        const int sms   = (dev>=0)?getAttrSafe(cudaDevAttrMultiProcessorCount,    dev):0;
-        const int warp  = (dev>=0)?getAttrSafe(cudaDevAttrWarpSize,               dev):0;
-        const int thrSM = (dev>=0)?getAttrSafe(cudaDevAttrMaxThreadsPerMultiProcessor, dev):0;
-        const int thrBL = (dev>=0)?getAttrSafe(cudaDevAttrMaxThreadsPerBlock,     dev):0;
-        const int smBlk = (dev>=0)?getAttrSafe(cudaDevAttrMaxSharedMemoryPerBlockOptin, dev):0;
-        const int smSM  = (dev>=0)?getAttrSafe(cudaDevAttrMaxSharedMemoryPerMultiprocessor, dev):0;
-        size_t memFree=0, memTot=0; cudaMemGetInfo(&memFree, &memTot);
-        LUCHS_LOG_HOST("[CUDA] ctx: rt=%d drv=%d dev=%d name=\"%s\" cc=%d.%d sms=%d warp=%d thr/SM=%d thr/blk=%d smemBlk=%d smemSM=%d memMB free=%zu total=%zu",
-                       rt, drv, dev, name, ccMaj, ccMin, sms, warp, thrSM, thrBL, smBlk, smSM, (memFree>>20), (memTot>>20));
+        return;
     }
-
-    GLint prev=0; glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prev);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo.id());
-    GLint now=0; glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &now);
-    if (now != (GLint)pbo.id()) {
-        LUCHS_LOG_HOST("[FATAL] GL bind failed - buffer %u was not bound (GL says %d)", pbo.id(), now);
-        throw std::runtime_error("glBindBuffer(GL_PIXEL_UNPACK_BUFFER) failed");
+    if (pboResource && s_currentPboId == newId) {
+        return;
     }
-
-    pboResource = new bear_CudaPBOResource(pbo.id());
-
-    size_t warm=0;
-    if (auto* ptr = pboResource->mapAndLog(warm)) {
-        (void)ptr; pboResource->unmap();
-        if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[PBO] warm-up map/unmap done (%zu bytes)", warm);
+    delete pboResource;
+    pboResource = nullptr;
+    pboResource = new bear_CudaPBOResource(newId);
+    if (!pboResource || !pboResource->get()) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ERROR] registerPBO: failed to register pbo=%u", (unsigned)newId);
+        }
+        delete pboResource;
+        pboResource = nullptr;
+        s_currentPboId = 0;
+        return;
     }
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, (GLuint)prev);
-
-    // Timing-Events einmalig einrichten (nur falls Logging aktiv)
-    ensureEventsOnce();
+    s_currentPboId = newId;
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CUDA] registerPBO ok pbo=%u", (unsigned)newId);
+    }
 }
 
 void renderCudaFrame(

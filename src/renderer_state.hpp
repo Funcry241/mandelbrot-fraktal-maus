@@ -7,6 +7,7 @@
 // Leichte Includes im Header (keine PCH)
 #include <vector>
 #include <string>
+#include <array>
 #include <vector_types.h>        // float2/double2 (__align__-Typen → MSVC C4324)
 #include "hermelin_buffer.hpp"   // RAII-Wrapper fuer GL/CUDA-Buffer (by value erforderlich)
 #include "zoom_logic.hpp"        // ZoomLogic::ZoomState (by-value Member → vollständiger Typ noetig)
@@ -58,7 +59,12 @@ public:
     int                        progressiveCooldownFrames = 0; // 0=aktiv, >0=Pause
 
     // 🎥 OpenGL-Zielpuffer (Interop via CUDA) mit RAII
-    Hermelin::GLBuffer pbo;
+    static constexpr int kPboRingSize = 3;
+    std::array<Hermelin::GLBuffer, kPboRingSize> pboRing;
+    int pboIndex = 0;
+    inline Hermelin::GLBuffer& currentPBO() { return pboRing[pboIndex]; }
+    inline const Hermelin::GLBuffer& currentPBO() const { return pboRing[pboIndex]; }
+    inline void advancePboRing() { pboIndex = (pboIndex + 1) % kPboRingSize; }
     Hermelin::GLBuffer tex;
 
     // 🕒 Zeitsteuerung pro Frame
