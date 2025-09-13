@@ -36,7 +36,6 @@ extern "C" void launch_mandelbrotHybrid(
 namespace CudaInterop {
 static bear_CudaPBOResource* pboResource = nullptr;
 static std::unordered_map<GLuint, bear_CudaPBOResource*> s_pboMap;
-static GLuint s_currentPboId = 0;
 
 static bool  pauseZoom                        = false;
 static bool  s_deviceInitDone                 = false;
@@ -107,10 +106,7 @@ void registerAllPBOs(const GLuint* ids, int count) {
         delete kv.second;
     }
     s_pboMap.clear();
-    pboResource = nullptr;
-    s_currentPboId = 0;
-
-    if (!ids || count <= 0) {
+    pboResource = nullptr;if (!ids || count <= 0) {
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ERROR] registerAllPBOs: invalid input");
         }
@@ -134,9 +130,7 @@ void registerAllPBOs(const GLuint* ids, int count) {
     for (int i = 0; i < count; ++i) {
         const GLuint id = ids[i];
         auto it = s_pboMap.find(id);
-        if (it != s_pboMap.end()) {
-            s_currentPboId = id;
-            pboResource = it->second;
+        if (it != s_pboMap.end()) {pboResource = it->second;
             if constexpr (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[CUDA] registerAllPBOs ok, active pbo=%u", (unsigned)id);
             }
@@ -153,9 +147,7 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
             LUCHS_LOG_HOST("[ERROR] registerPBO(select): pbo not pre-registered id=%u", (unsigned)id);
         }
         return;
-    }
-    s_currentPboId = id;
-    pboResource = it->second; // switch active resource
+    }pboResource = it->second; // switch active resource
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[CUDA] select active PBO id=%u", (unsigned)id);
     }
@@ -418,7 +410,5 @@ void unregisterAllPBOs() {
         delete kv.second; // destructor handles unmap+unregister
     }
     s_pboMap.clear();
-    pboResource = nullptr;
-    s_currentPboId = 0;
-}
+    pboResource = nullptr;}
 }
