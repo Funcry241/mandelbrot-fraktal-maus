@@ -73,7 +73,7 @@ __device__ __forceinline__ float3 gtPalette_srgb(float x, bool inSet, float t){
     const float gamma=0.84f, lift=0.08f, baseVibr=1.05f, addVibrMax=0.06f, warmDriftAmp=0.06f;
     const float warmShift = 1.00f + warmDriftAmp*g_sinA;
     const float breathAmp = 0.08f;
-    if (inSet) return make_float3(12/255.f,14/255.f,20/255.f); // solides dunkles Set
+    if (inSet) return make_float3(0.f,0.f,0.f); // solides dunkles Set
 
     x = clamp01(__powf(clamp01(x), gamma));
     x = clamp01((x + lift) / (1.0f + lift));
