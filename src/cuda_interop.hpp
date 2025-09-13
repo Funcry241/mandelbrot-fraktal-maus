@@ -20,6 +20,10 @@ namespace CudaInterop {
 
 // Registriert den PBO als CUDA-Resource (RAII-Wrapper intern)
 void registerPBO(const Hermelin::GLBuffer& pbo);
+    // Register a fixed set of PBO ids once (called on resize)
+    void registerAllPBOs(const GLuint* ids, int count);
+    // Unregister and free all PBO registrations
+    void unregisterAllPBOs();
 
 // (unregister erfolgt automatisch über RAII in bear_CudaPBOResource, hier nur Cleanup-Funktion:)
 void unregisterPBO();
