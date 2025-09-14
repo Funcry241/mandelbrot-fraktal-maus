@@ -14,20 +14,19 @@
 namespace OpenGLUtils
 {
 
-// -----------------------------------------------------------------------------
-// TU-lokaler Kontext-String für Logs (z. B. "init", "resize")
-// -----------------------------------------------------------------------------
-static const char* g_resourceContext = "unknown";
+namespace {
+    // Kleines Kontextlabel für Logs (z.B. "init", "resize", "frame")
+    const char* g_resourceContext = "unknown";
 
-void setGLResourceContext(const char* context) {
-    g_resourceContext = context ? context : "unknown";
+    GLint queryMaxTexSize() {
+        GLint maxTex = 0;
+        glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTex);
+        return maxTex;
+    }
 }
 
-// Kleiner Helper: Maximal erlaubte Texture-Größe (für Diagnose/Guards)
-static inline GLint queryMaxTexSize() {
-    GLint maxTex = 0;
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTex);
-    return maxTex;
+void setGLResourceContext(const char* context) {
+    g_resourceContext = (context && *context) ? context : "unknown";
 }
 
 // -----------------------------------------------------------------------------
@@ -61,6 +60,15 @@ GLuint createTexture(int width, int height) {
     GLuint tex = 0;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
+    // Debug label (GL_KHR_debug) for easier GPU debugging
+#ifdef GL_KHR_debug
+    if (GLEW_KHR_debug) {
+        char label[64];
+        std::snprintf(label, sizeof(label), "OTR_tex_%dx%d_%s", width, height, g_resourceContext);
+        glObjectLabel(GL_TEXTURE, tex, -1, label);
+    }
+#endif
+
     // Sampler-Parameter (stabil, keine Mipmaps)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -74,7 +82,7 @@ GLuint createTexture(int width, int height) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,  0);
 
-    // Bindings/Einstellungen wiederherstellen
+    // State wiederherstellen
     glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prevTex0));
     glActiveTexture(static_cast<GLenum>(prevActiveTex));
 
@@ -93,6 +101,14 @@ GLuint createPBO(int width, int height) {
     GLuint pbo = 0;
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+    // Debug label (GL_KHR_debug) for easier GPU debugging
+#ifdef GL_KHR_debug
+    if (GLEW_KHR_debug) {
+        char label[64];
+        std::snprintf(label, sizeof(label), "OTR_pbo_%dx%d_%s", width, height, g_resourceContext);
+        glObjectLabel(GL_BUFFER, pbo, -1, label);
+    }
+#endif
     glBufferData(GL_PIXEL_UNPACK_BUFFER, static_cast<GLsizeiptr>(bytes), nullptr, GL_STREAM_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
@@ -106,41 +122,38 @@ GLuint createPBO(int width, int height) {
 // Texture-Update aus gebundenem UNPACK-PBO (Vollflächen-Upload)
 // -----------------------------------------------------------------------------
 void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[GL-UPLOAD] Binding PBO=%u and Texture=%u (ctx=%s, %dx%d)",
-                       pbo, tex, g_resourceContext, width, height);
-    }
-
-    if (pbo == 0 || tex == 0 || width <= 0 || height <= 0) {
+    if (!pbo || !tex || width <= 0 || height <= 0) {
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[GL-UPLOAD][ERR] invalid args pbo=%u tex=%u w=%d h=%d",
+            LUCHS_LOG_HOST("[ERROR] updateTextureFromPBO invalid args pbo=%u tex=%u w=%d h=%d",
                            pbo, tex, width, height);
         }
         return;
     }
 
-    // Globalen State sichern
-    GLint prevActiveTex = 0, prevPBO = 0, prevAlign = 0, prevRowLen = 0;
-    GLint prevSkipPix = 0, prevSkipRows = 0, prevTex0 = 0;
+    // State sichern
+    GLint prevActiveTex = 0, prevTex0 = 0, prevPBO = 0;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
     glActiveTexture(GL_TEXTURE0);
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex0);
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevPBO);
-    glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevAlign);
-    glGetIntegerv(GL_UNPACK_ROW_LENGTH, &prevRowLen);
-    glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &prevSkipPix);
-    glGetIntegerv(GL_UNPACK_SKIP_ROWS, &prevSkipRows);
 
-    // Set: Bind Ziel-Texture & PBO
+    // Upload-Setup
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 
-    // PixelStore-Einstellungen
+    // saubere PixelStore-Parameter (RowLength/Alignment)
+    GLint prevAlign=0, prevRowLen=0, prevSkipPix=0, prevSkipRows=0;
+    glGetIntegerv(GL_UNPACK_ALIGNMENT,    &prevAlign);
+    glGetIntegerv(GL_UNPACK_ROW_LENGTH,   &prevRowLen);
+    glGetIntegerv(GL_UNPACK_SKIP_PIXELS,  &prevSkipPix);
+    glGetIntegerv(GL_UNPACK_SKIP_ROWS,    &prevSkipRows);
+
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
     glPixelStorei(GL_UNPACK_SKIP_ROWS,   0);
 
+    // Wir invalidieren die Ziel-Textur vor dem Upload (Treiberhint)
     glInvalidateTexImage(tex, 0);
 
     glTexSubImage2D(GL_TEXTURE_2D, 0,

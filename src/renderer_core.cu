@@ -1,6 +1,6 @@
-///// Otter: Renderer-Core – GL init + window, delegates to pipeline; no zoom logic here.
-///// Schneefuchs: Strict CUDA/GL separation; deterministic ASCII logs; resources clearly owned.
-///// Maus: Progressive cooldown + Tatze 7 soft-invalidate on view jumps (post-pipeline, no memset).
+///// Otter: Renderer-Core – GL init + window; enables filtered KHR_debug (noisy severities off); no zoom logic here.
+///**/ Schneefuchs: Strict CUDA/GL separation; deterministic ASCII logs; resources clearly owned; duplicate resize removed.
+///**/ Maus: Progressive cooldown + Tatze 7 soft-invalidate on view jumps (post-pipeline, no memset).
 ///// Datei: src/renderer_core.cu
 
 #include "pch.hpp"
@@ -37,8 +37,18 @@ namespace {
     static void EnableGlDebugOutputOnce() {
     #ifdef GL_DEBUG_OUTPUT
         glEnable(GL_DEBUG_OUTPUT); // asynchronous (no sync debug)
+
+        // Filter out very noisy severities to minimize runtime overhead
+        // (available in GL 4.3 core or KHR_debug)
+    #ifdef GL_DEBUG_SEVERITY_NOTIFICATION
+        glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
+    #endif
+    #ifdef GL_DEBUG_SEVERITY_LOW
+        glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_LOW, 0, nullptr, GL_FALSE);
+    #endif
+
         glDebugMessageCallback(GlDebugCallback, nullptr);
-        LUCHS_LOG_HOST("[GL] KHR_debug enabled (async)");
+        LUCHS_LOG_HOST("[GL] KHR_debug enabled (async, low+notification filtered)");
     #endif
         // Log default framebuffer sRGB capability (once)
         GLint enc = 0;
@@ -97,7 +107,7 @@ bool Renderer::initGL() {
         return false;
     }
 
-    // Enable GL debug output and log default FB sRGB capability
+    // Enable GL debug output (filtered) and log default FB sRGB capability
     EnableGlDebugOutputOnce();
 
     // --- Log OpenGL & GLSL versions (requested) ---
