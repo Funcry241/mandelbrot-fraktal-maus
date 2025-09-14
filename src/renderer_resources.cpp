@@ -1,7 +1,6 @@
 ///// Otter: Immutable Texture-Storage; deterministischer Upload; sauberes PixelStore-Handling.
 ///// Schneefuchs: State sichern/wiederherstellen; klare Fehlerpfade; ASCII-Logs.
 ///// Maus: OpenGL PBO/Texture Utils – robuste Init/Upload-Reihenfolge; keine versteckten Seiteneffekte.
-//  CUDA 13 Kontext: Host-seitig; keine Device-Abhängigkeiten. Logs & Checks minimal im Fastpath.
 ///// Datei: src/renderer_resources.cpp
 
 #include "pch.hpp"
@@ -83,7 +82,9 @@ GLuint createPBO(int width, int height) {
                        pbo, g_resourceContext, width, height,
                        static_cast<long long>(bytes), realSize);
         const GLenum err = glGetError();
-        LUCHS_LOG_HOST("[GL-ERROR] createPBO glGetError() = 0x%04X", err);
+        if (err != GL_NO_ERROR) {
+            LUCHS_LOG_HOST("[GL-ERROR] createPBO glGetError()=0x%04X", (unsigned)err);
+        }
     }
     return pbo;
 }
@@ -148,7 +149,9 @@ GLuint createTexture(int width, int height) {
         LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createTexture -> ID %u (ctx=%s, %dx%d, RGBA8 immutable)",
                        tex, g_resourceContext, width, height);
         const GLenum err = glGetError();
-        LUCHS_LOG_HOST("[GL-ERROR] createTexture glGetError() = 0x%04X", err);
+        if (err != GL_NO_ERROR) {
+            LUCHS_LOG_HOST("[GL-ERROR] createTexture glGetError()=0x%04X", (unsigned)err);
+        }
     }
     return tex;
 }
@@ -202,10 +205,12 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
 
     if constexpr (Settings::debugLogging) {
         const GLenum err = glGetError();
-        LUCHS_LOG_HOST("[GL-UPLOAD] glTexSubImage2D glGetError() = 0x%04X", err);
+        if (err != GL_NO_ERROR) {
+            LUCHS_LOG_HOST("[GL-UPLOAD][ERR] glTexSubImage2D glGetError()=0x%04X", (unsigned)err);
+        }
     }
 
-    // Reihenfolge der Wiederherstellung beachten!
+    // State wiederherstellen
     glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prevTex0));
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prevPBO));
     glPixelStorei(GL_UNPACK_ALIGNMENT, prevAlign);
