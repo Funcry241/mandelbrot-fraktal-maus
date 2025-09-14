@@ -121,11 +121,11 @@ static void beginFrame(FrameContext& fctx, RendererState& state) {
 
 // ------------------------------- CUDA + analysis ------------------------------
 static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
-    
     // Rotate PBO ring for this frame and ensure CUDA uses the current PBO
     state.advancePboRing();
     CudaInterop::registerPBO(state.currentPBO());
-if constexpr (Settings::debugLogging) {
+
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] computeCudaFrame: dimensions=%dx%d, zoom=%.5f, tileSize=%d",
                        fctx.width, fctx.height, fctx.zoom, fctx.tileSize);
     }
@@ -134,7 +134,7 @@ if constexpr (Settings::debugLogging) {
     const int tilesY   = (fctx.height + fctx.tileSize - 1) / fctx.tileSize;
     const int numTiles = tilesX * tilesY;
 
-    if (fctx.tileSize <= 0 || numTiles <= 0) {
+    if (fctx.tileSize <= 0 || numTiles <= 0) [[unlikely]] {
         LUCHS_LOG_HOST("[FATAL] computeCudaFrame: invalid tileSize=%d or numTiles=%d",
                        fctx.tileSize, numTiles);
         return;
@@ -191,7 +191,7 @@ if constexpr (Settings::debugLogging) {
         if constexpr (Settings::debugLogging) {
             if (state.lastTimings.valid) {
                 LUCHS_LOG_HOST(
-                    "[FRAME] Mandelbrot=%.3f | Launch=%.3f | Sync=%.3f | Entropy=%.3f | Contrastgenre=%.3f | LogFlush=%.3f | PBOMap=%.3f",
+                    "[FRAME] Mandelbrot=%.3f | Launch=%.3f | Sync=%.3f | Entropy=%.3f | Contrast=%.3f | LogFlush=%.3f | PBOMap=%.3f",
                     state.lastTimings.mandelbrotTotal,
                     state.lastTimings.mandelbrotLaunch,
                     state.lastTimings.mandelbrotSync,
@@ -204,23 +204,17 @@ if constexpr (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[TIME] CUDA stream0 elapsed: %.3f ms", msGpu);
             }
         }
-    } catch (const std::exception& ex) { /* softened */
+    } catch (const std::exception& ex) { // [[unlikely]] catch path
         LUCHS_LOG_HOST("[ERROR] renderCudaFrame threw: %s", ex.what());
         LuchsLogger::flushDeviceLogToHost(0);
     }
 
-    // Device-Logs periodisch spülen
+    // Device-Logs: nur bei Fehler sofort spülen (periodisch erfolgt am Frameende bei PERF-Logs)
     {
         const cudaError_t err = cudaPeekAtLastError();
-        if constexpr (Settings::debugLogging) {
-            if (err != cudaSuccess || (g_frame % 30 == 0)) {
-                LUCHS_LOG_HOST("[PIPE] Flushing device logs (err=%d, frame=%d)", (int)err, g_frame);
-                LuchsLogger::flushDeviceLogToHost(0);
-            }
-        } else {
-            if (err != cudaSuccess) {
-                LuchsLogger::flushDeviceLogToHost(0);
-            }
+        if (err != cudaSuccess) [[unlikely]] {
+            LUCHS_LOG_HOST("[PIPE] Flushing device logs (err=%d, frame=%d)", (int)err, g_frame);
+            LuchsLogger::flushDeviceLogToHost(0);
         }
     }
 
@@ -242,7 +236,7 @@ if constexpr (Settings::debugLogging) {
         if (zr.bestIndex >= 0) {
             fctx.lastEntropy  = zr.bestEntropy;
             fctx.lastContrast = zr.bestContrast;
-        } else {
+        } else [[unlikely]] {
             fctx.lastEntropy  = 0.0f;
             fctx.lastContrast = 0.0f;
         }
@@ -262,7 +256,7 @@ if constexpr (Settings::debugLogging) {
 
 // ------------------------------- apply zoom step ------------------------------
 static void applyZoomStep(FrameContext& fctx, CommandBus& bus) {
-    if (!fctx.shouldZoom) return;
+    if (!fctx.shouldZoom) [[likely]] return;
 
     const double2 diff = { fctx.newOffset.x - fctx.offset.x, fctx.newOffset.y - fctx.offset.y };
     const float   prevZoom = fctx.zoom;
@@ -287,12 +281,12 @@ static void applyZoomStep(FrameContext& fctx, CommandBus& bus) {
 static void drawFrame(FrameContext& fctx, RendererState& state) {
     const auto t0 = Clock::now();
 
-    if (fctx.width <= 0 || fctx.height <= 0) return;
+    if (fctx.width <= 0 || fctx.height <= 0) [[unlikely]] return;
 
     glViewport(0, 0, fctx.width, fctx.height);
 
     const GLboolean hadScissor = glIsEnabled(GL_SCISSOR_TEST);
-    if (hadScissor) glDisable(GL_SCISSOR_TEST);
+    if (hadScissor) [[unlikely]] glDisable(GL_SCISSOR_TEST);
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] drawFrame begin: tex=%u pbo=%u %dx%d",
@@ -306,7 +300,7 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
 
     RendererPipeline::drawFullscreenQuad(state.tex.id());
 
-    if (hadScissor) glEnable(GL_SCISSOR_TEST);
+    if (hadScissor) [[unlikely]] glEnable(GL_SCISSOR_TEST);
 
     const auto t1 = Clock::now();
     g_texMs = std::chrono::duration_cast<msd>(t1 - t0).count();
@@ -374,6 +368,7 @@ void execute(RendererState& state) {
     FpsMeter::updateCoreMs(g_frameTotal);
 
     if (perfShouldLog(g_frame)) {
+        // Periodische Device-Logspülung nur hier (reduziert Overhead im Hotpath):
         LuchsLogger::flushDeviceLogToHost(0);
 
         const int    resX = g_ctx.width;
