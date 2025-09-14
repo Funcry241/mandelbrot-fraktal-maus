@@ -1,6 +1,6 @@
-///// Otter: Main sets error callback, CUDA precheck, GL init via Renderer, tight frame loop; ASCII logs only.
-///// Schneefuchs: Headers/sources in sync; no macro redefinitions; CUDA_CHECK lives in luchs_log_host.hpp.
-///// Maus: Precise timing; overlays follow Settings; deterministic behavior; thread-safe logging.
+///// Otter: Main sets up renderer, CUDA precheck, and the tight frame loop; no GLFW error callback here (moved to RendererWindow after glfwInit).
+///// Schneefuchs: Headers/sources in sync; CUDA_CHECK lives in luchs_log_host.hpp; no pre-init GLFW calls in main.
+///// Maus: Precise timing; overlays follow Settings; deterministic ASCII logs; thread-safe logging.
 ///// Datei: src/main.cpp
 
 #include "pch.hpp"
@@ -15,23 +15,15 @@
 #include <cstdlib>
 #include <GLFW/glfw3.h>
 
-// -----------------------------
-// GLFW error callback (ASCII only)
-// -----------------------------
-static void glfwErrorCallback(int error, const char* description)
-{
-    LUCHS_LOG_HOST("[GLFW][ERROR] code=%d desc=%s", error, description ? description : "null");
-}
-
 int main()
 {
     if (Settings::debugLogging)
         LUCHS_LOG_HOST("[BOOT] Mandelbrot-Otterdream started");
 
-    // Set GLFW error callback as early as possible (may catch init issues inside renderer.initGL)
-    glfwSetErrorCallback(glfwErrorCallback);
+    // NOTE: (2) GLFW init & error callback are handled inside RendererWindow::createWindow()
+    //       after glfwInit(). Do NOT call any GLFW functions here before initGL().
 
-    // --- Create renderer (owns GL context/window inside initGL by project convention)
+    // Create renderer (GL context/window is created inside initGL by project convention)
     Renderer renderer(Settings::width, Settings::height);
     if (!renderer.initGL())
     {
@@ -39,14 +31,14 @@ int main()
         return EXIT_FAILURE;
     }
 
-    // --- CUDA early sanity (device presence etc.)
+    // CUDA early sanity (device presence etc.)
     if (!CudaInterop::precheckCudaRuntime())
     {
         LUCHS_LOG_HOST("[FATAL] CUDA pre-initialization failed - no usable device");
         return EXIT_FAILURE;
     }
 
-    // --- Optional: verify cudaGetErrorString availability/path (project-specific guard)
+    // Optional: verify cudaGetErrorString availability/path (project-specific guard)
     if (!CudaInterop::verifyCudaGetErrorStringSafe())
     {
         LUCHS_LOG_HOST("[FATAL] CUDA error-string path invalid - refusing to proceed");
