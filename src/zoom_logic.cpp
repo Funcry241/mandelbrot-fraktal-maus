@@ -36,8 +36,8 @@ constexpr float  kSEED_STEP_NDC      = 0.015f;
 // Turn limiter & length damping
 constexpr float kTURN_OMEGA_MIN = 2.5f;
 constexpr float kTURN_OMEGA_MAX = 10.0f;
-constexpr float kTHETA_DAMP_LO  = 0.35f;
-constexpr float kTHETA_DAMP_HI  = 1.20f;
+constexpr float kTHETA_DAMP_LO  = 0.42f; // was 0.35f
+constexpr float kTHETA_DAMP_HI  = 1.32f; // was 1.20f
 
 constexpr float kSOFTMAX_LOG_EPS = -7.0f;
 
@@ -46,7 +46,7 @@ constexpr float kEMA_TAU_MIN   = 0.040f;
 constexpr float kEMA_TAU_MAX   = 0.220f;
 constexpr float kEMA_ALPHA_MIN = 0.06f;
 constexpr float kEMA_ALPHA_MAX = 0.30f;
-constexpr float kFORCE_MIN_DRIFT_ALPHA = 0.05f;
+constexpr float kFORCE_MIN_DRIFT_ALPHA = 0.06f; // was 0.05f
 
 inline float clampf(float x, float lo, float hi){ return x<lo?lo:(x>hi?hi:x); }
 inline float smoothstepf(float a,float b,float x){ const float t=clampf((x-a)/(b-a),0.0f,1.0f); return t*t*(3.0f-2.0f*t); }
