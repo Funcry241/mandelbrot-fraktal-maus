@@ -27,66 +27,7 @@ void setGLResourceContext(const char* context) {
 static inline GLint queryMaxTexSize() {
     GLint maxTex = 0;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTex);
-    return (maxTex > 0) ? maxTex : 0;
-}
-
-// -----------------------------------------------------------------------------
-// PBO anlegen (GL_PIXEL_UNPACK_BUFFER) – RGBA8 Uploadpfad
-// -----------------------------------------------------------------------------
-GLuint createPBO(int width, int height) {
-    if (width <= 0 || height <= 0) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ERROR] createPBO invalid size (ctx=%s) w=%d h=%d",
-                           g_resourceContext, width, height);
-        }
-        return 0;
-    }
-
-    const unsigned long long w = static_cast<unsigned long long>(width);
-    const unsigned long long h = static_cast<unsigned long long>(height);
-    const unsigned long long total = w * h * 4ull; // RGBA8
-    if (total > static_cast<unsigned long long>(std::numeric_limits<GLsizeiptr>::max())) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ERROR] createPBO size overflow (ctx=%s) w=%llu h=%llu bytes=%llu",
-                           g_resourceContext, w, h, total);
-        }
-        return 0;
-    }
-    const GLsizeiptr bytes = static_cast<GLsizeiptr>(total);
-
-    // Vorheriges Binding sichern
-    GLint prevPBO = 0;
-    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevPBO);
-
-    GLuint pbo = 0;
-    glGenBuffers(1, &pbo);
-    if (!pbo) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ERROR] glGenBuffers failed for PBO (ctx=%s)", g_resourceContext);
-        }
-        return 0;
-    }
-
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, bytes, nullptr, GL_STREAM_DRAW); // Upload-Pfad
-
-    // Realgröße verifizieren (Debug)
-    GLint realSize = 0;
-    glGetBufferParameteriv(GL_PIXEL_UNPACK_BUFFER, GL_BUFFER_SIZE, &realSize);
-
-    // Binding wiederherstellen
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prevPBO));
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createPBO -> ID %u (ctx=%s, %dx%d, bytes=%lld real=%d)",
-                       pbo, g_resourceContext, width, height,
-                       static_cast<long long>(bytes), realSize);
-        const GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            LUCHS_LOG_HOST("[GL-ERROR] createPBO glGetError()=0x%04X", (unsigned)err);
-        }
-    }
-    return pbo;
+    return maxTex;
 }
 
 // -----------------------------------------------------------------------------
@@ -111,26 +52,14 @@ GLuint createTexture(int width, int height) {
         return 0;
     }
 
-    // Aktive Texture Einheit sichern
-    GLint prevActiveTex = 0;
+    // Globalen State sichern
+    GLint prevActiveTex = 0, prevTex0 = 0;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
-
-    // Auf Unit 0 arbeiten; deren Binding sichern
     glActiveTexture(GL_TEXTURE0);
-    GLint prevTex0 = 0;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex0);
 
     GLuint tex = 0;
     glGenTextures(1, &tex);
-    if (!tex) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ERROR] glGenTextures failed (ctx=%s)", g_resourceContext);
-        }
-        // Vorherige aktive Einheit wiederherstellen
-        glActiveTexture(static_cast<GLenum>(prevActiveTex));
-        return 0;
-    }
-
     glBindTexture(GL_TEXTURE_2D, tex);
     // Sampler-Parameter (stabil, keine Mipmaps)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -141,23 +70,40 @@ GLuint createTexture(int width, int height) {
     // Immutable Storage
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
 
+    // Clamp to single mip level (no mips)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,  0);
+
     // Bindings/Einstellungen wiederherstellen
     glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prevTex0));
     glActiveTexture(static_cast<GLenum>(prevActiveTex));
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[DEBUG] OpenGLUtils::createTexture -> ID %u (ctx=%s, %dx%d, RGBA8 immutable)",
-                       tex, g_resourceContext, width, height);
-        const GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            LUCHS_LOG_HOST("[GL-ERROR] createTexture glGetError()=0x%04X", (unsigned)err);
-        }
+        LUCHS_LOG_HOST("[GL-TEX] created RGBA8 %dx%d id=%u (ctx=%s)",
+                       width, height, tex, g_resourceContext);
     }
     return tex;
 }
 
 // -----------------------------------------------------------------------------
-// Upload PBO -> Texture (RGBA8), globalen GL-State vollständig restaurieren
+// PBO anlegen (GL_PIXEL_UNPACK_BUFFER) – Größe = width*height*4 (RGBA8)
+// -----------------------------------------------------------------------------
+GLuint createPBO(int width, int height) {
+    const size_t bytes = static_cast<size_t>(width) * static_cast<size_t>(height) * 4u;
+    GLuint pbo = 0;
+    glGenBuffers(1, &pbo);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, static_cast<GLsizeiptr>(bytes), nullptr, GL_STREAM_DRAW);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[GL-PBO] created unpack PBO=%u bytes=%zu (ctx=%s)", pbo, bytes, g_resourceContext);
+    }
+    return pbo;
+}
+
+// -----------------------------------------------------------------------------
+// Texture-Update aus gebundenem UNPACK-PBO (Vollflächen-Upload)
 // -----------------------------------------------------------------------------
 void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
     if constexpr (Settings::debugLogging) {
@@ -175,28 +121,27 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
 
     // Globalen State sichern
     GLint prevActiveTex = 0, prevPBO = 0, prevAlign = 0, prevRowLen = 0;
-    GLint prevSkipPix = 0, prevSkipRows = 0;
+    GLint prevSkipPix = 0, prevSkipRows = 0, prevTex0 = 0;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex0);
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevPBO);
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevAlign);
     glGetIntegerv(GL_UNPACK_ROW_LENGTH, &prevRowLen);
     glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &prevSkipPix);
-    glGetIntegerv(GL_UNPACK_SKIP_ROWS,   &prevSkipRows);
+    glGetIntegerv(GL_UNPACK_SKIP_ROWS, &prevSkipRows);
 
-    // Auf Unit 0 umschalten; deren 2D-Binding sichern
-    glActiveTexture(GL_TEXTURE0);
-    GLint prevTex0 = 0;
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex0);
-
-    // Upload aus PBO → Texture (uchar4-Layout)
+    // Set: Bind Ziel-Texture & PBO
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 
-    // Deterministische PixelStore-Einstellungen
+    // PixelStore-Einstellungen
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
     glPixelStorei(GL_UNPACK_SKIP_ROWS,   0);
+
+    glInvalidateTexImage(tex, 0);
 
     glTexSubImage2D(GL_TEXTURE_2D, 0,
                     0, 0, width, height,
@@ -204,7 +149,7 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
                     nullptr); // Quelle: gebundener PBO
 
     if constexpr (Settings::debugLogging) {
-        const GLenum err = glGetError();
+        GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
             LUCHS_LOG_HOST("[GL-UPLOAD][ERR] glTexSubImage2D glGetError()=0x%04X", (unsigned)err);
         }
@@ -220,7 +165,7 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
     glActiveTexture(static_cast<GLenum>(prevActiveTex));
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[GL-UPLOAD] Texture update complete, state restored");
+        LUCHS_LOG_HOST("[GL-UPLOAD] done (ctx=%s)", g_resourceContext);
     }
 }
 

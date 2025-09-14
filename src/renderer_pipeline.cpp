@@ -19,9 +19,8 @@ namespace {
     static GLuint sProgram    = 0;
     static GLint  sUTex       = -1;
     static GLuint sDummyVAO   = 0;   // Core Profile verlangt ein gebundenes VAO
-    static GLuint sTimeQuery  = 0;   // optionaler GPU-Timer
+    static GLuint sTimeQuery  = 0;
 
-    // kleine State-Caches (nur in dieser TU)
     static GLuint s_lastProgram = 0;
     static GLuint s_lastTex2D   = 0;
 
@@ -32,6 +31,32 @@ namespace {
         if (s_lastTex2D != t)   { glBindTexture(GL_TEXTURE_2D, t); s_lastTex2D = t; }
     }
 
+    // Track last active texture unit and fixed-function enables to avoid per-frame glGet*/glIsEnabled
+    static GLenum    s_lastActiveTex = GL_TEXTURE0;
+    static GLboolean s_depthEnabled  = GL_FALSE;
+    static GLboolean s_cullEnabled   = GL_FALSE;
+#ifdef GL_FRAMEBUFFER_SRGB
+    static GLboolean s_srgbEnabled   = GL_FALSE;
+#endif
+
+    inline void bindActiveTex(GLenum unit) {
+        if (s_lastActiveTex != unit) { glActiveTexture(unit); s_lastActiveTex = unit; }
+    }
+    inline void setDepthEnabled(bool on) {
+        GLboolean want = on ? GL_TRUE : GL_FALSE;
+        if (s_depthEnabled != want) { (on ? glEnable(GL_DEPTH_TEST) : glDisable(GL_DEPTH_TEST)); s_depthEnabled = want; }
+    }
+    inline void setCullEnabled(bool on) {
+        GLboolean want = on ? GL_TRUE : GL_FALSE;
+        if (s_cullEnabled != want) { (on ? glEnable(GL_CULL_FACE) : glDisable(GL_CULL_FACE)); s_cullEnabled = want; }
+    }
+#ifdef GL_FRAMEBUFFER_SRGB
+    inline void setSRGBEnabled(bool on) {
+        GLboolean want = on ? GL_TRUE : GL_FALSE;
+        if (s_srgbEnabled != want) { (on ? glEnable(GL_FRAMEBUFFER_SRGB) : glDisable(GL_FRAMEBUFFER_SRGB)); s_srgbEnabled = want; }
+    }
+#endif
+
     // --- Mini Shader Utils (ASCII-Logs, deterministisch) ---------------------
     static GLuint compile(GLenum type, const char* src) {
         GLuint id = glCreateShader(type);
@@ -40,93 +65,94 @@ namespace {
         GLint ok = GL_FALSE;
         glGetShaderiv(id, GL_COMPILE_STATUS, &ok);
         if (!ok) {
-            char log[2048]; GLsizei n = 0;
-            glGetShaderInfoLog(id, (GLsizei)sizeof(log), &n, log);
-            LUCHS_LOG_HOST("[GL][ERR] shader compile failed: %.*s", (int)n, log);
+            char log[2048] = {0};
+            glGetShaderInfoLog(id, 2047, nullptr, log);
+            LUCHS_LOG_HOST("[GL-SHADER][ERR] compile failed: %s", log);
             glDeleteShader(id);
             return 0;
         }
         return id;
     }
+
     static GLuint link(GLuint vs, GLuint fs) {
-        GLuint p = glCreateProgram();
-        glAttachShader(p, vs);
-        glAttachShader(p, fs);
-        glLinkProgram(p);
+        GLuint prog = glCreateProgram();
+        glAttachShader(prog, vs);
+        glAttachShader(prog, fs);
+        glLinkProgram(prog);
         GLint ok = GL_FALSE;
-        glGetProgramiv(p, GL_LINK_STATUS, &ok);
+        glGetProgramiv(prog, GL_LINK_STATUS, &ok);
         if (!ok) {
-            char log[2048]; GLsizei n = 0;
-            glGetProgramInfoLog(p, (GLsizei)sizeof(log), &n, log);
-            LUCHS_LOG_HOST("[GL][ERR] program link failed: %.*s", (int)n, log);
-            glDeleteProgram(p);
+            char log[2048] = {0};
+            glGetProgramInfoLog(prog, 2047, nullptr, log);
+            LUCHS_LOG_HOST("[GL-PROGRAM][ERR] link failed: %s", log);
+            glDeleteProgram(prog);
             return 0;
         }
-        return p;
-    }
-
-    // --- Fullscreen-Triangle Shaders (gl_VertexID) ---------------------------
-    static constexpr const char* VS = R"GLSL(#version 430 core
-    out vec2 vUV;
-    void main(){
-        const vec2 pos[3] = vec2[3](
-            vec2(-1.0, -1.0),
-            vec2( 3.0, -1.0),
-            vec2(-1.0,  3.0)
-        );
-        gl_Position = vec4(pos[gl_VertexID], 0.0, 1.0);
-        // grob [0,2] – clamped im FS; vermeidet Divisionen/Branches
-        vUV = 0.5 * (pos[gl_VertexID] + 1.0);
-    })GLSL";
-
-    static constexpr const char* FS = R"GLSL(#version 430 core
-    layout(location=0) out vec4 oColor;
-    in vec2 vUV;
-    uniform sampler2D uTex;
-    void main(){
-        vec2 uv = clamp(vUV, vec2(0.0), vec2(1.0));
-        oColor = texture(uTex, uv);
-    })GLSL";
-
-    // einmalige Initialisierung (idempotent)
-    static void ensurePipeline() {
-        if (sProgram) return;
-
-        GLuint vs = compile(GL_VERTEX_SHADER,   VS);
-        GLuint fs = compile(GL_FRAGMENT_SHADER, FS);
-        if (!vs || !fs) {
-            LUCHS_LOG_HOST("[FATAL] shader build failed");
-            std::exit(EXIT_FAILURE);
-        }
-        sProgram = link(vs, fs);
-        glDeleteShader(vs);
-        glDeleteShader(fs);
-        if (!sProgram) {
-            LUCHS_LOG_HOST("[FATAL] program link failed");
-            std::exit(EXIT_FAILURE);
-        }
-
-        bindProgram(sProgram);
-        sUTex = glGetUniformLocation(sProgram, "uTex");
-        if (sUTex >= 0) glUniform1i(sUTex, 0);
-        bindProgram(0);
-
-        // Dummy-VAO fuer Core Profile
-        glGenVertexArrays(1, &sDummyVAO);
-
-        if constexpr (Settings::performanceLogging || Settings::debugLogging) {
-            glGenQueries(1, &sTimeQuery);
-            if constexpr (Settings::debugLogging)
-                LUCHS_LOG_HOST("[GL] pipeline ready prog=%u vao=%u timerQ=%u", sProgram, sDummyVAO, sTimeQuery);
-        }
+        return prog;
     }
 } // namespace
 
-// ---------------------------------- API --------------------------------------
+// --- Simple FSQ Shader (GLSL 430 core) ---------------------------------------
+static const char* VS = R"(#version 430 core
+out vec2 v_uv;
+void main() {
+    vec2 p = vec2((gl_VertexID==1)?3.0:-1.0, (gl_VertexID==2)?3.0:-1.0);
+    v_uv   = (p+1.0)*0.5;
+    gl_Position = vec4(p,0,1);
+}
+)";
 
-void init() {
-    ensurePipeline();
-    // Upload-Pfad nutzt RendererResources; PixelStore ist dort bereits definiert.
+static const char* FS = R"(#version 430 core
+layout(location=0) out vec4 o_color;
+in vec2 v_uv;
+uniform sampler2D uTex;
+void main() {
+    o_color = texture(uTex, v_uv);
+}
+)";
+
+static void ensurePipeline() {
+    if (sProgram) return;
+
+    GLuint vs = compile(GL_VERTEX_SHADER,   VS);
+    GLuint fs = compile(GL_FRAGMENT_SHADER, FS);
+    if (!vs || !fs) {
+        LUCHS_LOG_HOST("[FATAL] shader build failed");
+        std::exit(EXIT_FAILURE);
+    }
+    sProgram = link(vs, fs);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    if (!sProgram) {
+        LUCHS_LOG_HOST("[FATAL] program link failed");
+        std::exit(EXIT_FAILURE);
+    }
+
+    bindProgram(sProgram);
+    sUTex = glGetUniformLocation(sProgram, "uTex");
+    if (sUTex >= 0) glUniform1i(sUTex, 0);
+    bindProgram(0);
+
+    // Dummy-VAO fuer Core Profile
+    glGenVertexArrays(1, &sDummyVAO);
+
+    // Seed tracked fixed-function states and texture unit/bindings (one-time)
+    // Query once to initialize; later we track ourselves to avoid per-frame glGet*
+    GLint activeTex = 0; glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTex);
+    s_lastActiveTex = (GLenum)activeTex;
+    GLint boundTex2D = 0; glActiveTexture(GL_TEXTURE0); glGetIntegerv(GL_TEXTURE_BINDING_2D, &boundTex2D);
+    s_lastTex2D = (GLuint)boundTex2D;
+
+    s_depthEnabled = glIsEnabled(GL_DEPTH_TEST);
+    s_cullEnabled  = glIsEnabled(GL_CULL_FACE);
+#ifdef GL_FRAMEBUFFER_SRGB
+    s_srgbEnabled  = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+#endif
+
+    if constexpr (Settings::performanceLogging || Settings::debugLogging) {
+        glGenQueries(1, &sTimeQuery);
+    }
+
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPELINE] init done");
     }
@@ -135,26 +161,25 @@ void init() {
 void drawFullscreenQuad(GLuint tex) {
     ensurePipeline();
 
-    // State sichern (minimal)
-    GLint prevProg = 0; glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
-    GLint prevActiveTex = 0; glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
-    GLint prevTex0 = 0; glActiveTexture(GL_TEXTURE0); glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex0);
-
-    GLboolean wasDepth = glIsEnabled(GL_DEPTH_TEST);
-    GLboolean wasCull  = glIsEnabled(GL_CULL_FACE);
+    // State sichern via TU-Tracker (keine per-frame glGet*)
+    GLuint prevProg      = s_lastProgram;
+    GLenum prevActiveTex = s_lastActiveTex;
+    GLuint prevTex0      = s_lastTex2D;
+    GLboolean prevDepth  = s_depthEnabled;
+    GLboolean prevCull   = s_cullEnabled;
 #ifdef GL_FRAMEBUFFER_SRGB
-    GLboolean wasSRGB  = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+    GLboolean prevSRGB   = s_srgbEnabled;
 #endif
 
-    if (wasDepth) glDisable(GL_DEPTH_TEST);
-    if (wasCull)  glDisable(GL_CULL_FACE);
+    setDepthEnabled(false);
+    setCullEnabled(false);
 #ifdef GL_FRAMEBUFFER_SRGB
-    if (!wasSRGB)  glEnable(GL_FRAMEBUFFER_SRGB); // ensure linear->sRGB at FB
+    setSRGBEnabled(true); // ensure linear->sRGB at FB
 #endif
 
     // Draw
     bindProgram(sProgram);
-    glActiveTexture(GL_TEXTURE0);
+    bindActiveTex(GL_TEXTURE0);
     bindTex2D(tex);
     glBindVertexArray(sDummyVAO);
 
@@ -178,20 +203,21 @@ void drawFullscreenQuad(GLuint tex) {
         }
     }
 
-    // State wiederherstellen
+    // State wiederherstellen (ohne glGet*)
     glBindVertexArray(0);
     bindTex2D((GLuint)prevTex0);
-    glActiveTexture((GLenum)prevActiveTex);
+    bindActiveTex((GLenum)prevActiveTex);
     bindProgram((GLuint)prevProg);
-
-    if (wasCull)  glEnable(GL_CULL_FACE);
-    if (wasDepth) glEnable(GL_DEPTH_TEST);
+    setCullEnabled(prevCull == GL_TRUE);
+    setDepthEnabled(prevDepth == GL_TRUE);
 #ifdef GL_FRAMEBUFFER_SRGB
-    if (!wasSRGB)  glDisable(GL_FRAMEBUFFER_SRGB);
+    setSRGBEnabled(prevSRGB == GL_TRUE);
 #endif
 }
 
-void cleanup() {
+// --- Thin wrappers to match header/API and keep headers & sources in sync -----
+void init()    { ensurePipeline(); }
+void cleanup() { 
     if (sTimeQuery) { glDeleteQueries(1, &sTimeQuery); sTimeQuery = 0; }
     if (sDummyVAO)  { glDeleteVertexArrays(1, &sDummyVAO); sDummyVAO = 0; }
     if (sProgram)   { glDeleteProgram(sProgram); sProgram = 0; }

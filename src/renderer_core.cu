@@ -23,6 +23,32 @@
 #include <algorithm> // std::max
 #include <cmath>     // std::abs
 
+// --- OpenGL KHR_debug (asynchronous) + sRGB default FB capability logging ---
+namespace {
+    // KHR_debug callback: ASCII-only, non-blocking
+    static void APIENTRY GlDebugCallback(GLenum source, GLenum type, GLuint id,
+                                         GLenum severity, GLsizei length, const GLchar* message, const void* userParam) {
+        (void)length; (void)userParam;
+        LUCHS_LOG_HOST("[GL-DBG] src=%u type=%u id=%u sev=%u msg=%s",
+                       (unsigned)source, (unsigned)type, id, (unsigned)severity,
+                       message ? message : "(null)");
+    }
+
+    static void EnableGlDebugOutputOnce() {
+    #ifdef GL_DEBUG_OUTPUT
+        glEnable(GL_DEBUG_OUTPUT); // asynchronous (no sync debug)
+        glDebugMessageCallback(GlDebugCallback, nullptr);
+        LUCHS_LOG_HOST("[GL] KHR_debug enabled (async)");
+    #endif
+        // Log default framebuffer sRGB capability (once)
+        GLint enc = 0;
+        glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT,
+            GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING, &enc);
+        const bool fbIsSRGB = (enc == GL_SRGB);
+        LUCHS_LOG_HOST("[GL] Default FB sRGB capable: %d", fbIsSRGB ? 1 : 0);
+    }
+} // namespace
+
 Renderer::Renderer(int width, int height)
 : state(width, height)
 {
@@ -64,11 +90,15 @@ bool Renderer::initGL() {
     // GLEW init (idempotent enough; log errors clearly)
     GLenum glewErr = glewInit();
     if (glewErr != GLEW_OK) {
-        LUCHS_LOG_HOST("[FATAL] glewInit failed: %s", reinterpret_cast<const char*>(glewGetErrorString(glewErr)));
+        LUCHS_LOG_HOST("[FATAL] glewInit failed: %s",
+                       reinterpret_cast<const char*>(glewGetErrorString(glewErr)));
         RendererWindow::destroyWindow(state.window);
         state.window = nullptr;
         return false;
     }
+
+    // Enable GL debug output and log default FB sRGB capability
+    EnableGlDebugOutputOnce();
 
     // --- Log OpenGL & GLSL versions (requested) ---
     if constexpr (Settings::debugLogging) {
@@ -90,7 +120,7 @@ bool Renderer::initGL() {
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
         for (auto& b : state.pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(state.width, state.height)); }
-    state.pboIndex = 0;
+        state.pboIndex = 0;
         state.tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(state.width, state.height));
 
         // Register PBO with CUDA (CudaInterop encapsulates CUDA-13 compatible path)
@@ -103,7 +133,8 @@ bool Renderer::initGL() {
         if constexpr (Settings::debugLogging) {
             GLint boundPBO = 0;
             glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundPBO);
-            LUCHS_LOG_HOST("[CHECK] initGL - GL PBO bound: %d | PBO ID: %u", boundPBO, state.currentPBO().id());
+            LUCHS_LOG_HOST("[CHECK] initGL - GL PBO bound: %d | PBO ID: %u",
+                           boundPBO, state.currentPBO().id());
         }
     }
 
