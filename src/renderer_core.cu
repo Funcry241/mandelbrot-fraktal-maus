@@ -70,6 +70,19 @@ bool Renderer::initGL() {
         return false;
     }
 
+    // --- Log OpenGL & GLSL versions (requested) ---
+    if constexpr (Settings::debugLogging) {
+        GLint major = 0, minor = 0;
+        glGetIntegerv(GL_MAJOR_VERSION, &major);
+        glGetIntegerv(GL_MINOR_VERSION, &minor);
+        const char* glVer   = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        const char* glslVer = reinterpret_cast<const char*>(glGetString(GL_SHADING_LANGUAGE_VERSION));
+        LUCHS_LOG_HOST("[GL] OpenGL %d.%d | %s | GLSL %s",
+                       major, minor,
+                       glVer ? glVer : "?",
+                       glslVer ? glslVer : "?");
+    }
+
     // Note: VSync preference is initialized exactly once in renderer_loop.cpp (initVSyncOnce).
     // Renderer core does not touch swap interval here to avoid conflicting policies.
 
