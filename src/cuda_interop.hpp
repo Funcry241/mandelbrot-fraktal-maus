@@ -4,7 +4,6 @@
 #include "hermelin_buffer.hpp"
 #include "renderer_state.hpp"
 
-// OpenGL GLuint forward (avoid pulling GL headers here)
 using GLuint = unsigned int;
 
 namespace CudaInterop {
