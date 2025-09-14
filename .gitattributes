@@ -1,6 +1,6 @@
 # 🧠 Maus-Kommentar: Einheitliche Line Endings, saubere Diffs – Mandelbrot-Otterdream
-# 🦊 Schneefuchs: Spezifische Regeln kommen NACH allgemeinen; keine CRLF/LF-Warnflut. (Bezug zu Schneefuchs)
-# 🦦 Otter: PowerShell/Batch bewusst CRLF, Quellcode strikt LF. (Bezug zu Otter)
+# 🦊 Schneefuchs: Spezifische Regeln kommen NACH allgemeinen; keine CRLF/LF-Warnflut.
+# 🦦 Otter: PowerShell/Batch bewusst CRLF, Quellcode strikt LF.
 
 # --------------------------------------------------------
 # Standardtextdateien: global LF als Default
@@ -20,7 +20,8 @@
 *.vert    text eol=lf
 *.frag    text eol=lf
 *.cmake   text eol=lf
-CMakeLists.txt text eol=lf
+CMakeLists.txt      text eol=lf
+CMakePresets.json   text eol=lf
 
 # --------------------------------------------------------
 # Batch-/Shell-/PowerShell – bewusst CRLF für bessere Win-Editor-Kompatibilität
@@ -35,14 +36,24 @@ CMakeLists.txt text eol=lf
 # Markdown / Doku / Konfig
 *.md      text eol=lf
 *.txt     text eol=lf
+LICENSE   text eol=lf
 *.json    text eol=lf
 *.jsonc   text eol=lf
 *.ini     text eol=lf
 *.yaml    text eol=lf
 *.yml     text eol=lf
+.github/workflows/*.yml text eol=lf
 .gitignore      text eol=lf
 .gitattributes  text eol=lf
 .vscode/*       text eol=lf
+
+# --------------------------------------------------------
+# (Optional, falls im Repo) Visual-Studio-Projektdateien – LF ist ok
+*.sln     text eol=lf
+*.vcxproj text eol=lf
+*.vcxproj.filters text eol=lf
+*.props   text eol=lf
+*.targets text eol=lf
 
 # --------------------------------------------------------
 # Binärformate – niemals als Text behandeln
