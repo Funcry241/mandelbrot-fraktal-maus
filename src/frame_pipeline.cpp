@@ -204,7 +204,7 @@ if constexpr (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[TIME] CUDA stream0 elapsed: %.3f ms", msGpu);
             }
         }
-    } catch (const std::exception& ex) {
+    } catch (const std::exception& ex) { /* softened */
         LUCHS_LOG_HOST("[ERROR] renderCudaFrame threw: %s", ex.what());
         LuchsLogger::flushDeviceLogToHost(0);
     }

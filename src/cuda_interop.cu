@@ -34,9 +34,10 @@ extern "C" void launch_mandelbrotHybrid(
 );
 
 namespace CudaInterop {
+
+// === Persistenter Interop-Zustand ===
 static bear_CudaPBOResource* pboResource = nullptr;
 static std::unordered_map<GLuint, bear_CudaPBOResource*> s_pboMap;
-
 
 static bool  pauseZoom                        = false;
 static bool  s_deviceInitDone                 = false;
@@ -53,6 +54,7 @@ static bool        s_evInit  = false;
 
 static cudaStream_t s_copyStream = nullptr;
 
+// --- Helpers ---------------------------------------------------------------
 static inline void ensureDeviceOnce() {
     if (!s_deviceInitDone) { CUDA_CHECK(cudaSetDevice(0)); s_deviceInitDone = true; }
 }
@@ -95,19 +97,39 @@ static inline void destroyEventsIfAny() {
 static inline int getAttrSafe(cudaDeviceAttr a, int dev) {
     int v = 0;
     const cudaError_t e = cudaDeviceGetAttribute(&v, a, dev);
-    if (e != cudaSuccess) { /* still 0 */ }
+    (void)e; // keep 0 on failure
     return v;
 }
 
+// --- API -------------------------------------------------------------------
+void registerAllPBOs(const GLuint* ids, int count) {
+    ensureDeviceOnce();
+    for (auto &kv : s_pboMap) delete kv.second;
+    s_pboMap.clear();
+    pboResource = nullptr;
+    if (!ids || count<=0) return;
+    for (int i=0;i<count;++i){
+        const GLuint id = ids[i];
+        if (!id) continue;
+        auto *res = new bear_CudaPBOResource(id);
+        if (res && res->get()) s_pboMap[id] = res; else delete res;
+    }
+    for (int i=0;i<count;++i){ auto it=s_pboMap.find(ids[i]); if(it!=s_pboMap.end()){ pboResource=it->second; break; } }
+}
+
+void unregisterAllPBOs() {
+    for (auto &kv : s_pboMap) delete kv.second;
+    s_pboMap.clear();
+    pboResource = nullptr;
+}
 
 void registerPBO(const Hermelin::GLBuffer& pbo) {
     ensureDeviceOnce();
     const GLuint id = pbo.id();
     auto it = s_pboMap.find(id);
-    if (it == s_pboMap.end()) return;
+    if (it == s_pboMap.end()) { return; }
     pboResource = it->second;
 }
-
 
 void renderCudaFrame(
     Hermelin::CudaDeviceBuffer& d_iterations,
@@ -193,9 +215,6 @@ void renderCudaFrame(
     // Fehlerstatus ohne Device-weite Synchronisation erfassen
     cudaError_t mbErrLaunch = cudaGetLastError(); // Launch-Fehler (sofort)
     cudaError_t mbErrSync   = cudaSuccess;        // Laufzeitfehler via Event-Wait
-#if !defined(__CUDA_ARCH__)
-    // mbMs ist oben deklariert; hier nur befüllen
-#endif
 
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
         if (s_evInit) {
@@ -241,16 +260,17 @@ void renderCudaFrame(
     }
 
 #if !defined(__CUDA_ARCH__)
-    
     if (!s_copyStream) { CUDA_CHECK(cudaStreamCreateWithFlags(&s_copyStream, cudaStreamNonBlocking)); }
-const auto tEC0 = std::chrono::high_resolution_clock::now();
+    const auto tEC0 = std::chrono::high_resolution_clock::now();
 #endif
+
     ::computeCudaEntropyContrast(
         static_cast<const uint16_t*>(d_iterations.get()),
         static_cast<float*>(d_entropy.get()),
         static_cast<float*>(d_contrast.get()),
         width, height, tileSize, maxIterations
     );
+
 #if !defined(__CUDA_ARCH__)
     const auto tEC1 = std::chrono::high_resolution_clock::now();
     const double ecMs = std::chrono::duration<double, std::milli>(tEC1 - tEC0).count();
@@ -358,31 +378,3 @@ void logCudaDeviceContext(const char* tag) {
 }
 
 } // namespace CudaInterop
-
-namespace CudaInterop {
-void registerAllPBOs(const GLuint* ids, int count) {
-    ensureDeviceOnce();
-    for (auto &kv : s_pboMap) delete kv.second;
-    s_pboMap.clear();
-    pboResource = nullptr;
-    if (!ids || count <= 0) return;
-    for (int i=0;i<count;++i){
-        const GLuint id = ids[i];
-        if (!id) continue;
-        auto *res = new bear_CudaPBOResource(id);
-        if (res && res->get()) s_pboMap[id] = res; else delete res;
-    }
-    for (int i=0;i<count;++i){
-        auto it = s_pboMap.find(ids[i]);
-        if (it != s_pboMap.end()) { pboResource = it->second; break; }
-    }
-}
-}
-
-namespace CudaInterop {
-void unregisterAllPBOs() {
-    for (auto &kv : s_pboMap) delete kv.second;
-    s_pboMap.clear();
-    pboResource = nullptr;
-}
-}
