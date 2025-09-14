@@ -1,7 +1,7 @@
-///// Otter: Heatmap-Overlay - Diagnose & Mini-HUD; Shader 0 on error; cached uniforms; no state leaks.
-///// Schneefuchs: Zustands-Restore (VAO/VBO/Program/Blend); ASCII-Logs; deterministisch; keine verdeckten Pfade.
-///// Maus: Default ohne Marker/Points; Overlay y=0 unten; gleiche Datenquelle wie Zoom.
-///// Datei: src/heatmap_overlay.cpp
+///// Otter: Kurz & robust: Mini-Heatmap unten rechts, Shader-0 on error, keine verdeckten Pfade.
+///// Schneefuchs: Zustands-Restore (VAO/VBO/Program/Blend), gecachte Uniforms, deterministische ASCII-Logs.
+/// /// Maus: Keine Marker/Points; y=0 unten; gleiche Datenquelle wie Zoom.
+/// /// Datei: src/heatmap_overlay.cpp
 
 #pragma warning(push)
 #pragma warning(disable: 4100)
@@ -11,250 +11,63 @@
 #include "settings.hpp"
 #include "renderer_state.hpp"
 #include "luchs_log_host.hpp"
-#include "heatmap_utils.hpp"
+#include <vector>
 #include <algorithm>
 #include <cmath>
-#include <utility>
 
-// 0 = aus, 1 = an.
-#ifndef HEATMAP_DRAW_MAX_MARKER
-#define HEATMAP_DRAW_MAX_MARKER 0
-#endif
-#ifndef HEATMAP_DRAW_SELF_CHECK
-#define HEATMAP_DRAW_SELF_CHECK 0
-#endif
-
-// Quelle: RendererState – keine verdeckten Pfade.
-// Nacktmull-Pullover: State nutzt center (double2).
 #define RS_OFFSET_X(ctx) ((ctx).center.x)
 #define RS_OFFSET_Y(ctx) ((ctx).center.y)
 #define RS_ZOOM(ctx)     ((ctx).zoom)
 
 namespace HeatmapOverlay {
 
-static GLuint overlayVAO = 0;
-static GLuint overlayVBO = 0;
-static GLuint overlayShader = 0;
-static GLint  overlay_uScaleLoc  = -1;
-static GLint  overlay_uOffsetLoc = -1;
+// --- GL state (TU-lokal) ---
+static GLuint sVAO=0, sVBO=0, sProg=0;
+static GLint  uScale=-1, uOffset=-1;
 
-#if HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
-static GLuint pointProg   = 0;
-static GLuint pointVAO    = 0;
-static GLuint pointVBO    = 0;
-static GLint  point_uScaleLoc   = -1;
-static GLint  point_uOffsetLoc  = -1;
-static GLint  point_uSizeLoc    = -1;
-#endif
-
-static const char* vertexShaderSrc = R"GLSL(
-#version 430 core
-layout(location = 0) in vec2 aPos;
-layout(location = 1) in float aValue;
-out float vValue;
-uniform vec2 uOffset;
-uniform vec2 uScale;
-void main() {
-    vec2 pos = aPos * uScale + uOffset;      // aPos in Tile-Koordinaten, y=0 unten
-    gl_Position = vec4(pos, 0.0, 1.0);
-    vValue = aValue;
-}
-)GLSL";
-
-static const char* fragmentShaderSrc = R"GLSL(
-#version 430 core
-in float vValue;
-out vec4 FragColor;
-vec3 colormap(float v) {
-    float g = smoothstep(0.0, 1.0, v);
-    return mix(vec3(0.08, 0.08, 0.10), vec3(1.0, 0.6, 0.2), g);
-}
-void main() {
-    FragColor = vec4(colormap(clamp(vValue, 0.0, 1.0)), 0.85);
-}
-)GLSL";
-
-static GLuint compile(GLenum type, const char* src) {
-    GLuint shader = glCreateShader(type);
-    if (!shader) {
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[SHADER ERROR] glCreateShader failed (type=%u)", (unsigned)type);
-        return 0;
-    }
-    glShaderSource(shader, 1, &src, nullptr);
-    glCompileShader(shader);
-    GLint success = 0;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        GLchar log[2048] = {0};
-        glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[SHADER ERROR] Compilation failed (%s): %s",
-                           type == GL_VERTEX_SHADER ? "Vertex" : "Fragment", log);
-        glDeleteShader(shader);
-        return 0;
-    }
-    return shader;
-}
-
-static GLuint linkProgram(GLuint vs, GLuint fs) {
-    if (vs == 0 || fs == 0) return 0;
-    GLuint prog = glCreateProgram();
-    if (!prog) {
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[SHADER ERROR] glCreateProgram failed");
-        return 0;
-    }
-    glAttachShader(prog, vs);
-    glAttachShader(prog, fs);
-    glLinkProgram(prog);
-    GLint success = 0;
-    glGetProgramiv(prog, GL_LINK_STATUS, &success);
-    if (!success) {
-        GLchar log[2048] = {0};
-        glGetProgramInfoLog(prog, sizeof(log), nullptr, log);
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[SHADER ERROR] Linking failed: %s", log);
-        glDeleteProgram(prog);
-        prog = 0;
-    }
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-    return prog;
-}
-
-static GLuint createOverlayProgram() {
-    return linkProgram(compile(GL_VERTEX_SHADER,   vertexShaderSrc),
-                       compile(GL_FRAGMENT_SHADER, fragmentShaderSrc));
-}
-
-#if HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
-static const char* pointVS = R"GLSL(
+// --- Minimaler Shader (Tiles als gefärbte Triangles, vValue in [0,1]) ---
+static const char* kVS = R"GLSL(
 #version 430 core
 layout(location=0) in vec2 aPos;
-layout(location=1) in vec3 aColor;
-uniform vec2 uScale;
-uniform vec2 uOffset;
-uniform float uPointSize;
-out vec3 vColor;
+layout(location=1) in float aValue;
+out float vValue;
+uniform vec2 uScale, uOffset;
 void main(){
-    vec2 pos = aPos * uScale + uOffset;      // y=0 unten (wie Overlay)
-    gl_Position = vec4(pos, 0.0, 1.0);
-    gl_PointSize = uPointSize;
-    vColor = aColor;
+  gl_Position = vec4(aPos * uScale + uOffset, 0.0, 1.0);
+  vValue = aValue;
 }
 )GLSL";
 
-static const char* pointFS = R"GLSL(
+static const char* kFS = R"GLSL(
 #version 430 core
-in vec3 vColor;
-out vec4 FragColor;
-void main(){ FragColor = vec4(vColor, 1.0); }
+in float vValue; out vec4 FragColor;
+vec3 map(float v){ float g=smoothstep(0.0,1.0,clamp(v,0.0,1.0));
+  return mix(vec3(0.08,0.08,0.10), vec3(1.0,0.6,0.2), g); }
+void main(){ FragColor = vec4(map(vValue), 0.85); }
 )GLSL";
 
-static void ensurePointPipeline()
-{
-    if (pointProg) return;
-    pointProg = linkProgram(compile(GL_VERTEX_SHADER, pointVS),
-                            compile(GL_FRAGMENT_SHADER, pointFS));
-    if (pointProg == 0) return;
-    glGenVertexArrays(1, &pointVAO);
-    glGenBuffers(1, &pointVBO);
-    point_uScaleLoc  = glGetUniformLocation(pointProg, "uScale");
-    point_uOffsetLoc = glGetUniformLocation(pointProg, "uOffset");
-    point_uSizeLoc   = glGetUniformLocation(pointProg, "uPointSize");
+static GLuint compile(GLenum type, const char* src){
+    GLuint sh = glCreateShader(type); if(!sh) return 0;
+    glShaderSource(sh,1,&src,nullptr); glCompileShader(sh);
+    GLint ok=0; glGetShaderiv(sh,GL_COMPILE_STATUS,&ok);
+    if(!ok){ if constexpr(Settings::debugLogging){ GLchar log[512]={0}; glGetShaderInfoLog(sh,512,nullptr,log);
+        LUCHS_LOG_HOST("[HM] Shader compile failed: %s", log);} glDeleteShader(sh); return 0; }
+    return sh;
+}
+static GLuint makeProgram(){
+    GLuint vs=compile(GL_VERTEX_SHADER,kVS), fs=compile(GL_FRAGMENT_SHADER,kFS);
+    if(!vs||!fs){ if(vs)glDeleteShader(vs); if(fs)glDeleteShader(fs); return 0; }
+    GLuint p=glCreateProgram(); if(!p){ glDeleteShader(vs); glDeleteShader(fs); return 0; }
+    glAttachShader(p,vs); glAttachShader(p,fs); glLinkProgram(p);
+    glDeleteShader(vs); glDeleteShader(fs);
+    GLint ok=0; glGetProgramiv(p,GL_LINK_STATUS,&ok);
+    if(!ok){ if constexpr(Settings::debugLogging){ GLchar log[512]={0}; glGetProgramInfoLog(p,512,nullptr,log);
+        LUCHS_LOG_HOST("[HM] Program link failed: %s", log);} glDeleteProgram(p); return 0; }
+    return p;
 }
 
-static void drawPoints(const float* pts, int count, float scaleX, float scaleY, float offX, float offY, float pointSize)
-{
-    ensurePointPipeline();
-    if (pointProg == 0) return;
-
-    GLint prevVAO = 0, prevArray = 0, prevProg = 0;
-    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArray);
-    glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
-
-    glBindVertexArray(pointVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, pointVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float)*5*count, nullptr, GL_DYNAMIC_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(float)*5*count, pts);
-
-    glUseProgram(pointProg);
-    glUniform2f(point_uScaleLoc,  scaleX, scaleY);
-    glUniform2f(point_uOffsetLoc, offX, offY);
-    glUniform1f(point_uSizeLoc,   pointSize);
-
-    GLboolean wasBlend = GL_FALSE;
-    glGetBooleanv(GL_BLEND, &wasBlend);
-    glEnable(GL_PROGRAM_POINT_SIZE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5*sizeof(float), (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5*sizeof(float), (void*)(2*sizeof(float)));
-
-    glDrawArrays(GL_POINTS, 0, count);
-
-    if (!wasBlend) glDisable(GL_BLEND);
-    glDisableVertexAttribArray(0);
-    glDisableVertexAttribArray(1);
-    glBindBuffer(GL_ARRAY_BUFFER, prevArray);
-    glBindVertexArray((GLuint)prevVAO);
-    glUseProgram((GLuint)prevProg);
-}
-
-static void DrawHeatmapSelfCheck_OverlaySpace(int tilesX, int tilesY,
-                                              float scaleX, float scaleY,
-                                              float offsetX, float offsetY)
-{
-#if HEATMAP_DRAW_SELF_CHECK
-    const float pts[5][5] = {
-        { 0.5f,        0.5f,         0.0f, 0.0f, 1.0f },
-        { tilesX-0.5f, 0.5f,         0.0f, 1.0f, 0.0f },
-        { tilesX-0.5f, tilesY-0.5f,  1.0f, 1.0f, 0.0f },
-        { 0.5f,        tilesY-0.5f,  1.0f, 0.0f, 1.0f },
-        { tilesX*0.5f, tilesY*0.5f,  1.0f, 0.0f, 0.0f },
-    };
-    drawPoints(&pts[0][0], 5, scaleX, scaleY, offsetX, offsetY, 10.0f);
-#else
-    (void)tilesX; (void)tilesY; (void)scaleX; (void)scaleY; (void)offsetX; (void)offsetY;
-#endif
-}
-
-static void DrawPoint_ScreenPixels(float px, float py, int width, int height, float r, float g, float b, float sizePx)
-{
-#if HEATMAP_DRAW_MAX_MARKER
-    const float scaleX =  2.0f / float(width);
-    const float scaleY =  2.0f / float(height);
-    const float offX   = -1.0f;
-    const float offY   = -1.0f;
-    const float p[1][5] = { { px + 0.5f, py + 0.5f, r, g, b } };
-    drawPoints(&p[0][0], 1, scaleX, scaleY, offX, offY, sizePx);
-#else
-    (void)px; (void)py; (void)width; (void)height; (void)r; (void)g; (void)b; (void)sizePx;
-#endif
-}
-#endif // HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
-
-static inline std::pair<double,double>
-screenToComplex(int px, int py, int width, int height, const RendererState& ctx, bool flipY)
-{
-    const double nx = ((double(px) + 0.5) / double(width))  * 2.0 - 1.0;
-    double ny       = ((double(py) + 0.5) / double(height)) * 2.0 - 1.0;
-    if (flipY) ny = -ny;
-
-    const double aspect = double(width) / double(height);
-    const double scale  = 1.0 / std::max(1e-12, (double)RS_ZOOM(ctx));
-
-    const double re = nx * aspect * scale + (double)RS_OFFSET_X(ctx);
-    const double im = ny * scale          + (double)RS_OFFSET_Y(ctx);
-    return {re, im};
-}
-
-void toggle(RendererState& ctx) {
+// --- API ---
+void toggle(RendererState& ctx){
 #if defined(USE_HEATMAP_OVERLAY)
     ctx.heatmapOverlayEnabled = !ctx.heatmapOverlayEnabled;
 #else
@@ -262,192 +75,107 @@ void toggle(RendererState& ctx) {
 #endif
 }
 
-void cleanup() {
-    if (overlayVAO) glDeleteVertexArrays(1, &overlayVAO);
-    if (overlayVBO) glDeleteBuffers(1, &overlayVBO);
-    if (overlayShader) glDeleteProgram(overlayShader);
-#if HEATMAP_DRAW_MAX_MARKER || HEATMAP_DRAW_SELF_CHECK
-    if (pointVAO) glDeleteVertexArrays(1, &pointVAO);
-    if (pointVBO) glDeleteBuffers(1, &pointVBO);
-    if (pointProg) glDeleteProgram(pointProg);
-    pointVAO = pointVBO = pointProg = 0;
-    point_uScaleLoc = point_uOffsetLoc = point_uSizeLoc = -1;
-#endif
-    overlayVAO = overlayVBO = overlayShader = 0;
-    overlay_uScaleLoc = overlay_uOffsetLoc = -1;
+void cleanup(){
+    if(sVAO) glDeleteVertexArrays(1,&sVAO);
+    if(sVBO) glDeleteBuffers(1,&sVBO);
+    if(sProg) glDeleteProgram(sProg);
+    sVAO=sVBO=sProg=0; uScale=uOffset=-1;
 }
 
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
-                 int width, int height,
-                 int tileSize,
+                 int width, int height, int tileSize,
                  [[maybe_unused]] GLuint textureId,
-                 [[maybe_unused]] RendererState& ctx)
+                 RendererState& ctx)
 {
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[HM] drawOverlay: entropy=%zu contrast=%zu enabled=%d size=%dx%d ts=%d",
-                       entropy.size(), contrast.size(), ctx.heatmapOverlayEnabled ? 1 : 0,
-                       width, height, tileSize);
-    }
-    if (!ctx.heatmapOverlayEnabled) return;
-    if (width <= 0 || height <= 0 || tileSize <= 0) {
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[HM] WARN: invalid dimensions or tileSize<=0 (w=%d h=%d ts=%d)", width, height, tileSize);
-        return;
-    }
+    if(!ctx.heatmapOverlayEnabled) return;
+    if(width<=0||height<=0||tileSize<=0) return;
 
     const int tilesX = (width  + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
-    const int quadCount = tilesX * tilesY;
+    const int nTiles = tilesX * tilesY;
+    if((int)entropy.size()<nTiles || (int)contrast.size()<nTiles) return;
 
-    if (entropy.size() < (size_t)quadCount || contrast.size() < (size_t)quadCount) {
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[HM] WARN: vector size too small (E=%zu C=%zu need=%d)", entropy.size(), contrast.size(), quadCount);
-        return;
+    // Lazy-Init
+    if(!sProg){
+        sProg = makeProgram();
+        if(!sProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[HM] ERROR: program==0"); return; }
+        uScale  = glGetUniformLocation(sProg,"uScale");
+        uOffset = glGetUniformLocation(sProg,"uOffset");
     }
+    if(!sVAO){ glGenVertexArrays(1,&sVAO); glGenBuffers(1,&sVBO); }
 
-    std::vector<float> data;
-    data.reserve(static_cast<size_t>(quadCount) * 6u * 3u);
-
+    // Wertebereich bestimmen
     float maxVal = 1e-6f;
-    for (int i = 0; i < quadCount; ++i) {
-        maxVal = std::max(maxVal, entropy[i] + contrast[i]);
-    }
+    for(int i=0;i<nTiles;++i) maxVal = std::max(maxVal, entropy[i]+contrast[i]);
 
-    int maxIdx = 0; float maxScore = -1.0f;
-    for (int y = 0; y < tilesY; ++y) {
-        for (int x = 0; x < tilesX; ++x) {
-            const int idx = y * tilesX + x;
-            const float raw = entropy[idx] + contrast[idx];
-            const float v   = raw / maxVal;
-
-            if (raw > maxScore) { maxScore = raw; maxIdx = idx; }
-
-            const float px = float(x), py = float(y);
-            const float quad[6][3] = {
-                {px,     py,     v},
-                {px + 1, py,     v},
-                {px + 1, py + 1, v},
-                {px,     py,     v},
-                {px + 1, py + 1, v},
-                {px,     py + 1, v}
+    // Triangles bauen: pro Tile 6 Vertices, (x,y,v) mit y=0 unten
+    std::vector<float> verts;
+    verts.reserve(size_t(nTiles)*6u*3u);
+    for(int y=0;y<tilesY;++y){
+        for(int x=0;x<tilesX;++x){
+            const int i = y*tilesX + x;
+            const float v = (entropy[i]+contrast[i]) / maxVal;
+            const float px=float(x), py=float(y);
+            const float q[6][3] = {
+                {px,py,v},{px+1,py,v},{px+1,py+1,v},
+                {px,py,v},{px+1,py+1,v},{px,py+1,v}
             };
-            for (auto& vert : quad) data.insert(data.end(), vert, vert + 3);
+            verts.insert(verts.end(), &q[0][0], &q[0][0]+18);
         }
     }
 
-    if (overlayShader == 0) {
-        overlayShader = createOverlayProgram();        // Shader==0 on error → sofortiger Abbruch, kein State-Leak
-        if (overlayShader == 0) {
-            if constexpr (Settings::debugLogging)
-                LUCHS_LOG_HOST("[HM] ERROR: overlay shader creation failed.");
-            return;
-        }
-        overlay_uScaleLoc  = glGetUniformLocation(overlayShader, "uScale");
-        overlay_uOffsetLoc = glGetUniformLocation(overlayShader, "uOffset");
-    }
-    if (overlayVAO == 0) {
-        glGenVertexArrays(1, &overlayVAO);
-        glGenBuffers(1, &overlayVBO);
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[HM] Overlay init: VAO=%u VBO=%u Shader=%u", overlayVAO, overlayVBO, overlayShader);
-        }
-    }
+    // Platzierung: unten rechts, Höhe ~100px, Seitenverhältnis = tilesX/tilesY
+    constexpr int hPx=100, pad=16;
+    const float aspect = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
+    const int   wPx = std::max(1, int(std::round(hPx*aspect)));
 
-    // ------ State sichern
-    GLint prevVAO = 0, prevArray = 0, prevProg = 0;
-    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArray);
-    glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
-    GLboolean wasBlend = GL_FALSE;
-    glGetBooleanv(GL_BLEND, &wasBlend);
+    const float sx = (float(wPx)/float(width)/float(tilesX))*2.0f;
+    const float sy = (float(hPx)/float(height)/float(tilesY))*2.0f;
+    const float ox =  1.0f - (float(wPx + pad)/float(width))*2.0f;
+    const float oy = -1.0f + (float(pad)      /float(height))*2.0f;
 
-    GLint prevSrcRGB=0, prevDstRGB=0, prevSrcA=0, prevDstA=0;
-    glGetIntegerv(GL_BLEND_SRC_RGB,   &prevSrcRGB);
-    glGetIntegerv(GL_BLEND_DST_RGB,   &prevDstRGB);
-    glGetIntegerv(GL_BLEND_SRC_ALPHA, &prevSrcA);
-    glGetIntegerv(GL_BLEND_DST_ALPHA, &prevDstA);
+    // State sichern
+    GLint prevVAO=0, prevBuf=0, prevProg=0, srcRGB=0,dstRGB=0,srcA=0,dstA=0;
+    GLboolean wasBlend=GL_FALSE;
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&prevVAO);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING,&prevBuf);
+    glGetIntegerv(GL_CURRENT_PROGRAM,&prevProg);
+    glGetBooleanv(GL_BLEND,&wasBlend);
+    glGetIntegerv(GL_BLEND_SRC_RGB,&srcRGB); glGetIntegerv(GL_BLEND_DST_RGB,&dstRGB);
+    glGetIntegerv(GL_BLEND_SRC_ALPHA,&srcA); glGetIntegerv(GL_BLEND_DST_ALPHA,&dstA);
 
-    // ------ Program & Uniforms
-    glUseProgram(overlayShader);
+    // Zeichnen
+    glUseProgram(sProg);
+    glUniform2f(uScale,sx,sy);
+    glUniform2f(uOffset,ox,oy);
 
-    // Platzierung unten rechts (y=0 unten)
-    constexpr int overlayHeightPx = 100;
-    const float overlayAspect = float(tilesX) / std::max(1.0f, float(tilesY));
-    const int overlayWidthPx = std::max(1, int(std::round(overlayHeightPx * overlayAspect)));
-    constexpr int paddingX = 16, paddingY = 16;
-
-    // Skalen/Offsets (NDC)
-    const float scaleX = (float(overlayWidthPx)  / float(width)  / float(tilesX)) * 2.0f;
-    const float scaleY = (float(overlayHeightPx) / float(height) / float(tilesY)) * 2.0f;
-
-    // rechts unten: x verschiebt nach links um Breite+Padding; y beginnt unten + Padding
-    const float offsetX =  1.0f - (float(overlayWidthPx + paddingX) / float(width))  * 2.0f;
-    const float offsetY = -1.0f + (float(paddingY)                  / float(height)) * 2.0f;
-
-    glUniform2f(overlay_uScaleLoc,  scaleX, scaleY);
-    glUniform2f(overlay_uOffsetLoc, offsetX, offsetY);
-
-    // ------ Geometrie
-    glBindVertexArray(overlayVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, overlayVBO);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(data.size() * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(data.size() * sizeof(float)), data.data());
-
+    glBindVertexArray(sVAO);
+    glBindBuffer(GL_ARRAY_BUFFER,sVBO);
+    glBufferData(GL_ARRAY_BUFFER,GLsizeiptr(verts.size()*sizeof(float)),nullptr,GL_DYNAMIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER,0,GLsizeiptr(verts.size()*sizeof(float)),verts.data());
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,3*sizeof(float),(void*)0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)(2 * sizeof(float)));
+    glVertexAttribPointer(1,1,GL_FLOAT,GL_FALSE,3*sizeof(float),(void*)(2*sizeof(float)));
 
-    // ------ Blend sauber setzen + nachher komplett restoren
     glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+    glDrawArrays(GL_TRIANGLES,0,GLsizei(verts.size()/3));
 
-    const GLenum errBefore = glGetError();
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(data.size() / 3));
-    const GLenum errAfter  = glGetError();
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[HM] drawOverlay: verts=%zu  glErr=0x%x->0x%x", data.size()/3, errBefore, errAfter);
-    }
-
-#if HEATMAP_DRAW_SELF_CHECK
-    DrawHeatmapSelfCheck_OverlaySpace(tilesX, tilesY, scaleX, scaleY, offsetX, offsetY);
-#endif
-
-#if HEATMAP_DRAW_MAX_MARKER
-    auto [centerPx, centerPy] = tileIndexToPixelCenter(maxIdx, tilesX, tilesY, width, height);
-    DrawPoint_ScreenPixels(static_cast<float>(centerPx), static_cast<float>(centerPy),
-                           width, height, 0.0f, 1.0f, 0.5f, 10.0f);
-#endif
-
-    if constexpr (Settings::debugLogging) {
-        int bx = maxIdx % tilesX;
-        int by = maxIdx / tilesX;
-        auto [centerPxLog, centerPyLog] = tileIndexToPixelCenter(maxIdx, tilesX, tilesY, width, height);
-        const double ndcX = ((centerPxLog) / double(width)  - 0.5) * 2.0;
-        const double ndcY = ((centerPyLog) / double(height) - 0.5) * 2.0;
-        auto [reA, imA] = screenToComplex((int)std::floor(centerPxLog), (int)std::floor(centerPyLog),
-                                          width, height, ctx, /*flipY=*/false);
-        auto [reB, imB] = screenToComplex((int)std::floor(centerPxLog), (int)std::floor(centerPyLog),
-                                          width, height, ctx, /*flipY=*/true);
-        LUCHS_LOG_HOST("[HM] tiles=%dx%d ts=%d  maxIdx=%d -> (x=%d,y=%d)  centerPx=(%.1f,%.1f)  ndc=(%.5f, %.5f)",
-                       tilesX, tilesY, tileSize, maxIdx, bx, by, centerPxLog, centerPyLog, ndcX, ndcY);
-        LUCHS_LOG_HOST("[HM] complex(noFlip)= %.9f + i*%.9f   |   complex(Yflip)= %.9f + i*%.9f",
-                       reA, imA, reB, imB);
-        LUCHS_LOG_HOST("[HM] camera zoom=%.6f  center=(%.9f, %.9f)  aspect=%.6f",
-                       RS_ZOOM(ctx), RS_OFFSET_X(ctx), RS_OFFSET_Y(ctx), double(width)/double(height));
-    }
-
-    // ------ State restoren
-    glBlendFuncSeparate(prevSrcRGB, prevDstRGB, prevSrcA, prevDstA);
-    if (!wasBlend) glDisable(GL_BLEND);
-
+    // Restore
+    glBlendFuncSeparate(srcRGB,dstRGB,srcA,dstA);
+    if(!wasBlend) glDisable(GL_BLEND);
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
-    glBindBuffer(GL_ARRAY_BUFFER, prevArray);
+    glBindBuffer(GL_ARRAY_BUFFER,prevBuf);
     glBindVertexArray((GLuint)prevVAO);
     glUseProgram((GLuint)prevProg);
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[HM] draw ok tiles=%dx%d verts=%zu zoom=%.6f center=(%.9f,%.9f)",
+                       tilesX,tilesY,verts.size()/3, RS_ZOOM(ctx), RS_OFFSET_X(ctx), RS_OFFSET_Y(ctx));
+    }
 }
 
 } // namespace HeatmapOverlay
