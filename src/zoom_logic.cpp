@@ -1,7 +1,7 @@
-///// Otter: V3-lite + Pullback metric (center); smooth direction changes; softmax target; HUD hidden. (Nacktmull entfernt)
-///// Schneefuchs: ASCII-only logs; deterministic; /WX-safe; minimal math-first behavior.
-///// Maus: Navigation-only; clear bestIndex; stable ABI; no HUD markers.
-///// Datei: src/zoom_logic.cpp
+///// Otter: V3-lite OPT — alloc-light (no ndc buffers), single-pass stats for best/mean; identical behavior; no black zoom.
+/// /// Schneefuchs: Deterministic, ASCII logs, /WX-safe; same math & constants; micro-opts only (invWidth/Height, fewer divisions).
+/// /// Maus: Stable ABI; Patch-A target inertia kept; no planner; HUD markers off.
+/// /// Datei: src/zoom_logic.cpp
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"
@@ -134,6 +134,10 @@ ZoomResult evaluateZoomTarget(
     if(tilesX<=0||tilesY<=0||totalTiles<=0 || (int)entropy.size()<totalTiles || (int)contrast.size()<totalTiles){
         out.shouldZoom = Settings::ForceAlwaysZoom; return out; }
 
+    // small micro-opts
+    const double invWidth  = (width  > 0) ? (1.0 / double(width )) : 0.0;
+    const double invHeight = (height > 0) ? (1.0 / double(height)) : 0.0;
+
     const double invZoom    = 1.0 / std::max(1e-6f, zoom);
     const double M0         = centerDzdcMag((double)currentOffset.x, (double)currentOffset.y, kM0_ITER);
     const double M0c        = std::log1p(std::max(0.0, M0));
@@ -162,26 +166,24 @@ ZoomResult evaluateZoomTarget(
         return out;
     }
 
-    // Median/MAD on copies (nth_element modifies input).
-    std::vector<float> e(entropy.begin(), entropy.begin()+totalTiles);
-    std::vector<float> c(contrast.begin(), contrast.begin()+totalTiles);
+    // Median/MAD on working copies (reserve to avoid re-alloc churn)
+    std::vector<float> e; e.reserve((size_t)totalTiles);
+    std::vector<float> c; c.reserve((size_t)totalTiles);
+    e.insert(e.end(), entropy.begin(), entropy.begin()+totalTiles);
+    c.insert(c.end(), contrast.begin(), contrast.begin()+totalTiles);
     const float eMed = median_inplace(e); const float eMad = mad_from_center_inplace(e, eMed);
     const float cMed = median_inplace(c); const float cMad = mad_from_center_inplace(c, cMed);
 
-    float bestScore = -1e9f; int bestIdx = -1;
-    std::vector<float> ndcX(totalTiles), ndcY(totalTiles);
-    for (int i=0;i<totalTiles;++i){
-        auto p = tileIndexToPixelCenter(i, tilesX, tilesY, width, height);
-        const double cx = static_cast<double>(p.first)/width; const double cy = static_cast<double>(p.second)/height;
-        ndcX[i] = static_cast<float>((cx-0.5)*2.0); ndcY[i] = static_cast<float>((cy-0.5)*2.0);
-        const float ez = (entropy[i]-eMed)/eMad; const float cz = (contrast[i]-cMed)/cMad; const float s = kALPHA_E*ez + kBETA_C*cz;
-        if (s>bestScore){ bestScore=s; bestIdx=i; }
-    }
-
+    // Single pass for best score + moments
+    float  bestScore = -1e9f; int bestIdx = -1;
     double meanS=0.0, meanS2=0.0;
-    for(int i=0;i<totalTiles;++i){
-        const float ez=(entropy[i]-eMed)/eMad; const float cz=(contrast[i]-cMed)/cMad;
-        const float s=kALPHA_E*ez+kBETA_C*cz; meanS+=s; meanS2+=double(s)*s;
+    for (int i=0;i<totalTiles;++i){
+        const float ez=(entropy[i]-eMed)/eMad;
+        const float cz=(contrast[i]-cMed)/cMad;
+        const float s = kALPHA_E*ez + kBETA_C*cz;
+        meanS  += s;
+        meanS2 += double(s)*s;
+        if (s>bestScore){ bestScore=s; bestIdx=i; }
     }
     meanS/=std::max(1, totalTiles);
     const double varS = std::max(0.0, meanS2/std::max(1,totalTiles) - meanS*meanS);
@@ -190,30 +192,53 @@ ZoomResult evaluateZoomTarget(
     float temp = kTEMP_BASE; if (stdS>1e-6) temp = static_cast<float>(kTEMP_BASE/(0.5f+(float)stdS)); temp = clampf(temp, 0.2f, 2.5f);
     const float sCut = bestScore + temp * kSOFTMAX_LOG_EPS; const float invTemp = 1.0f/std::max(1e-6f,temp);
 
+    // Softmax accumulation (recompute NDC on demand; identical numerics)
     double sumW=0.0, numX=0.0, numY=0.0; int bestAdj=-1; float bestAdjScore=-1e9f;
     for (int i=0;i<totalTiles;++i){
-        const float ez=(entropy[i]-eMed)/eMad; const float cz=(contrast[i]-cMed)/cMad; const float s=kALPHA_E*ez+kBETA_C*cz; if (s<sCut) continue;
-        const double cx = currentOffset.x + ndcX[i]*invZoomEff; const double cy = currentOffset.y + ndcY[i]*invZoomEff;
-        if (insideCardioidOrBulb(cx,cy)) continue;
-        const double w = std::exp(double((s - bestScore)*invTemp)); sumW += w; numX += w*ndcX[i]; numY += w*ndcY[i];
+        const float ez=(entropy[i]-eMed)/eMad;
+        const float cz=(contrast[i]-cMed)/cMad;
+        const float s = kALPHA_E*ez + kBETA_C*cz;
+        if (s<sCut) continue;
+
+        auto p = tileIndexToPixelCenter(i, tilesX, tilesY, width, height);
+        const double cx = double(p.first)  * invWidth;
+        const double cy = double(p.second) * invHeight;
+        const double ndcX = (cx-0.5)*2.0;
+        const double ndcY = (cy-0.5)*2.0;
+
+        const double tx = currentOffset.x + ndcX*invZoomEff;
+        const double ty = currentOffset.y + ndcY*invZoomEff;
+        if (insideCardioidOrBulb(tx,ty)) continue;
+
+        const double w = std::exp(double((s - bestScore)*invTemp));
+        sumW += w; numX += w*ndcX; numY += w*ndcY;
         if (s>bestAdjScore){ bestAdjScore=s; bestAdj=i; }
     }
 
+    // Target selection (with exact same fallbacks)
     double ndcTX=0.0, ndcTY=0.0;
-    if (sumW>0.0){ const double inv = 1.0/sumW; ndcTX = numX*inv; ndcTY = numY*inv; }
-    else if (bestAdj>=0){ ndcTX = ndcX[bestAdj]; ndcTY = ndcY[bestAdj]; }
-    else if (bestIdx>=0){
-        const double cx = currentOffset.x + ndcX[bestIdx]*invZoomEff; const double cy = currentOffset.y + ndcY[bestIdx]*invZoomEff;
-        if (!insideCardioidOrBulb(cx,cy)) { ndcTX=ndcX[bestIdx]; ndcTY=ndcY[bestIdx]; }
+    if (sumW>0.0){
+        const double inv = 1.0/sumW; ndcTX = numX*inv; ndcTY = numY*inv;
+    } else if (bestAdj>=0){
+        auto p = tileIndexToPixelCenter(bestAdj, tilesX, tilesY, width, height);
+        ndcTX = (double(p.first )*invWidth  - 0.5)*2.0;
+        ndcTY = (double(p.second)*invHeight - 0.5)*2.0;
+    } else if (bestIdx>=0){
+        auto p = tileIndexToPixelCenter(bestIdx, tilesX, tilesY, width, height);
+        const double ndcBX = (double(p.first )*invWidth  - 0.5)*2.0;
+        const double ndcBY = (double(p.second)*invHeight - 0.5)*2.0;
+        const double tx = currentOffset.x + ndcBX*invZoomEff;
+        const double ty = currentOffset.y + ndcBY*invZoomEff;
+        if (!insideCardioidOrBulb(tx,ty)) { ndcTX=ndcBX; ndcTY=ndcBY; }
     }
     if (ndcTX==0.0 && ndcTY==0.0){
         ndcTX = g_dirInit? g_prevDirX : 1.0f; ndcTY = g_dirInit? g_prevDirY : 0.0f;
-    }  
+    }
 
     // ---- Patch A: minimal NDC-Target-Inertia (keine weiteren Änderungen) ----
     if (g_dirInit) {
-        ndcTX = 0.7f * ndcTX + 0.3f * g_prevDirX;
-        ndcTY = 0.7f * ndcTY + 0.3f * g_prevDirY;
+        ndcTX = 0.7f * (float)ndcTX + 0.3f * g_prevDirX;
+        ndcTY = 0.7f * (float)ndcTY + 0.3f * g_prevDirY;
     }
     // -------------------------------------------------------------------------
 
@@ -270,7 +295,7 @@ ZoomResult evaluateZoomTarget(
         LUCHS_LOG_HOST("[ZOOM-LITE] invZoomEff=%.3g dist=%.6f ndc=%.6f len=%.3f ema=%.3f omega=%.3f",
                (float)invZoomEff,
                out.distance,
-               (float)std::sqrt(ndcTX*ndcTX + ndcTY*ndcTY),
+               (float)std::sqrt((double)ndcTX*(double)ndcTX + (double)ndcTY*(double)ndcTY),
                lenScale,
                emaAlpha,
                maxTurn);
