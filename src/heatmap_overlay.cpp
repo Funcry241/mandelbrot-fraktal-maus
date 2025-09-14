@@ -55,7 +55,7 @@ out float vValue;
 uniform vec2 uOffset;
 uniform vec2 uScale;
 void main() {
-    vec2 pos = aPos * uScale + uOffset;
+    vec2 pos = aPos * uScale + uOffset;      // aPos in Tile-Koordinaten, y=0 unten
     gl_Position = vec4(pos, 0.0, 1.0);
     vValue = aValue;
 }
@@ -138,7 +138,7 @@ uniform vec2 uOffset;
 uniform float uPointSize;
 out vec3 vColor;
 void main(){
-    vec2 pos = aPos * uScale + uOffset;
+    vec2 pos = aPos * uScale + uOffset;      // y=0 unten (wie Overlay)
     gl_Position = vec4(pos, 0.0, 1.0);
     gl_PointSize = uPointSize;
     vColor = aColor;
@@ -185,16 +185,16 @@ static void drawPoints(const float* pts, int count, float scaleX, float scaleY, 
     glUniform2f(point_uOffsetLoc, offX, offY);
     glUniform1f(point_uSizeLoc,   pointSize);
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5*sizeof(float), (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5*sizeof(float), (void*)(2*sizeof(float)));
-
     GLboolean wasBlend = GL_FALSE;
     glGetBooleanv(GL_BLEND, &wasBlend);
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5*sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5*sizeof(float), (void*)(2*sizeof(float)));
 
     glDrawArrays(GL_POINTS, 0, count);
 
@@ -290,15 +290,21 @@ void drawOverlay(const std::vector<float>& entropy,
                        width, height, tileSize);
     }
     if (!ctx.heatmapOverlayEnabled) return;
-    if (entropy.empty() || contrast.empty()) {
+    if (width <= 0 || height <= 0 || tileSize <= 0) {
         if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[HM] WARN: entropy/contrast empty, overlay skipped.");
+            LUCHS_LOG_HOST("[HM] WARN: invalid dimensions or tileSize<=0 (w=%d h=%d ts=%d)", width, height, tileSize);
         return;
     }
 
     const int tilesX = (width  + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int quadCount = tilesX * tilesY;
+
+    if (entropy.size() < (size_t)quadCount || contrast.size() < (size_t)quadCount) {
+        if constexpr (Settings::debugLogging)
+            LUCHS_LOG_HOST("[HM] WARN: vector size too small (E=%zu C=%zu need=%d)", entropy.size(), contrast.size(), quadCount);
+        return;
+    }
 
     std::vector<float> data;
     data.reserve(static_cast<size_t>(quadCount) * 6u * 3u);
@@ -330,22 +336,25 @@ void drawOverlay(const std::vector<float>& entropy,
         }
     }
 
-    if (overlayVAO == 0) {
-        glGenVertexArrays(1, &overlayVAO);
-        glGenBuffers(1, &overlayVBO);
-        overlayShader = createOverlayProgram();
+    if (overlayShader == 0) {
+        overlayShader = createOverlayProgram();        // Shader==0 on error → sofortiger Abbruch, kein State-Leak
         if (overlayShader == 0) {
             if constexpr (Settings::debugLogging)
                 LUCHS_LOG_HOST("[HM] ERROR: overlay shader creation failed.");
-            return; // Shader==0 on error -> no draw, kein State-Leak
+            return;
         }
         overlay_uScaleLoc  = glGetUniformLocation(overlayShader, "uScale");
         overlay_uOffsetLoc = glGetUniformLocation(overlayShader, "uOffset");
+    }
+    if (overlayVAO == 0) {
+        glGenVertexArrays(1, &overlayVAO);
+        glGenBuffers(1, &overlayVBO);
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[HM] Overlay init: VAO=%u VBO=%u Shader=%u", overlayVAO, overlayVBO, overlayShader);
         }
     }
 
+    // ------ State sichern
     GLint prevVAO = 0, prevArray = 0, prevProg = 0;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArray);
@@ -353,21 +362,33 @@ void drawOverlay(const std::vector<float>& entropy,
     GLboolean wasBlend = GL_FALSE;
     glGetBooleanv(GL_BLEND, &wasBlend);
 
+    GLint prevSrcRGB=0, prevDstRGB=0, prevSrcA=0, prevDstA=0;
+    glGetIntegerv(GL_BLEND_SRC_RGB,   &prevSrcRGB);
+    glGetIntegerv(GL_BLEND_DST_RGB,   &prevDstRGB);
+    glGetIntegerv(GL_BLEND_SRC_ALPHA, &prevSrcA);
+    glGetIntegerv(GL_BLEND_DST_ALPHA, &prevDstA);
+
+    // ------ Program & Uniforms
     glUseProgram(overlayShader);
 
+    // Platzierung unten rechts (y=0 unten)
     constexpr int overlayHeightPx = 100;
-    const float overlayAspect = float(tilesX) / float(tilesY);
-    const int overlayWidthPx = static_cast<int>(overlayHeightPx * overlayAspect);
+    const float overlayAspect = float(tilesX) / std::max(1.0f, float(tilesY));
+    const int overlayWidthPx = std::max(1, int(std::round(overlayHeightPx * overlayAspect)));
     constexpr int paddingX = 16, paddingY = 16;
 
+    // Skalen/Offsets (NDC)
     const float scaleX = (float(overlayWidthPx)  / float(width)  / float(tilesX)) * 2.0f;
     const float scaleY = (float(overlayHeightPx) / float(height) / float(tilesY)) * 2.0f;
-    const float offsetX = 1.0f - (float(overlayWidthPx  + paddingX) / float(width)  * 2.0f);
-    const float offsetY = 1.0f - (float(overlayHeightPx + paddingY) / float(height) * 2.0f);
+
+    // rechts unten: x verschiebt nach links um Breite+Padding; y beginnt unten + Padding
+    const float offsetX =  1.0f - (float(overlayWidthPx + paddingX) / float(width))  * 2.0f;
+    const float offsetY = -1.0f + (float(paddingY)                  / float(height)) * 2.0f;
 
     glUniform2f(overlay_uScaleLoc,  scaleX, scaleY);
     glUniform2f(overlay_uOffsetLoc, offsetX, offsetY);
 
+    // ------ Geometrie
     glBindVertexArray(overlayVAO);
     glBindBuffer(GL_ARRAY_BUFFER, overlayVBO);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(data.size() * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
@@ -378,8 +399,9 @@ void drawOverlay(const std::vector<float>& entropy,
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)(2 * sizeof(float)));
 
+    // ------ Blend sauber setzen + nachher komplett restoren
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
     const GLenum errBefore = glGetError();
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(data.size() / 3));
@@ -417,7 +439,10 @@ void drawOverlay(const std::vector<float>& entropy,
                        RS_ZOOM(ctx), RS_OFFSET_X(ctx), RS_OFFSET_Y(ctx), double(width)/double(height));
     }
 
+    // ------ State restoren
+    glBlendFuncSeparate(prevSrcRGB, prevDstRGB, prevSrcA, prevDstA);
     if (!wasBlend) glDisable(GL_BLEND);
+
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
     glBindBuffer(GL_ARRAY_BUFFER, prevArray);
