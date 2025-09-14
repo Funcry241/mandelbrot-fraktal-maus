@@ -1,19 +1,16 @@
 {
   "version": 5,
-  "cmakeMinimumRequired": {
-    "major": 3,
-    "minor": 28,
-    "patch": 0
-  },
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
   "configurePresets": [
     {
       "name": "windows-msvc",
-      "displayName": "Windows (MSVC, CUDA)",
+      "displayName": "Windows (MSVC, CUDA, project-local vcpkg)",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/windows",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_CXX_STANDARD": "23",
@@ -23,16 +20,24 @@
         "CMAKE_CUDA_STANDARD_REQUIRED": "ON",
         "CMAKE_CUDA_EXTENSIONS": "OFF",
         "CMAKE_CUDA_ARCHITECTURES": "80;86;89;90"
+      },
+      "environment": {
+        "VCPKG_ROOT": "${sourceDir}/vcpkg",
+        "VCPKG_FEATURE_FLAGS": "manifests,versions,registries,binarycaching",
+        "VCPKG_DEFAULT_TRIPLET": "x64-windows",
+        "VCPKG_DEFAULT_BINARY_CACHE": "${sourceDir}/vcpkg_cache",
+        "VCPKG_KEEP_ENV_VARS": "CUDA_PATH;CUDA_HOME;PATH;INCLUDE;LIB"
       }
     },
     {
       "name": "linux-gcc13",
-      "displayName": "Linux (GCC 13+, CUDA)",
+      "displayName": "Linux (GCC 13+, CUDA, project-local vcpkg)",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/linux",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_CXX_STANDARD": "23",
@@ -47,7 +52,12 @@
         "CMAKE_C_COMPILER": "/usr/bin/gcc-13"
       },
       "environment": {
-        "CUDA_PATH": "/usr/local/cuda"
+        "CUDA_PATH": "/usr/local/cuda",
+        "VCPKG_ROOT": "${sourceDir}/vcpkg",
+        "VCPKG_FEATURE_FLAGS": "manifests,versions,registries,binarycaching",
+        "VCPKG_DEFAULT_TRIPLET": "x64-linux",
+        "VCPKG_DEFAULT_BINARY_CACHE": "${sourceDir}/vcpkg_cache",
+        "VCPKG_KEEP_ENV_VARS": "CUDA_PATH:PATH:INCLUDE:LIB"
       }
     }
   ],
@@ -55,24 +65,14 @@
     {
       "name": "windows-build",
       "displayName": "Build (Windows)",
-      "configurePreset": "windows-msvc"
+      "configurePreset": "windows-msvc",
+      "configuration": "Release"
     },
     {
       "name": "linux-build",
       "displayName": "Build (Linux, GCC 13)",
-      "configurePreset": "linux-gcc13"
-    },
-    {
-      "name": "windows-install",
-      "displayName": "Install (Windows)",
-      "configurePreset": "windows-msvc",
-      "inherits": ["windows-build"]
-    },
-    {
-      "name": "linux-install",
-      "displayName": "Install (Linux)",
       "configurePreset": "linux-gcc13",
-      "inherits": ["linux-build"]
+      "configuration": "Release"
     }
   ]
 }
