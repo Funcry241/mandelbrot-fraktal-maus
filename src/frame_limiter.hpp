@@ -23,7 +23,7 @@ public:
         static_assert(clock::is_steady, "steady_clock must be steady");
         const auto now = clock::now();
 
-        if (targetFps <= 0) {
+        if (targetFps <= 0) [[unlikely]] {
             if (_initialized) {
                 _lastDt = std::chrono::duration<double>(now - _lastStamp).count();
             }
@@ -35,7 +35,7 @@ public:
         const auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::duration<double>(1.0 / static_cast<double>(targetFps)));
 
-        if (!_initialized) {
+        if (!_initialized) [[unlikely]] {
             _initialized = true;
             _nextTick    = now + period; // first frame: no sleep
             _lastStamp   = now;
@@ -46,13 +46,13 @@ public:
         }
 
         // Coarse sleep if far from _nextTick, then fine spin-wait.
-        auto remaining = _nextTick - now;
-        double sleptMs = 0.0;
+        auto   remaining = _nextTick - now;
+        double sleptMs   = 0.0;
 
         constexpr auto kSpinThreshold = std::chrono::milliseconds(2);
         constexpr auto kSleepSlack    = std::chrono::milliseconds(1);
 
-        if (remaining > kSpinThreshold) {
+        if (remaining > kSpinThreshold) [[likely]] {
             const auto coarse = remaining - kSleepSlack;
             const auto before = clock::now();
             std::this_thread::sleep_for(coarse);
@@ -73,7 +73,7 @@ public:
         _lastStamp = after;
 
         // Drift handling: if we overran significantly, rebase to avoid creep.
-        if (after - _nextTick > period) {
+        if (after - _nextTick > period) [[unlikely]] {
             _nextTick = after + period; // re-sync (no accumulated lag)
             if constexpr (Settings::performanceLogging) {
                 LUCHS_LOG_HOST("[FPS] overrun: frame=%.3fms; re-sync next tick", _lastDt * 1000.0);
