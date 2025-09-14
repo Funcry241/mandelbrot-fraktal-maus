@@ -23,26 +23,40 @@ public:
         static_assert(clock::is_steady, "steady_clock must be steady");
         const auto now = clock::now();
 
+        // Handle disabled limiter
         if (targetFps <= 0) [[unlikely]] {
             if (_initialized) {
                 _lastDt = std::chrono::duration<double>(now - _lastStamp).count();
             }
-            _lastStamp = now;
-            _initialized = true;
+            _lastStamp     = now;
+            _initialized   = true;
+            _lastTargetFps = targetFps;
             return;
         }
 
+        // Period for this call (supports dynamic FPS changes)
         const auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::duration<double>(1.0 / static_cast<double>(targetFps)));
 
+        // First invocation initialization
         if (!_initialized) [[unlikely]] {
-            _initialized = true;
-            _nextTick    = now + period; // first frame: no sleep
-            _lastStamp   = now;
-            _lastDt      = 0.0;
-            _lastSleep   = 0.0;
-            _logCounter  = 0;
+            _initialized   = true;
+            _nextTick      = now + period; // first frame: no sleep
+            _lastStamp     = now;
+            _lastDt        = 0.0;
+            _lastSleep     = 0.0;
+            _logCounter    = 0;
+            _lastTargetFps = targetFps;
             return;
+        }
+
+        // If target FPS changed, rebase schedule to "now + new period"
+        if (_lastTargetFps != targetFps) [[unlikely]] {
+            if constexpr (Settings::performanceLogging) {
+                LUCHS_LOG_HOST("[FPS] target change: %d -> %d (rebase schedule)", _lastTargetFps, targetFps);
+            }
+            _nextTick      = now + period;
+            _lastTargetFps = targetFps;
         }
 
         // Coarse sleep if far from _nextTick, then fine spin-wait.
@@ -95,10 +109,11 @@ public:
     }
 
     inline void reset() noexcept {
-        _initialized = false;
-        _logCounter  = 0;
-        _lastDt      = 0.0;
-        _lastSleep   = 0.0;
+        _initialized   = false;
+        _logCounter    = 0;
+        _lastDt        = 0.0;
+        _lastSleep     = 0.0;
+        _lastTargetFps = -1;
     }
 
 private:
@@ -108,6 +123,7 @@ private:
     int    _logCounter{0};
     double _lastDt{0.0};
     double _lastSleep{0.0};
+    int    _lastTargetFps{-1};
 };
 
 } // namespace pace
