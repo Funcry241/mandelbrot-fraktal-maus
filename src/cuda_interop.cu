@@ -99,6 +99,7 @@ static inline int getAttrSafe(cudaDeviceAttr a, int dev) {
     return v;
 }
 
+
 void registerPBO(const Hermelin::GLBuffer& pbo) {
     ensureDeviceOnce();
     const GLuint id = pbo.id();
@@ -106,6 +107,7 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
     if (it == s_pboMap.end()) return;
     pboResource = it->second;
 }
+
 
 void renderCudaFrame(
     Hermelin::CudaDeviceBuffer& d_iterations,

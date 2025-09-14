@@ -269,7 +269,7 @@ void RendererState::resize(int newWidth, int newHeight) {
     pboIndex = 0;
     tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
 
-    CudaInterop::registerPBO(currentPBO());
+    { GLuint ids[kPboRingSize] = { pboRing[0].id(), pboRing[1].id(), pboRing[2].id() }; CudaInterop::registerAllPBOs(ids, kPboRingSize); }
 
     // PixelScale hängt von Größe/Zoom ab → neu berechnen
     recomputePixelScale(*this);
