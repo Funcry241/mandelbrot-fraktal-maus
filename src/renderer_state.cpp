@@ -252,7 +252,7 @@ void RendererState::resize(int newWidth, int newHeight) {
     d_stateIt.free();
 
     // Unregister CUDA-GL PBO
-    CudaInterop::unregisterPBO();
+    CudaInterop::unregisterAllPBOs();
 
     // Free GL buffers via RAII
     for (auto& b : pboRing) { b.free(); }
@@ -267,7 +267,6 @@ void RendererState::resize(int newWidth, int newHeight) {
     // Create fresh GL buffers
     for (auto& b : pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(width, height)); }
     pboIndex = 0;
-    { GLuint ids[kPboRingSize] = { pboRing[0].id(), pboRing[1].id(), pboRing[2].id() }; CudaInterop::registerAllPBOs(ids, kPboRingSize); }
     tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
 
     CudaInterop::registerPBO(currentPBO());

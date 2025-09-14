@@ -37,6 +37,7 @@ namespace CudaInterop {
 static bear_CudaPBOResource* pboResource = nullptr;
 static std::unordered_map<GLuint, bear_CudaPBOResource*> s_pboMap;
 
+
 static bool  pauseZoom                        = false;
 static bool  s_deviceInitDone                 = false;
 
@@ -98,59 +99,12 @@ static inline int getAttrSafe(cudaDeviceAttr a, int dev) {
     return v;
 }
 
-
-void registerAllPBOs(const GLuint* ids, int count) {
-    ensureDeviceOnce();
-    // Drop previous registrations
-    for (auto &kv : s_pboMap) {
-        delete kv.second;
-    }
-    s_pboMap.clear();
-    pboResource = nullptr;if (!ids || count <= 0) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ERROR] registerAllPBOs: invalid input");
-        }
-        return;
-    }
-    // Create RAII registrations for each id
-    for (int i = 0; i < count; ++i) {
-        const GLuint id = ids[i];
-        if (id == 0) continue;
-        auto *res = new bear_CudaPBOResource(id);
-        if (res && res->get()) {
-            s_pboMap[id] = res;
-        } else {
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ERROR] registerAllPBOs: failed to register pbo=%u", (unsigned)id);
-            }
-            delete res;
-        }
-    }
-    // Set first valid as active
-    for (int i = 0; i < count; ++i) {
-        const GLuint id = ids[i];
-        auto it = s_pboMap.find(id);
-        if (it != s_pboMap.end()) {pboResource = it->second;
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[CUDA] registerAllPBOs ok, active pbo=%u", (unsigned)id);
-            }
-            break;
-        }
-    }
-}
 void registerPBO(const Hermelin::GLBuffer& pbo) {
     ensureDeviceOnce();
     const GLuint id = pbo.id();
     auto it = s_pboMap.find(id);
-    if (it == s_pboMap.end()) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ERROR] registerPBO(select): pbo not pre-registered id=%u", (unsigned)id);
-        }
-        return;
-    }pboResource = it->second; // switch active resource
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[CUDA] select active PBO id=%u", (unsigned)id);
-    }
+    if (it == s_pboMap.end()) return;
+    pboResource = it->second;
 }
 
 void renderCudaFrame(
@@ -403,12 +357,30 @@ void logCudaDeviceContext(const char* tag) {
 
 } // namespace CudaInterop
 
+namespace CudaInterop {
+void registerAllPBOs(const GLuint* ids, int count) {
+    ensureDeviceOnce();
+    for (auto &kv : s_pboMap) delete kv.second;
+    s_pboMap.clear();
+    pboResource = nullptr;
+    if (!ids || count <= 0) return;
+    for (int i=0;i<count;++i){
+        const GLuint id = ids[i];
+        if (!id) continue;
+        auto *res = new bear_CudaPBOResource(id);
+        if (res && res->get()) s_pboMap[id] = res; else delete res;
+    }
+    for (int i=0;i<count;++i){
+        auto it = s_pboMap.find(ids[i]);
+        if (it != s_pboMap.end()) { pboResource = it->second; break; }
+    }
+}
+}
 
 namespace CudaInterop {
 void unregisterAllPBOs() {
-    for (auto &kv : s_pboMap) {
-        delete kv.second; // destructor handles unmap+unregister
-    }
+    for (auto &kv : s_pboMap) delete kv.second;
     s_pboMap.clear();
-    pboResource = nullptr;}
+    pboResource = nullptr;
+}
 }
