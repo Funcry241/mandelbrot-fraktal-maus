@@ -51,7 +51,7 @@ uniform vec4 uPanelRectPx; uniform float uRadiusPx,uAlpha,uBorderPx;
 
 float sdRoundRect(vec2 p, vec2 b, float r){
   vec2 d = abs(p) - b + vec2(r);
-  return length(max(d,0.0)) - r;
+  return length(max(d,0.0)) - r;      // d<0 innen, d>0 außen
 }
 
 void main(){
@@ -59,16 +59,14 @@ void main(){
   vec2 b = 0.5 * (uPanelRectPx.zw - uPanelRectPx.xy);
   float d = sdRoundRect(vPx - c, b, uRadiusPx);
 
-  // Screen-space AA statt discard -> keine harten Halos
+  // One-sided AA: innen stets voll deckend, nur außen ausfaden
   float aa   = fwidth(d);
-  float body = smoothstep(aa, -aa, d);          // 1 innen, 0 außen
+  float body = 1.0 - smoothstep(0.0, aa, max(d, 0.0));  // 1 innen, 0 außen
 
-  // Sehr dezenter innerer Stroke (nur an der Kante)
-  float inner = smoothstep(-uBorderPx, 0.0, d); // 0 tief innen -> 1 an Kante
-
-  vec3 baseCol   = vColor;
-  vec3 borderCol = vec3(1.0, 0.82, 0.32);
-  vec3 col = mix(baseCol, borderCol, 0.12 * inner); // 12% statt 20%
+  // Sehr dezenter innerer Stroke direkt an der Kante (kein Halo im Padding)
+  float inner = smoothstep(-uBorderPx, 0.0, d);         // 0 tief innen → 1 an Kante
+  vec3  borderCol = vec3(1.0, 0.82, 0.32);
+  vec3  col = mix(vColor, borderCol, 0.12 * inner);     // 12% statt 20%
 
   FragColor = vec4(col, uAlpha * body);
 }
@@ -207,7 +205,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glUseProgram(sPanelProg);
         if(uViewportPx>=0) glUniform2f(uViewportPx,(float)width,(float)height);
         if(uPanelRectPx>=0) glUniform4f(uPanelRectPx,(float)panelX0,(float)panelY0,(float)panelX1,(float)panelY1);
-        if(uRadiusPx>=0)    glUniform1f(uRadiusPx,Pfau::UI_RADIUS);
+        if(uRadiusPx>=0)    glUniform1f(uRadiusPx,Pfau::UI_RADIUS - 2.0f);
         if(uAlpha>=0)       glUniform1f(uAlpha,Pfau::PANEL_ALPHA);
         if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER);
         glBindVertexArray(sPanelVAO);
