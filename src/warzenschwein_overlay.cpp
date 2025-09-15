@@ -1,6 +1,6 @@
-///// Otter: Projekt „Pfau“ – kompakt fix: avoid vs/fs shadowing; halbtransparentes Panel (TL), Pixel-Snapping.
-///// Schneefuchs: C4459 behoben durch Umbenennung lokaler Shader-Handles (shVS/shFS); MAUS-Header #62 normiert.
-///// Maus: Keine Funktionsänderung; identische Margins/Alpha wie Heatmap; ASCII-Logs [UI/Pfau].
+///// Otter: Projekt „Pfau“ – kompakt fix: Top-Margin außen = UI_MARGIN (Content-Anker = MARGIN+PADDING).
+///// Schneefuchs: C4459 bereits behoben; nur 2 Zeilen in generateOverlayQuads angepasst; ASCII-Logs.
+//\/\/ Maus: Panel-Top jetzt exakt symmetrisch zur Heatmap; keine API-/Shader-Änderungen.
 ///// Datei: src/warzenschwein_overlay.cpp
 #pragma warning(push)
 #pragma warning(disable: 4100)
@@ -107,19 +107,28 @@ void generateOverlayQuads(const std::string& t, int viewportW, int viewportH, fl
     (void)viewportW; (void)viewportH; (void)zoom;
     vOut.clear(); pOut.clear();
     const float scalePx = std::max(1.0f, Settings::hudPixelSize);
-    const float marginX = Pfau::UI_MARGIN, marginY = Pfau::UI_MARGIN;
+
+    // Außenabstand soll EXAKT UI_MARGIN sein → Content-Anker = MARGIN + PADDING
+    const float marginX = Pfau::UI_MARGIN,  marginY = Pfau::UI_MARGIN;
+    const float pad     = Pfau::UI_PADDING;
+    const float x0 = (float)WarzenschweinOverlay::snapToPixel(marginX + pad);
+    const float y0 = (float)WarzenschweinOverlay::snapToPixel(marginY + pad);
+
+    // Zeilen splitten
     std::vector<std::string> lines; { std::string cur; cur.reserve(64);
         for(char c: t){ if(c=='\n'){ lines.push_back(cur); cur.clear(); } else cur+=c; }
         if(!cur.empty()) lines.push_back(cur);
     }
+
+    // Content-Box
     size_t maxW=0; for(const auto& l:lines) maxW=std::max(maxW,l.size());
     const float advX=(glyphW+1)*scalePx, advY=(glyphH+2)*scalePx;
     const float boxW=float(maxW)*advX, boxH=float(lines.size())*advY;
-    const float pad=Pfau::UI_PADDING;
-    const float x0=(float)WarzenschweinOverlay::snapToPixel(marginX);
-    const float y0=(float)WarzenschweinOverlay::snapToPixel(marginY);
-    buildPanel(pOut, x0-pad, y0-pad, x0+boxW+pad, y0+boxH+pad);
 
+    // Panel-Rand exakt bei UI_MARGIN
+    buildPanel(pOut, x0 - pad, y0 - pad, x0 + boxW + pad, y0 + boxH + pad);
+
+    // Glyphen
     const float r=1.0f,g=0.82f,b=0.32f;
     for(size_t row=0; row<lines.size(); ++row){
         const std::string& line=lines[row];
