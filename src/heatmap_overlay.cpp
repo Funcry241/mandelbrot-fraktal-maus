@@ -1,4 +1,4 @@
-///// Otter: Kurz & robust: Mini-Heatmap unten rechts, Shader-0 on error, keine verdeckten Pfade.
+///// Otter: Kurz & robust: Mini-Heatmap rechts oben, Shader-0 on error, keine verdeckten Pfade.
 ///// Schneefuchs: Zustands-Restore (VAO/VBO/Program/Blend), gecachte Uniforms, deterministische ASCII-Logs.
 /// /// Maus: Keine Marker/Points; y=0 unten; gleiche Datenquelle wie Zoom.
 /// /// Datei: src/heatmap_overlay.cpp
@@ -125,15 +125,17 @@ void drawOverlay(const std::vector<float>& entropy,
         }
     }
 
-    // Platzierung: unten rechts, Höhe ~100px, Seitenverhältnis = tilesX/tilesY
+    // Platzierung: RECHTS OBEN, Höhe ~100px, Seitenverhältnis = tilesX/tilesY
     constexpr int hPx=100, pad=16;
     const float aspect = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
     const int   wPx = std::max(1, int(std::round(hPx*aspect)));
 
     const float sx = (float(wPx)/float(width)/float(tilesX))*2.0f;
     const float sy = (float(hPx)/float(height)/float(tilesY))*2.0f;
+
+    // rechts oben: x von rechts (wie zuvor), y so, dass OBERKANTE pad hat
     const float ox =  1.0f - (float(wPx + pad)/float(width))*2.0f;
-    const float oy = -1.0f + (float(pad)      /float(height))*2.0f;
+    const float oy =  1.0f - (float(pad + hPx)/float(height))*2.0f;  // <<— Top-Right
 
     // State sichern
     GLint prevVAO=0, prevBuf=0, prevProg=0, srcRGB=0,dstRGB=0,srcA=0,dstA=0;
@@ -173,7 +175,7 @@ void drawOverlay(const std::vector<float>& entropy,
     glUseProgram((GLuint)prevProg);
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[HM] draw ok tiles=%dx%d verts=%zu zoom=%.6f center=(%.9f,%.9f)",
+        LUCHS_LOG_HOST("[HM] draw ok (top-right) tiles=%dx%d verts=%zu zoom=%.6f center=(%.9f,%.9f)",
                        tilesX,tilesY,verts.size()/3, RS_ZOOM(ctx), RS_OFFSET_X(ctx), RS_OFFSET_Y(ctx));
     }
 }
