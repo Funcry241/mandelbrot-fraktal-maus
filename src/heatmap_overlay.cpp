@@ -63,7 +63,7 @@ void main(){
   float aa   = fwidth(d);
   float body = 1.0 - smoothstep(0.0, aa, max(d, 0.0));  // 1 innen, 0 außen
 
-  // SCHMALER innerer Stroke: Übergangsband = 0.5 * uBorderPx
+  // sehr schmaler innerer Stroke: nur ~0.5*uBorderPx Bandbreite
   float inner = smoothstep(-uBorderPx*0.5, 0.0, d);
 
   vec3 borderCol = vec3(1.0, 0.82, 0.32);
@@ -166,14 +166,20 @@ void drawOverlay(const std::vector<float>& entropy,
     constexpr int contentHPx = 100;
     const float aspect = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
     const int   contentWPx = std::max(1, int(std::round(contentHPx*aspect)));
-    const int panelW = contentWPx + int(2*Pfau::UI_PADDING);
-    const int panelH = contentHPx + int(2*Pfau::UI_PADDING);
+
+    // *** Heatmap-spezifisch: schmaleres Innenpadding ***
+    const int padPx = HeatmapOverlay::snapToPixel(Pfau::UI_PADDING * 0.5f);
+
+    const int panelW = contentWPx + padPx*2;
+    const int panelH = contentHPx + padPx*2;
+
     const int panelX1 = width  - HeatmapOverlay::snapToPixel(Pfau::UI_MARGIN);
     const int panelX0 = panelX1 - panelW;
     const int panelY0 = HeatmapOverlay::snapToPixel(Pfau::UI_MARGIN);
     const int panelY1 = panelY0 + panelH;
-    const int contentX0 = panelX0 + int(Pfau::UI_PADDING);
-    const int contentY0 = panelY0 + int(Pfau::UI_PADDING);
+
+    const int contentX0 = panelX0 + padPx;
+    const int contentY0 = panelY0 + padPx;
 
     const float sx = ( (float)contentWPx / (float)width  / (float)tilesX ) * 2.0f;
     const float sy = ( (float)contentHPx / (float)height / (float)tilesY ) * 2.0f;
@@ -208,8 +214,9 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uPanelRectPx>=0) glUniform4f(uPanelRectPx,(float)panelX0,(float)panelY0,(float)panelX1,(float)panelY1);
         if(uRadiusPx>=0)    glUniform1f(uRadiusPx,Pfau::UI_RADIUS);
         if(uAlpha>=0)       glUniform1f(uAlpha,Pfau::PANEL_ALPHA);
-        // Dünnerer Rand: 45% der globalen UI_BORDER
-        if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER * 0.45f);
+        // Dünnster Saum: nur 35% der globalen Breite
+        if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER * 0.35f);
+
         glBindVertexArray(sPanelVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sPanelVBO);
         glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)sizeof(quad),nullptr,GL_DYNAMIC_DRAW);
