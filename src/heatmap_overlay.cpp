@@ -208,7 +208,7 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uPanelRectPx>=0) glUniform4f(uPanelRectPx,(float)panelX0,(float)panelY0,(float)panelX1,(float)panelY1);
         if(uRadiusPx>=0)    glUniform1f(uRadiusPx,Pfau::UI_RADIUS);
         if(uAlpha>=0)       glUniform1f(uAlpha,Pfau::PANEL_ALPHA);
-        if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER * 0.6f);
+        if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER * 0.1f);
         glBindVertexArray(sPanelVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sPanelVBO);
         glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)sizeof(quad),nullptr,GL_DYNAMIC_DRAW);
