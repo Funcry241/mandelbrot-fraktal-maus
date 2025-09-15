@@ -59,14 +59,15 @@ void main(){
   vec2 b = 0.5 * (uPanelRectPx.zw - uPanelRectPx.xy);
   float d = sdRoundRect(vPx - c, b, uRadiusPx);
 
-  // One-sided AA: innen stets voll deckend, nur außen ausfaden
+  // innen voll, außen weich ausfaden (kein Halo)
   float aa   = fwidth(d);
   float body = 1.0 - smoothstep(0.0, aa, max(d, 0.0));  // 1 innen, 0 außen
 
-  // Sehr dezenter innerer Stroke direkt an der Kante (kein Halo im Padding)
-  float inner = smoothstep(-uBorderPx, 0.0, d);         // 0 tief innen → 1 an Kante
-  vec3  borderCol = vec3(1.0, 0.82, 0.32);
-  vec3  col = mix(vColor, borderCol, 0.12 * inner);     // 12% statt 20%
+  // SCHMALER innerer Stroke: Übergangsband = 0.5 * uBorderPx
+  float inner = smoothstep(-uBorderPx*0.5, 0.0, d);
+
+  vec3 borderCol = vec3(1.0, 0.82, 0.32);
+  vec3 col = mix(vColor, borderCol, 0.10 * inner); // optional: 10% Intensität
 
   FragColor = vec4(col, uAlpha * body);
 }
@@ -207,7 +208,7 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uPanelRectPx>=0) glUniform4f(uPanelRectPx,(float)panelX0,(float)panelY0,(float)panelX1,(float)panelY1);
         if(uRadiusPx>=0)    glUniform1f(uRadiusPx,Pfau::UI_RADIUS);
         if(uAlpha>=0)       glUniform1f(uAlpha,Pfau::PANEL_ALPHA);
-        if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER - 8.0f);
+        if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER * 0.6f);
         glBindVertexArray(sPanelVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sPanelVBO);
         glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)sizeof(quad),nullptr,GL_DYNAMIC_DRAW);
