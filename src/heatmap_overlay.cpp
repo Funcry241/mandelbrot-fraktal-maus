@@ -48,12 +48,29 @@ void main(){ vColor=aColor; vPx=aPosPx; gl_Position=vec4(toNdc(aPosPx,uViewportP
 static const char* kPanelFS = R"GLSL(#version 430 core
 in vec3 vColor; in vec2 vPx; out vec4 FragColor;
 uniform vec4 uPanelRectPx; uniform float uRadiusPx,uAlpha,uBorderPx;
-float sdRoundRect(vec2 p, vec2 b, float r){ vec2 d=abs(p)-b+vec2(r); return length(max(d,0))-r; }
+
+float sdRoundRect(vec2 p, vec2 b, float r){
+  vec2 d = abs(p) - b + vec2(r);
+  return length(max(d,0.0)) - r;
+}
+
 void main(){
-  vec2 c=0.5*(uPanelRectPx.xy+uPanelRectPx.zw), b=0.5*(uPanelRectPx.zw-uPanelRectPx.xy);
-  float d=sdRoundRect(vPx-c,b,uRadiusPx); if(d>0) discard;
-  float edge=smoothstep(0,1,1.0-clamp(d+uBorderPx,0.0,uBorderPx)/max(uBorderPx,1e-6));
-  vec3 col=mix(vColor, vec3(1.0,0.82,0.32), 0.20*edge); FragColor=vec4(col,uAlpha);
+  vec2 c = 0.5 * (uPanelRectPx.xy + uPanelRectPx.zw);
+  vec2 b = 0.5 * (uPanelRectPx.zw - uPanelRectPx.xy);
+  float d = sdRoundRect(vPx - c, b, uRadiusPx);
+
+  // Screen-space AA statt discard -> keine harten Halos
+  float aa   = fwidth(d);
+  float body = smoothstep(aa, -aa, d);          // 1 innen, 0 außen
+
+  // Sehr dezenter innerer Stroke (nur an der Kante)
+  float inner = smoothstep(-uBorderPx, 0.0, d); // 0 tief innen -> 1 an Kante
+
+  vec3 baseCol   = vColor;
+  vec3 borderCol = vec3(1.0, 0.82, 0.32);
+  vec3 col = mix(baseCol, borderCol, 0.12 * inner); // 12% statt 20%
+
+  FragColor = vec4(col, uAlpha * body);
 }
 )GLSL";
 
