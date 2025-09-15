@@ -1,8 +1,7 @@
-///// Otter: Kurz & robust: Mini-Heatmap rechts oben, Shader-0 on error, keine verdeckten Pfade.
-///// Schneefuchs: Zustands-Restore (VAO/VBO/Program/Blend), gecachte Uniforms, deterministische ASCII-Logs.
-/// /// Maus: Keine Marker/Points; y=0 unten; gleiche Datenquelle wie Zoom.
-/// /// Datei: src/heatmap_overlay.cpp
-
+///// Otter: Projekt „Pfau“ – kompakt: vereinheitlichtes Panel (Alpha/Margin/Radius) + Tiles (TR).
+///// Schneefuchs: Keine API-Änderung; State-Restore wie zuvor; ASCII-Logs mit [UI/Pfau].
+///// Maus: Tiles opak, Panel halbtransparent; Pixel-Snapping; identische Top-Margin wie WS.
+// ///// Datei: src/heatmap_overlay.cpp
 #pragma warning(push)
 #pragma warning(disable: 4100)
 
@@ -21,52 +20,63 @@
 
 namespace HeatmapOverlay {
 
-// --- GL state (TU-lokal) ---
-static GLuint sVAO=0, sVBO=0, sProg=0;
+static GLuint sVAO=0, sVBO=0, sProg=0;                 // Tiles
 static GLint  uScale=-1, uOffset=-1;
+static GLuint sPanelVAO=0, sPanelVBO=0, sPanelProg=0;  // Panel
+static GLint  uViewportPx=-1, uPanelRectPx=-1, uRadiusPx=-1, uAlpha=-1, uBorderPx=-1;
 
-// --- Minimaler Shader (Tiles als gefärbte Triangles, vValue in [0,1]) ---
-static const char* kVS = R"GLSL(
-#version 430 core
-layout(location=0) in vec2 aPos;
-layout(location=1) in float aValue;
-out float vValue;
-uniform vec2 uScale, uOffset;
+static const char* kVS = R"GLSL(#version 430 core
+layout(location=0) in vec2 aPos; layout(location=1) in float aValue;
+out float vValue; uniform vec2 uScale,uOffset;
+void main(){ gl_Position=vec4(aPos*uScale+uOffset,0,1); vValue=aValue; }
+)GLSL";
+
+static const char* kFS = R"GLSL(#version 430 core
+in float vValue; out vec4 FragColor;
+vec3 map(float v){ float g=smoothstep(0,1,clamp(v,0,1));
+  return mix(vec3(0.08,0.08,0.10), vec3(1.0,0.82,0.32), g); }
+void main(){ FragColor=vec4(map(vValue),1.0); } // Tiles opak; Panel liefert Alpha
+)GLSL";
+
+static const char* kPanelVS = R"GLSL(#version 430 core
+layout(location=0) in vec2 aPosPx; layout(location=1) in vec3 aColor;
+uniform vec2 uViewportPx; out vec3 vColor; out vec2 vPx;
+vec2 toNdc(vec2 p, vec2 vp){ return vec2(p.x/vp.x*2-1, 1-p.y/vp.y*2); }
+void main(){ vColor=aColor; vPx=aPosPx; gl_Position=vec4(toNdc(aPosPx,uViewportPx),0,1); }
+)GLSL";
+
+static const char* kPanelFS = R"GLSL(#version 430 core
+in vec3 vColor; in vec2 vPx; out vec4 FragColor;
+uniform vec4 uPanelRectPx; uniform float uRadiusPx,uAlpha,uBorderPx;
+float sdRoundRect(vec2 p, vec2 b, float r){ vec2 d=abs(p)-b+vec2(r); return length(max(d,0))-r; }
 void main(){
-  gl_Position = vec4(aPos * uScale + uOffset, 0.0, 1.0);
-  vValue = aValue;
+  vec2 c=0.5*(uPanelRectPx.xy+uPanelRectPx.zw), b=0.5*(uPanelRectPx.zw-uPanelRectPx.xy);
+  float d=sdRoundRect(vPx-c,b,uRadiusPx); if(d>0) discard;
+  float edge=smoothstep(0,1,1.0-clamp(d+uBorderPx,0.0,uBorderPx)/max(uBorderPx,1e-6));
+  vec3 col=mix(vColor, vec3(1.0,0.82,0.32), 0.20*edge); FragColor=vec4(col,uAlpha);
 }
 )GLSL";
 
-static const char* kFS = R"GLSL(
-#version 430 core
-in float vValue; out vec4 FragColor;
-vec3 map(float v){ float g=smoothstep(0.0,1.0,clamp(v,0.0,1.0));
-  return mix(vec3(0.08,0.08,0.10), vec3(1.0,0.6,0.2), g); }
-void main(){ FragColor = vec4(map(vValue), 0.85); }
-)GLSL";
-
-static GLuint compile(GLenum type, const char* src){
-    GLuint sh = glCreateShader(type); if(!sh) return 0;
+static GLuint make(GLenum type, const char* src){
+    GLuint sh=glCreateShader(type); if(!sh) return 0;
     glShaderSource(sh,1,&src,nullptr); glCompileShader(sh);
     GLint ok=0; glGetShaderiv(sh,GL_COMPILE_STATUS,&ok);
-    if(!ok){ if constexpr(Settings::debugLogging){ GLchar log[512]={0}; glGetShaderInfoLog(sh,512,nullptr,log);
-        LUCHS_LOG_HOST("[HM] Shader compile failed: %s", log);} glDeleteShader(sh); return 0; }
+    if(!ok){ if constexpr(Settings::debugLogging){ char log[512]{}; glGetShaderInfoLog(sh,512,nullptr,log);
+        LUCHS_LOG_HOST("[UI/Pfau][HM] shader compile fail: %s", log);} glDeleteShader(sh); return 0; }
     return sh;
 }
-static GLuint makeProgram(){
-    GLuint vs=compile(GL_VERTEX_SHADER,kVS), fs=compile(GL_FRAGMENT_SHADER,kFS);
-    if(!vs||!fs){ if(vs)glDeleteShader(vs); if(fs)glDeleteShader(fs); return 0; }
-    GLuint p=glCreateProgram(); if(!p){ glDeleteShader(vs); glDeleteShader(fs); return 0; }
-    glAttachShader(p,vs); glAttachShader(p,fs); glLinkProgram(p);
-    glDeleteShader(vs); glDeleteShader(fs);
+static GLuint program(const char* vs, const char* fs){
+    GLuint v=make(GL_VERTEX_SHADER,vs), f=make(GL_FRAGMENT_SHADER,fs);
+    if(!v||!f){ if(v)glDeleteShader(v); if(f)glDeleteShader(f); return 0; }
+    GLuint p=glCreateProgram(); if(!p){ glDeleteShader(v); glDeleteShader(f); return 0; }
+    glAttachShader(p,v); glAttachShader(p,f); glLinkProgram(p);
+    glDeleteShader(v); glDeleteShader(f);
     GLint ok=0; glGetProgramiv(p,GL_LINK_STATUS,&ok);
-    if(!ok){ if constexpr(Settings::debugLogging){ GLchar log[512]={0}; glGetProgramInfoLog(p,512,nullptr,log);
-        LUCHS_LOG_HOST("[HM] Program link failed: %s", log);} glDeleteProgram(p); return 0; }
+    if(!ok){ if constexpr(Settings::debugLogging){ char log[512]{}; glGetProgramInfoLog(p,512,nullptr,log);
+        LUCHS_LOG_HOST("[UI/Pfau][HM] program link fail: %s", log);} glDeleteProgram(p); return 0; }
     return p;
 }
 
-// --- API ---
 void toggle(RendererState& ctx){
 #if defined(USE_HEATMAP_OVERLAY)
     ctx.heatmapOverlayEnabled = !ctx.heatmapOverlayEnabled;
@@ -80,6 +90,12 @@ void cleanup(){
     if(sVBO) glDeleteBuffers(1,&sVBO);
     if(sProg) glDeleteProgram(sProg);
     sVAO=sVBO=sProg=0; uScale=uOffset=-1;
+
+    if(sPanelVAO) glDeleteVertexArrays(1,&sPanelVAO);
+    if(sPanelVBO) glDeleteBuffers(1,&sPanelVBO);
+    if(sPanelProg) glDeleteProgram(sPanelProg);
+    sPanelVAO=sPanelVBO=sPanelProg=0;
+    uViewportPx=uPanelRectPx=uRadiusPx=uAlpha=uBorderPx=-1;
 }
 
 void drawOverlay(const std::vector<float>& entropy,
@@ -88,95 +104,137 @@ void drawOverlay(const std::vector<float>& entropy,
                  [[maybe_unused]] GLuint textureId,
                  RendererState& ctx)
 {
-    if(!ctx.heatmapOverlayEnabled) return;
-    if(width<=0||height<=0||tileSize<=0) return;
+    if(!ctx.heatmapOverlayEnabled || width<=0||height<=0||tileSize<=0) return;
 
     const int tilesX = (width  + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int nTiles = tilesX * tilesY;
     if((int)entropy.size()<nTiles || (int)contrast.size()<nTiles) return;
 
-    // Lazy-Init
     if(!sProg){
-        sProg = makeProgram();
-        if(!sProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[HM] ERROR: program==0"); return; }
+        sProg = program(kVS,kFS);
+        if(!sProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[UI/Pfau][HM] ERROR: tiles program==0"); return; }
         uScale  = glGetUniformLocation(sProg,"uScale");
         uOffset = glGetUniformLocation(sProg,"uOffset");
     }
     if(!sVAO){ glGenVertexArrays(1,&sVAO); glGenBuffers(1,&sVBO); }
 
-    // Wertebereich bestimmen
+    if(!sPanelProg){
+        sPanelProg = program(kPanelVS, kPanelFS);
+        if(!sPanelProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[UI/Pfau][HM] ERROR: panel program==0"); }
+        uViewportPx = glGetUniformLocation(sPanelProg, "uViewportPx");
+        uPanelRectPx= glGetUniformLocation(sPanelProg, "uPanelRectPx");
+        uRadiusPx   = glGetUniformLocation(sPanelProg, "uRadiusPx");
+        uAlpha      = glGetUniformLocation(sPanelProg, "uAlpha");
+        uBorderPx   = glGetUniformLocation(sPanelProg, "uBorderPx");
+    }
+    if(!sPanelVAO){ glGenVertexArrays(1,&sPanelVAO); glGenBuffers(1,&sPanelVBO); }
+
     float maxVal = 1e-6f;
     for(int i=0;i<nTiles;++i) maxVal = std::max(maxVal, entropy[i]+contrast[i]);
 
-    // Triangles bauen: pro Tile 6 Vertices, (x,y,v) mit y=0 unten
-    std::vector<float> verts;
-    verts.reserve(size_t(nTiles)*6u*3u);
+    std::vector<float> verts; verts.reserve(size_t(nTiles)*6u*3u);
     for(int y=0;y<tilesY;++y){
         for(int x=0;x<tilesX;++x){
-            const int i = y*tilesX + x;
-            const float v = (entropy[i]+contrast[i]) / maxVal;
+            const float v = (entropy[y*tilesX+x]+contrast[y*tilesX+x]) / maxVal;
             const float px=float(x), py=float(y);
-            const float q[6][3] = {
-                {px,py,v},{px+1,py,v},{px+1,py+1,v},
-                {px,py,v},{px+1,py+1,v},{px,py+1,v}
+            const float q[18] = {
+                px,py,v, px+1,py,v, px+1,py+1,v,
+                px,py,v, px+1,py+1,v, px,py+1,v
             };
-            verts.insert(verts.end(), &q[0][0], &q[0][0]+18);
+            verts.insert(verts.end(), q, q+18);
         }
     }
 
-    // Platzierung: RECHTS OBEN, Höhe ~100px, Seitenverhältnis = tilesX/tilesY
-    constexpr int hPx=100, pad=16;
+    // Pfau-Layout (Top-Right): identische Top-Margin wie Warzenschwein
+    constexpr int contentHPx = 100;
     const float aspect = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
-    const int   wPx = std::max(1, int(std::round(hPx*aspect)));
+    const int   contentWPx = std::max(1, int(std::round(contentHPx*aspect)));
+    const int panelW = contentWPx + int(2*Pfau::UI_PADDING);
+    const int panelH = contentHPx + int(2*Pfau::UI_PADDING);
+    const int panelX1 = width  - HeatmapOverlay::snapToPixel(Pfau::UI_MARGIN);
+    const int panelX0 = panelX1 - panelW;
+    const int panelY0 = HeatmapOverlay::snapToPixel(Pfau::UI_MARGIN);
+    const int panelY1 = panelY0 + panelH;
+    const int contentX0 = panelX0 + int(Pfau::UI_PADDING);
+    const int contentY0 = panelY0 + int(Pfau::UI_PADDING);
 
-    const float sx = (float(wPx)/float(width)/float(tilesX))*2.0f;
-    const float sy = (float(hPx)/float(height)/float(tilesY))*2.0f;
-
-    // rechts oben: x von rechts (wie zuvor), y so, dass OBERKANTE pad hat
-    const float ox =  1.0f - (float(wPx + pad)/float(width))*2.0f;
-    const float oy =  1.0f - (float(pad + hPx)/float(height))*2.0f;  // <<— Top-Right
+    const float sx = ( (float)contentWPx / (float)width  / (float)tilesX ) * 2.0f;
+    const float sy = ( (float)contentHPx / (float)height / (float)tilesY ) * 2.0f;
+    const int   gridBottomY = (int)((height - (contentY0 + contentHPx)));
+    const float ox = ( (float)contentX0 / (float)width )  * 2.0f - 1.0f;
+    const float oy = ( (float)gridBottomY / (float)height ) * 2.0f - 1.0f;
 
     // State sichern
     GLint prevVAO=0, prevBuf=0, prevProg=0, srcRGB=0,dstRGB=0,srcA=0,dstA=0;
-    GLboolean wasBlend=GL_FALSE;
+    GLboolean wasBlend=GL_FALSE, wasDepth=GL_FALSE;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING,&prevBuf);
     glGetIntegerv(GL_CURRENT_PROGRAM,&prevProg);
     glGetBooleanv(GL_BLEND,&wasBlend);
+    glGetBooleanv(GL_DEPTH_TEST,&wasDepth);
     glGetIntegerv(GL_BLEND_SRC_RGB,&srcRGB); glGetIntegerv(GL_BLEND_DST_RGB,&dstRGB);
     glGetIntegerv(GL_BLEND_SRC_ALPHA,&srcA); glGetIntegerv(GL_BLEND_DST_ALPHA,&dstA);
 
-    // Zeichnen
-    glUseProgram(sProg);
-    glUniform2f(uScale,sx,sy);
-    glUniform2f(uOffset,ox,oy);
+    // Panel (semi-transparent, rounded)
+    {
+        const float base[3]={0.10f,0.10f,0.10f};
+        const float quad[30]={
+            (float)panelX0,(float)panelY0, base[0],base[1],base[2],
+            (float)panelX1,(float)panelY0, base[0],base[1],base[2],
+            (float)panelX1,(float)panelY1, base[0],base[1],base[2],
+            (float)panelX0,(float)panelY0, base[0],base[1],base[2],
+            (float)panelX1,(float)panelY1, base[0],base[1],base[2],
+            (float)panelX0,(float)panelY1, base[0],base[1],base[2],
+        };
+        glUseProgram(sPanelProg);
+        if(uViewportPx>=0) glUniform2f(uViewportPx,(float)width,(float)height);
+        if(uPanelRectPx>=0) glUniform4f(uPanelRectPx,(float)panelX0,(float)panelY0,(float)panelX1,(float)panelY1);
+        if(uRadiusPx>=0)    glUniform1f(uRadiusPx,Pfau::UI_RADIUS);
+        if(uAlpha>=0)       glUniform1f(uAlpha,Pfau::PANEL_ALPHA);
+        if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER);
+        glBindVertexArray(sPanelVAO);
+        glBindBuffer(GL_ARRAY_BUFFER,sPanelVBO);
+        glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)sizeof(quad),nullptr,GL_DYNAMIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER,0,(GLsizeiptr)sizeof(quad),quad);
+        glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,5*sizeof(float),(void*)0);
+        glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,5*sizeof(float),(void*)(2*sizeof(float)));
+        glDisable(GL_DEPTH_TEST); glEnable(GL_BLEND);
+        glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+        glDrawArrays(GL_TRIANGLES,0,6);
+    }
 
-    glBindVertexArray(sVAO);
-    glBindBuffer(GL_ARRAY_BUFFER,sVBO);
-    glBufferData(GL_ARRAY_BUFFER,GLsizeiptr(verts.size()*sizeof(float)),nullptr,GL_DYNAMIC_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER,0,GLsizeiptr(verts.size()*sizeof(float)),verts.data());
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,3*sizeof(float),(void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1,1,GL_FLOAT,GL_FALSE,3*sizeof(float),(void*)(2*sizeof(float)));
-
-    glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
-    glDrawArrays(GL_TRIANGLES,0,GLsizei(verts.size()/3));
+    // Tiles (opak) über Panel
+    {
+        glUseProgram(sProg);
+        glUniform2f(uScale,sx,sy);
+        glUniform2f(uOffset,ox,oy);
+        glBindVertexArray(sVAO);
+        glBindBuffer(GL_ARRAY_BUFFER,sVBO);
+        const GLsizeiptr bytes = (GLsizeiptr)(verts.size()*sizeof(float));
+        glBufferData(GL_ARRAY_BUFFER,bytes,nullptr,GL_DYNAMIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER,0,bytes,verts.data());
+        glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,3*sizeof(float),(void*)0);
+        glEnableVertexAttribArray(1); glVertexAttribPointer(1,1,GL_FLOAT,GL_FALSE,3*sizeof(float),(void*)(2*sizeof(float)));
+        glEnable(GL_BLEND);
+        glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+        glDrawArrays(GL_TRIANGLES,0,(GLsizei)(verts.size()/3));
+    }
 
     // Restore
     glBlendFuncSeparate(srcRGB,dstRGB,srcA,dstA);
     if(!wasBlend) glDisable(GL_BLEND);
-    glDisableVertexAttribArray(0);
-    glDisableVertexAttribArray(1);
+    if(wasDepth) glEnable(GL_DEPTH_TEST);
+    glDisableVertexAttribArray(0); glDisableVertexAttribArray(1);
     glBindBuffer(GL_ARRAY_BUFFER,prevBuf);
     glBindVertexArray((GLuint)prevVAO);
     glUseProgram((GLuint)prevProg);
 
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[HM] draw ok (top-right) tiles=%dx%d verts=%zu zoom=%.6f center=(%.9f,%.9f)",
-                       tilesX,tilesY,verts.size()/3, RS_ZOOM(ctx), RS_OFFSET_X(ctx), RS_OFFSET_Y(ctx));
+    if constexpr(Settings::debugLogging){
+        LUCHS_LOG_HOST("[UI/Pfau][HM] ok TR tiles=%dx%d verts=%zu zoom=%.6f c=(%.9f,%.9f) panel=[%d,%d..%d,%d]",
+                       tilesX,tilesY,verts.size()/3,RS_ZOOM(ctx),RS_OFFSET_X(ctx),RS_OFFSET_Y(ctx),
+                       panelX0,panelY0,panelX1,panelY1);
+        GLenum err=glGetError(); if(err!=GL_NO_ERROR) LUCHS_LOG_HOST("[UI/Pfau][HM-GL] err=0x%04X",err);
     }
 }
 
