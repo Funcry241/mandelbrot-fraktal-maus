@@ -67,7 +67,7 @@ void main(){
   float inner = smoothstep(-uBorderPx*0.5, 0.0, d);
 
   vec3 borderCol = vec3(1.0, 0.82, 0.32);
-  vec3 col = mix(vColor, borderCol, 0.10 * inner); // optional: 10% Intensität
+  vec3 col = mix(vColor, borderCol, 0.08 * inner); // dezenter: 8% Mix
 
   FragColor = vec4(col, uAlpha * body);
 }
@@ -208,7 +208,8 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uPanelRectPx>=0) glUniform4f(uPanelRectPx,(float)panelX0,(float)panelY0,(float)panelX1,(float)panelY1);
         if(uRadiusPx>=0)    glUniform1f(uRadiusPx,Pfau::UI_RADIUS);
         if(uAlpha>=0)       glUniform1f(uAlpha,Pfau::PANEL_ALPHA);
-        if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER * 0.1f);
+        // Dünnerer Rand: 45% der globalen UI_BORDER
+        if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER * 0.45f);
         glBindVertexArray(sPanelVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sPanelVBO);
         glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)sizeof(quad),nullptr,GL_DYNAMIC_DRAW);
