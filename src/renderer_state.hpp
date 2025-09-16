@@ -1,6 +1,6 @@
-///// Otter: Einheitliche, klare Struktur – nur aktive Zustaende; Header schlank, keine PCH; Nacktmull-Pullover.
-///// Schneefuchs: Speicher/Buffer exakt definiert; State entkoppelt; MSVC-Align-Warnung lokal gekapselt.
-///  Maus: tileSize bleibt explizit; Progressive-State (z,it) + Cooldown-Mechanik; ASCII-only.
+///// Otter: Zaunkönig [ZK] – PBO-Fences & saubere Ring-Disziplin; Header schlank, keine PCH; Nacktmull-Pullover.
+///// Schneefuchs: [ZK] GLsync vorwärts deklariert; Speicher/Buffer exakt; State entkoppelt; MSVC-Align-Warnung lokal gekapselt.
+///// Maus: [ZK] Flags klar benannt (pboFence, skipUploadThisFrame); tileSize explizit; Progressive (z,it) mit Cooldown; ASCII-only.
 ///// Datei: src/renderer_state.hpp
 #pragma once
 
@@ -14,6 +14,7 @@
 
 // Vorwaertsdeklarationen statt schwerer Header
 struct GLFWwindow;
+struct __GLsync; using GLsync = __GLsync*; // [ZK] GLsync vorwaerts deklariert (keine GL-Header hier)
 
 // MSVC: float2/double2 sind __align__-Typen → C4324 (Padding). Lokal und gezielt unterdruecken.
 #if defined(_MSC_VER)
@@ -66,6 +67,12 @@ public:
     inline const Hermelin::GLBuffer& currentPBO() const { return pboRing[pboIndex]; }
     inline void advancePboRing() { pboIndex = (pboIndex + 1) % kPboRingSize; }
     Hermelin::GLBuffer tex;
+
+    // 🔒 [ZK] GL-Fences je Slot: schützen vor Reuse solange DMA (PBO→Tex) noch läuft
+    std::array<GLsync, kPboRingSize> pboFence{}; // nullptr = kein Fence gesetzt
+
+    // 🚩 [ZK] Wenn true: In dieser Frame **kein** Texture-Upload (kein freier Slot – nicht blockieren)
+    bool skipUploadThisFrame = false;
 
     // 🕒 Zeitsteuerung pro Frame
     int    frameCount = 0;

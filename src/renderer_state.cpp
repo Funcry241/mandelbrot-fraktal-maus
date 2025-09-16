@@ -1,6 +1,7 @@
 ///// Otter: Einheitliche, klare Struktur – nur aktive Zustaende; Header schlank, keine PCH; Nacktmull-Pullover.
 ///// Schneefuchs: Speicher/Buffer exakt definiert; Host-Timings zentral – eine Quelle; /WX-fest; ASCII-only.
 ///// Maus: Progressive-Defaults aus Settings::progressiveEnabled; Cooldown/State robust.
+///// Zaunkönig [ZK]: PBO-Fences sicher aufräumen (resize/Reset), Skip-Flag sauber initialisieren.
 ///// Datei: src/renderer_state.cpp
 
 #include "pch.hpp"
@@ -26,6 +27,15 @@ namespace {
         const double sy      = (rs.height > 0) ? (2.0 / (double)rs.height) * invZoom : 2.0 * invZoom;
         rs.pixelScale.y = sy;
         rs.pixelScale.x = sy * ar;
+    }
+
+    // [ZK] Alle GL-Fences dieses States sicher entfernen (noexcept). Erfordert gültigen GL-Kontext.
+    inline void clearPboFences(RendererState& rs) noexcept {
+        // Kontext setzen (kein no-op: wir wollen die gleiche Ressourcendomäne wie beim Upload)
+        OpenGLUtils::setGLResourceContext("pbo-fence-clear");
+        for (auto& f : rs.pboFence) {
+            if (f) { glDeleteSync(f); f = 0; }
+        }
     }
 }
 
@@ -65,9 +75,14 @@ void RendererState::reset() {
 
     // Zoom V3 Silk-Lite: persistenter Zustand auf Default
     zoomV3State = {};
-    
+
+    // Progressive
     progressiveEnabled         = Settings::progressiveEnabled;
     progressiveCooldownFrames  = 0;
+
+    // [ZK] Upload-Skip zurücksetzen & evtl. alte Fences putzen
+    skipUploadThisFrame = false;
+    clearPboFences(*this);
 
     // CUDA/Host-Timings: Default (valid=false) + Host-Frame-Nullung
     lastTimings = CudaPhaseTimings{};
@@ -244,6 +259,9 @@ void RendererState::resize(int newWidth, int newHeight) {
         return;
     }
 
+    // [ZK] Erst alle Fences aufräumen, dann Ressourcen frei geben
+    clearPboFences(*this);
+
     // Free old CUDA device buffers
     d_iterations.free();
     d_entropy.free();
@@ -267,6 +285,8 @@ void RendererState::resize(int newWidth, int newHeight) {
     // Create fresh GL buffers
     for (auto& b : pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(width, height)); }
     pboIndex = 0;
+    std::fill(pboFence.begin(), pboFence.end(), (GLsync)0); // [ZK] Fences zurücksetzen
+    skipUploadThisFrame = false; // [ZK]
     tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
 
     { GLuint ids[kPboRingSize] = { pboRing[0].id(), pboRing[1].id(), pboRing[2].id() }; CudaInterop::registerAllPBOs(ids, kPboRingSize); }

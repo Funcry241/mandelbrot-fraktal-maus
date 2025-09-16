@@ -1,7 +1,8 @@
 ///// Otter: Kürzer & robust: Auto-PBO-Register, MapGuard, Events+Stream einmalig, ASCII-Perf-Logs.
-/// /// Schneefuchs: Ein Pfad, deterministische State-Übergaben, konsistente Fehlerpfade, keine Redundanz.
-/// /// Maus: Keine versteckten Pfade; Host-Pinning für schnelle memcpy; Shader/GL bleiben unberührt.
-/// /// Datei: src/cuda_interop.cu
+///  Schneefuchs: Ein Pfad, deterministische State-Übergaben, konsistente Fehlerpfade, keine Redundanz.
+///  Maus: Keine versteckten Pfade; Host-Pinning für schnelle memcpy; Shader/GL bleiben unberührt.
+///// Zaunkönig [ZK]: WriteDiscard-Flags für GL-Interop, unregisterAll räumt auch Host-Pins/Events/Streams; Logs minimal.
+///// Datei: src/cuda_interop.cu
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
@@ -82,6 +83,16 @@ static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size
     if constexpr (Settings::debugLogging)
         LUCHS_LOG_HOST("[PIN] host-register ptr=%p bytes=%zu", regPtr, regBytes);
 }
+
+// [ZK] Für bereits registrierte Ressourcen sicherstellen, dass Map-Flags auf WriteDiscard stehen
+static inline void enforceWriteDiscard(bear_CudaPBOResource* res) {
+    if (!res) return;
+    if (auto* gr = res->get()) {
+        // Ignoriere Fehler (ältere Treiber können setMapFlags auf no-op setzen)
+        (void)cudaGraphicsResourceSetMapFlags(gr, cudaGraphicsMapFlagsWriteDiscard);
+    }
+}
+
 struct MapGuard {
     bear_CudaPBOResource* r=nullptr;
     void* ptr=nullptr; size_t bytes=0;
@@ -93,30 +104,59 @@ struct MapGuard {
 // ---- PBO-Verwaltung ---------------------------------------------------------
 void registerAllPBOs(const GLuint* ids, int count) {
     ensureDeviceOnce();
+    // [ZK] Vorherige PINS/EVENTS/STREAMS mit aufräumen, um Leaks bei Resize zu vermeiden
+    if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
+    if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
+    destroyEventsIfAny();
+    if (s_copyStrm) { cudaStreamDestroy(s_copyStrm); s_copyStrm=nullptr; }
+
     for (auto &kv : s_pboMap) delete kv.second; s_pboMap.clear(); s_pboActive=nullptr;
     if (!ids || count<=0) return;
+
     for (int i=0;i<count;++i) {
         if (!ids[i]) continue;
         auto* res = new bear_CudaPBOResource(ids[i]);
-        if (res && res->get()) s_pboMap[ids[i]] = res; else delete res;
+        if (res && res->get()) {
+            enforceWriteDiscard(res); // [ZK]
+            s_pboMap[ids[i]] = res;
+        } else {
+            delete res;
+        }
     }
     for (int i=0;i<count && !s_pboActive;++i){ auto it=s_pboMap.find(ids[i]); if(it!=s_pboMap.end()) s_pboActive=it->second; }
 }
+
 void unregisterAllPBOs() {
+    // [ZK] Auch Host-Pins, Events und Stream freigeben (Resize/Shutdown)
+    if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
+    if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
+    destroyEventsIfAny();
+    if (s_copyStrm) { cudaStreamDestroy(s_copyStrm); s_copyStrm=nullptr; }
+
     for (auto &kv : s_pboMap) delete kv.second; s_pboMap.clear(); s_pboActive=nullptr;
 }
+
 void registerPBO(const Hermelin::GLBuffer& pbo) {
     ensureDeviceOnce();
     const GLuint id = pbo.id();
     auto it = s_pboMap.find(id);
     if (it == s_pboMap.end()) {
         auto* res = new bear_CudaPBOResource(id);
-        if (res && res->get()) { s_pboMap[id]=res; if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[CUDA-Interop] auto-registered PBO id=%u", id); }
-        else { delete res; LUCHS_LOG_HOST("[FATAL] failed to create CudaPBOResource id=%u", id); return; }
+        if (res && res->get()) {
+            enforceWriteDiscard(res); // [ZK]
+            s_pboMap[id]=res;
+            if constexpr (Settings::debugLogging)
+                LUCHS_LOG_HOST("[CUDA-Interop] auto-registered PBO id=%u", id);
+        } else {
+            delete res;
+            LUCHS_LOG_HOST("[FATAL] failed to create CudaPBOResource id=%u", id);
+            return;
+        }
         it = s_pboMap.find(id);
     }
     s_pboActive = it->second;
 }
+
 void unregisterPBO() {  // nur aktives PBO lösen + Host-Pins/Event/Stream putzen
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
@@ -161,6 +201,7 @@ void renderCudaFrame(
 #if !defined(__CUDA_ARCH__)
     const auto tMap0 = std::chrono::high_resolution_clock::now();
 #endif
+    // [ZK] Map sollte dank GL-Fences non-blocking sein
     MapGuard map(s_pboActive);
     if (!map.ptr) throw std::runtime_error("pboResource->map() returned null");
 
@@ -242,7 +283,7 @@ void renderCudaFrame(
     state.lastTimings.deviceLogFlush   = 0.0;
 
     if constexpr (Settings::performanceLogging)
-        LUCHS_LOG_HOST("[PERF] path=gpu mp=%.2f mb=%.2f en=%.2f ct=%.2f tt=%.2f", mapMs, mbMs, entMs, conMs, totalMs);
+        LUCHS_LOG_HOST("[PERF][ZK] path=gpu mp=%.2f mb=%.2f en=%.2f ct=%.2f tt=%.2f", mapMs, mbMs, entMs, conMs, totalMs);
 #endif
 }
 

@@ -273,28 +273,38 @@ void mandelbrotUnifiedKernel(
         return;
     }
 
-    // Direct Pfad (mit Periodizität)
+    // [ZK] Direct Pfad (mit Periodizität) + Warp-Frühstopp (Chunk + Vote)
     float zx=0.f, zy=0.f;
     int it = maxIter; // default: bounded
 
     float px=0.f, py=0.f; int lastProbe=0;
-    const int perN  = Settings::periodicityCheckInterval;
-    const float eps2= (float)Settings::periodicityEps2;
+    const int   perN  = Settings::periodicityCheckInterval;
+    const float eps2  = (float)Settings::periodicityEps2;
 
-    #pragma unroll 4
-    for (int i=0;i<maxIter;++i){
-        const float x2=zx*zx, y2=zy*zy;
-        if (x2+y2>esc2){ it=i; break; }
-        const float xt=x2-y2+c.x; zy=__fmaf_rn(2.0f*zx,zy,c.y); zx=xt;
-        if constexpr (Settings::periodicityEnabled){
-            const int step=i-lastProbe;
-            if (step>=perN){
-                const float ddx=zx-px, ddy=zy-py;
-                const float d2=ddx*ddx+ddy*ddy;
-                if (d2<=eps2){ it=maxIter; break; }
-                px=zx; py=zy; lastProbe=i;
+    #ifndef WARP_CHUNK
+    #define WARP_CHUNK 8
+    #endif
+
+    unsigned mask = __activemask();
+    bool done = false;
+    int i = 0;
+    for (; i < maxIter; ) {
+        #pragma unroll
+        for (int j = 0; j < WARP_CHUNK && i < maxIter; ++j, ++i) {
+            const float x2 = zx*zx, y2 = zy*zy;
+            if (x2 + y2 > esc2) { it = i; done = true; break; }
+            const float xt = x2 - y2 + c.x; zy = __fmaf_rn(2.0f*zx, zy, c.y); zx = xt;
+            if constexpr (Settings::periodicityEnabled) {
+                const int step = i - lastProbe;
+                if (step >= perN) {
+                    const float ddx = zx - px, ddy = zy - py;
+                    const float d2  = ddx*ddx + ddy*ddy;
+                    if (d2 <= eps2) { it = maxIter; done = true; break; }
+                    px = zx; py = zy; lastProbe = i;
+                }
             }
         }
+        if (__all_sync(mask, done)) break;
     }
 
     float3 rgb = shade_color_only(it, maxIter, zx, zy, tSec);
@@ -371,8 +381,8 @@ extern "C" void launch_mandelbrotHybrid(
             if (cudaEventElapsedTime(&ms, evStart, evStop) != cudaSuccess) {
                 LUCHS_LOG_HOST("[PERF][WARN] cudaEventElapsedTime failed");
             } else {
-                LUCHS_LOG_HOST("[PERF] nacktmull unified kern=%.2f ms itMax=%d bx=%d by=%d unroll=%d",
-                               ms, maxIter, (int)block.x, (int)block.y, (int)Settings::MANDEL_UNROLL);
+                LUCHS_LOG_HOST("[PERF] nacktmull unified kern=%.2f ms itMax=%d bx=%d by=%d unroll=%d chunk=%d",
+                               ms, maxIter, (int)block.x, (int)block.y, (int)Settings::MANDEL_UNROLL, (int)WARP_CHUNK);
             }
             cudaEventDestroy(evStart);
             cudaEventDestroy(evStop);

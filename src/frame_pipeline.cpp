@@ -60,14 +60,16 @@ namespace {
         }
     }
 
+    // [GLQ] Einmalige Scissor-State-Ermittlung statt pro Frame abzufragen
+    static bool       s_scissorInit = false;
+    static GLboolean  s_scissorPrev = GL_FALSE;
+
     // --- Diagnose: GL-PBO kurz mappen und die ersten Bytes prüfen (nur Debug) ---
     [[maybe_unused]] static void peekPBO(GLuint pbo) {
         if constexpr (!Settings::debugLogging) {
             (void)pbo;
             return;
         }
-        GLint prev = 0;
-        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prev);
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 
         const GLsizeiptr N = 64; // erste 64 Bytes
@@ -83,7 +85,8 @@ namespace {
             const GLenum err = glGetError();
             LUCHS_LOG_HOST("[PBO-PEEK][WARN] map failed for pbo=%u (glError=0x%04X)", pbo, err);
         }
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prev));
+        // [GLQ] Kein glGetIntegerv mehr – wir hinterlassen "0" als Unpack-Binding
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     }
 
     // --- CUDA 13: Events statt cudaDeviceSynchronize() -----------
@@ -121,8 +124,35 @@ static void beginFrame(FrameContext& fctx, RendererState& state) {
 
 // ------------------------------- CUDA + analysis ------------------------------
 static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
-    // Rotate PBO ring for this frame and ensure CUDA uses the current PBO
-    state.advancePboRing();
+    // [ZK] Non-blocking PBO-Ring Auswahl mit GLsync-Fences
+    int tried = 0;
+    const int R = RendererState::kPboRingSize;
+    int next = (state.pboIndex + 1) % R;
+    bool found = false;
+    for (; tried < R; ++tried) {
+        GLsync& fence = state.pboFence[next];
+        if (fence) {
+            GLenum s = glClientWaitSync(fence, 0, 0); // poll only (non-blocking)
+            if (s == GL_ALREADY_SIGNALED || s == GL_CONDITION_SATISFIED) {
+                glDeleteSync(fence); fence = 0;
+            } else {
+                next = (next + 1) % R; continue;
+            }
+        }
+        found = true; break;
+    }
+    if (!found) {
+        state.skipUploadThisFrame = true;
+        if constexpr (Settings::performanceLogging) {
+            LUCHS_LOG_HOST("[ZK][UP] skip reason=no_free_pbo ring=%d", state.pboIndex);
+        }
+        return; // Kein Mapping/Compute, um Stalls zu vermeiden
+    }
+
+    state.pboIndex = next;
+    state.skipUploadThisFrame = false;
+
+    // Jetzt den freien Slot der CUDA-Seite zuordnen
     CudaInterop::registerPBO(state.currentPBO());
 
     if constexpr (Settings::debugLogging) {
@@ -285,8 +315,12 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
 
     glViewport(0, 0, fctx.width, fctx.height);
 
-    const GLboolean hadScissor = glIsEnabled(GL_SCISSOR_TEST);
-    if (hadScissor) [[unlikely]] glDisable(GL_SCISSOR_TEST);
+    // [GLQ] Nur im ersten Frame Scissor-Status abfragen, danach cachen
+    if (!s_scissorInit) {
+        s_scissorPrev = glIsEnabled(GL_SCISSOR_TEST);
+        s_scissorInit = true;
+    }
+    if (s_scissorPrev) [[unlikely]] glDisable(GL_SCISSOR_TEST);
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] drawFrame begin: tex=%u pbo=%u %dx%d",
@@ -295,12 +329,25 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
     }
 
     OpenGLUtils::setGLResourceContext("draw");
+
     // Feste Aufrufreihenfolge: updateTextureFromPBO(PBO, TEX, W, H)
-    OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(), state.tex.id(), fctx.width, fctx.height);
+    if (!state.skipUploadThisFrame) {
+        OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(), state.tex.id(), fctx.width, fctx.height);
+        // [ZK] Fence nach DMA-Start setzen, um Reuse zu bewachen
+        if (state.pboFence[state.pboIndex]) { glDeleteSync(state.pboFence[state.pboIndex]); state.pboFence[state.pboIndex]=0; }
+        state.pboFence[state.pboIndex] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZK][UP] fence set pbo=%u ring=%d", state.currentPBO().id(), state.pboIndex);
+        }
+    } else {
+        if constexpr (Settings::performanceLogging) {
+            LUCHS_LOG_HOST("[ZK][UP] no-upload this frame");
+        }
+    }
 
     RendererPipeline::drawFullscreenQuad(state.tex.id());
 
-    if (hadScissor) [[unlikely]] glEnable(GL_SCISSOR_TEST);
+    if (s_scissorPrev) glEnable(GL_SCISSOR_TEST);
 
     const auto t1 = Clock::now();
     g_texMs = std::chrono::duration_cast<msd>(t1 - t0).count();
