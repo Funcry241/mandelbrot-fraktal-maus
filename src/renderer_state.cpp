@@ -235,8 +235,16 @@ void RendererState::setupCudaBuffers(int tileSize) {
     }
 
     // --- host mirror sizes ---
-    h_entropy.resize(size_t(numTiles));
-    h_contrast.resize(size_t(numTiles));
+    // [ZK][HRES] Pre-reserve capacity for worst-case (MIN_TILE_SIZE) to avoid re-pinning
+    {
+        const int tilesXmax = (width  + Settings::MIN_TILE_SIZE - 1) / Settings::MIN_TILE_SIZE;
+        const int tilesYmax = (height + Settings::MIN_TILE_SIZE - 1) / Settings::MIN_TILE_SIZE;
+        const size_t numTilesMax = size_t(tilesXmax) * size_t(tilesYmax);
+        if (h_entropy.capacity()  < numTilesMax)  h_entropy.reserve(numTilesMax);
+        if (h_contrast.capacity() < numTilesMax) h_contrast.reserve(numTilesMax);
+        h_entropy.resize(size_t(numTiles));
+        h_contrast.resize(size_t(numTiles));
+    }
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[ALLOC] buffers ready: it=%p(%zu) entropy=%p(%zu) contrast=%p(%zu) z=%p(%zu) it2=%p(%zu) | %dx%d px, tileSize=%d -> tiles=%d",

@@ -1,6 +1,7 @@
 ///// Otter: Direktfarbe (A=255), kein Compose. Neon-Intro (~2s) + Rüsselwarze (Glanz & Glitzer).
 ///// Schneefuchs: API unverändert, Progressive & Periodizität bleiben; analytische Gradienten; kompakt.
 ///  Maus: Innen dunkel, außen Palette + Highlights; performantes Packen & minimale Zweige.
+///// ZK: Periodizitäts-Log nur einmal (Debug), sonst unverändert.
 ///  Datei: src/nacktmull.cu
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -390,9 +391,14 @@ extern "C" void launch_mandelbrotHybrid(
             mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
         }
 
+        // [ZK] Periodizitäts-Info nur einmal loggen
+        static bool s_logPeriodicityOnce = false;
         if constexpr (Settings::debugLogging){
-            LUCHS_LOG_HOST("[INFO] periodicity enabled=%d N=%d eps2=%.3e",
-                (int)Settings::periodicityEnabled,(int)Settings::periodicityCheckInterval,(double)Settings::periodicityEps2);
+            if (!s_logPeriodicityOnce) {
+                LUCHS_LOG_HOST("[INFO] periodicity enabled=%d N=%d eps2=%.3e",
+                    (int)Settings::periodicityEnabled,(int)Settings::periodicityCheckInterval,(double)Settings::periodicityEps2);
+                s_logPeriodicityOnce = true;
+            }
         }
     } catch (...) {
         LUCHS_LOG_HOST("[NACKTMULL][ERR] unexpected exception in launch_mandelbrotHybrid");
