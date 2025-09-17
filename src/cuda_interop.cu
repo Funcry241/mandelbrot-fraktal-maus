@@ -1,8 +1,7 @@
-///// Otter: Kürzer & robust: Auto-PBO-Register, MapGuard, Events+Stream einmalig, ASCII-Perf-Logs.
-///  Schneefuchs: Ein Pfad, deterministische State-Übergaben, konsistente Fehlerpfade, keine Redundanz.
-///  Maus: Keine versteckten Pfade; Host-Pinning für schnelle memcpy; Shader/GL bleiben unberührt.
-///  Zaunkönig [ZK]: WriteDiscard-Flags, unregisterAll räumt Host-Pins/Events/Streams; Logs minimal.
-///  Datei: src/cuda_interop.cu
+///// Otter: OpenGL PBO interop; map/unmap + pointer retrieval logged deterministically.
+///// Schneefuchs: Precheck cuda runtime; numeric rc codes only; no getErrorString.
+///// Maus: Immediate device-log flush on CUDA errors; one line per event.
+///// Datei: src/cuda_interop.cu
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"

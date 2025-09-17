@@ -1,6 +1,6 @@
-///// Otter: Feste Aufrufreihenfolge - updateTextureFromPBO(PBO, TEX, W, H); ASCII-Logs; keine Compat-Wrapper.
-///// Schneefuchs: /WX-fest; keine toten TU-scope-Symbole (Progressive komplett entfernt).
-///// Maus: Diese TU nutzt ausschließlich den klassischen Pfad; Progressive wird hier NICHT gebaut.
+///// Otter: Central frame pipeline; timing + PBO mapping logged in one fixed ASCII line.
+///// Schneefuchs: Headers/Sources in sync; no duplicate includes.
+///// Maus: Performance logging default ON; epoch-millis, stable field order.
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"

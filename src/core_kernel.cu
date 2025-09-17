@@ -1,7 +1,8 @@
-///// Otter: MAUS header normalized; ASCII-only; no functional changes.
-///// Schneefuchs: Header format per rules #60–62; path normalized.
-///// Maus: Keep this as the only top header block; exact four lines.
+///// Otter: Deterministic CUDA path with single-line ASCII logs per event.
+///// Schneefuchs: Device logs via LUCHS_LOG_DEVICE; snprintf only for message construction.
+///// Maus: One final macro call; no printf/fprintf in device code.
 ///// Datei: src/core_kernel.cu
+
 #include "pch.hpp"
 
 #include <cuda_runtime.h>

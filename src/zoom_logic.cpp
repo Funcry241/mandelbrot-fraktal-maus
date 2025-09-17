@@ -1,7 +1,7 @@
-///// Otter: V3-lite Smooth+Speed — slew-limit, handover blend, temp-EMA, top-k floor; trig-free turn; no black zoom.
-///// Schneefuchs: Deterministic, ASCII logs, /WX-safe; steady_clock dt; micro-opts (invWidth/Height).
-///// Maus: Stable ABI; Patch-A inertia (angle+deadband); no planner; HUD markers off.
-/// /// Datei: src/zoom_logic.cpp
+///// Otter: Silk-Lite zoom controller with PD motion and hysteresis; ASCII-only logs.
+///// Schneefuchs: No API drift; statistics cadence and retarget intervals documented.
+///// Maus: ForceAlwaysZoom default ON; warm-up freeze respected.
+///// Datei: src/zoom_logic.cpp
 
 #include "zoom_logic.hpp"
 #include "settings.hpp"

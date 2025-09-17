@@ -1,7 +1,8 @@
-///// Otter: Add Kolibri/Grid & Kolibri/Boost knobs; periodicity interval 64->96; stable defaults otherwise.
-///// Schneefuchs: Fully documented per rule #55; grouped as Settings::Kolibri and ::KolibriBoost; ASCII-only.
-///// Maus: Next steps wire Grid in frame_pipeline & overlay, Boost in pipeline + kernel; no spam logs.
+///// Otter: Central config; every value documented (purpose, range, default).
+///// Schneefuchs: No hidden macros; single source of truth for flags.
+///// Maus: performanceLogging=1, ForceAlwaysZoom=1 baseline; ASCII-only logs.
 ///// Datei: src/settings.hpp
+
 #pragma once
 
 // ============================================================================

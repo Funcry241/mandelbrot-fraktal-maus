@@ -1,6 +1,6 @@
-///// Otter: Loop orchestrates FramePipeline; no duplicate upload/draw; async 100th-frame capture.
-///// Schneefuchs: if constexpr for C4127; VSync init-once; precise 60 FPS pacing; ASCII-only logs.
-///// Maus: Schlanke TU; keine unnoetigen Includes/Statics; deterministische Reihenfolge.
+///// Otter: Main loop; Silk-Lite motion + frame budget pacing.
+///// Schneefuchs: Device/host logs separated; flush on CUDA error paths.
+///// Maus: Warm-up freeze; fixed cadence for stats; one line per event.
 ///// Datei: src/renderer_loop.cpp
 
 #include "pch.hpp"

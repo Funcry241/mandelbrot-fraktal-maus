@@ -1,7 +1,8 @@
-///// Otter: Projekt 'Pfau' - compact: unified panel (alpha/margin/radius) + tiles (Top-Right).
-///// Schneefuchs: No API change; state restore as before; ASCII logs with [UI/Pfau].
-///// Maus: Tiles opaque, panel semi-transparent; pixel snapping; same top margin as WS.
+///// Otter: GPU Heatmap overlay (fragment shader glow/alpha), no external deps.
+///// Schneefuchs: Coordinates harmonized with Eule; header/source in sync.
+///// Maus: One-line logs, fixed field order; enable by default.
 ///// Datei: src/heatmap_overlay.cpp
+
 #pragma warning(push)
 #pragma warning(disable: 4100)
 

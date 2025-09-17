@@ -1,7 +1,8 @@
-///// Otter: Projekt „Pfau“ – kompakt fix: Top-Margin außen = UI_MARGIN (Content-Anker = MARGIN+PADDING).
-///// Schneefuchs: C4459 bereits behoben; nur 2 Zeilen in generateOverlayQuads angepasst; ASCII-Logs.
-//\/\/ Maus: Panel-Top jetzt exakt symmetrisch zur Heatmap; keine API-/Shader-Änderungen.
+///// Otter: HUD overlay; zoom/offset/FPS/entropy in deterministic layout.
+///// Schneefuchs: No duplicate includes; API stable with header.
+///// Maus: ASCII-only; minimal allocations per frame.
 ///// Datei: src/warzenschwein_overlay.cpp
+
 #pragma warning(push)
 #pragma warning(disable: 4100)
 
