@@ -1,8 +1,8 @@
 ///// Otter: Kürzer & robust: Auto-PBO-Register, MapGuard, Events+Stream einmalig, ASCII-Perf-Logs.
 ///  Schneefuchs: Ein Pfad, deterministische State-Übergaben, konsistente Fehlerpfade, keine Redundanz.
 ///  Maus: Keine versteckten Pfade; Host-Pinning für schnelle memcpy; Shader/GL bleiben unberührt.
-///// Zaunkönig [ZK]: WriteDiscard-Flags für GL-Interop, unregisterAll räumt auch Host-Pins/Events/Streams; Logs minimal.
-///// Datei: src/cuda_interop.cu
+///  Zaunkönig [ZK]: WriteDiscard-Flags, unregisterAll räumt Host-Pins/Events/Streams; Logs minimal.
+///  Datei: src/cuda_interop.cu
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
@@ -16,7 +16,6 @@
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
 #include <vector_types.h>
-#include <vector_functions.h>
 
 #include <unordered_map>
 #include <vector>
@@ -53,25 +52,28 @@ static cudaStream_t   s_copyStrm = nullptr;
 static inline void ensureDeviceOnce() {
     if (!s_deviceOk) { CUDA_CHECK(cudaSetDevice(0)); s_deviceOk = true; }
 }
+
+// create timing/barrier events once (always, not only for logging)
 static inline void ensureEventsOnce() {
     if (s_evInit) return;
-    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
-        cudaEventCreate(&s_evStart);
-        cudaEventCreate(&s_evStop);
-        s_evInit = (s_evStart && s_evStop);
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[CUDA] timing events %s", s_evInit ? "created" : "FAILED");
-    }
+    CUDA_CHECK(cudaEventCreate(&s_evStart));
+    CUDA_CHECK(cudaEventCreate(&s_evStop));
+    s_evInit = (s_evStart && s_evStop);
+    if constexpr (Settings::debugLogging)
+        LUCHS_LOG_HOST("[CUDA][ZK] events %s", s_evInit ? "created" : "FAILED");
 }
+
 static inline void ensureCopyStreamOnce() {
     if (!s_copyStrm) CUDA_CHECK(cudaStreamCreateWithFlags(&s_copyStrm, cudaStreamNonBlocking));
 }
+
 static inline void destroyEventsIfAny() {
     if (!s_evInit) return;
     cudaEventDestroy(s_evStart); s_evStart=nullptr;
     cudaEventDestroy(s_evStop);  s_evStop =nullptr;
     s_evInit=false;
 }
+
 static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size_t& regBytes) {
     const size_t cap = vec.capacity();
     void* ptr = cap ? (void*)vec.data() : nullptr;
@@ -84,11 +86,10 @@ static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size
         LUCHS_LOG_HOST("[PIN] host-register ptr=%p bytes=%zu", regPtr, regBytes);
 }
 
-// [ZK] Für bereits registrierte Ressourcen sicherstellen, dass Map-Flags auf WriteDiscard stehen
+// [ZK] Für registrierte Ressourcen WriteDiscard-Flags setzen
 static inline void enforceWriteDiscard(bear_CudaPBOResource* res) {
     if (!res) return;
     if (auto* gr = res->get()) {
-        // Ignoriere Fehler (ältere Treiber können setMapFlags auf no-op setzen)
         (void)cudaGraphicsResourceSetMapFlags(gr, cudaGraphicsMapFlagsWriteDiscard);
     }
 }
@@ -104,7 +105,8 @@ struct MapGuard {
 // ---- PBO-Verwaltung ---------------------------------------------------------
 void registerAllPBOs(const GLuint* ids, int count) {
     ensureDeviceOnce();
-    // [ZK] Vorherige PINS/EVENTS/STREAMS mit aufräumen, um Leaks bei Resize zu vermeiden
+
+    // [ZK] Vorherige Pins/Events/Stream sauber freigeben (Resize/Reset)
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
@@ -127,7 +129,7 @@ void registerAllPBOs(const GLuint* ids, int count) {
 }
 
 void unregisterAllPBOs() {
-    // [ZK] Auch Host-Pins, Events und Stream freigeben (Resize/Shutdown)
+    // [ZK] Host-Pins, Events und Stream freigeben; PBOs löschen
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
@@ -157,12 +159,20 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
     s_pboActive = it->second;
 }
 
-void unregisterPBO() {  // nur aktives PBO lösen + Host-Pins/Event/Stream putzen
+void unregisterPBO() {
+    // aktives PBO entfernen + Pins/Events/Stream putzen
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
     if (s_copyStrm) { cudaStreamDestroy(s_copyStrm); s_copyStrm=nullptr; }
-    delete s_pboActive; s_pboActive=nullptr;
+
+    if (s_pboActive) {
+        // aus Map entfernen (keine Dangling-Pointer)
+        for (auto it = s_pboMap.begin(); it != s_pboMap.end(); ++it) {
+            if (it->second == s_pboActive) { delete it->second; s_pboMap.erase(it); break; }
+        }
+        s_pboActive = nullptr;
+    }
 }
 
 // ---- Hauptpfad --------------------------------------------------------------
@@ -212,31 +222,23 @@ void renderCudaFrame(
     const size_t needBytes = size_t(width)*size_t(height)*sizeof(uchar4);
     if (map.bytes < needBytes) throw std::runtime_error("PBO byte size mismatch");
 
-    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
-        ensureEventsOnce();
-        if (s_evInit) cudaEventRecord(s_evStart, 0);
-    }
+    ensureEventsOnce();
 
     (void)cudaGetLastError();
+    cudaEventRecord(s_evStart, 0); // timing start (default stream)
     launch_mandelbrotHybrid(static_cast<uchar4*>(map.ptr),
                             static_cast<uint16_t*>(d_iterations.get()),
                             width,height, zoom, offset, maxIterations, tileSize);
     cudaError_t mbErrLaunch = cudaGetLastError();
-    cudaError_t mbErrSync   = cudaSuccess;
 
-    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
-        if (s_evInit) {
-            cudaEventRecord(s_evStop, 0);
-            mbErrSync = cudaEventSynchronize(s_evStop);
-            float ms=0.0f;
-            if (mbErrSync==cudaSuccess) {
-                cudaEventElapsedTime(&ms, s_evStart, s_evStop);
-            #if !defined(__CUDA_ARCH__)
-                mbMs = ms;
-            #endif
-            }
-        }
+    cudaEventRecord(s_evStop, 0);  // timing stop for kernel
+    cudaError_t mbErrSync   = cudaEventSynchronize(s_evStop);
+
+#if !defined(__CUDA_ARCH__)
+    if (mbErrSync==cudaSuccess) {
+        float ms=0.0f; cudaEventElapsedTime(&ms, s_evStart, s_evStop); mbMs = ms;
     }
+#endif
     if (mbErrLaunch != cudaSuccess || mbErrSync != cudaSuccess)
         throw std::runtime_error("CUDA failure: mandelbrot kernel");
 
@@ -255,7 +257,7 @@ void renderCudaFrame(
     entMs = ecMs * 0.5; conMs = ecMs * 0.5;
 #endif
 
-    // Host-Transfers (gepinnt, async)
+    // Host-Transfers (gepinnt, async) — korrekt sequenziert via Event-Barrier
     if (h_entropy.capacity()  < size_t(numTiles)) h_entropy.reserve(size_t(numTiles));
     if (h_contrast.capacity() < size_t(numTiles)) h_contrast.reserve(size_t(numTiles));
     ensureHostPinned(h_entropy,  s_hostRegEntropyPtr,  s_hostRegEntropyBytes);
@@ -263,6 +265,10 @@ void renderCudaFrame(
     h_entropy.resize(size_t(numTiles)); h_contrast.resize(size_t(numTiles));
 
     ensureCopyStreamOnce();
+    // Warten im Copy-Stream, bis Default-Stream (Kernels) fertig ist
+    cudaEventRecord(s_evStart, 0);                // reuse as barrier marker
+    CUDA_CHECK(cudaStreamWaitEvent(s_copyStrm, s_evStart, 0));
+
     CUDA_CHECK(cudaMemcpyAsync(h_entropy.data(),  d_entropy.get(),  enBytes, cudaMemcpyDeviceToHost, s_copyStrm));
     CUDA_CHECK(cudaMemcpyAsync(h_contrast.data(), d_contrast.get(), ctBytes, cudaMemcpyDeviceToHost, s_copyStrm));
     CUDA_CHECK(cudaStreamSynchronize(s_copyStrm));
@@ -283,7 +289,7 @@ void renderCudaFrame(
     state.lastTimings.deviceLogFlush   = 0.0;
 
     if constexpr (Settings::performanceLogging)
-        LUCHS_LOG_HOST("[PERF][ZK] path=gpu mp=%.2f mb=%.2f en=%.2f ct=%.2f tt=%.2f", mapMs, mbMs, entMs, conMs, totalMs);
+        LUCHS_LOG_HOST("[PERF][ZK] mp=%.2f mb=%.2f en=%.2f ct=%.2f tt=%.2f", mapMs, mbMs, entMs, conMs, totalMs);
 #endif
 }
 

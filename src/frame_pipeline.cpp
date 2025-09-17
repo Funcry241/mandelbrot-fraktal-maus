@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <algorithm>        // std::max, std::min
 #include <vector_types.h>
 #include <vector_functions.h> // make_float2
 #include <cuda_runtime.h>     // CUDA events for timing (no device-wide sync)
@@ -389,7 +390,34 @@ void execute(RendererState& state) {
     // Nacktmull-Pullover: State hält center (double2); FrameContext hält offset (float2)
     g_ctx.offset        = make_float2((float)state.center.x, (float)state.center.y);
     g_ctx.maxIterations = state.maxIterations;
-    g_ctx.tileSize      = computeTileSizeFromZoom(g_ctx.zoom);
+
+    // Kolibri/Grid: screen-konstante Kachelgröße in Pixeln (statt zoom-basiert)
+    if constexpr (Settings::Kolibri::gridScreenConstant) {
+        const int desired = std::max(1, Settings::Kolibri::desiredTilePx);
+        const int tilesX  = (g_ctx.width  + desired - 1) / desired;  // ceil(width/desired)
+        const int tilesY  = (g_ctx.height + desired - 1) / desired;  // ceil(height/desired)
+        const int safeX   = std::max(1, tilesX);
+        const int safeY   = std::max(1, tilesY);
+        const int tileW   = g_ctx.width  / safeX;   // floor, passt horizontal
+        const int tileH   = g_ctx.height / safeY;   // floor, passt vertikal
+        int tilePx        = std::min(tileW, tileH); // quadratischer tileSize (Best-Fit)
+        tilePx            = std::max(8, std::min(tilePx, 256)); // konservative Klammer
+
+        g_ctx.tileSize = tilePx;
+
+        // Optionales, sparsames Log nur bei Änderung (function-static, kein TU-Müll)
+        static int s_prevTilePx = -1;
+        if (Settings::performanceLogging && tilePx != s_prevTilePx) {
+            const int logTilesX = (g_ctx.width  + tilePx - 1) / tilePx;
+            const int logTilesY = (g_ctx.height + tilePx - 1) / tilePx;
+            LUCHS_LOG_HOST("[GRID] screen-const tilePx=%d tiles=%dx%d res=%dx%d",
+                           tilePx, logTilesX, logTilesY, g_ctx.width, g_ctx.height);
+            s_prevTilePx = tilePx;
+        }
+    } else {
+        g_ctx.tileSize = computeTileSizeFromZoom(g_ctx.zoom);
+    }
+
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
     // Klassischer Pfad (Progressive vollständig entfernt)

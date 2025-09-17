@@ -1,4 +1,3 @@
-
 ///// Otter: Loop orchestrates FramePipeline; no duplicate upload/draw; async 100th-frame capture.
 ///// Schneefuchs: if constexpr for C4127; VSync init-once; precise 60 FPS pacing; ASCII-only logs.
 ///// Maus: Schlanke TU; keine unnoetigen Includes/Statics; deterministische Reihenfolge.

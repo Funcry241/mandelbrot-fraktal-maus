@@ -1,6 +1,6 @@
-///// Otter: MAUS header normalized; ASCII-only; no functional changes.
-///// Schneefuchs: Header format per rules #60–62; path normalized.
-///// Maus: Keep this as the only top header block; exact four lines.
+///// Otter: Add Kolibri/Grid & Kolibri/Boost knobs; periodicity interval 64->96; stable defaults otherwise.
+///// Schneefuchs: Fully documented per rule #55; grouped as Settings::Kolibri and ::KolibriBoost; ASCII-only.
+///// Maus: Next steps wire Grid in frame_pipeline & overlay, Boost in pipeline + kernel; no spam logs.
 ///// Datei: src/settings.hpp
 #pragma once
 
@@ -186,8 +186,9 @@ namespace Settings {
     // periodicityCheckInterval
     // Wirkung: Prüfintervall N (Iterationen) zwischen zwei Proben von z.
     // Empfehlung: 32 .. 128 (int) – größer = seltener, schneller; kleiner = häufiger, genauer.
+    // Hinweis: Kolibri/Boost empfiehlt moderat höhere Intervalle. Default hier: 96.
     // ------------------------------------------------------------------------
-    inline constexpr int periodicityCheckInterval = 64;
+    inline constexpr int periodicityCheckInterval = 96;
 
     // ------------------------------------------------------------------------
     // periodicityEps2
@@ -220,4 +221,73 @@ inline constexpr int MANDEL_UNROLL  = 4;
 
 // Enable fused multiply-add in the iteration updates (zy and zx path).
 inline constexpr bool MANDEL_USE_FMA = true;
+
+
+// ============================== Kolibri/Grid =================================
+// Screen-constant heatmap tiles (visual analysis grid independent of zoom).
+// Implementierung: frame_pipeline berechnet tileSizePx aus Fenstergröße.
+// -----------------------------------------------------------------------------
+namespace Kolibri {
+    // ------------------------------------------------------------------------
+    // gridScreenConstant
+    // Wirkung: Aktiviert screen-konstante Tiles im Analyse-/Overlay-Pfad.
+    // Empfehlung: true (bool)
+    // Effekt: Kacheln bleiben ~gleich groß in Pixeln, unabhängig vom Zoom.
+    // ------------------------------------------------------------------------
+    inline constexpr bool gridScreenConstant = true;
+
+    // ------------------------------------------------------------------------
+    // desiredTilePx
+    // Wirkung: Zielgröße einer Kachel in Bildschirm-Pixeln.
+    // Empfehlung: 20 .. 40 (int) – 28 ist ein guter Startwert.
+    // Effekt: kleiner = dichteres Raster, größer = weniger Kacheln.
+    // ------------------------------------------------------------------------
+    inline constexpr int  desiredTilePx = 28;
+
+    // ------------------------------------------------------------------------
+    // gridFadeEnable / gridFadeMinFps / gridFadeZoomStart
+    // Wirkung: Optionaler Fade des Gitters, wenn es „stören“ würde.
+    // Empfehlung:
+    //   - gridFadeEnable: true
+    //   - gridFadeMinFps: 35 .. 45
+    //   - gridFadeZoomStart: szenabhaengig, z.B. 5000.0f
+    // Effekt: blendet Raster sanft zurück, wenn FPS niedrig sind oder Zoom hoch ist.
+    // ------------------------------------------------------------------------
+    inline constexpr bool  gridFadeEnable   = true;
+    inline constexpr int   gridFadeMinFps   = 35;
+    inline constexpr float gridFadeZoomStart = 5000.0f;
+} // namespace Kolibri
+
+
+// ============================== Kolibri/Boost ================================
+// Deep-zoom framerate stabilizer: frame-budget + runtime addIter bounds.
+// Pipeline verwendet dt→addIterRuntime in Resume-Pfad; Kernel-Tuning separat.
+// -----------------------------------------------------------------------------
+namespace KolibriBoost {
+    // ------------------------------------------------------------------------
+    // enable
+    // Wirkung: Schaltet Budget-Regler frei (dt→addIterRuntime) und Kernel-Tuning.
+    // Empfehlung: true (bool)
+    // ------------------------------------------------------------------------
+    inline constexpr bool   enable = true;
+
+    // ------------------------------------------------------------------------
+    // targetFrameMs
+    // Wirkung: Zielzeit pro Frame (Budget). Pipeline senkt/erhöht addIterRuntime,
+    // um diese Zeit grob einzuhalten.
+    // Empfehlung: 18.0 .. 25.0 (double) – 22.0 ≈ 45 FPS gefühlt sehr flüssig.
+    // ------------------------------------------------------------------------
+    inline constexpr double targetFrameMs = 22.0;
+
+    // ------------------------------------------------------------------------
+    // addIterMin / addIterMax / addIterStep
+    // Wirkung: Klemmen und Schrittweite für addIterRuntime (pro Frame).
+    // Empfehlung: Min 12..24, Max 40..64, Step 1..4
+    // Effekt: Tighter Min → höhere FPS-Sicherheit; höheres Max → schnellere Schärfe.
+    // ------------------------------------------------------------------------
+    inline constexpr int addIterMin  = 16;
+    inline constexpr int addIterMax  = 48;
+    inline constexpr int addIterStep = 2;
+} // namespace KolibriBoost
+
 } // namespace Settings

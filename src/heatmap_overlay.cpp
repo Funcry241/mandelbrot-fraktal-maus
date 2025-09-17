@@ -1,7 +1,7 @@
-///// Otter: Projekt „Pfau“ – kompakt: vereinheitlichtes Panel (Alpha/Margin/Radius) + Tiles (TR).
-///// Schneefuchs: Keine API-Änderung; State-Restore wie zuvor; ASCII-Logs mit [UI/Pfau].
-///// Maus: Tiles opak, Panel halbtransparent; Pixel-Snapping; identische Top-Margin wie WS.
-// ///// Datei: src/heatmap_overlay.cpp
+///// Otter: Projekt 'Pfau' - compact: unified panel (alpha/margin/radius) + tiles (Top-Right).
+///// Schneefuchs: No API change; state restore as before; ASCII logs with [UI/Pfau].
+///// Maus: Tiles opaque, panel semi-transparent; pixel snapping; same top margin as WS.
+///// Datei: src/heatmap_overlay.cpp
 #pragma warning(push)
 #pragma warning(disable: 4100)
 
@@ -35,7 +35,7 @@ static const char* kFS = R"GLSL(#version 430 core
 in float vValue; out vec4 FragColor;
 vec3 map(float v){ float g=smoothstep(0,1,clamp(v,0,1));
   return mix(vec3(0.08,0.08,0.10), vec3(1.0,0.82,0.32), g); }
-void main(){ FragColor=vec4(map(vValue),1.0); } // Tiles opak; Panel liefert Alpha
+void main(){ FragColor=vec4(map(vValue),1.0); } // Tiles opaque; panel provides alpha
 )GLSL";
 
 static const char* kPanelVS = R"GLSL(#version 430 core
@@ -51,7 +51,7 @@ uniform vec4 uPanelRectPx; uniform float uRadiusPx,uAlpha,uBorderPx;
 
 float sdRoundRect(vec2 p, vec2 b, float r){
   vec2 d = abs(p) - b + vec2(r);
-  return length(max(d,0.0)) - r;      // d<0 innen, d>0 außen
+  return length(max(d,0.0)) - r;      // d<0 inside, d>0 outside
 }
 
 void main(){
@@ -59,15 +59,15 @@ void main(){
   vec2 b = 0.5 * (uPanelRectPx.zw - uPanelRectPx.xy);
   float d = sdRoundRect(vPx - c, b, uRadiusPx);
 
-  // innen voll, außen weich ausfaden (kein Halo)
+  // inside full, outside fade softly (no halo)
   float aa   = fwidth(d);
-  float body = 1.0 - smoothstep(0.0, aa, max(d, 0.0));  // 1 innen, 0 außen
+  float body = 1.0 - smoothstep(0.0, aa, max(d, 0.0));  // 1 inside, 0 outside
 
-  // sehr schmaler innerer Stroke: nur ~0.5*uBorderPx Bandbreite
+  // very thin inner stroke: ~0.5*uBorderPx bandwidth
   float inner = smoothstep(-uBorderPx*0.5, 0.0, d);
 
   vec3 borderCol = vec3(1.0, 0.82, 0.32);
-  vec3 col = mix(vColor, borderCol, 0.08 * inner); // dezenter: 8% Mix
+  vec3 col = mix(vColor, borderCol, 0.08 * inner); // subtle: 8% mix
 
   FragColor = vec4(col, uAlpha * body);
 }
@@ -162,12 +162,12 @@ void drawOverlay(const std::vector<float>& entropy,
         }
     }
 
-    // Pfau-Layout (Top-Right): identische Top-Margin wie Warzenschwein
+    // Pfau layout (Top-Right): same top margin as Warzenschwein
     constexpr int contentHPx = 100;
     const float aspect = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
     const int   contentWPx = std::max(1, int(std::round(contentHPx*aspect)));
 
-    // *** Heatmap-spezifisch: schmaleres Innenpadding ***
+    // Heatmap-specific: narrower inner padding
     const int padPx = HeatmapOverlay::snapToPixel(Pfau::UI_PADDING * 0.5f);
 
     const int panelW = contentWPx + padPx*2;
@@ -187,7 +187,7 @@ void drawOverlay(const std::vector<float>& entropy,
     const float ox = ( (float)contentX0 / (float)width )  * 2.0f - 1.0f;
     const float oy = ( (float)gridBottomY / (float)height ) * 2.0f - 1.0f;
 
-    // State sichern
+    // Save state
     GLint prevVAO=0, prevBuf=0, prevProg=0, srcRGB=0,dstRGB=0,srcA=0,dstA=0;
     GLboolean wasBlend=GL_FALSE, wasDepth=GL_FALSE;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&prevVAO);
@@ -214,7 +214,7 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uPanelRectPx>=0) glUniform4f(uPanelRectPx,(float)panelX0,(float)panelY0,(float)panelX1,(float)panelY1);
         if(uRadiusPx>=0)    glUniform1f(uRadiusPx,Pfau::UI_RADIUS);
         if(uAlpha>=0)       glUniform1f(uAlpha,Pfau::PANEL_ALPHA);
-        // Dünnster Saum: nur 35% der globalen Breite
+        // thinnest rim: only 35% of global width
         if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER * 0.35f);
 
         glBindVertexArray(sPanelVAO);
@@ -228,7 +228,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
     }
 
-    // Tiles (opak) über Panel
+    // Tiles (opaque) above panel
     {
         glUseProgram(sProg);
         glUniform2f(uScale,sx,sy);
