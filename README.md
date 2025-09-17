@@ -1,5 +1,4 @@
 <!-- Datei: README.md -->
-
 <!-- 🐭 Maus-Kommentar: README für Alpha 81 – CI-validiert, Silk-Lite Zoom integriert, Auto-Tuner statt JSON-Reload. Logs jetzt mit Epoch-Millis, strikt einzeilig. CUDA 13 ist Pflicht; GLEW dynamisch. Schneefuchs: „Nur was synchron ist, bleibt stabil.“ -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
@@ -25,42 +24,41 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
 
 ## 🧠 Features
 
-* **🚀 CUDA Rendering**
+* **🚀 CUDA Rendering**  
   2-Pass Mandelbrot-Pipeline (Warmup + Sliced Finish), warp-synchron, CHUNKed (`WARP_CHUNK=64`).
-
   * **Survivor-Black**: unfertige Pixel sofort schwarz → *kein Ghosting* zwischen Slices.
   * **Event-Timing**: Ereignisbasierte Messung via CUDA-Events (ohne globales `cudaDeviceSynchronize()` im Normalpfad).
 
-* **🎯 Auto-Zoom mit Entropie- und Kontrastanalyse**
+* **🎯 Auto-Zoom mit Entropie- und Kontrastanalyse**  
   Softmax-Schwerpunkt über **Median/MAD**-normalisierte Scores; Softmax-Sparsification für ruhige Ziele.
 
-* **🪶 Silk-Lite Motion Planner**
+* **🪶 Silk-Lite Motion Planner**  
   Sanfte Schwenks, **Yaw-Rate-Limiter (rad/s)** + Längendämpfung, relative Hysterese & kurzer Lock gegen Flip-Flop.
 
-* **🕳️ Anti-Black-Guard (Cardioid/Bulb-Avoidance)**
+* **🕳️ Anti-Black-Guard (Cardioid/Bulb-Avoidance)**  
   Warm-up-Drift und **Void-Bias** schieben den Fokus verlässlich aus Innenbereichen → *kein „Zoom ins Schwarze“*.
 
-* **📈 Progressive Iterationen (Zoom-abhängig)**
-  Iterationszahl steigt automatisch mit dem Zoom-Level (Progressive/Resume optional).
+* **📈 Progressive Iterationen (Zoom-abhängig)**  
+  Iterationszahl steigt automatisch mit dem Zoom-Level. **Standardmäßig aktiv** (abschaltbar).
 
-* **🎨 GT-Palette (Cyan→Amber) + Smooth Coloring**
+* **🎨 GT-Palette (Cyan→Amber) + Smooth Coloring**  
   Interpolation im **Linearraum** gegen Banding, **Smooth Coloring** via `it - log2(log2(|z|))`.  
   **Streifen-Shading** optional – **standardmäßig aus** (`stripes = 0.0f`) für ringfreie Darstellung.
 
-* **🔍 Adaptive Tile-Größe**
+* **🔍 Adaptive Tile-Größe**  
   Automatische Tile-Anpassung für bessere Detailauswertung bei starkem Zoom.
 
-* **🖼️ Echtzeit-OpenGL + CUDA-Interop**
+* **🖼️ Echtzeit-OpenGL + CUDA-Interop**  
   Anzeige via Fullscreen-Quad, direkte PBO-Verbindung (`cudaGraphicsGLRegisterBuffer`).
 
-* **📊 Heatmap-Overlay (Projekt Eule)**
-  Visualisierung von Entropie/Kontrast pro Tile (GPU-Shader-Variante in Arbeit).  
+* **📊 Heatmap-Overlay (Eule – Preview)**  
+  Visualisierung von Entropie/Kontrast pro Tile (GPU-Shader-Variante im Aufbau).  
   **Heatmap-Vertrag**: *Innenpunkte schreiben `iterOut = maxIter`*, Escape schreibt die Iterationsnummer.
 
-* **🧰 HUD & ASCII-Debug (Warzenschwein)**
+* **🧰 HUD & ASCII-Debug (Warzenschwein)**  
   FPS, Zoom, Offset – optional. **Logging ist ASCII-only** und wirkt nicht auf Berechnungs-/Render-Pfade.
 
-* **🤖 Auto-Tuner**
+* **🤖 Auto-Tuner**  
   Findet ohne Neustart zyklisch optimale Zoom-/Analyseparameter und schreibt sie ins Log (kein JSON-Reload nötig).
 
 ---
@@ -94,8 +92,8 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
 
 ## 📦 Abhängigkeiten (via vcpkg)
 
-* [GLFW](https://www.glfw.org/) – Fenster-/Eingabe-Handling
-* [GLEW](http://glew.sourceforge.net/) – OpenGL-Extension-Management (dynamisch)
+* [GLFW](https://www.glfw.org/) – Fenster-/Eingabe-Handling  
+* [GLEW](http://glew.sourceforge.net/) – OpenGL-Extension-Management (**dynamisch**)
 
 ---
 
@@ -112,7 +110,8 @@ cd mandelbrot-fraktal-maus
 # vcpkg lokal bootstrappen (unter Windows .bat verwenden)
 git clone https://github.com/microsoft/vcpkg.git
 cd vcpkg
-./bootstrap-vcpkg.sh   # Windows: .ootstrap-vcpkg.bat
+./bootstrap-vcpkg.sh            # Linux/macOS
+.ootstrap-vcpkg.bat           # Windows (PowerShell oder CMD)
 cd ..
 ```
 
@@ -126,7 +125,7 @@ cmake --build build --config Release
 # (optional) Installationsbaum erzeugen
 cmake --install build --prefix .\dist
 # Ausführen
-./build/mandelbrot_otterdream.exe
+.uild\mandelbrot_otterdream.exe
 ```
 
 ### 3) Linux (GCC + Ninja)
@@ -140,7 +139,7 @@ cmake --install build --prefix ./dist
 ./build/mandelbrot_otterdream
 ```
 
-> **Tipp:** Abweichende Compute Capability? Beim Konfigurieren überschreiben:
+> **Tipp:** Abweichende Compute Capability beim Konfigurieren überschreiben:
 >
 > ```bash
 > cmake -S . -B build -G Ninja >   -DCMAKE_CUDA_ARCHITECTURES=90 >   -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" >   -DCMAKE_BUILD_TYPE=Release
@@ -153,7 +152,8 @@ cmake --install build --prefix ./dist
 * `P`: Auto-Zoom pausieren/fortsetzen
 * `H`: Heatmap-Overlay ein/aus
 * `T`: HUD (Warzenschwein) ein/aus
-> Optional: `Space` kann zusätzlich als Alias für `P` gemappt werden.
+
+> Hinweis: `Space` ist derzeit **nicht** gemappt (kein Alias zu `P`).
 
 ---
 
@@ -189,11 +189,12 @@ Ergebnis: zielstrebig, ruckfrei — ohne „ins Schwarze“ zu kippen.
 
 ---
 
-## ⚙️ Konfigurationshinweise
+## ⚙️ Konventionshinweise
 
-* **Logging**: ASCII-only; strikt **einzeilig** pro Event. Zeitstempel sind **Epoch-Millis (UTC)**.
+* **Logging**: ASCII-only; strikt **einzeilig** pro Event. Zeitstempel sind **Epoch-Millis (UTC)**.  
   `debugLogging` für Diagnose; `performanceLogging` misst budgetschonend via CUDA-Events.
 * **ForceAlwaysZoom**: hält den Zoomfluss aktiv (mit weicher Drift, falls kein starkes Signal vorliegt).
+* **Tier-Codename-Pflege**: Nicht genutzte/retirierte Namen stehen im **[Friedhof](Friedhof.md)** (Doppelvergabe vermeiden).
 
 ---
 
@@ -203,7 +204,7 @@ MIT-Lizenz – siehe [LICENSE](LICENSE).
 
 ---
 
-**OtterDream** – von der Raupe zum Fraktal-Schmetterling 🦋
+**OtterDream** – von der Raupe zum Fraktal-Schmetterling 🦋  
 *Happy Zooming!*
 
 🐭 Maus sorgt für Fokus und ASCII-Sauberkeit.  
