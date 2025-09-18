@@ -12,7 +12,7 @@
 #include <vector_functions.h> // make_float2
 #include <cuda_runtime.h>     // CUDA events for timing (no device-wide sync)
 
-#include "renderer_resources.hpp"    // OpenGLUtils::setGLResourceContext(...), OpenGLUtils::updateTextureFromPBO(...)
+#include "renderer_resources.hpp"    // OpenGLUtils::setGLResourceContext(...), OpenGLUtils::updateTextureFromPBO(...), OpenGLUtils::peekPBO(...)
 #include "renderer_pipeline.hpp"     // RendererPipeline::drawFullscreenQuad(...)
 #include "cuda_interop.hpp"          // CudaInterop::renderCudaFrame(...)
 #include "frame_context.hpp"
@@ -64,31 +64,6 @@ namespace {
     // [GLQ] Einmalige Scissor-State-Ermittlung statt pro Frame abzufragen
     static bool       s_scissorInit = false;
     static GLboolean  s_scissorPrev = GL_FALSE;
-
-    // --- Diagnose: GL-PBO kurz mappen und die ersten Bytes prüfen (nur Debug) ---
-    [[maybe_unused]] static void peekPBO(GLuint pbo) {
-        if constexpr (!Settings::debugLogging) {
-            (void)pbo;
-            return;
-        }
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-
-        const GLsizeiptr N = 64; // erste 64 Bytes
-        void* ptr = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, N, GL_MAP_READ_BIT);
-        if (ptr) {
-            const unsigned char* b = static_cast<const unsigned char*>(ptr);
-            unsigned sum16 = 0;
-            for (int i = 0; i < 16 && i < N; ++i) sum16 += b[i];
-            unsigned b0=b[0], b1=b[1], b2=b[2], b3=b[3];
-            LUCHS_LOG_HOST("[PBO-PEEK] pbo=%u first4=%u,%u,%u,%u sum16=%u", pbo, b0, b1, b2, b3, sum16);
-            glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
-        } else {
-            const GLenum err = glGetError();
-            LUCHS_LOG_HOST("[PBO-PEEK][WARN] map failed for pbo=%u (glError=0x%04X)", pbo, err);
-        }
-        // [GLQ] Kein glGetIntegerv mehr – wir hinterlassen "0" als Unpack-Binding
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-    }
 
     // --- CUDA 13: Events statt cudaDeviceSynchronize() -----------
     static cudaEvent_t g_evStart = nullptr;
@@ -286,26 +261,10 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
 }
 
 // ------------------------------- apply zoom step ------------------------------
+// Thin wrapper: delegates to zoom_command.cpp with explicit frameIndex/zoomGain.
 static void applyZoomStep(FrameContext& fctx, CommandBus& bus) {
-    if (!fctx.shouldZoom) [[likely]] return;
-
-    const double2 diff = { fctx.newOffset.x - fctx.offset.x, fctx.newOffset.y - fctx.offset.y };
-    const float   prevZoom = fctx.zoom;
-
-    fctx.offset = fctx.newOffset;
-    fctx.zoom  *= kZOOM_GAIN;
-
-    ZoomCommand cmd;
-    cmd.frameIndex = g_frame;
-    cmd.oldOffset  = make_float2((float)(fctx.offset.x - diff.x), (float)(fctx.offset.y - diff.y));
-    cmd.zoomBefore = prevZoom;
-    cmd.newOffset  = make_float2((float)fctx.newOffset.x, (float)fctx.newOffset.y);
-    cmd.zoomAfter  = fctx.zoom;
-    cmd.entropy    = fctx.lastEntropy;
-    cmd.contrast   = fctx.lastContrast;
-
-    bus.push(cmd);
-    fctx.timeSinceLastZoom = 0.0f;
+    extern void buildAndPushZoomCommand(FrameContext& fctx, CommandBus& bus, int frameIndex, float zoomGain);
+    buildAndPushZoomCommand(fctx, bus, g_frame, kZOOM_GAIN);
 }
 
 // ------------------------------ draw (GL upload + FSQ) -----------------------
@@ -326,7 +285,7 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] drawFrame begin: tex=%u pbo=%u %dx%d",
                        state.tex.id(), state.currentPBO().id(), fctx.width, fctx.height);
-        peekPBO(state.currentPBO().id());
+        OpenGLUtils::peekPBO(state.currentPBO().id());
     }
 
     OpenGLUtils::setGLResourceContext("draw");
@@ -443,7 +402,6 @@ void execute(RendererState& state) {
     FpsMeter::updateCoreMs(g_frameTotal);
 
     if (perfShouldLog(g_frame)) {
-        // Periodische Device-Logspülung nur hier (reduziert Overhead im Hotpath):
         LuchsLogger::flushDeviceLogToHost(0);
 
         const int    resX = g_ctx.width;

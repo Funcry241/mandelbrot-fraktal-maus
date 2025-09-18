@@ -10,6 +10,7 @@
 
 #include <stdexcept>
 #include <limits>
+#include <cstdio>
 
 namespace OpenGLUtils
 {
@@ -60,7 +61,6 @@ GLuint createTexture(int width, int height) {
     GLuint tex = 0;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
-    // Debug label (GL_KHR_debug) for easier GPU debugging
 #ifdef GL_KHR_debug
     if (GLEW_KHR_debug) {
         char label[64];
@@ -69,20 +69,16 @@ GLuint createTexture(int width, int height) {
     }
 #endif
 
-    // Sampler-Parameter (stabil, keine Mipmaps)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
 
-    // Immutable Storage
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
 
-    // Clamp to single mip level (no mips)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,  0);
 
-    // State wiederherstellen
     glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prevTex0));
     glActiveTexture(static_cast<GLenum>(prevActiveTex));
 
@@ -101,7 +97,6 @@ GLuint createPBO(int width, int height) {
     GLuint pbo = 0;
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    // Debug label (GL_KHR_debug) for easier GPU debugging
 #ifdef GL_KHR_debug
     if (GLEW_KHR_debug) {
         char label[64];
@@ -137,11 +132,9 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex0);
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevPBO);
 
-    // Upload-Setup
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 
-    // saubere PixelStore-Parameter (RowLength/Alignment)
     GLint prevAlign=0, prevRowLen=0, prevSkipPix=0, prevSkipRows=0;
     glGetIntegerv(GL_UNPACK_ALIGNMENT,    &prevAlign);
     glGetIntegerv(GL_UNPACK_ROW_LENGTH,   &prevRowLen);
@@ -153,7 +146,6 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
     glPixelStorei(GL_UNPACK_SKIP_ROWS,   0);
 
-    // Wir invalidieren die Ziel-Textur vor dem Upload (Treiberhint)
     glInvalidateTexImage(tex, 0);
 
     glTexSubImage2D(GL_TEXTURE_2D, 0,
@@ -164,7 +156,7 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
     if constexpr (Settings::debugLogging) {
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
-            LUCHS_LOG_HOST("[GL-UPLOAD][ERR] glTexSubImage2D glGetError()=0x%04X", (unsigned)err);
+            LUCHS_LOG_HOST("[GL-UPLOAD][ERR] glTexSubImage2D glGetError()=0x%04X", static_cast<unsigned>(err));
         }
     }
 
@@ -180,6 +172,34 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[GL-UPLOAD] done (ctx=%s)", g_resourceContext);
     }
+}
+
+// -----------------------------------------------------------------------------
+// Diagnose: erste Bytes eines UNPACK-PBOs auslesen (Debug-Helfer)
+// -----------------------------------------------------------------------------
+void peekPBO(GLuint pbo) {
+    if constexpr (!Settings::debugLogging) {
+        (void)pbo;
+        return;
+    }
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+
+    const GLsizeiptr N = 64; // erste 64 Bytes
+    void* ptr = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, N, GL_MAP_READ_BIT);
+    if (ptr) {
+        const unsigned char* b = static_cast<const unsigned char*>(ptr);
+        unsigned sum16 = 0;
+        for (int i = 0; i < 16 && i < N; ++i) sum16 += b[i];
+        const unsigned b0=b[0], b1=b[1], b2=b[2], b3=b[3];
+        LUCHS_LOG_HOST("[PBO-PEEK] pbo=%u first4=%u,%u,%u,%u sum16=%u", pbo, b0, b1, b2, b3, sum16);
+        glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+    } else {
+        const GLenum err = glGetError();
+        LUCHS_LOG_HOST("[PBO-PEEK][WARN] map failed for pbo=%u (glError=0x%04X)", pbo, err);
+    }
+
+    // Kein glGetIntegerv: wir hinterlassen "0" als Unpack-Binding (explizit)
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 }
 
 } // namespace OpenGLUtils

@@ -21,6 +21,9 @@ void   setGLResourceContext(const char* context);
 // Upload: PBO -> Texture (robust; sichert/restauriert relevanten GL-State)
 void   updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height);
 
+// Diagnose-Helfer: Liest ein paar Bytes aus dem UNPACK-PBO (nur sinnvoll mit debugLogging)
+void   peekPBO(GLuint pbo);
+
 } // namespace OpenGLUtils
 
 #endif // RENDERER_RESOURCES_HPP
