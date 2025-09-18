@@ -2,6 +2,7 @@
 ///// Schneefuchs: [ZK] GLsync vorwärts deklariert; Speicher/Buffer exakt; State entkoppelt; MSVC-Align-Warnung lokal gekapselt.
 ///// Maus: [ZK] Flags klar benannt (pboFence, skipUploadThisFrame); tileSize explizit; Progressive (z,it) mit Cooldown; ASCII-only.
 ///// Datei: src/renderer_state.hpp
+
 #pragma once
 
 // Leichte Includes im Header (keine PCH)
@@ -32,11 +33,10 @@ public:
     int         height = 0;
     GLFWwindow* window = nullptr;
 
-    // 🔍 Kamera (Komplexebene) — Nacktmull-Pullover: double-präzis
-    //   Mapping: c = center + (ix - w/2)*pixelScale.x + i*(iy - h/2)*pixelScale.y
-    double      zoom = 1.0;           // skalare Zoomgroesse (unitless)
-    double2     center{0.0, 0.0};     // Weltzentrum c0 (double-Genauigkeit)
-    double2     pixelScale{0.0, 0.0}; // Delta pro Pixel in Real/Imag (double)
+    // 🔍 Kamera (Komplexebene)
+    double      zoom = 1.0;
+    double2     center{0.0, 0.0};
+    double2     pixelScale{0.0, 0.0};
 
     // 🧮 Iterationsparameter
     int baseIterations = 100;
@@ -56,11 +56,11 @@ public:
     Hermelin::CudaDeviceBuffer d_entropy;    // float[numTiles]
     Hermelin::CudaDeviceBuffer d_contrast;   // float[numTiles]
 
-    // ➕ Progressive-State (Per-Pixel Resume) – Keks 4/5
-    Hermelin::CudaDeviceBuffer d_stateZ;     // float2[width*height] – letzter z
-    Hermelin::CudaDeviceBuffer d_stateIt;    // int   [width*height] – akk. Iterationen
-    bool                       progressiveEnabled = true; // Host-Schalter (sanft)
-    int                        progressiveCooldownFrames = 0; // 0=aktiv, >0=Pause
+    // ➕ Progressive-State (Per-Pixel Resume)
+    Hermelin::CudaDeviceBuffer d_stateZ;     // float2[width*height]
+    Hermelin::CudaDeviceBuffer d_stateIt;    // int[width*height]
+    bool                       progressiveEnabled = true;
+    int                        progressiveCooldownFrames = 0;
 
     // 🎥 OpenGL-Zielpuffer (Interop via CUDA) mit RAII
     static constexpr int kPboRingSize = 3;
@@ -71,17 +71,15 @@ public:
     inline void advancePboRing() { pboIndex = (pboIndex + 1) % kPboRingSize; }
     Hermelin::GLBuffer tex;
 
-    // 🔒 [ZK] GL-Fences je Slot: schützen vor Reuse solange DMA (PBO→Tex) noch läuft
+    // 🔒 [ZK] GL-Fences je Slot
     std::array<GLsync, kPboRingSize> pboFence{}; // nullptr = kein Fence gesetzt
-
-    // 🚩 [ZK] Wenn true: In dieser Frame **kein** Texture-Upload (kein freier Slot – nicht blockieren)
     bool skipUploadThisFrame = false;
 
     // 🕒 Zeitsteuerung pro Frame
     int    frameCount = 0;
     double lastTime   = 0.0;
 
-    // 🌀 Zoom V3 Silk-Lite: Persistenter Zustand (keine Globals)
+    // 🌀 Zoom V3 Silk-Lite
     ZoomLogic::ZoomState zoomV3State;
 
     // 🔥 Overlay-Zustaende
@@ -89,13 +87,12 @@ public:
     bool        warzenschweinOverlayEnabled = false;
     std::string warzenschweinText;
 
-    // 🎬 CUDA Streams (Ownership im State) – Schritt 4e
-    // Non-blocking Render-Stream; wird im Ctor/reset() erzeugt und im Dtor sauber zerstört.
-    cudaStream_t renderStream = nullptr;
+    // 🎬 CUDA Streams (Ownership im State) – 4e/4f
+    cudaStream_t renderStream = nullptr; // non-blocking
+    cudaStream_t copyStream   = nullptr; // non-blocking (Host->GL Copy / Staging)
 
-    // ⏱️ Timings – CUDA + HOST konsolidiert (eine Quelle)
+    // ⏱️ Timings – CUDA + HOST konsolidiert
     struct CudaPhaseTimings {
-        // CUDA / Interop (gesetzt vom Renderpfad)
         bool   valid            = false;
         double mandelbrotTotal  = 0.0;
         double mandelbrotLaunch = 0.0;
@@ -104,34 +101,25 @@ public:
         double contrast         = 0.0;
         double deviceLogFlush   = 0.0;
         double pboMap           = 0.0;
-
-        // HOST (gesetzt in frame_pipeline)
         double uploadMs         = 0.0;
         double overlaysMs       = 0.0;
         double frameTotalMs     = 0.0;
-
-        void resetHostFrame() noexcept {
-            uploadMs     = 0.0;
-            overlaysMs   = 0.0;
-            frameTotalMs = 0.0;
-        }
+        void resetHostFrame() noexcept { uploadMs = overlaysMs = frameTotalMs = 0.0; }
     };
     CudaPhaseTimings lastTimings;
 
     // 🧽 Setup & Verwaltung
     RendererState(int w, int h);
-    ~RendererState(); // Stream-Cleanup (renderStream) – kein Leck, kein implizites Global
+    ~RendererState();
     void reset();
     void setupCudaBuffers(int tileSize);
     void resize(int newWidth, int newHeight);
-
-    // 🧯 Progressive-State vorsichtig invalidieren (1-Frame-Cooldown, optional Hard-Reset)
     void invalidateProgressiveState(bool hardReset) noexcept;
 
 private:
-    // Interne Helfer für CUDA-Stream-Lifecycle (Definition in .cpp)
-    void createCudaStreamsIfNeeded();   // legt renderStream non-blocking an, falls nullptr
-    void destroyCudaStreamsIfAny() noexcept; // zerstört renderStream, setzt auf nullptr
+    // Stream-Lifecycle
+    void createCudaStreamsIfNeeded();       // legt renderStream/copyStream non-blocking an
+    void destroyCudaStreamsIfAny() noexcept; // zerstört beide, setzt auf nullptr
 };
 
 #if defined(_MSC_VER)

@@ -47,7 +47,7 @@ static void*          s_hostRegEntropyPtr   = nullptr;  static size_t s_hostRegE
 static void*          s_hostRegContrastPtr  = nullptr;  static size_t s_hostRegContrastBytes  = 0;
 
 static cudaEvent_t    s_evStart = nullptr, s_evStop = nullptr; static bool s_evInit = false;
-static cudaStream_t   s_copyStrm = nullptr;
+// NOTE [4f]: TU-lokaler Copy-Stream entfernt — kommt jetzt als Funktionsparameter.
 
 // ---- Helpers ----------------------------------------------------------------
 static inline void ensureDeviceOnce() {
@@ -61,10 +61,6 @@ static inline void ensureEventsOnce() {
     s_evInit = (s_evStart && s_evStop);
     if constexpr (Settings::debugLogging)
         LUCHS_LOG_HOST("[CUDA][ZK] events %s", s_evInit ? "created" : "FAILED");
-}
-
-static inline void ensureCopyStreamOnce() {
-    if (!s_copyStrm) CUDA_CHECK(cudaStreamCreateWithFlags(&s_copyStrm, cudaStreamNonBlocking));
 }
 
 static inline void destroyEventsIfAny() {
@@ -108,7 +104,8 @@ void registerAllPBOs(const GLuint* ids, int count) {
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
-    if (s_copyStrm) { cudaStreamDestroy(s_copyStrm); s_copyStrm=nullptr; }
+
+    // [4f] kein TU-lokaler Copy-Stream mehr -> nichts zu zerstören hier
 
     for (auto &kv : s_pboMap) delete kv.second; s_pboMap.clear(); s_pboActive=nullptr;
     if (!ids || count<=0) return;
@@ -130,7 +127,8 @@ void unregisterAllPBOs() {
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
-    if (s_copyStrm) { cudaStreamDestroy(s_copyStrm); s_copyStrm=nullptr; }
+
+    // [4f] kein TU-lokaler Copy-Stream mehr -> nichts zu zerstören hier
 
     for (auto &kv : s_pboMap) delete kv.second; s_pboMap.clear(); s_pboActive=nullptr;
 }
@@ -160,7 +158,8 @@ void unregisterPBO() {
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
-    if (s_copyStrm) { cudaStreamDestroy(s_copyStrm); s_copyStrm=nullptr; }
+
+    // [4f] kein TU-lokaler Copy-Stream mehr -> nichts zu zerstören hier
 
     if (s_pboActive) {
         for (auto it = s_pboMap.begin(); it != s_pboMap.end(); ++it) {
@@ -182,7 +181,8 @@ void renderCudaFrame(
     std::vector<float>& h_contrast,
     float2& newOffset, bool& shouldZoom,
     int tileSize, RendererState& state,
-    cudaStream_t renderStream /*=0*/
+    cudaStream_t renderStream,
+    cudaStream_t copyStream
 ){
 #if !defined(__CUDA_ARCH__)
     const auto t0 = std::chrono::high_resolution_clock::now();
@@ -264,12 +264,12 @@ void renderCudaFrame(
     ensureHostPinned(h_contrast, s_hostRegContrastPtr, s_hostRegContrastBytes);
     h_entropy.resize(size_t(numTiles)); h_contrast.resize(size_t(numTiles));
 
-    ensureCopyStreamOnce();
-    CUDA_CHECK(cudaStreamWaitEvent(s_copyStrm, s_evStop, 0)); // warte auf Ende des Render-Streams
+    // [4f] expliziter copyStream aus dem RendererState
+    CUDA_CHECK(cudaStreamWaitEvent(copyStream, s_evStop, 0)); // warte auf Ende des Render-Streams
 
-    CUDA_CHECK(cudaMemcpyAsync(h_entropy.data(),  d_entropy.get(),  enBytes, cudaMemcpyDeviceToHost, s_copyStrm));
-    CUDA_CHECK(cudaMemcpyAsync(h_contrast.data(), d_contrast.get(), ctBytes, cudaMemcpyDeviceToHost, s_copyStrm));
-    CUDA_CHECK(cudaStreamSynchronize(s_copyStrm));
+    CUDA_CHECK(cudaMemcpyAsync(h_entropy.data(),  d_entropy.get(),  enBytes, cudaMemcpyDeviceToHost, copyStream));
+    CUDA_CHECK(cudaMemcpyAsync(h_contrast.data(), d_contrast.get(), ctBytes, cudaMemcpyDeviceToHost, copyStream));
+    CUDA_CHECK(cudaStreamSynchronize(copyStream));
 
     shouldZoom = false; newOffset = offset;
 

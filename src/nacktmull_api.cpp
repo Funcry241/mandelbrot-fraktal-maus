@@ -1,5 +1,5 @@
 ///// Otter: Host wrapper for CUDA render/analysis; ASCII-only logs.
-///// Schneefuchs: Uses RendererState-owned renderStream; no globals; robust error paths.
+///// Schneefuchs: Uses RendererState-owned render/copy streams; no globals; robust error paths.
 ///// Maus: Mirrors old computeCudaFrame; no API drift for callers.
 ///// Datei: src/nacktmull_api.cpp
 
@@ -87,14 +87,15 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
 
     // Device-Render (Iterations -> Shade) + E/C-Analyse (erzeugt Host-Arrays)
     try {
-        float2 gpuOffset    = make_float2((float)fctx.offset.x, (float)fctx.offset.y);
-        float2 gpuNewOffset = gpuOffset;
+        const float2 gpuOffset    = make_float2((float)fctx.offset.x, (float)fctx.offset.y);
+        float2       gpuNewOffset = gpuOffset;
 
-        // Stream-Weitergabe: bevorzugt den vom State besessenen Stream,
-        // fällt im Notfall (nullptr) deterministisch auf Default-Stream 0 zurück.
+        // Streams: bevorzugt State-Streams, deterministischer Fallback = 0
         cudaStream_t renderStrm = state.renderStream ? state.renderStream : (cudaStream_t)0;
-        if (!state.renderStream && Settings::debugLogging) {
-            LUCHS_LOG_HOST("[STREAM][WARN] state.renderStream=nullptr -> using default stream 0");
+        cudaStream_t copyStrm   = state.copyStream   ? state.copyStream   : renderStrm;
+
+        if ((!state.renderStream || !state.copyStream) && Settings::debugLogging) {
+            LUCHS_LOG_HOST("[STREAM][WARN] fallback used (render=%p, copy=%p)", (void*)renderStrm, (void*)copyStrm);
         }
 
         CudaInterop::renderCudaFrame(
@@ -112,7 +113,8 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
             fctx.shouldZoom,
             fctx.tileSize,
             state,
-            renderStrm   // expliziter Render-Stream (State-Ownership)
+            renderStrm,
+            copyStrm
         );
         // gpuNewOffset wird aktuell nicht verwendet (Zoom-Analyse folgt unten)
     } catch (const std::exception& ex) { // [[unlikely]]

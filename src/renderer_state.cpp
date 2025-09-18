@@ -11,12 +11,10 @@
 #include "common.hpp"
 #include "renderer_resources.hpp"
 #include <algorithm> // std::clamp, std::max
-#include <cstring>   // std::memset
+#include <cstring>
 
-// CUDA: Implementierung hier, Header nur vorwaerts deklariert
 #include <cuda_runtime_api.h>
 
-// 🦊 Schneefuchs: interne Helfer in anonymer NS, noexcept – klarer Scope.
 namespace {
     inline void computeTiles(int width, int height, int tileSize,
                              int& tilesX, int& tilesY, int& numTiles) noexcept {
@@ -24,7 +22,6 @@ namespace {
         tilesY   = (height + tileSize - 1) / tileSize;
         numTiles = tilesX * tilesY;
     }
-
     inline void recomputePixelScale(RendererState& rs) noexcept {
         const double invZoom = (rs.zoom != 0.0) ? (1.0 / rs.zoom) : 1.0;
         const double ar      = (rs.height > 0) ? (double)rs.width / (double)rs.height : 1.0;
@@ -32,10 +29,7 @@ namespace {
         rs.pixelScale.y = sy;
         rs.pixelScale.x = sy * ar;
     }
-
-    // [ZK] Alle GL-Fences dieses States sicher entfernen (noexcept). Erfordert gültigen GL-Kontext.
     inline void clearPboFences(RendererState& rs) noexcept {
-        // Kontext setzen (kein no-op: wir wollen die gleiche Ressourcendomäne wie beim Upload)
         OpenGLUtils::setGLResourceContext("pbo-fence-clear");
         for (auto& f : rs.pboFence) {
             if (f) { glDeleteSync(f); f = 0; }
@@ -43,20 +37,25 @@ namespace {
     }
 }
 
-// --- Stream-Lifecycle (Ownership im State) -----------------------------------
+// --- Stream-Lifecycle ---------------------------------------------------------
 
 void RendererState::createCudaStreamsIfNeeded() {
+    CUDA_CHECK(cudaSetDevice(0));
     if (!renderStream) {
-        CUDA_CHECK(cudaSetDevice(0));
         CUDA_CHECK(cudaStreamCreateWithFlags(&renderStream, cudaStreamNonBlocking));
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[STREAM] renderStream created %p (non-blocking)", (void*)renderStream);
         }
     }
+    if (!copyStream) {
+        CUDA_CHECK(cudaStreamCreateWithFlags(&copyStream, cudaStreamNonBlocking));
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[STREAM] copyStream created %p (non-blocking)", (void*)copyStream);
+        }
+    }
 }
 
 void RendererState::destroyCudaStreamsIfAny() noexcept {
-    // Keine CUDA_CHECK-Makros in noexcept; hart aufraeumen und loggen.
     if (renderStream) {
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[STREAM] renderStream destroy %p", (void*)renderStream);
@@ -64,19 +63,24 @@ void RendererState::destroyCudaStreamsIfAny() noexcept {
         cudaStreamDestroy(renderStream);
         renderStream = nullptr;
     }
+    if (copyStream) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[STREAM] copyStream destroy %p", (void*)copyStream);
+        }
+        cudaStreamDestroy(copyStream);
+        copyStream = nullptr;
+    }
 }
 
-// --- Ctor / Dtor -------------------------------------------------------------
+// --- Ctor / Dtor --------------------------------------------------------------
 
 RendererState::RendererState(int w, int h)
 : width(w), height(h) {
-    // Erzeuge Streams frueh, damit Call-Sites sie sofort nutzen koennen
     createCudaStreamsIfNeeded();
     reset();
 }
 
 RendererState::~RendererState() {
-    // [ZK] Fences zuerst aufraeumen, dann Streams/FBOs/GL
     clearPboFences(*this);
     destroyCudaStreamsIfAny();
 }
@@ -84,67 +88,53 @@ RendererState::~RendererState() {
 // --- Reset -------------------------------------------------------------------
 
 void RendererState::reset() {
-    // Kamera (Nacktmull-Pullover: doubles)
     zoom   = static_cast<double>(Settings::initialZoom);
     center = make_double2(static_cast<double>(Settings::initialOffsetX),
                           static_cast<double>(Settings::initialOffsetY));
     recomputePixelScale(*this);
 
-    // Iterationen
     baseIterations = Settings::INITIAL_ITERATIONS;
     maxIterations  = Settings::MAX_ITERATIONS_CAP;
 
-    // Timings / Zaehler
     fps        = 0.0f;
     deltaTime  = 0.0f;
     frameCount = 0;
     lastTime   = glfwGetTime();
 
-    // Tiles
     lastTileSize = Settings::BASE_TILE_SIZE;
 
-    // Overlays
     heatmapOverlayEnabled       = Settings::heatmapOverlayEnabled;
     warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
     warzenschweinText.clear();
 
-    // Host-Analysepuffer
     h_entropy.clear();
     h_contrast.clear();
 
-    // Zoom V3 Silk-Lite: persistenter Zustand auf Default
     zoomV3State = {};
 
-    // Progressive
     progressiveEnabled         = Settings::progressiveEnabled;
     progressiveCooldownFrames  = 0;
 
-    // [ZK] Upload-Skip zuruecksetzen & evtl. alte Fences putzen
     skipUploadThisFrame = false;
     clearPboFences(*this);
 
-    // CUDA/Host-Timings: Default (valid=false) + Host-Frame-Nullung
     lastTimings = CudaPhaseTimings{};
     lastTimings.resetHostFrame();
 
-    // Streams sicherstellen (Reset kann nach Dtor/Resize gerufen werden)
     createCudaStreamsIfNeeded();
 }
 
-// --- CUDA-Puffer -------------------------------------------------------------
+// --- CUDA-Puffer --------------------------------------------------------------
 
 void RendererState::setupCudaBuffers(int tileSize) {
-    // --- sanitize input ---
     if (width <= 0 || height <= 0) {
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ERROR] setupCudaBuffers: invalid size %dx%d", width, height);
         }
         return;
     }
-    // Clamp tile size to configured bounds
     tileSize = std::clamp(tileSize, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
 
-    // --- derive sizes ---
     const size_t totalPixels    = size_t(width) * size_t(height);
     int tilesX = 0, tilesY = 0, numTiles = 0;
     computeTiles(width, height, tileSize, tilesX, tilesY, numTiles);
@@ -153,12 +143,10 @@ void RendererState::setupCudaBuffers(int tileSize) {
     const size_t entropy_bytes  = size_t(numTiles) * sizeof(float);
     const size_t contrast_bytes = size_t(numTiles) * sizeof(float);
 
-    // Progressive-States (nur wenn Feature global aktiviert)
     const bool   wantProg       = Settings::progressiveEnabled;
     const size_t z_bytes        = totalPixels * sizeof(float2);
     const size_t it2_bytes      = totalPixels * sizeof(uint16_t);
 
-    // 🦦 Otter: Fast-Path – wenn alles schon passt, sofort raus
     const bool sizesOk =
         d_iterations.size() >= it_bytes      &&
         d_entropy.size()    >= entropy_bytes &&
@@ -168,9 +156,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
         h_contrast.size()   == size_t(numTiles) &&
         lastTileSize        == tileSize;
 
-    if (sizesOk) {
-        return;
-    }
+    if (sizesOk) return;
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] setupCudaBuffers: w=%d h=%d zoom=%.5f tileSize=%d tiles=%d (%d x %d) pixels=%zu",
@@ -182,7 +168,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
         CudaInterop::logCudaDeviceContext("setupCudaBuffers");
     }
 
-    // --- iterations buffer (only-grow policy) ---
+    // d_iterations
     {
         const size_t have = d_iterations.size();
         const bool   grow = have < it_bytes;
@@ -197,7 +183,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
         if (grow || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_iterations.get(), 0, it_bytes));
     }
 
-    // --- entropy buffer (only-grow policy) ---
+    // d_entropy
     {
         const size_t have = d_entropy.size();
         const bool   grow = have < entropy_bytes;
@@ -212,20 +198,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
         if (grow || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_entropy.get(), 0, entropy_bytes));
     }
 
-    // Optional: Pointer-Attribute pruefen
-    if constexpr (Settings::debugLogging) {
-        cudaPointerAttributes attr{};
-        const cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_entropy.get());
-        if (attrErr == cudaSuccess) {
-            LUCHS_LOG_HOST("[CHECK] d_entropy attr: type=%d device=%d hostPtr=%p devicePtr=%p",
-                           (int)attr.type, (int)attr.device,
-                           (void*)attr.hostPointer, (void*)attr.devicePointer);
-        } else {
-            LUCHS_LOG_HOST("[CHECK] d_entropy attr query failed: err=%d", (int)attrErr);
-        }
-    }
-
-    // --- contrast buffer (only-grow policy) ---
+    // d_contrast
     {
         const size_t have = d_contrast.size();
         const bool   grow = have < contrast_bytes;
@@ -240,36 +213,31 @@ void RendererState::setupCudaBuffers(int tileSize) {
         if (grow || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_contrast.get(), 0, contrast_bytes));
     }
 
-    // --- progressive buffers (only-grow policy; nur wenn Feature aktiv) ---
+    // progressive
     if (wantProg) {
-        // z-state
-        {
-            const size_t have = d_stateZ.size();
-            const bool   grow = have < z_bytes;
-            if (grow) {
-                if constexpr (Settings::debugLogging) {
-                    LUCHS_LOG_HOST("[ALLOC] d_stateZ grow: have=%zu -> need=%zu (px %zu)", have, z_bytes, totalPixels);
-                }
-                d_stateZ.allocate(z_bytes);
-            } else if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ALLOC] d_stateZ ok: have=%zu need=%zu (no realloc)", have, z_bytes);
+        const size_t haveZ  = d_stateZ.size();
+        const bool   growZ  = haveZ < z_bytes;
+        if (growZ) {
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ALLOC] d_stateZ grow: have=%zu -> need=%zu (px %zu)", haveZ, z_bytes, totalPixels);
             }
-            if (grow || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_stateZ.get(), 0, z_bytes));
+            d_stateZ.allocate(z_bytes);
+        } else if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ALLOC] d_stateZ ok: have=%zu need=%zu", haveZ, z_bytes);
         }
-        // it-state
-        {
-            const size_t have = d_stateIt.size();
-            const bool   grow = have < it2_bytes;
-            if (grow) {
-                if constexpr (Settings::debugLogging) {
-                    LUCHS_LOG_HOST("[ALLOC] d_stateIt grow: have=%zu -> need=%zu (px %zu)", have, it2_bytes, totalPixels);
-                }
-                d_stateIt.allocate(it2_bytes);
-            } else if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ALLOC] d_stateIt ok: have=%zu need=%zu (no realloc)", have, it2_bytes);
+        if (growZ || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_stateZ.get(), 0, z_bytes));
+
+        const size_t haveIt = d_stateIt.size();
+        const bool   growIt = haveIt < it2_bytes;
+        if (growIt) {
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ALLOC] d_stateIt grow: have=%zu -> need=%zu (px %zu)", haveIt, it2_bytes, totalPixels);
             }
-            if (grow || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_stateIt.get(), 0, it2_bytes));
+            d_stateIt.allocate(it2_bytes);
+        } else if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ALLOC] d_stateIt ok: have=%zu need=%zu", haveIt, it2_bytes);
         }
+        if (growIt || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_stateIt.get(), 0, it2_bytes));
     }
 
     if constexpr (Settings::debugLogging) {
@@ -278,8 +246,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
         LUCHS_LOG_HOST("[CHECK] post-alloc sync: err=%d", (int)lastErr);
     }
 
-    // --- host mirror sizes ---
-    // [ZK][HRES] Pre-reserve capacity for worst-case (MIN_TILE_SIZE) to avoid re-pinning
+    // host mirror sizes
     {
         const int tilesXmax = (width  + Settings::MIN_TILE_SIZE - 1) / Settings::MIN_TILE_SIZE;
         const int tilesYmax = (height + Settings::MIN_TILE_SIZE - 1) / Settings::MIN_TILE_SIZE;
@@ -313,39 +280,32 @@ void RendererState::resize(int newWidth, int newHeight) {
         return;
     }
 
-    // [ZK] Erst alle Fences aufraeumen, dann Ressourcen frei geben
     clearPboFences(*this);
 
-    // Free old CUDA device buffers
     d_iterations.free();
     d_entropy.free();
     d_contrast.free();
     d_stateZ.free();
     d_stateIt.free();
 
-    // Unregister CUDA-GL PBO
     CudaInterop::unregisterAllPBOs();
 
-    // Free GL buffers via RAII
     for (auto& b : pboRing) { b.free(); }
     tex.free();
 
-    // Apply new size
     width  = newWidth;
     height = newHeight;
 
     OpenGLUtils::setGLResourceContext("resize");
 
-    // Create fresh GL buffers
     for (auto& b : pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(width, height)); }
     pboIndex = 0;
-    std::fill(pboFence.begin(), pboFence.end(), (GLsync)0); // [ZK] Fences zuruecksetzen
-    skipUploadThisFrame = false; // [ZK]
+    std::fill(pboFence.begin(), pboFence.end(), (GLsync)0);
+    skipUploadThisFrame = false;
     tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
 
     { GLuint ids[kPboRingSize] = { pboRing[0].id(), pboRing[1].id(), pboRing[2].id() }; CudaInterop::registerAllPBOs(ids, kPboRingSize); }
 
-    // PixelScale haengt von Groesse/Zoom ab → neu berechnen
     recomputePixelScale(*this);
 
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
@@ -356,8 +316,6 @@ void RendererState::resize(int newWidth, int newHeight) {
     }
 
     setupCudaBuffers(lastTileSize);
-
-    // Host-Timings fuer neues Frame auf Null
     lastTimings.resetHostFrame();
 
     if constexpr (Settings::debugLogging) {
@@ -365,17 +323,11 @@ void RendererState::resize(int newWidth, int newHeight) {
     }
 }
 
-// --- Progressive-Invalidierung ----------------------------------------------
-
 void RendererState::invalidateProgressiveState(bool hardReset) noexcept {
-    // Soft: nur Pause des Resume-Mechanismus, keine Memsets hier
     progressiveEnabled        = false;
-    // Mini-Cooldown: 2 Frames Puffer, damit Kernel/Upload stabil sind
     progressiveCooldownFrames = 2;
 
     if (hardReset) {
-        // Harte Invalidierung optional: Inhalte werden bei naechster setupCudaBuffers()
-        // via cudaMemset initialisiert; hier keine CUDA-Calls (noexcept!).
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[PROG] hardReset requested (state will be cleared on next allocation)");
         }
