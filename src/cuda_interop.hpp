@@ -7,11 +7,17 @@
 
 #include <cstddef>
 #include <vector>               // std::vector<float>
-#include <cuda_runtime_api.h>
+#include <vector_types.h>       // float2 (leichtgewichtig, keine PCH)
 
-#include "hermelin_buffer.hpp"
-#include "renderer_state.hpp"
-#include "frame_context.hpp"
+// CUDA: nur schlanke Vorwärtsdeklaration (keine schweren cuda_runtime*-Includes)
+struct CUstream_st; using cudaStream_t = CUstream_st*;
+
+// Projekt-Typen nur vorwärts deklarieren, um Abhängigkeiten zu reduzieren
+namespace Hermelin {
+    class CudaDeviceBuffer;
+    class GLBuffer;
+}
+class RendererState;
 
 namespace CudaInterop {
 
@@ -20,7 +26,6 @@ void logCudaDeviceContext(const char* tag);
 
 // ---- CUDA Runtime Precheck / Sanity ------------------------------------------
 bool precheckCudaRuntime();
-bool verifyCudaGetErrorStringSafe();
 
 // ---- Pause-Zoom Toggle (Host) ------------------------------------------------
 void setPauseZoom(bool pause);

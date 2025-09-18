@@ -17,8 +17,9 @@
 struct GLFWwindow;
 struct __GLsync; using GLsync = __GLsync*; // [ZK] GLsync vorwaerts deklariert (keine GL-Header hier)
 
-// CUDA-Stream schlank vorwaerts deklarieren (kein schwerer cuda_runtime*-Include im Header)
+// CUDA-Primitive schlank vorwaerts deklarieren (kein cuda_runtime*-Include im Header)
 struct CUstream_st; using cudaStream_t = CUstream_st*; // Ownership liegt beim RendererState
+struct CUevent_st;  using cudaEvent_t  = CUevent_st*;  // Events fuer Render→E/C→Copy Verkettung
 
 // MSVC: float2/double2 sind __align__-Typen → C4324 (Padding). Lokal und gezielt unterdruecken.
 #if defined(_MSC_VER)
@@ -50,6 +51,9 @@ public:
     int                 lastTileSize = 0;
     std::vector<float>  h_entropy;
     std::vector<float>  h_contrast;
+    // Optional: Host-Pinning-Status (Registrierung erfolgt im .cpp)
+    bool                h_entropyPinned  = false;
+    bool                h_contrastPinned = false;
 
     // 🔗 Analyse/Iteration (Device) mit RAII
     Hermelin::CudaDeviceBuffer d_iterations; // int[width*height]
@@ -89,7 +93,11 @@ public:
 
     // 🎬 CUDA Streams (Ownership im State) – 4e/4f
     cudaStream_t renderStream = nullptr; // non-blocking
-    cudaStream_t copyStream   = nullptr; // non-blocking (Host->GL Copy / Staging)
+    cudaStream_t copyStream   = nullptr; // non-blocking (D→H Copy / Staging)
+
+    // 🎯 CUDA Events zur asynchronen Verkettung (Render → E/C → Copy)
+    cudaEvent_t  evEcDone   = nullptr; // signalisiert: Entropy/Contrast fertig (auf renderStream recorded)
+    cudaEvent_t  evCopyDone = nullptr; // optional: D→H Copy fertig (auf copyStream recorded)
 
     // ⏱️ Timings – CUDA + HOST konsolidiert
     struct CudaPhaseTimings {
@@ -117,9 +125,13 @@ public:
     void invalidateProgressiveState(bool hardReset) noexcept;
 
 private:
-    // Stream-Lifecycle
-    void createCudaStreamsIfNeeded();       // legt renderStream/copyStream non-blocking an
-    void destroyCudaStreamsIfAny() noexcept; // zerstört beide, setzt auf nullptr
+    // Stream-/Event-Lifecycle
+    void createCudaStreamsIfNeeded();         // legt renderStream/copyStream non-blocking an
+    void destroyCudaStreamsIfAny() noexcept;  // zerstört beide, setzt auf nullptr
+    void createCudaEventsIfNeeded();          // legt evEcDone/evCopyDone (DisableTiming) an
+    void destroyCudaEventsIfAny() noexcept;   // zerstört Events, setzt auf nullptr
+    void ensureHostPinnedForAnalysis();       // registriert h_entropy/h_contrast als pinned (idempotent)
+    void unpinHostAnalysisIfAny() noexcept;   // deregistriert pinned Hostpuffer bei Resize/Shutdown
 };
 
 #if defined(_MSC_VER)

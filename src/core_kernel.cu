@@ -143,29 +143,51 @@ void contrastKernel(
 }
 
 // --------------------------- host wrapper: E/C only ---------------------------
-void computeCudaEntropyContrast(
+// NOTE (Otter): Fully asynchronous: no host-side synchronization, no device-wide sync.
+// - Kernels launch on the provided `stream`.
+// - Entropy buffer is cleared with cudaMemsetAsync on the same `stream`.
+// - If `ecDoneEvent` is non-null, it is recorded on `stream` after the contrast kernel.
+
+// Non-throwing, numeric-rc logging for extern "C" wrapper (avoid C4297 under /WX)
+#define EC_NT_CHECK(call) \
+    do { cudaError_t _e = (call); if (_e != cudaSuccess) { \
+        LUCHS_LOG_HOST("[CUDA][EC] rc=%d at %s:%d", (int)_e, __FILE__, __LINE__); } } while (0)
+
+extern "C" void computeCudaEntropyContrast(
     const uint16_t* d_it, float* d_e, float* d_c,
-    int w, int h, int tile, int maxIter)
+    int w, int h, int tile, int maxIter,
+    cudaStream_t stream /*= nullptr*/,
+    cudaEvent_t  ecDoneEvent /*= nullptr*/)
 {
-    // Early guards: robust zeroing for invalid sizes.
+    // Early guards: robust zeroing for invalid sizes (async, non-throwing).
     if (w <= 0 || h <= 0 || tile <= 0 || maxIter < 0) {
-        const int tilesX0 = (tile > 0) ? (w + tile - 1) / tile : 0;
-        const int tilesY0 = (tile > 0) ? (h + tile - 1) / tile : 0;
+        const int    tilesX0     = (tile > 0) ? (w + tile - 1) / tile : 0;
+        const int    tilesY0     = (tile > 0) ? (h + tile - 1) / tile : 0;
         const size_t tilesTotal0 = size_t(tilesX0) * size_t(tilesY0);
-        if (d_e && tilesTotal0) CUDA_CHECK(cudaMemset(d_e, 0, tilesTotal0 * sizeof(float)));
-        if (d_c && tilesTotal0) CUDA_CHECK(cudaMemset(d_c, 0, tilesTotal0 * sizeof(float)));
+        if (d_e && tilesTotal0) EC_NT_CHECK(cudaMemsetAsync(d_e, 0, tilesTotal0 * sizeof(float), stream));
+        if (d_c && tilesTotal0) EC_NT_CHECK(cudaMemsetAsync(d_c, 0, tilesTotal0 * sizeof(float), stream));
+        if (ecDoneEvent)        EC_NT_CHECK(cudaEventRecord(ecDoneEvent, stream));
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[EC] invalid-dims queued zero-fill tiles=%zu stream=%p evt=%p",
+                           tilesTotal0, (void*)stream, (void*)ecDoneEvent);
+        }
         return;
     }
 
-    const int tilesX = (w + tile - 1) / tile;
-    const int tilesY = (h + tile - 1) / tile;
+    const int    tilesX     = (w + tile - 1) / tile;
+    const int    tilesY     = (h + tile - 1) / tile;
     const size_t tilesTotal = size_t(tilesX) * size_t(tilesY);
     if (tilesTotal == 0) {
+        if (ecDoneEvent) EC_NT_CHECK(cudaEventRecord(ecDoneEvent, stream));
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[EC] zero-tiles queued (nothing to do) stream=%p evt=%p",
+                           (void*)stream, (void*)ecDoneEvent);
+        }
         return;
     }
 
     // Clear entropy buffer (contrast reads neighbors; entropy kernel overwrites all valid tiles).
-    CUDA_CHECK(cudaMemset(d_e, 0, tilesTotal * sizeof(float)));
+    EC_NT_CHECK(cudaMemsetAsync(d_e, 0, tilesTotal * sizeof(float), stream));
 
     // Launch config
     const dim3 enGrid(tilesX, tilesY);
@@ -177,40 +199,23 @@ void computeCudaEntropyContrast(
         (tilesY + ctBlock.y - 1) / ctBlock.y
     );
 
-    // Events only when logging is enabled; avoids overhead and unreachable-code warnings.
-    if constexpr (Settings::performanceLogging || Settings::debugLogging) {
-        cudaEvent_t evStart{}, evMid{}, evEnd{};
-        CUDA_CHECK(cudaEventCreate(&evStart));
-        CUDA_CHECK(cudaEventCreate(&evMid));
-        CUDA_CHECK(cudaEventCreate(&evEnd));
+    if constexpr (Settings::debugLogging || Settings::performanceLogging) {
+        LUCHS_LOG_HOST("[EC] queued tiles=%dx%d (%zu) tileSize=%d maxIter=%d stream=%p",
+                       tilesX, tilesY, tilesTotal, tile, maxIter, (void*)stream);
+    }
 
-        CUDA_CHECK(cudaEventRecord(evStart, 0));
-        entropyKernel<<<enGrid, enBlock>>>(d_it, d_e, w, h, tile, maxIter);
-        CUDA_CHECK(cudaGetLastError());
-        CUDA_CHECK(cudaEventRecord(evMid, 0));
+    // Launch kernels on the provided stream (no host sync)
+    entropyKernel<<<enGrid, enBlock, 0, stream>>>(d_it, d_e, w, h, tile, maxIter);
+    (void)cudaPeekAtLastError();
 
-        contrastKernel<<<ctGrid, ctBlock>>>(d_e, d_c, tilesX, tilesY);
-        CUDA_CHECK(cudaGetLastError());
-        CUDA_CHECK(cudaEventRecord(evEnd, 0));
-        CUDA_CHECK(cudaEventSynchronize(evEnd));
+    contrastKernel<<<ctGrid, ctBlock, 0, stream>>>(d_e, d_c, tilesX, tilesY);
+    (void)cudaPeekAtLastError();
 
-        float ms1 = 0.0f, ms2 = 0.0f;
-        CUDA_CHECK(cudaEventElapsedTime(&ms1, evStart, evMid));
-        CUDA_CHECK(cudaEventElapsedTime(&ms2, evMid, evEnd));
-
-        if constexpr (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[PERF] entropy=%.2f ms contrast=%.2f ms", ms1, ms2);
-        } else if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[TIME] entropy=%.2f ms | contrast=%.2f ms", ms1, ms2);
+    // Record completion event for downstream streams (copy/upload), if requested.
+    if (ecDoneEvent) {
+        EC_NT_CHECK(cudaEventRecord(ecDoneEvent, stream));
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[EC] done-event recorded stream=%p evt=%p", (void*)stream, (void*)ecDoneEvent);
         }
-
-        CUDA_CHECK(cudaEventDestroy(evStart));
-        CUDA_CHECK(cudaEventDestroy(evMid));
-        CUDA_CHECK(cudaEventDestroy(evEnd));
-    } else {
-        entropyKernel<<<enGrid, enBlock>>>(d_it, d_e, w, h, tile, maxIter);
-        CUDA_CHECK(cudaGetLastError());
-        contrastKernel<<<ctGrid, ctBlock>>>(d_e, d_c, tilesX, tilesY);
-        CUDA_CHECK(cudaGetLastError());
     }
 }

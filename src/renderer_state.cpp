@@ -10,10 +10,16 @@
 #include "cuda_interop.hpp"
 #include "common.hpp"
 #include "renderer_resources.hpp"
-#include <algorithm> // std::clamp, std::max
+
+#include <algorithm> // clamp, max
 #include <cstring>
 
 #include <cuda_runtime_api.h>
+
+// GL forward utils expected in renderer_resources.hpp
+// - OpenGLUtils::setGLResourceContext(const char*)
+// - OpenGLUtils::createPBO(int w,int h)
+// - OpenGLUtils::createTexture(int w,int h)
 
 namespace {
     inline void computeTiles(int width, int height, int tileSize,
@@ -22,6 +28,7 @@ namespace {
         tilesY   = (height + tileSize - 1) / tileSize;
         numTiles = tilesX * tilesY;
     }
+
     inline void recomputePixelScale(RendererState& rs) noexcept {
         const double invZoom = (rs.zoom != 0.0) ? (1.0 / rs.zoom) : 1.0;
         const double ar      = (rs.height > 0) ? (double)rs.width / (double)rs.height : 1.0;
@@ -29,6 +36,7 @@ namespace {
         rs.pixelScale.y = sy;
         rs.pixelScale.x = sy * ar;
     }
+
     inline void clearPboFences(RendererState& rs) noexcept {
         OpenGLUtils::setGLResourceContext("pbo-fence-clear");
         for (auto& f : rs.pboFence) {
@@ -37,7 +45,7 @@ namespace {
     }
 }
 
-// --- Stream-Lifecycle ---------------------------------------------------------
+// =============================== Streams / Events =============================
 
 void RendererState::createCudaStreamsIfNeeded() {
     CUDA_CHECK(cudaSetDevice(0));
@@ -72,20 +80,94 @@ void RendererState::destroyCudaStreamsIfAny() noexcept {
     }
 }
 
-// --- Ctor / Dtor --------------------------------------------------------------
+void RendererState::createCudaEventsIfNeeded() {
+    if (!evEcDone) {
+        CUDA_CHECK(cudaEventCreateWithFlags(&evEcDone, cudaEventDisableTiming));
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[EVENT] evEcDone created %p (disableTiming)", (void*)evEcDone);
+        }
+    }
+    if (!evCopyDone) {
+        CUDA_CHECK(cudaEventCreateWithFlags(&evCopyDone, cudaEventDisableTiming));
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[EVENT] evCopyDone created %p (disableTiming)", (void*)evCopyDone);
+        }
+    }
+}
+
+void RendererState::destroyCudaEventsIfAny() noexcept {
+    if (evEcDone) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[EVENT] evEcDone destroy %p", (void*)evEcDone);
+        }
+        cudaEventDestroy(evEcDone);
+        evEcDone = nullptr;
+    }
+    if (evCopyDone) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[EVENT] evCopyDone destroy %p", (void*)evCopyDone);
+        }
+        cudaEventDestroy(evCopyDone);
+        evCopyDone = nullptr;
+    }
+}
+
+// =============================== Host Pinning =================================
+
+void RendererState::ensureHostPinnedForAnalysis() {
+    // Register host vectors as pinned (idempotent). Must be sized already.
+    if (!h_entropy.empty() && !h_entropyPinned) {
+        CUDA_CHECK(cudaHostRegister(h_entropy.data(), h_entropy.size() * sizeof(float), cudaHostRegisterDefault));
+        h_entropyPinned = true;
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[PIN] h_entropy pinned ptr=%p bytes=%zu",
+                           (void*)h_entropy.data(), h_entropy.size() * sizeof(float));
+        }
+    }
+    if (!h_contrast.empty() && !h_contrastPinned) {
+        CUDA_CHECK(cudaHostRegister(h_contrast.data(), h_contrast.size() * sizeof(float), cudaHostRegisterDefault));
+        h_contrastPinned = true;
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[PIN] h_contrast pinned ptr=%p bytes=%zu",
+                           (void*)h_contrast.data(), h_contrast.size() * sizeof(float));
+        }
+    }
+}
+
+void RendererState::unpinHostAnalysisIfAny() noexcept {
+    if (h_entropyPinned && !h_entropy.empty()) {
+        cudaHostUnregister(h_entropy.data());
+        h_entropyPinned = false;
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[PIN] h_entropy unpinned ptr=%p", (void*)h_entropy.data());
+        }
+    }
+    if (h_contrastPinned && !h_contrast.empty()) {
+        cudaHostUnregister(h_contrast.data());
+        h_contrastPinned = false;
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[PIN] h_contrast unpinned ptr=%p", (void*)h_contrast.data());
+        }
+    }
+}
+
+// ================================== Ctor/Dtor =================================
 
 RendererState::RendererState(int w, int h)
 : width(w), height(h) {
     createCudaStreamsIfNeeded();
+    createCudaEventsIfNeeded();
     reset();
 }
 
 RendererState::~RendererState() {
     clearPboFences(*this);
+    unpinHostAnalysisIfAny();
+    destroyCudaEventsIfAny();
     destroyCudaStreamsIfAny();
 }
 
-// --- Reset -------------------------------------------------------------------
+// =================================== Reset ===================================
 
 void RendererState::reset() {
     zoom   = static_cast<double>(Settings::initialZoom);
@@ -107,24 +189,31 @@ void RendererState::reset() {
     warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
     warzenschweinText.clear();
 
+    // Host mirrors (unpinned first to avoid stale registrations after resize)
+    unpinHostAnalysisIfAny();
     h_entropy.clear();
     h_contrast.clear();
 
+    // Zoom V3 state clean
     zoomV3State = {};
 
+    // Progressive defaults from Settings
     progressiveEnabled         = Settings::progressiveEnabled;
     progressiveCooldownFrames  = 0;
 
+    // Zaunkönig: fences & upload flag
     skipUploadThisFrame = false;
     clearPboFences(*this);
 
     lastTimings = CudaPhaseTimings{};
     lastTimings.resetHostFrame();
 
+    // Ensure infra is present
     createCudaStreamsIfNeeded();
+    createCudaEventsIfNeeded();
 }
 
-// --- CUDA-Puffer --------------------------------------------------------------
+// ================================ CUDA Buffers ================================
 
 void RendererState::setupCudaBuffers(int tileSize) {
     if (width <= 0 || height <= 0) {
@@ -156,7 +245,11 @@ void RendererState::setupCudaBuffers(int tileSize) {
         h_contrast.size()   == size_t(numTiles) &&
         lastTileSize        == tileSize;
 
-    if (sizesOk) return;
+    if (sizesOk) {
+        // Ensure pinning if vectors were reallocated elsewhere
+        ensureHostPinnedForAnalysis();
+        return;
+    }
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[DEBUG] setupCudaBuffers: w=%d h=%d zoom=%.5f tileSize=%d tiles=%d (%d x %d) pixels=%zu",
@@ -168,93 +261,79 @@ void RendererState::setupCudaBuffers(int tileSize) {
         CudaInterop::logCudaDeviceContext("setupCudaBuffers");
     }
 
-    // d_iterations
+    // Device buffers
     {
+        // d_iterations
         const size_t have = d_iterations.size();
         const bool   grow = have < it_bytes;
         if (grow) {
             if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ALLOC] d_iterations grow: have=%zu -> need=%zu", have, it_bytes);
+                LUCHS_LOG_HOST("[ALLOC] d_iterations grow: %zu -> %zu", have, it_bytes);
             }
             d_iterations.allocate(it_bytes);
-        } else if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_iterations ok: have=%zu need=%zu (no realloc)", have, it_bytes);
         }
-        if (grow || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_iterations.get(), 0, it_bytes));
-    }
-
-    // d_entropy
-    {
-        const size_t have = d_entropy.size();
-        const bool   grow = have < entropy_bytes;
-        if (grow) {
+        // d_entropy
+        const size_t haveE = d_entropy.size();
+        const bool   growE = haveE < entropy_bytes;
+        if (growE) {
             if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ALLOC] d_entropy grow: have=%zu -> need=%zu (tiles %d)", have, entropy_bytes, numTiles);
+                LUCHS_LOG_HOST("[ALLOC] d_entropy grow: %zu -> %zu (tiles %d)", haveE, entropy_bytes, numTiles);
             }
             d_entropy.allocate(entropy_bytes);
-        } else if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_entropy ok: have=%zu need=%zu (tiles %d, no realloc)", have, entropy_bytes, numTiles);
         }
-        if (grow || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_entropy.get(), 0, entropy_bytes));
-    }
-
-    // d_contrast
-    {
-        const size_t have = d_contrast.size();
-        const bool   grow = have < contrast_bytes;
-        if (grow) {
+        // d_contrast
+        const size_t haveC = d_contrast.size();
+        const bool   growC = haveC < contrast_bytes;
+        if (growC) {
             if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ALLOC] d_contrast grow: have=%zu -> need=%zu (tiles %d)", have, contrast_bytes, numTiles);
+                LUCHS_LOG_HOST("[ALLOC] d_contrast grow: %zu -> %zu (tiles %d)", haveC, contrast_bytes, numTiles);
             }
             d_contrast.allocate(contrast_bytes);
-        } else if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_contrast ok: have=%zu need=%zu (tiles %d, no realloc)", have, contrast_bytes, numTiles);
         }
-        if (grow || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_contrast.get(), 0, contrast_bytes));
-    }
 
-    // progressive
-    if (wantProg) {
-        const size_t haveZ  = d_stateZ.size();
-        const bool   growZ  = haveZ < z_bytes;
-        if (growZ) {
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ALLOC] d_stateZ grow: have=%zu -> need=%zu (px %zu)", haveZ, z_bytes, totalPixels);
+        // progressive
+        if (wantProg) {
+            const size_t haveZ  = d_stateZ.size();
+            const bool   growZ  = haveZ < z_bytes;
+            if (growZ) {
+                if constexpr (Settings::debugLogging) {
+                    LUCHS_LOG_HOST("[ALLOC] d_stateZ grow: %zu -> %zu (px %zu)", haveZ, z_bytes, totalPixels);
+                }
+                d_stateZ.allocate(z_bytes);
             }
-            d_stateZ.allocate(z_bytes);
-        } else if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_stateZ ok: have=%zu need=%zu", haveZ, z_bytes);
-        }
-        if (growZ || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_stateZ.get(), 0, z_bytes));
-
-        const size_t haveIt = d_stateIt.size();
-        const bool   growIt = haveIt < it2_bytes;
-        if (growIt) {
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ALLOC] d_stateIt grow: have=%zu -> need=%zu (px %zu)", haveIt, it2_bytes, totalPixels);
+            const size_t haveIt = d_stateIt.size();
+            const bool   growIt = haveIt < it2_bytes;
+            if (growIt) {
+                if constexpr (Settings::debugLogging) {
+                    LUCHS_LOG_HOST("[ALLOC] d_stateIt grow: %zu -> %zu (px %zu)", haveIt, it2_bytes, totalPixels);
+                }
+                d_stateIt.allocate(it2_bytes);
             }
-            d_stateIt.allocate(it2_bytes);
-        } else if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ALLOC] d_stateIt ok: have=%zu need=%zu", haveIt, it2_bytes);
         }
-        if (growIt || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_stateIt.get(), 0, it2_bytes));
+
+        if constexpr (Settings::debugLogging) {
+            CUDA_CHECK(cudaDeviceSynchronize());
+            cudaError_t lastErr = cudaGetLastError();
+            LUCHS_LOG_HOST("[CHECK] post-alloc sync: err=%d", (int)lastErr);
+        }
     }
 
-    if constexpr (Settings::debugLogging) {
-        CUDA_CHECK(cudaDeviceSynchronize());
-        cudaError_t lastErr = cudaGetLastError();
-        LUCHS_LOG_HOST("[CHECK] post-alloc sync: err=%d", (int)lastErr);
-    }
-
-    // host mirror sizes
+    // Host mirrors (reserve for MIN_TILE_SIZE worst case, then size to current)
     {
         const int tilesXmax = (width  + Settings::MIN_TILE_SIZE - 1) / Settings::MIN_TILE_SIZE;
         const int tilesYmax = (height + Settings::MIN_TILE_SIZE - 1) / Settings::MIN_TILE_SIZE;
         const size_t numTilesMax = size_t(tilesXmax) * size_t(tilesYmax);
+
+        // Unregister before vector might reallocate
+        unpinHostAnalysisIfAny();
+
         if (h_entropy.capacity()  < numTilesMax)  h_entropy.reserve(numTilesMax);
-        if (h_contrast.capacity() < numTilesMax) h_contrast.reserve(numTilesMax);
+        if (h_contrast.capacity() < numTilesMax)  h_contrast.reserve(numTilesMax);
         h_entropy.resize(size_t(numTiles));
         h_contrast.resize(size_t(numTiles));
+
+        // Re-register pinned after (re)allocation
+        ensureHostPinnedForAnalysis();
     }
 
     if constexpr (Settings::debugLogging) {
@@ -270,7 +349,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
     lastTileSize = tileSize;
 }
 
-// --- Resize ------------------------------------------------------------------
+// ================================== Resize ===================================
 
 void RendererState::resize(int newWidth, int newHeight) {
     if (newWidth <= 0 || newHeight <= 0) {
@@ -280,6 +359,7 @@ void RendererState::resize(int newWidth, int newHeight) {
         return;
     }
 
+    // GL / CUDA teardown for old size
     clearPboFences(*this);
 
     d_iterations.free();
@@ -293,18 +373,20 @@ void RendererState::resize(int newWidth, int newHeight) {
     for (auto& b : pboRing) { b.free(); }
     tex.free();
 
+    // Apply new size
     width  = newWidth;
     height = newHeight;
 
+    // Recreate GL side
     OpenGLUtils::setGLResourceContext("resize");
-
     for (auto& b : pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(width, height)); }
     pboIndex = 0;
     std::fill(pboFence.begin(), pboFence.end(), (GLsync)0);
     skipUploadThisFrame = false;
     tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
 
-    { GLuint ids[kPboRingSize] = { pboRing[0].id(), pboRing[1].id(), pboRing[2].id() }; CudaInterop::registerAllPBOs(ids, kPboRingSize); }
+    { GLuint ids[kPboRingSize] = { pboRing[0].id(), pboRing[1].id(), pboRing[2].id() };
+      CudaInterop::registerAllPBOs(ids, kPboRingSize); }
 
     recomputePixelScale(*this);
 
@@ -322,6 +404,8 @@ void RendererState::resize(int newWidth, int newHeight) {
         LUCHS_LOG_HOST("[RESIZE] %d x %d buffers reallocated", width, height);
     }
 }
+
+// ========================= Progressive State Control ==========================
 
 void RendererState::invalidateProgressiveState(bool hardReset) noexcept {
     progressiveEnabled        = false;

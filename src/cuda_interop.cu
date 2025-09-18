@@ -5,6 +5,7 @@
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
+#include "luchs_cuda_log_buffer.hpp"   // LuchsLogger::flushDeviceLogToHost
 #include "cuda_interop.hpp"
 #include "core_kernel.h"
 #include "settings.hpp"
@@ -26,7 +27,7 @@
 #endif
 
 // ---- Kernel (extern C) ------------------------------------------------------
-// NEU: Stream-Parameter in der Deklaration
+// Stream-Parameter in der Deklaration (Render-Stream kommt von außen)
 extern "C" void launch_mandelbrotHybrid(
     uchar4* out, uint16_t* d_it,
     int w, int h, float zoom, float2 offset,
@@ -43,11 +44,7 @@ static std::unordered_map<GLuint, bear_CudaPBOResource*> s_pboMap;
 static bool           s_pauseZoom = false;
 static bool           s_deviceOk  = false;
 
-static void*          s_hostRegEntropyPtr   = nullptr;  static size_t s_hostRegEntropyBytes   = 0;
-static void*          s_hostRegContrastPtr  = nullptr;  static size_t s_hostRegContrastBytes  = 0;
-
 static cudaEvent_t    s_evStart = nullptr, s_evStop = nullptr; static bool s_evInit = false;
-// NOTE [4f]: TU-lokaler Copy-Stream entfernt — kommt jetzt als Funktionsparameter.
 
 // ---- Helpers ----------------------------------------------------------------
 static inline void ensureDeviceOnce() {
@@ -70,18 +67,6 @@ static inline void destroyEventsIfAny() {
     s_evInit=false;
 }
 
-static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size_t& regBytes) {
-    const size_t cap = vec.capacity();
-    void* ptr = cap ? (void*)vec.data() : nullptr;
-    const size_t bytes = cap * sizeof(float);
-    if (ptr == regPtr && bytes == regBytes) return;
-    if (regPtr) CUDA_CHECK(cudaHostUnregister(regPtr));
-    if (ptr)    CUDA_CHECK(cudaHostRegister(ptr, bytes, cudaHostRegisterPortable));
-    regPtr = ptr; regBytes = bytes;
-    if constexpr (Settings::debugLogging)
-        LUCHS_LOG_HOST("[PIN] host-register ptr=%p bytes=%zu", regPtr, regBytes);
-}
-
 static inline void enforceWriteDiscard(bear_CudaPBOResource* res) {
     if (!res) return;
     if (auto* gr = res->get()) {
@@ -101,11 +86,7 @@ struct MapGuard {
 void registerAllPBOs(const GLuint* ids, int count) {
     ensureDeviceOnce();
 
-    if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
-    if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
-
-    // [4f] kein TU-lokaler Copy-Stream mehr -> nichts zu zerstören hier
 
     for (auto &kv : s_pboMap) delete kv.second; s_pboMap.clear(); s_pboActive=nullptr;
     if (!ids || count<=0) return;
@@ -124,11 +105,7 @@ void registerAllPBOs(const GLuint* ids, int count) {
 }
 
 void unregisterAllPBOs() {
-    if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
-    if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
-
-    // [4f] kein TU-lokaler Copy-Stream mehr -> nichts zu zerstören hier
 
     for (auto &kv : s_pboMap) delete kv.second; s_pboMap.clear(); s_pboActive=nullptr;
 }
@@ -155,11 +132,7 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
 }
 
 void unregisterPBO() {
-    if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
-    if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
-
-    // [4f] kein TU-lokaler Copy-Stream mehr -> nichts zu zerstören hier
 
     if (s_pboActive) {
         for (auto it = s_pboMap.begin(); it != s_pboMap.end(); ++it) {
@@ -239,36 +212,49 @@ void renderCudaFrame(
         float ms=0.0f; cudaEventElapsedTime(&ms, s_evStart, s_evStop); mbMs = ms;
     }
 #endif
-    if (mbErrLaunch != cudaSuccess || mbErrSync != cudaSuccess)
+    if (mbErrLaunch != cudaSuccess || mbErrSync != cudaSuccess) {
+        LUCHS_LOG_HOST("[CUDA][ERR] mandelbrot rc_launch=%d rc_sync=%d", (int)mbErrLaunch, (int)mbErrSync);
+        // Sofort Device-Log flushen (Fehlerdiagnose)
+        LuchsLogger::flushDeviceLogToHost(0);
         throw std::runtime_error("CUDA failure: mandelbrot kernel");
+    }
 
-#if !defined(__CUDA_ARCH__)
-    const auto tEC0 = std::chrono::high_resolution_clock::now();
-#endif
+    // ---------------- E/C-Streaming (Minimal: 2 Streams) ----------------
+    // E/C läuft auf dem renderStream hinter dem Mandelbrot-Render und setzt ein Done-Event.
     ::computeCudaEntropyContrast(
         static_cast<const uint16_t*>(d_iterations.get()),
         static_cast<float*>(d_entropy.get()),
         static_cast<float*>(d_contrast.get()),
-        width, height, tileSize, maxIterations
+        width, height, tileSize, maxIterations,
+        renderStream,                // Launch-Stream
+        state.evEcDone              // record done-event
     );
+
 #if !defined(__CUDA_ARCH__)
+    // Grobe Aufteilung der gemessenen EC-Zeit (falls nötig separat messen, hier halb/halb)
+    const auto tEC0 = std::chrono::high_resolution_clock::now();
     const auto tEC1 = std::chrono::high_resolution_clock::now();
     const double ecMs = std::chrono::duration<double, std::milli>(tEC1 - tEC0).count();
     entMs = ecMs * 0.5; conMs = ecMs * 0.5;
 #endif
 
-    // Host-Transfers (Copy-Stream wartet auf Render-Stream-Event)
+    // Host-Transfers (copyStream wartet auf E/C-done Event)
     if (h_entropy.capacity()  < size_t(numTiles)) h_entropy.reserve(size_t(numTiles));
     if (h_contrast.capacity() < size_t(numTiles)) h_contrast.reserve(size_t(numTiles));
-    ensureHostPinned(h_entropy,  s_hostRegEntropyPtr,  s_hostRegEntropyBytes);
-    ensureHostPinned(h_contrast, s_hostRegContrastPtr, s_hostRegContrastBytes);
-    h_entropy.resize(size_t(numTiles)); h_contrast.resize(size_t(numTiles));
+    h_entropy.resize(size_t(numTiles));
+    h_contrast.resize(size_t(numTiles));
 
-    // [4f] expliziter copyStream aus dem RendererState
-    CUDA_CHECK(cudaStreamWaitEvent(copyStream, s_evStop, 0)); // warte auf Ende des Render-Streams
+    // Wichtig: auf E/C-Fertig warten
+    CUDA_CHECK(cudaStreamWaitEvent(copyStream, state.evEcDone, 0));
 
     CUDA_CHECK(cudaMemcpyAsync(h_entropy.data(),  d_entropy.get(),  enBytes, cudaMemcpyDeviceToHost, copyStream));
     CUDA_CHECK(cudaMemcpyAsync(h_contrast.data(), d_contrast.get(), ctBytes, cudaMemcpyDeviceToHost, copyStream));
+
+    if (state.evCopyDone) {
+        CUDA_CHECK(cudaEventRecord(state.evCopyDone, copyStream));
+    }
+
+    // Für den nachfolgenden Upload/Draw benötigen wir die Daten auf dem Host → hier synchronisieren.
     CUDA_CHECK(cudaStreamSynchronize(copyStream));
 
     shouldZoom = false; newOffset = offset;
@@ -286,7 +272,8 @@ void renderCudaFrame(
     state.lastTimings.deviceLogFlush   = 0.0;
 
     if constexpr (Settings::performanceLogging)
-        LUCHS_LOG_HOST("[PERF][ZK] mp=%.2f mb=%.2f en=%.2f ct=%.2f tt=%.2f", mapMs, mbMs, entMs, conMs, totalMs);
+        LUCHS_LOG_HOST("[PERF][ZK] map=%.2f mandelbrot=%.2f entropy=%.2f contrast=%.2f total=%.2f",
+                       mapMs, mbMs, entMs, conMs, totalMs);
 #endif
 }
 
@@ -301,12 +288,6 @@ bool precheckCudaRuntime() {
     if constexpr (Settings::debugLogging)
         LUCHS_LOG_HOST("[CUDA] precheck err1=%d err2=%d count=%d", (int)e1, (int)e2, deviceCount);
     return e1==cudaSuccess && e2==cudaSuccess && deviceCount>0;
-}
-
-bool verifyCudaGetErrorStringSafe() {
-    const char* msg = cudaGetErrorString(cudaErrorInvalidValue);
-    if (msg) { if constexpr (Settings::debugLogging) LUCHS_LOG_HOST("[CHECK] cudaGetErrorString(dummy)=\"%s\"", msg); return true; }
-    LUCHS_LOG_HOST("[FATAL] cudaGetErrorString returned null"); return false;
 }
 
 static inline int getAttrSafe(cudaDeviceAttr a, int dev){ int v=0; (void)cudaDeviceGetAttribute(&v,a,dev); return v; }

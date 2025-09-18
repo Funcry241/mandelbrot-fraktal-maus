@@ -68,7 +68,7 @@ namespace {
         return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
     }
 
-    // [GLQ] Einmalige Scissor-State-Ermittlung statt pro Frame abzufragen
+    // [GLS] Einmalige Scissor-State-Ermittlung statt pro Frame abzufragen
     static bool       s_scissorInit = false;
     static GLboolean  s_scissorPrev = GL_FALSE;
 

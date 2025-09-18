@@ -38,13 +38,6 @@ int main()
         return EXIT_FAILURE;
     }
 
-    // Optional: verify cudaGetErrorString availability/path (project-specific guard)
-    if (!CudaInterop::verifyCudaGetErrorStringSafe())
-    {
-        LUCHS_LOG_HOST("[FATAL] CUDA error-string path invalid - refusing to proceed");
-        return EXIT_FAILURE;
-    }
-
     // Sync overlay flags from Settings (runtime-visible defaults)
     renderer.getState().heatmapOverlayEnabled       = Settings::heatmapOverlayEnabled;
     renderer.getState().warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
