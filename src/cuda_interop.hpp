@@ -1,11 +1,16 @@
+///// Otter: CUDA–GL Interop API; stream-aware; ASCII-only logs.
+///// Schneefuchs: Minimal includes; deterministic signatures; /WX-safe.
+///  Maus: Default-Stream rückwärtskompatibel; clear ownership.
+///  Datei: src/cuda_interop.hpp
 #pragma once
+
 #include <cstdint>
 #include <vector>
+#include <vector_types.h>        // float2
+#include <cuda_runtime_api.h>    // cudaStream_t
+
 #include "hermelin_buffer.hpp"
 #include "renderer_state.hpp"
-
-// Für cudaStream_t
-#include <cuda_runtime_api.h>
 
 using GLuint = unsigned int;
 
@@ -26,7 +31,7 @@ void renderCudaFrame(
     std::vector<float>& h_contrast,
     float2& newOffset, bool& shouldZoom,
     int tileSize, RendererState& state,
-    cudaStream_t renderStream = 0   // <--- NEU (optional, rückwärtskompatibel)
+    cudaStream_t renderStream = 0   // optional; default = legacy stream
 );
 
 void setPauseZoom(bool pause);
