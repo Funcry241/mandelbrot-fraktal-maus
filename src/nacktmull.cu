@@ -1,8 +1,8 @@
-///// Otter: Direktfarbe (A=255), kein Compose. Neon-Intro (~2s) + Rüsselwarze (Glanz & Glitzer).
-///// Schneefuchs: API unverändert, Progressive & Periodizität bleiben; analytische Gradienten; kompakt.
-///  Maus: Innen dunkel, außen Palette + Highlights; performantes Packen & minimale Zweige.
-///// ZK: Periodizitäts-Log nur einmal (Debug), sonst unverändert.
-///  Datei: src/nacktmull.cu
+///// Otter: Direktfarbe (A=255), kein Compose; Neon-Intro (~2s) + Rüsselwarze (Glanz & Glitzer).
+///// Schneefuchs: API mit Stream-Param; Progressive & Periodizität beibehalten; analytische Gradienten; ZK-Log nur einmal (Debug).
+///// Maus: Innen dunkel, außen Palette + Highlights; performantes Packen & minimale Zweige.
+///// Datei: src/nacktmull.cu
+
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <vector_types.h>

@@ -1,7 +1,7 @@
 ///// Otter: Host wrapper for CUDA render/analysis; ASCII-only logs.
-/// ///// Schneefuchs: No global side-effects; TU-local CUDA events; robust error paths.
-/// ///// Maus: Mirrors old computeCudaFrame body; no API drift for callers.
-/// ///// Datei: src/nacktmull_api.cpp
+///// Schneefuchs: TU-local stream; no global side-effects; robust error paths.
+///// Maus: Mirrors old computeCudaFrame; no API drift for callers.
+///// Datei: src/nacktmull_api.cpp
 
 #include "pch.hpp"
 #include "nacktmull_api.hpp"
@@ -22,20 +22,11 @@
 #include <exception>
 
 namespace {
-
-// CUDA 13: Events statt device-weitem Sync (TU-lokal)
-static cudaEvent_t g_evStart = nullptr;
-static cudaEvent_t g_evStop  = nullptr;
-static bool        g_evInit  = false;
-
-inline void ensureCudaEvents() {
-    if (!g_evInit) {
-        CUDA_CHECK(cudaEventCreate(&g_evStart));
-        CUDA_CHECK(cudaEventCreate(&g_evStop));
-        g_evInit = true;
-    }
+// TU-lokaler Render-Stream (non-blocking)
+static cudaStream_t g_renderStream = nullptr;
+inline void ensureRenderStreamOnce() {
+    if (!g_renderStream) CUDA_CHECK(cudaStreamCreateWithFlags(&g_renderStream, cudaStreamNonBlocking));
 }
-
 } // anon
 
 namespace NacktmullAPI
@@ -104,10 +95,7 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
 
     // Device-Render (Iterations -> Shade) + E/C-Analyse (erzeugt Host-Arrays)
     try {
-        ensureCudaEvents();
-
-        // GPU-Zeitmessung ohne deviceweite Synchronisation:
-        CUDA_CHECK(cudaEventRecord(g_evStart, /*stream=*/0));
+        ensureRenderStreamOnce();
 
         float2 gpuOffset    = make_float2((float)fctx.offset.x, (float)fctx.offset.y);
         float2 gpuNewOffset = gpuOffset;
@@ -126,33 +114,10 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
             gpuNewOffset,
             fctx.shouldZoom,
             fctx.tileSize,
-            state
+            state,
+            g_renderStream   // expliziter Render-Stream
         );
-
-        // Stop-Event wird nach allen Kernel-Launches in Stream 0 eingereiht:
-        CUDA_CHECK(cudaEventRecord(g_evStop, /*stream=*/0));
-        CUDA_CHECK(cudaEventSynchronize(g_evStop)); // wartet nur auf Stream 0
-
-        float msGpuF = 0.0f;
-        CUDA_CHECK(cudaEventElapsedTime(&msGpuF, g_evStart, g_evStop));
-        const double msGpu = static_cast<double>(msGpuF);
-
-        if constexpr (Settings::debugLogging) {
-            if (state.lastTimings.valid) {
-                LUCHS_LOG_HOST(
-                    "[FRAME] Mandelbrot=%.3f | Launch=%.3f | Sync=%.3f | Entropy=%.3f | Contrast=%.3f | LogFlush=%.3f | PBOMap=%.3f",
-                    state.lastTimings.mandelbrotTotal,
-                    state.lastTimings.mandelbrotLaunch,
-                    state.lastTimings.mandelbrotSync,
-                    state.lastTimings.entropy,
-                    state.lastTimings.contrast,
-                    state.lastTimings.deviceLogFlush,
-                    state.lastTimings.pboMap
-                );
-            } else {
-                LUCHS_LOG_HOST("[TIME] CUDA stream0 elapsed: %.3f ms", msGpu);
-            }
-        }
+        // gpuNewOffset wird aktuell nicht verwendet (Zoom-Analyse folgt unten)
     } catch (const std::exception& ex) { // [[unlikely]]
         LUCHS_LOG_HOST("[ERROR] renderCudaFrame threw: %s", ex.what());
         LuchsLogger::flushDeviceLogToHost(0);

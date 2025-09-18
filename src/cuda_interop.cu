@@ -26,10 +26,12 @@
 #endif
 
 // ---- Kernel (extern C) ------------------------------------------------------
+// NEU: Stream-Parameter in der Deklaration
 extern "C" void launch_mandelbrotHybrid(
     uchar4* out, uint16_t* d_it,
     int w, int h, float zoom, float2 offset,
-    int maxIter, int tile
+    int maxIter, int tile,
+    cudaStream_t stream
 );
 
 namespace CudaInterop {
@@ -52,7 +54,6 @@ static inline void ensureDeviceOnce() {
     if (!s_deviceOk) { CUDA_CHECK(cudaSetDevice(0)); s_deviceOk = true; }
 }
 
-// create timing/barrier events once (always, not only for logging)
 static inline void ensureEventsOnce() {
     if (s_evInit) return;
     CUDA_CHECK(cudaEventCreate(&s_evStart));
@@ -85,7 +86,6 @@ static inline void ensureHostPinned(std::vector<float>& vec, void*& regPtr, size
         LUCHS_LOG_HOST("[PIN] host-register ptr=%p bytes=%zu", regPtr, regBytes);
 }
 
-// [ZK] Für registrierte Ressourcen WriteDiscard-Flags setzen
 static inline void enforceWriteDiscard(bear_CudaPBOResource* res) {
     if (!res) return;
     if (auto* gr = res->get()) {
@@ -105,7 +105,6 @@ struct MapGuard {
 void registerAllPBOs(const GLuint* ids, int count) {
     ensureDeviceOnce();
 
-    // [ZK] Vorherige Pins/Events/Stream sauber freigeben (Resize/Reset)
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
@@ -118,7 +117,7 @@ void registerAllPBOs(const GLuint* ids, int count) {
         if (!ids[i]) continue;
         auto* res = new bear_CudaPBOResource(ids[i]);
         if (res && res->get()) {
-            enforceWriteDiscard(res); // [ZK]
+            enforceWriteDiscard(res);
             s_pboMap[ids[i]] = res;
         } else {
             delete res;
@@ -128,7 +127,6 @@ void registerAllPBOs(const GLuint* ids, int count) {
 }
 
 void unregisterAllPBOs() {
-    // [ZK] Host-Pins, Events und Stream freigeben; PBOs löschen
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
@@ -144,7 +142,7 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
     if (it == s_pboMap.end()) {
         auto* res = new bear_CudaPBOResource(id);
         if (res && res->get()) {
-            enforceWriteDiscard(res); // [ZK]
+            enforceWriteDiscard(res);
             s_pboMap[id]=res;
             if constexpr (Settings::debugLogging)
                 LUCHS_LOG_HOST("[CUDA-Interop] auto-registered PBO id=%u", id);
@@ -159,14 +157,12 @@ void registerPBO(const Hermelin::GLBuffer& pbo) {
 }
 
 void unregisterPBO() {
-    // aktives PBO entfernen + Pins/Events/Stream putzen
     if (s_hostRegEntropyPtr)  { cudaHostUnregister(s_hostRegEntropyPtr);  s_hostRegEntropyPtr=nullptr;  s_hostRegEntropyBytes=0; }
     if (s_hostRegContrastPtr) { cudaHostUnregister(s_hostRegContrastPtr); s_hostRegContrastPtr=nullptr; s_hostRegContrastBytes=0; }
     destroyEventsIfAny();
     if (s_copyStrm) { cudaStreamDestroy(s_copyStrm); s_copyStrm=nullptr; }
 
     if (s_pboActive) {
-        // aus Map entfernen (keine Dangling-Pointer)
         for (auto it = s_pboMap.begin(); it != s_pboMap.end(); ++it) {
             if (it->second == s_pboActive) { delete it->second; s_pboMap.erase(it); break; }
         }
@@ -192,8 +188,6 @@ void renderCudaFrame(
     const auto t0 = std::chrono::high_resolution_clock::now();
     double mapMs=0.0, mbMs=0.0, entMs=0.0, conMs=0.0;
 #endif
-    (void)renderStream; // Specht 4a: vorerst ungenutzt (Warnings-as-Errors)
-
     if (!s_pboActive) throw std::runtime_error("[FATAL] CUDA PBO not registered!");
     if (width<=0 || height<=0)  throw std::runtime_error("invalid framebuffer dims");
     if (tileSize<=0) { int was=tileSize; tileSize = Settings::BASE_TILE_SIZE>0 ? Settings::BASE_TILE_SIZE : 16; LUCHS_LOG_HOST("[WARN] tileSize<=0 (%d) -> using %d", was, tileSize); }
@@ -213,7 +207,6 @@ void renderCudaFrame(
 #if !defined(__CUDA_ARCH__)
     const auto tMap0 = std::chrono::high_resolution_clock::now();
 #endif
-    // [ZK] Map sollte dank GL-Fences non-blocking sein
     MapGuard map(s_pboActive);
     if (!map.ptr) throw std::runtime_error("pboResource->map() returned null");
 
@@ -225,17 +218,21 @@ void renderCudaFrame(
     if (map.bytes < needBytes) throw std::runtime_error("PBO byte size mismatch");
 
     ensureEventsOnce();
-
     (void)cudaGetLastError();
-    cudaEventRecord(s_evStart, 0); // timing start (default stream)
 
+    // Timing-Event auf DEM Render-Stream (nicht Stream 0)
+    CUDA_CHECK(cudaEventRecord(s_evStart, renderStream));
+
+    // Kernel-Launch auf dem übergebenen Stream
     launch_mandelbrotHybrid(static_cast<uchar4*>(map.ptr),
                             static_cast<uint16_t*>(d_iterations.get()),
-                            width,height, zoom, offset, maxIterations, tileSize);
+                            width, height, zoom, offset, maxIterations, tileSize,
+                            renderStream);
     cudaError_t mbErrLaunch = cudaGetLastError();
 
-    cudaEventRecord(s_evStop, 0);  // timing stop for kernel
-    cudaError_t mbErrSync   = cudaEventSynchronize(s_evStop);
+    // Stop-Event & Sync ebenfalls auf renderStream
+    CUDA_CHECK(cudaEventRecord(s_evStop, renderStream));
+    cudaError_t mbErrSync = cudaEventSynchronize(s_evStop);
 
 #if !defined(__CUDA_ARCH__)
     if (mbErrSync==cudaSuccess) {
@@ -260,7 +257,7 @@ void renderCudaFrame(
     entMs = ecMs * 0.5; conMs = ecMs * 0.5;
 #endif
 
-    // Host-Transfers (gepinnt, async) — korrekt sequenziert via Event-Barrier
+    // Host-Transfers (Copy-Stream wartet auf Render-Stream-Event)
     if (h_entropy.capacity()  < size_t(numTiles)) h_entropy.reserve(size_t(numTiles));
     if (h_contrast.capacity() < size_t(numTiles)) h_contrast.reserve(size_t(numTiles));
     ensureHostPinned(h_entropy,  s_hostRegEntropyPtr,  s_hostRegEntropyBytes);
@@ -268,15 +265,12 @@ void renderCudaFrame(
     h_entropy.resize(size_t(numTiles)); h_contrast.resize(size_t(numTiles));
 
     ensureCopyStreamOnce();
-    // Warten im Copy-Stream, bis Default-Stream (Kernels) fertig ist
-    cudaEventRecord(s_evStart, 0);                // reuse as barrier marker (default stream)
-    CUDA_CHECK(cudaStreamWaitEvent(s_copyStrm, s_evStart, 0));
+    CUDA_CHECK(cudaStreamWaitEvent(s_copyStrm, s_evStop, 0)); // warte auf Ende des Render-Streams
 
     CUDA_CHECK(cudaMemcpyAsync(h_entropy.data(),  d_entropy.get(),  enBytes, cudaMemcpyDeviceToHost, s_copyStrm));
     CUDA_CHECK(cudaMemcpyAsync(h_contrast.data(), d_contrast.get(), ctBytes, cudaMemcpyDeviceToHost, s_copyStrm));
     CUDA_CHECK(cudaStreamSynchronize(s_copyStrm));
 
-    // Zoom-Entscheidung (hier neutral)
     shouldZoom = false; newOffset = offset;
 
 #if !defined(__CUDA_ARCH__)
