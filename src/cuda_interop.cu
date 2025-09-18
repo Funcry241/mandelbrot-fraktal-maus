@@ -185,12 +185,15 @@ void renderCudaFrame(
     std::vector<float>& h_entropy,
     std::vector<float>& h_contrast,
     float2& newOffset, bool& shouldZoom,
-    int tileSize, RendererState& state
+    int tileSize, RendererState& state,
+    cudaStream_t renderStream /*=0*/
 ){
 #if !defined(__CUDA_ARCH__)
     const auto t0 = std::chrono::high_resolution_clock::now();
     double mapMs=0.0, mbMs=0.0, entMs=0.0, conMs=0.0;
 #endif
+    (void)renderStream; // Specht 4a: vorerst ungenutzt (Warnings-as-Errors)
+
     if (!s_pboActive) throw std::runtime_error("[FATAL] CUDA PBO not registered!");
     if (width<=0 || height<=0)  throw std::runtime_error("invalid framebuffer dims");
     if (tileSize<=0) { int was=tileSize; tileSize = Settings::BASE_TILE_SIZE>0 ? Settings::BASE_TILE_SIZE : 16; LUCHS_LOG_HOST("[WARN] tileSize<=0 (%d) -> using %d", was, tileSize); }
@@ -225,6 +228,7 @@ void renderCudaFrame(
 
     (void)cudaGetLastError();
     cudaEventRecord(s_evStart, 0); // timing start (default stream)
+
     launch_mandelbrotHybrid(static_cast<uchar4*>(map.ptr),
                             static_cast<uint16_t*>(d_iterations.get()),
                             width,height, zoom, offset, maxIterations, tileSize);
@@ -265,7 +269,7 @@ void renderCudaFrame(
 
     ensureCopyStreamOnce();
     // Warten im Copy-Stream, bis Default-Stream (Kernels) fertig ist
-    cudaEventRecord(s_evStart, 0);                // reuse as barrier marker
+    cudaEventRecord(s_evStart, 0);                // reuse as barrier marker (default stream)
     CUDA_CHECK(cudaStreamWaitEvent(s_copyStrm, s_evStart, 0));
 
     CUDA_CHECK(cudaMemcpyAsync(h_entropy.data(),  d_entropy.get(),  enBytes, cudaMemcpyDeviceToHost, s_copyStrm));

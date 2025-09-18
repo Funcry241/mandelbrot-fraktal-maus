@@ -4,6 +4,9 @@
 #include "hermelin_buffer.hpp"
 #include "renderer_state.hpp"
 
+// Für cudaStream_t
+#include <cuda_runtime_api.h>
+
 using GLuint = unsigned int;
 
 namespace CudaInterop {
@@ -22,7 +25,8 @@ void renderCudaFrame(
     std::vector<float>& h_entropy,
     std::vector<float>& h_contrast,
     float2& newOffset, bool& shouldZoom,
-    int tileSize, RendererState& state
+    int tileSize, RendererState& state,
+    cudaStream_t renderStream = 0   // <--- NEU (optional, rückwärtskompatibel)
 );
 
 void setPauseZoom(bool pause);
