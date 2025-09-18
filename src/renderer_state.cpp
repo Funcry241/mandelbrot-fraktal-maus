@@ -11,6 +11,10 @@
 #include "common.hpp"
 #include "renderer_resources.hpp"
 #include <algorithm> // std::clamp, std::max
+#include <cstring>   // std::memset
+
+// CUDA: Implementierung hier, Header nur vorwaerts deklariert
+#include <cuda_runtime_api.h>
 
 // 🦊 Schneefuchs: interne Helfer in anonymer NS, noexcept – klarer Scope.
 namespace {
@@ -39,10 +43,45 @@ namespace {
     }
 }
 
+// --- Stream-Lifecycle (Ownership im State) -----------------------------------
+
+void RendererState::createCudaStreamsIfNeeded() {
+    if (!renderStream) {
+        CUDA_CHECK(cudaSetDevice(0));
+        CUDA_CHECK(cudaStreamCreateWithFlags(&renderStream, cudaStreamNonBlocking));
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[STREAM] renderStream created %p (non-blocking)", (void*)renderStream);
+        }
+    }
+}
+
+void RendererState::destroyCudaStreamsIfAny() noexcept {
+    // Keine CUDA_CHECK-Makros in noexcept; hart aufraeumen und loggen.
+    if (renderStream) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[STREAM] renderStream destroy %p", (void*)renderStream);
+        }
+        cudaStreamDestroy(renderStream);
+        renderStream = nullptr;
+    }
+}
+
+// --- Ctor / Dtor -------------------------------------------------------------
+
 RendererState::RendererState(int w, int h)
 : width(w), height(h) {
+    // Erzeuge Streams frueh, damit Call-Sites sie sofort nutzen koennen
+    createCudaStreamsIfNeeded();
     reset();
 }
+
+RendererState::~RendererState() {
+    // [ZK] Fences zuerst aufraeumen, dann Streams/FBOs/GL
+    clearPboFences(*this);
+    destroyCudaStreamsIfAny();
+}
+
+// --- Reset -------------------------------------------------------------------
 
 void RendererState::reset() {
     // Kamera (Nacktmull-Pullover: doubles)
@@ -55,7 +94,7 @@ void RendererState::reset() {
     baseIterations = Settings::INITIAL_ITERATIONS;
     maxIterations  = Settings::MAX_ITERATIONS_CAP;
 
-    // Timings / Zähler
+    // Timings / Zaehler
     fps        = 0.0f;
     deltaTime  = 0.0f;
     frameCount = 0;
@@ -80,14 +119,19 @@ void RendererState::reset() {
     progressiveEnabled         = Settings::progressiveEnabled;
     progressiveCooldownFrames  = 0;
 
-    // [ZK] Upload-Skip zurücksetzen & evtl. alte Fences putzen
+    // [ZK] Upload-Skip zuruecksetzen & evtl. alte Fences putzen
     skipUploadThisFrame = false;
     clearPboFences(*this);
 
     // CUDA/Host-Timings: Default (valid=false) + Host-Frame-Nullung
     lastTimings = CudaPhaseTimings{};
     lastTimings.resetHostFrame();
+
+    // Streams sicherstellen (Reset kann nach Dtor/Resize gerufen werden)
+    createCudaStreamsIfNeeded();
 }
+
+// --- CUDA-Puffer -------------------------------------------------------------
 
 void RendererState::setupCudaBuffers(int tileSize) {
     // --- sanitize input ---
@@ -168,7 +212,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
         if (grow || Settings::debugLogging) CUDA_CHECK(cudaMemset(d_entropy.get(), 0, entropy_bytes));
     }
 
-    // Optional: Pointer-Attribute prüfen
+    // Optional: Pointer-Attribute pruefen
     if constexpr (Settings::debugLogging) {
         cudaPointerAttributes attr{};
         const cudaError_t attrErr = cudaPointerGetAttributes(&attr, d_entropy.get());
@@ -251,13 +295,15 @@ void RendererState::setupCudaBuffers(int tileSize) {
                        d_iterations.get(), d_iterations.size(),
                        d_entropy.get(),    d_entropy.size(),
                        d_contrast.get(),   d_contrast.size(),
-                       wantProg ? d_stateZ.get()  : nullptr, wantProg ? d_stateZ.size()  : 0,
-                       wantProg ? d_stateIt.get() : nullptr, wantProg ? d_stateIt.size() : 0,
+                       Settings::progressiveEnabled ? d_stateZ.get()  : nullptr, Settings::progressiveEnabled ? d_stateZ.size()  : 0,
+                       Settings::progressiveEnabled ? d_stateIt.get() : nullptr, Settings::progressiveEnabled ? d_stateIt.size() : 0,
                        width, height, tileSize, numTiles);
     }
 
     lastTileSize = tileSize;
 }
+
+// --- Resize ------------------------------------------------------------------
 
 void RendererState::resize(int newWidth, int newHeight) {
     if (newWidth <= 0 || newHeight <= 0) {
@@ -267,7 +313,7 @@ void RendererState::resize(int newWidth, int newHeight) {
         return;
     }
 
-    // [ZK] Erst alle Fences aufräumen, dann Ressourcen frei geben
+    // [ZK] Erst alle Fences aufraeumen, dann Ressourcen frei geben
     clearPboFences(*this);
 
     // Free old CUDA device buffers
@@ -293,13 +339,13 @@ void RendererState::resize(int newWidth, int newHeight) {
     // Create fresh GL buffers
     for (auto& b : pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(width, height)); }
     pboIndex = 0;
-    std::fill(pboFence.begin(), pboFence.end(), (GLsync)0); // [ZK] Fences zurücksetzen
+    std::fill(pboFence.begin(), pboFence.end(), (GLsync)0); // [ZK] Fences zuruecksetzen
     skipUploadThisFrame = false; // [ZK]
     tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
 
     { GLuint ids[kPboRingSize] = { pboRing[0].id(), pboRing[1].id(), pboRing[2].id() }; CudaInterop::registerAllPBOs(ids, kPboRingSize); }
 
-    // PixelScale hängt von Größe/Zoom ab → neu berechnen
+    // PixelScale haengt von Groesse/Zoom ab → neu berechnen
     recomputePixelScale(*this);
 
     lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
@@ -319,7 +365,8 @@ void RendererState::resize(int newWidth, int newHeight) {
     }
 }
 
-// 🧯 Progressive-State vorsichtig invalidieren (1-Frame-Cooldown, ohne Throw)
+// --- Progressive-Invalidierung ----------------------------------------------
+
 void RendererState::invalidateProgressiveState(bool hardReset) noexcept {
     // Soft: nur Pause des Resume-Mechanismus, keine Memsets hier
     progressiveEnabled        = false;
@@ -327,7 +374,7 @@ void RendererState::invalidateProgressiveState(bool hardReset) noexcept {
     progressiveCooldownFrames = 2;
 
     if (hardReset) {
-        // Harte Invalidierung optional: Inhalte werden bei nächster setupCudaBuffers()
+        // Harte Invalidierung optional: Inhalte werden bei naechster setupCudaBuffers()
         // via cudaMemset initialisiert; hier keine CUDA-Calls (noexcept!).
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[PROG] hardReset requested (state will be cleared on next allocation)");

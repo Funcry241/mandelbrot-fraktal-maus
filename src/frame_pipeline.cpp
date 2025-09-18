@@ -27,7 +27,7 @@
 #include "luchs_cuda_log_buffer.hpp"
 #include "common.hpp"
 #include "settings.hpp"
-#include "nacktmull_api.hpp"   // <-- NEU: Host-Wrapper-API
+#include "nacktmull_api.hpp"   // Host-Wrapper-API
 
 namespace FramePipeline
 {
@@ -60,6 +60,12 @@ namespace {
             (void)frameIdx;
             return false;
         }
+    }
+
+    // Epoch-Millis für stabile Zeitachse in Logs
+    inline long long epochMillisNow() {
+        using namespace std::chrono;
+        return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
     }
 
     // [GLQ] Einmalige Scissor-State-Ermittlung statt pro Frame abzufragen
@@ -101,6 +107,7 @@ static void beginFrame(FrameContext& fctx, RendererState& state) {
 // ------------------------------- CUDA + analysis ------------------------------
 // Dünner Wrapper: delegiert an NacktmullAPI (Host-Seite).
 static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
+    // NacktmullAPI nimmt state.renderStream und leitet ihn bis in CudaInterop weiter.
     NacktmullAPI::computeCudaFrame(fctx, state);
 }
 
@@ -239,34 +246,43 @@ void execute(RendererState& state) {
     FpsMeter::updateCoreMs(g_frameTotal);
 
     if (perfShouldLog(g_frame)) {
+        // Device-Log flushen (ASCII-only, deterministic)
         LuchsLogger::flushDeviceLogToHost(0);
 
+        // Felder sammeln (stabile Reihenfolge)
+        const long long tEpoch = epochMillisNow();
         const int    resX = g_ctx.width;
         const int    resY = g_ctx.height;
         const int    it   = g_ctx.maxIterations;
         const double fps  = (g_ctx.frameTime > 0.0f) ? (1.0 / g_ctx.frameTime) : 0.0;
 
-        const bool   vt   = state.lastTimings.valid;
-        const double mapMs  = vt ? state.lastTimings.pboMap          : 0.0;
+        const bool   vt     = state.lastTimings.valid;
+        const double mapMs  = vt ? state.lastTimings.pboMap          : 0.0; // PBO map/unmap
         const double mandMs = vt ? state.lastTimings.mandelbrotTotal : 0.0;
         const double entMs  = vt ? state.lastTimings.entropy         : 0.0;
         const double conMs  = vt ? state.lastTimings.contrast        : 0.0;
 
-        const int mallocs = 0, frees = 0, dflush = 1;
-        const int maxfps  = FpsMeter::currentMaxFpsInt();
+        const double txMs   = g_texMs;
+        const double ovMs   = g_ovlMs;
+        const double ttMs   = g_frameTotal;
 
-        LUCHS_LOG_HOST(
-            "[PERF-A] f=%d r=%dx%d zm=%.4g it=%d fp=%.1f mx=%d ma=%d fr=%d df=%d",
-            g_frame, resX, resY, (double)g_ctx.zoom, it,
-            fps, maxfps, mallocs, frees, dflush
-        );
+        const double e0     = (double)g_ctx.lastEntropy;
+        const double c0     = (double)g_ctx.lastContrast;
 
+        const int    ringIx = state.pboIndex;
+        const unsigned pbo  = state.currentPBO().id();
+        const unsigned tex  = state.tex.id();
+
+        const int maxfps    = FpsMeter::currentMaxFpsInt();
+        const int mallocs   = 0;
+        const int frees     = 0;
+        const int dflush    = 1;
+
+        // Eine feste ASCII-Zeile, epoch-millis zuerst, dann stabil sortierte Felder
         LUCHS_LOG_HOST(
-            "[PERF-B] f=%d mp=%.2f md=%.2f en=%.2f ct=%.2f tx=%.2f ov=%.2f tt=%.2f e0=%.4f c0=%.4f",
-            g_frame,
-            mapMs, mandMs, entMs, conMs,
-            g_texMs, g_ovlMs, g_frameTotal,
-            (double)g_ctx.lastEntropy, (double)g_ctx.lastContrast
+            "[PERF] t=%lld f=%d r=%dx%d zm=%.6g it=%d fps=%.1f mx=%d ma=%d fr=%d df=%d map=%.2f md=%.2f en=%.2f ct=%.2f tx=%.2f ov=%.2f tt=%.2f e0=%.4f c0=%.4f ring=%d pbo=%u tex=%u",
+            tEpoch, g_frame, resX, resY, (double)g_ctx.zoom, it, fps, maxfps, mallocs, frees, dflush,
+            mapMs, mandMs, entMs, conMs, txMs, ovMs, ttMs, e0, c0, ringIx, pbo, tex
         );
     }
 }

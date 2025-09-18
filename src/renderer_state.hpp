@@ -16,6 +16,9 @@
 struct GLFWwindow;
 struct __GLsync; using GLsync = __GLsync*; // [ZK] GLsync vorwaerts deklariert (keine GL-Header hier)
 
+// CUDA-Stream schlank vorwaerts deklarieren (kein schwerer cuda_runtime*-Include im Header)
+struct CUstream_st; using cudaStream_t = CUstream_st*; // Ownership liegt beim RendererState
+
 // MSVC: float2/double2 sind __align__-Typen → C4324 (Padding). Lokal und gezielt unterdruecken.
 #if defined(_MSC_VER)
   #pragma warning(push)
@@ -86,6 +89,10 @@ public:
     bool        warzenschweinOverlayEnabled = false;
     std::string warzenschweinText;
 
+    // 🎬 CUDA Streams (Ownership im State) – Schritt 4e
+    // Non-blocking Render-Stream; wird im Ctor/reset() erzeugt und im Dtor sauber zerstört.
+    cudaStream_t renderStream = nullptr;
+
     // ⏱️ Timings – CUDA + HOST konsolidiert (eine Quelle)
     struct CudaPhaseTimings {
         // CUDA / Interop (gesetzt vom Renderpfad)
@@ -113,12 +120,18 @@ public:
 
     // 🧽 Setup & Verwaltung
     RendererState(int w, int h);
+    ~RendererState(); // Stream-Cleanup (renderStream) – kein Leck, kein implizites Global
     void reset();
     void setupCudaBuffers(int tileSize);
     void resize(int newWidth, int newHeight);
 
     // 🧯 Progressive-State vorsichtig invalidieren (1-Frame-Cooldown, optional Hard-Reset)
     void invalidateProgressiveState(bool hardReset) noexcept;
+
+private:
+    // Interne Helfer für CUDA-Stream-Lifecycle (Definition in .cpp)
+    void createCudaStreamsIfNeeded();   // legt renderStream non-blocking an, falls nullptr
+    void destroyCudaStreamsIfAny() noexcept; // zerstört renderStream, setzt auf nullptr
 };
 
 #if defined(_MSC_VER)

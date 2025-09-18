@@ -2,6 +2,7 @@
 ///// Schneefuchs: No forward-decls — include real types to avoid C4099.
 ///// Maus: Exact API; stream param explicit; stable include order.
 ///// Datei: src/nacktmull_api.hpp
+
 #pragma once
 
 #include <vector_types.h>        // float2, uchar4
@@ -30,5 +31,6 @@ void launch_mandelbrotHybrid(uchar4* out, uint16_t* d_it,
 
 // ------------------------- C++ Host-API (Wrapper) -----------------------------
 namespace NacktmullAPI {
+    // Nutzt den vom RendererState besessenen renderStream (Schritt 4e).
     void computeCudaFrame(FrameContext& fctx, RendererState& state);
 } // namespace NacktmullAPI

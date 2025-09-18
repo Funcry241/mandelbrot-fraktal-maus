@@ -1,12 +1,12 @@
 ///// Otter: Host wrapper for CUDA render/analysis; ASCII-only logs.
-///// Schneefuchs: TU-local stream; no global side-effects; robust error paths.
+///// Schneefuchs: Uses RendererState-owned renderStream; no globals; robust error paths.
 ///// Maus: Mirrors old computeCudaFrame; no API drift for callers.
 ///// Datei: src/nacktmull_api.cpp
 
 #include "pch.hpp"
 #include "nacktmull_api.hpp"
 
-#include <GL/glew.h>            // GLsync, glClientWaitSync, glDeleteSync
+#include <GL/glew.h>             // GLsync, glClientWaitSync, glDeleteSync
 #include "cuda_interop.hpp"      // CudaInterop::{registerPBO,renderCudaFrame}
 #include "frame_context.hpp"
 #include "renderer_state.hpp"
@@ -20,14 +20,6 @@
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <exception>
-
-namespace {
-// TU-lokaler Render-Stream (non-blocking)
-static cudaStream_t g_renderStream = nullptr;
-inline void ensureRenderStreamOnce() {
-    if (!g_renderStream) CUDA_CHECK(cudaStreamCreateWithFlags(&g_renderStream, cudaStreamNonBlocking));
-}
-} // anon
 
 namespace NacktmullAPI
 {
@@ -95,10 +87,15 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
 
     // Device-Render (Iterations -> Shade) + E/C-Analyse (erzeugt Host-Arrays)
     try {
-        ensureRenderStreamOnce();
-
         float2 gpuOffset    = make_float2((float)fctx.offset.x, (float)fctx.offset.y);
         float2 gpuNewOffset = gpuOffset;
+
+        // Stream-Weitergabe: bevorzugt den vom State besessenen Stream,
+        // fällt im Notfall (nullptr) deterministisch auf Default-Stream 0 zurück.
+        cudaStream_t renderStrm = state.renderStream ? state.renderStream : (cudaStream_t)0;
+        if (!state.renderStream && Settings::debugLogging) {
+            LUCHS_LOG_HOST("[STREAM][WARN] state.renderStream=nullptr -> using default stream 0");
+        }
 
         CudaInterop::renderCudaFrame(
             state.d_iterations,
@@ -115,7 +112,7 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
             fctx.shouldZoom,
             fctx.tileSize,
             state,
-            g_renderStream   // expliziter Render-Stream
+            renderStrm   // expliziter Render-Stream (State-Ownership)
         );
         // gpuNewOffset wird aktuell nicht verwendet (Zoom-Analyse folgt unten)
     } catch (const std::exception& ex) { // [[unlikely]]
