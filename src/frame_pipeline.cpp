@@ -7,14 +7,14 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
-#include <algorithm>        // std::max, std::min
+#include <algorithm>
 #include <vector_types.h>
-#include <vector_functions.h> // make_float2
-#include <cuda_runtime.h>     // CUDA events for timing (no device-wide sync)
+#include <vector_functions.h>
+#include <cuda_runtime.h>
 
-#include "renderer_resources.hpp"    // OpenGLUtils::setGLResourceContext(...), OpenGLUtils::updateTextureFromPBO(...), OpenGLUtils::peekPBO(...)
-#include "renderer_pipeline.hpp"     // RendererPipeline::drawFullscreenQuad(...)
-#include "cuda_interop.hpp"          // CudaInterop::renderCudaFrame(...)
+#include "renderer_resources.hpp"
+#include "renderer_pipeline.hpp"
+#include "cuda_interop.hpp"
 #include "frame_context.hpp"
 #include "renderer_state.hpp"
 #include "zoom_command.hpp"
@@ -27,6 +27,7 @@
 #include "luchs_cuda_log_buffer.hpp"
 #include "common.hpp"
 #include "settings.hpp"
+#include "nacktmull_api.hpp"   // <-- NEU: Host-Wrapper-API
 
 namespace FramePipeline
 {
@@ -65,11 +66,10 @@ namespace {
     static bool       s_scissorInit = false;
     static GLboolean  s_scissorPrev = GL_FALSE;
 
-    // --- CUDA 13: Events statt cudaDeviceSynchronize() -----------
+    // CUDA-Events früher hier genutzt – verbleiben ohne Schaden, falls später wieder erforderlich.
     static cudaEvent_t g_evStart = nullptr;
     static cudaEvent_t g_evStop  = nullptr;
     static bool        g_evInit  = false;
-
     static inline void ensureCudaEvents() {
         if (!g_evInit) {
             CUDA_CHECK(cudaEventCreate(&g_evStart));
@@ -99,169 +99,13 @@ static void beginFrame(FrameContext& fctx, RendererState& state) {
 }
 
 // ------------------------------- CUDA + analysis ------------------------------
+// Dünner Wrapper: delegiert an NacktmullAPI (Host-Seite).
 static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
-    // [ZK] Non-blocking PBO-Ring Auswahl mit GLsync-Fences
-    int tried = 0;
-    const int R = RendererState::kPboRingSize;
-    int next = (state.pboIndex + 1) % R;
-    bool found = false;
-    for (; tried < R; ++tried) {
-        GLsync& fence = state.pboFence[next];
-        if (fence) {
-            GLenum s = glClientWaitSync(fence, 0, 0); // poll only (non-blocking)
-            if (s == GL_ALREADY_SIGNALED || s == GL_CONDITION_SATISFIED) {
-                glDeleteSync(fence); fence = 0;
-            } else {
-                next = (next + 1) % R; continue;
-            }
-        }
-        found = true; break;
-    }
-    if (!found) {
-        state.skipUploadThisFrame = true;
-        if constexpr (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[ZK][UP] skip reason=no_free_pbo ring=%d", state.pboIndex);
-        }
-        return; // Kein Mapping/Compute, um Stalls zu vermeiden
-    }
-
-    state.pboIndex = next;
-    state.skipUploadThisFrame = false;
-
-    // Jetzt den freien Slot der CUDA-Seite zuordnen
-    CudaInterop::registerPBO(state.currentPBO());
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PIPE] computeCudaFrame: dimensions=%dx%d, zoom=%.5f, tileSize=%d",
-                       fctx.width, fctx.height, fctx.zoom, fctx.tileSize);
-    }
-
-    const int tilesX   = (fctx.width  + fctx.tileSize - 1) / fctx.tileSize;
-    const int tilesY   = (fctx.height + fctx.tileSize - 1) / fctx.tileSize;
-    const int numTiles = tilesX * tilesY;
-
-    if (fctx.tileSize <= 0 || numTiles <= 0) [[unlikely]] {
-        LUCHS_LOG_HOST("[FATAL] computeCudaFrame: invalid tileSize=%d or numTiles=%d",
-                       fctx.tileSize, numTiles);
-        return;
-    }
-
-    state.setupCudaBuffers(fctx.tileSize);
-
-    if constexpr (Settings::debugLogging) {
-        const size_t totalPixels         = size_t(fctx.width) * size_t(fctx.height);
-        const size_t need_it_bytes       = totalPixels * sizeof(uint16_t);
-        const size_t need_entropy_bytes  = size_t(numTiles) * sizeof(float);
-        const size_t need_contrast_bytes = size_t(numTiles) * sizeof(float);
-        LUCHS_LOG_HOST("[SANITY] tiles=%d (%d x %d) pixels=%zu need(it=%zu entropy=%zu contrast=%zu) alloc(it=%zu entropy=%zu contrast=%zu)",
-                       numTiles, tilesX, tilesY, totalPixels,
-                       need_it_bytes, need_entropy_bytes, need_contrast_bytes,
-                       state.d_iterations.size(), state.d_entropy.size(), state.d_contrast.size());
-    }
-
-    // Device-Render (Iterations -> Shade) + E/C-Analyse (erzeugt Host-Arrays)
-    try {
-        ensureCudaEvents();
-
-        // GPU-Zeitmessung ohne deviceweite Synchronisation:
-        CUDA_CHECK(cudaEventRecord(g_evStart, /*stream=*/0));
-
-        float2 gpuOffset    = make_float2((float)fctx.offset.x, (float)fctx.offset.y);
-        float2 gpuNewOffset = gpuOffset;
-
-        CudaInterop::renderCudaFrame(
-            state.d_iterations,
-            state.d_entropy,
-            state.d_contrast,
-            fctx.width,
-            fctx.height,
-            fctx.zoom,
-            gpuOffset,
-            fctx.maxIterations,
-            fctx.h_entropy,
-            fctx.h_contrast,
-            gpuNewOffset,
-            fctx.shouldZoom,
-            fctx.tileSize,
-            state
-        );
-
-        // Stop-Event wird nach allen Kernel-Launches in Stream 0 eingereiht:
-        CUDA_CHECK(cudaEventRecord(g_evStop, /*stream=*/0));
-        CUDA_CHECK(cudaEventSynchronize(g_evStop)); // wartet nur auf Stream 0, nicht auf das gesamte Device
-
-        float msGpuF = 0.0f;
-        CUDA_CHECK(cudaEventElapsedTime(&msGpuF, g_evStart, g_evStop));
-        const double msGpu = static_cast<double>(msGpuF);
-
-        if constexpr (Settings::debugLogging) {
-            if (state.lastTimings.valid) {
-                LUCHS_LOG_HOST(
-                    "[FRAME] Mandelbrot=%.3f | Launch=%.3f | Sync=%.3f | Entropy=%.3f | Contrast=%.3f | LogFlush=%.3f | PBOMap=%.3f",
-                    state.lastTimings.mandelbrotTotal,
-                    state.lastTimings.mandelbrotLaunch,
-                    state.lastTimings.mandelbrotSync,
-                    state.lastTimings.entropy,
-                    state.lastTimings.contrast,
-                    state.lastTimings.deviceLogFlush,
-                    state.lastTimings.pboMap
-                );
-            } else {
-                LUCHS_LOG_HOST("[TIME] CUDA stream0 elapsed: %.3f ms", msGpu);
-            }
-        }
-    } catch (const std::exception& ex) { // [[unlikely]] catch path
-        LUCHS_LOG_HOST("[ERROR] renderCudaFrame threw: %s", ex.what());
-        LuchsLogger::flushDeviceLogToHost(0);
-    }
-
-    // Device-Logs: nur bei Fehler sofort spülen (periodisch erfolgt am Frameende bei PERF-Logs)
-    {
-        const cudaError_t err = cudaPeekAtLastError();
-        if (err != cudaSuccess) [[unlikely]] {
-            LUCHS_LOG_HOST("[PIPE] Flushing device logs (err=%d, frame=%d)", (int)err, g_frame);
-            LuchsLogger::flushDeviceLogToHost(0);
-        }
-    }
-
-    // Zoom-Analyse (nur Hostdaten h_entropy/h_contrast)
-    {
-        const float2 currOff = make_float2((float)fctx.offset.x, (float)fctx.offset.y);
-        const float2 prevOff = currOff;
-
-        auto zr = ZoomLogic::evaluateZoomTarget(
-            fctx.h_entropy,
-            fctx.h_contrast,
-            tilesX, tilesY,
-            fctx.width, fctx.height,
-            currOff, fctx.zoom,
-            prevOff,
-            state.zoomV3State
-        );
-
-        if (zr.bestIndex >= 0) {
-            fctx.lastEntropy  = zr.bestEntropy;
-            fctx.lastContrast = zr.bestContrast;
-        } else [[unlikely]] {
-            fctx.lastEntropy  = 0.0f;
-            fctx.lastContrast = 0.0f;
-        }
-
-        fctx.shouldZoom = zr.shouldZoom;
-        if (zr.shouldZoom) {
-            fctx.newOffset = { zr.newOffset.x, zr.newOffset.y };
-        }
-
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIPE] ZOOMV3: best=%d score=%.3f accept=%d newOff=(%.6f,%.6f)",
-                           zr.bestIndex, zr.bestScore, zr.shouldZoom ? 1 : 0,
-                           zr.newOffset.x, zr.newOffset.y);
-        }
-    }
+    NacktmullAPI::computeCudaFrame(fctx, state);
 }
 
 // ------------------------------- apply zoom step ------------------------------
-// Thin wrapper: delegates to zoom_command.cpp with explicit frameIndex/zoomGain.
+// Thin wrapper: delegiert an zoom_command.cpp mit FrameIndex/Gain.
 static void applyZoomStep(FrameContext& fctx, CommandBus& bus) {
     extern void buildAndPushZoomCommand(FrameContext& fctx, CommandBus& bus, int frameIndex, float zoomGain);
     buildAndPushZoomCommand(fctx, bus, g_frame, kZOOM_GAIN);
@@ -275,7 +119,6 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
 
     glViewport(0, 0, fctx.width, fctx.height);
 
-    // [GLQ] Nur im ersten Frame Scissor-Status abfragen, danach cachen
     if (!s_scissorInit) {
         s_scissorPrev = glIsEnabled(GL_SCISSOR_TEST);
         s_scissorInit = true;
@@ -290,10 +133,8 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
 
     OpenGLUtils::setGLResourceContext("draw");
 
-    // Feste Aufrufreihenfolge: updateTextureFromPBO(PBO, TEX, W, H)
     if (!state.skipUploadThisFrame) {
         OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(), state.tex.id(), fctx.width, fctx.height);
-        // [ZK] Fence nach DMA-Start setzen, um Reuse zu bewachen
         if (state.pboFence[state.pboIndex]) { glDeleteSync(state.pboFence[state.pboIndex]); state.pboFence[state.pboIndex]=0; }
         state.pboFence[state.pboIndex] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
         if constexpr (Settings::debugLogging) {
@@ -342,29 +183,24 @@ void execute(RendererState& state) {
 
     beginFrame(g_ctx, state);
 
-    // View-Parameter aus State in lokalen FrameContext spiegeln
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
     g_ctx.zoom          = static_cast<float>(state.zoom);
-    // Nacktmull-Pullover: State hält center (double2); FrameContext hält offset (float2)
     g_ctx.offset        = make_float2((float)state.center.x, (float)state.center.y);
     g_ctx.maxIterations = state.maxIterations;
 
-    // Kolibri/Grid: screen-konstante Kachelgröße in Pixeln (statt zoom-basiert)
     if constexpr (Settings::Kolibri::gridScreenConstant) {
         const int desired = std::max(1, Settings::Kolibri::desiredTilePx);
-        const int tilesX  = (g_ctx.width  + desired - 1) / desired;  // ceil(width/desired)
-        const int tilesY  = (g_ctx.height + desired - 1) / desired;  // ceil(height/desired)
+        const int tilesX  = (g_ctx.width  + desired - 1) / desired;
+        const int tilesY  = (g_ctx.height + desired - 1) / desired;
         const int safeX   = std::max(1, tilesX);
         const int safeY   = std::max(1, tilesY);
-        const int tileW   = g_ctx.width  / safeX;   // floor, passt horizontal
-        const int tileH   = g_ctx.height / safeY;   // floor, passt vertikal
-        int tilePx        = std::min(tileW, tileH); // quadratischer tileSize (Best-Fit)
-        tilePx            = std::max(8, std::min(tilePx, 256)); // konservative Klammer
+        const int tileW   = g_ctx.width  / safeX;
+        const int tileH   = g_ctx.height / safeY;
+        int tilePx        = std::min(tileW, tileH);
+        tilePx            = std::max(8, std::min(tilePx, 256));
+        g_ctx.tileSize    = tilePx;
 
-        g_ctx.tileSize = tilePx;
-
-        // Optionales, sparsames Log nur bei Änderung (function-static, kein TU-Müll)
         static int s_prevTilePx = -1;
         if (Settings::performanceLogging && tilePx != s_prevTilePx) {
             const int logTilesX = (g_ctx.width  + tilePx - 1) / tilePx;
@@ -379,26 +215,27 @@ void execute(RendererState& state) {
 
     g_ctx.overlayActive = state.heatmapOverlayEnabled;
 
-    // Klassischer Pfad (Progressive vollständig entfernt)
+    // Compute (ausgelagert)
     computeCudaFrame(g_ctx, state);
 
+    // Zoom-Command
     applyZoomStep(g_ctx, g_zoomBus);
 
     // Ergebnisse zurück nach State
     state.zoom   = g_ctx.zoom;
     state.center = { (double)g_ctx.offset.x, (double)g_ctx.offset.y };
 
-    // HUD-Text (ASCII) – nutzt MaxFPS vom letzten Frame
+    // HUD/Text
     state.warzenschweinText = HudText::build(g_ctx, state);
     WarzenschweinOverlay::setText(state.warzenschweinText);
 
+    // Draw
     drawFrame(g_ctx, state);
 
     const auto tFrame1 = Clock::now();
     g_frameTotal = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
     state.lastTimings.frameTotalMs = g_frameTotal;
 
-    // Exakte uncapped Framezeit -> FpsMeter (Anzeige im nächsten Frame)
     FpsMeter::updateCoreMs(g_frameTotal);
 
     if (perfShouldLog(g_frame)) {

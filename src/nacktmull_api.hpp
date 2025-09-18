@@ -5,15 +5,11 @@
 #pragma once
 
 #include <vector_types.h>  // float2, uchar4
+#include <cstdint>
 
 extern "C" {
 
 // Progressive state setter (Keks 4/5)
-// zDev: device pointer to float2[z] per pixel (resume state z)
-// itDev: device pointer to uint16_t[it] per pixel (resume iterations)
-// addIter: iteration budget per frame
-// iterCap: hard cap for iterations (usually maxIter of render call)
-// enabled: 1 = progressive on, 0 = off (direct path)
 void nacktmull_set_progressive(const void* zDev,
                                const void* itDev,
                                int addIter, int iterCap, int enabled);
@@ -24,3 +20,13 @@ void launch_mandelbrotHybrid(uchar4* out, uint16_t* d_it,
                              int maxIter, int tile);
 
 } // extern "C"
+
+// ------------------------- C++ Host-API (Wrapper) -----------------------------
+// Leichtgewichtige Host-Fassade rund um CUDA-Interop + Analyse.
+// Hält die eigentliche Frame-Berechnung außerhalb der Frame-Pipeline-TU.
+class FrameContext;   // <-- angleichen an Definition (class)
+class RendererState;  // <-- class ist hier neutral/safe
+
+namespace NacktmullAPI {
+    void computeCudaFrame(FrameContext& fctx, RendererState& state);
+} // namespace NacktmullAPI
