@@ -171,7 +171,7 @@ extern "C" void nacktmull_set_progressive(const void* zDev,const void* itDev,
 // ============================================================================
 // Unified Kernel – Direct ODER Progressive (branch by g_prog.enabled)
 // ============================================================================
-__global__ __launch_bounds__(256)
+__global__ __launch_bounds__(Settings::MANDEL_BLOCK_X * Settings::MANDEL_BLOCK_Y)
 void mandelbrotUnifiedKernel(
     uchar4* __restrict__ out, uint16_t* __restrict__ iterOut,
     int w,int h,float zoom,float2 center,int maxIter,float tSec)
