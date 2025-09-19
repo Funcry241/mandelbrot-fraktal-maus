@@ -112,8 +112,7 @@ add_executable(mandelbrot_otterdream
   src/luchs_log_host.cpp
   src/luchs_cuda_log_buffer.cu
   src/renderer_core.cu
-  src/renderer_loop.cpp
-  src/renderer_state.cpp
+  src/renderer_loop.cpp  
   src/renderer_pipeline.cpp
   src/renderer_window.cpp
   src/renderer_resources.cpp
@@ -132,6 +131,8 @@ add_executable(mandelbrot_otterdream
   src/hud_text.cpp
   src/nacktmull.cu
   src/nacktmull_api.cpp
+  src/renderer_state_cuda.cpp
+  src/renderer_state_gl.cpp
 )
 
 # ---------------------- Compile-Options --------------------

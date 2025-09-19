@@ -1,0 +1,147 @@
+///// Otter: Split – GL-Fences, PBO-Ring, Resize, Reset & Dtor; saubere Ring-Disziplin.
+///// Schneefuchs: GLsync-Abräumung zentral; Upload-Skip init; Header unverändert; /WX-fest.
+///// Maus: PixelScale-Recompute lokal; Events/Streams via CUDA-TU; Logs ASCII-only; unter 300 Zeilen.
+///// Datei: src/renderer_state_gl.cpp
+
+#include "pch.hpp"
+#include "renderer_state.hpp"
+#include "settings.hpp"
+#include "cuda_interop.hpp"
+#include "common.hpp"
+#include "renderer_resources.hpp"
+
+#include <algorithm>
+
+// GL forward utils expected in renderer_resources.hpp
+// - OpenGLUtils::setGLResourceContext(const char*)
+// - OpenGLUtils::createPBO(int w,int h)
+// - OpenGLUtils::createTexture(int w,int h)
+
+namespace {
+// ----- PixelScale (GL-Seite nutzt Reset/Resize) --------------------------------
+inline void recomputePixelScale(RendererState& rs) noexcept {
+    const double invZoom = (rs.zoom != 0.0) ? (1.0 / rs.zoom) : 1.0;
+    const double ar      = (rs.height > 0) ? (double)rs.width / (double)rs.height : 1.0;
+    const double sy      = (rs.height > 0) ? (2.0 / (double)rs.height) * invZoom : 2.0 * invZoom;
+    rs.pixelScale.y = sy;
+    rs.pixelScale.x = sy * ar;
+}
+
+inline void clearPboFences(RendererState& rs) noexcept {
+    OpenGLUtils::setGLResourceContext("pbo-fence-clear");
+    for (auto& f : rs.pboFence) {
+        if (f) { glDeleteSync(f); f = 0; }
+    }
+}
+} // namespace
+
+// ================================== Ctor/Dtor =================================
+
+RendererState::~RendererState() {
+    clearPboFences(*this);
+    unpinHostAnalysisIfAny();
+    destroyCudaEventsIfAny();
+    destroyCudaStreamsIfAny();
+}
+
+// =================================== Reset ===================================
+
+void RendererState::reset() {
+    zoom   = static_cast<double>(Settings::initialZoom);
+    center = make_double2(static_cast<double>(Settings::initialOffsetX),
+                          static_cast<double>(Settings::initialOffsetY));
+    recomputePixelScale(*this);
+
+    baseIterations = Settings::INITIAL_ITERATIONS;
+    maxIterations  = Settings::MAX_ITERATIONS_CAP;
+
+    fps        = 0.0f;
+    deltaTime  = 0.0f;
+    frameCount = 0;
+    lastTime   = glfwGetTime();
+
+    lastTileSize = Settings::BASE_TILE_SIZE;
+
+    heatmapOverlayEnabled       = Settings::heatmapOverlayEnabled;
+    warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
+    warzenschweinText.clear();
+
+    // Host mirrors (unpinned first to avoid stale registrations after resize)
+    unpinHostAnalysisIfAny();
+    h_entropy.clear();
+    h_contrast.clear();
+
+    // Zoom V3 state clean
+    zoomV3State = {};
+
+    // Progressive defaults from Settings
+    progressiveEnabled         = Settings::progressiveEnabled;
+    progressiveCooldownFrames  = 0;
+
+    // Zaunkönig: fences & upload flag
+    skipUploadThisFrame = false;
+    clearPboFences(*this);
+
+    lastTimings = CudaPhaseTimings{};
+    lastTimings.resetHostFrame();
+
+    // Ensure infra is present
+    createCudaStreamsIfNeeded();
+    createCudaEventsIfNeeded();
+}
+
+// ================================== Resize ===================================
+
+void RendererState::resize(int newWidth, int newHeight) {
+    if (newWidth <= 0 || newHeight <= 0) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ERROR] resize: invalid target size %d x %d", newWidth, newHeight);
+        }
+        return;
+    }
+
+    // GL / CUDA teardown for old size
+    clearPboFences(*this);
+
+    d_iterations.free();
+    d_entropy.free();
+    d_contrast.free();
+    d_stateZ.free();
+    d_stateIt.free();
+
+    CudaInterop::unregisterAllPBOs();
+
+    for (auto& b : pboRing) { b.free(); }
+    tex.free();
+
+    // Apply new size
+    width  = newWidth;
+    height = newHeight;
+
+    // Recreate GL side
+    OpenGLUtils::setGLResourceContext("resize");
+    for (auto& b : pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(width, height)); }
+    pboIndex = 0;
+    std::fill(pboFence.begin(), pboFence.end(), (GLsync)0);
+    skipUploadThisFrame = false;
+    tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
+
+    { GLuint ids[kPboRingSize] = { pboRing[0].id(), pboRing[1].id(), pboRing[2].id() };
+      CudaInterop::registerAllPBOs(ids, kPboRingSize); }
+
+    recomputePixelScale(*this);
+
+    lastTileSize = computeTileSizeFromZoom(static_cast<float>(zoom));
+    lastTileSize = std::clamp(lastTileSize, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[DEBUG] resize: zoom=%.5f -> tileSize=%d", zoom, lastTileSize);
+    }
+
+    setupCudaBuffers(lastTileSize);
+    lastTimings.resetHostFrame();
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[RESIZE] %d x %d buffers reallocated", width, height);
+    }
+}
