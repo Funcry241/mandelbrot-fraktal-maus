@@ -68,6 +68,8 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,const std::vecto
     using clock=std::chrono::steady_clock; const auto t0=clock::now();
     static clock::time_point s_last; static bool s_have=false;
     double dt = s_have ? std::chrono::duration<double>(t0-s_last).count() : (1.0/60.0); s_last=t0; s_have=true; if(!(dt>0.0)) dt=1.0/60.0;
+    // Spike-Schutz: für Dynamik (Omega/EMA) geklammertes dt verwenden; Handover nutzt reales dt
+    const double dt_clamped = clampf((float)dt, 1.0f/240.0f, 1.0f/24.0f);
 
     // Warm-up / handover
     static bool warmInit=false; static clock::time_point warmStart; if(!warmInit){warmStart=t0; warmInit=true;}
@@ -80,9 +82,15 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,const std::vecto
 
     const double invW=width>0? 1.0/double(width):0.0, invH=height>0? 1.0/double(height):0.0;
     const double invZ = 1.0/std::max(1e-6f,zoom);
-    const double M0   = centerDzdcMag((double)currentOffset.x,(double)currentOffset.y,kM0_ITER);
-    const double M0c  = std::log1p(std::max(0.0, M0));
-    const double mFac = std::clamp(1.0/(1.0+(double)kMETRIC_ALPHA*M0c),(double)kMETRIC_MIN_F,(double)kMETRIC_MAX_F);
+
+    // Metric factor: spare centerDzdcMag wenn klar "innen"
+    const bool centerInside = insideCardioidOrBulb(currentOffset.x,currentOffset.y);
+    double mFac = kMETRIC_MAX_F;
+    if(!centerInside){
+        const double M0  = centerDzdcMag((double)currentOffset.x,(double)currentOffset.y,kM0_ITER);
+        const double M0c = std::log1p(std::max(0.0, M0));
+        mFac = std::clamp(1.0/(1.0+(double)kMETRIC_ALPHA*M0c),(double)kMETRIC_MIN_F,(double)kMETRIC_MAX_F);
+    }
     const double invZE = invZ*mFac;
 
     if(inFreeze){
@@ -93,6 +101,7 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,const std::vecto
             const float a=0.20f; out.newOffset=make_float2(previousOffset.x*(1-a)+t.x*a, previousOffset.y*(1-a)+t.y*a);
         }else{
             float sx=g_dirInit?g_prevDirX:1.0f, sy=g_dirInit?g_prevDirY:0.0f;
+            if(!normalize2D(sx,sy)){ sx=1.0f; sy=0.0f; }
             const float2 t=make_float2(previousOffset.x+sx*(float)(kSEED_STEP_NDC*invZE), previousOffset.y+sy*(float)(kSEED_STEP_NDC*invZE));
             const float a=0.20f; out.newOffset=make_float2(previousOffset.x*(1-a)+t.x*a, previousOffset.y*(1-a)+t.y*a);
         }
@@ -137,7 +146,13 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,const std::vecto
     if(sumW>0.0){ const double inv=1.0/sumW; ndcTX=numX*inv; ndcTY=numY*inv; }
     else if(bestAdj>=0){ auto p=tileIndexToPixelCenter(bestAdj,tilesX,tilesY,width,height); ndcTX=(double(p.first)*invW-0.5)*2.0; ndcTY=(double(p.second)*invH-0.5)*2.0; }
     else if(bestIdx>=0){ auto p=tileIndexToPixelCenter(bestIdx,tilesX,tilesY,width,height); double bx=(double(p.first)*invW-0.5)*2.0, by=(double(p.second)*invH-0.5)*2.0; double tx=currentOffset.x+bx*invZE, ty=currentOffset.y+by*invZE; if(!insideCardioidOrBulb(tx,ty)){ ndcTX=bx; ndcTY=by; } }
-    if(ndcTX==0.0 && ndcTY==0.0){ ndcTX=g_dirInit?g_prevDirX:1.0f; ndcTY=g_dirInit?g_prevDirY:0.0f; }
+    // robustes Nullziel (Epsilon)
+    if (std::fabs(ndcTX) + std::fabs(ndcTY) < 1e-9) {
+        float fx = g_dirInit ? g_prevDirX : 1.0f;
+        float fy = g_dirInit ? g_prevDirY : 0.0f;
+        if(!normalize2D(fx,fy)){ fx=1.0f; fy=0.0f; }
+        ndcTX = fx; ndcTY = fy;
+    }
 
     // Patch-A: angle-aware inertia + deadband
     if(g_dirInit){
@@ -157,11 +172,12 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,const std::vecto
 
     const float sigF=clampf((float)stdS,0.0f,1.0f), distF=clampf(r/0.25f,0.0f,1.0f);
     const float omegaRaw=kTURN_OMEGA_MIN+(kTURN_OMEGA_MAX-kTURN_OMEGA_MIN)*std::max(sigF,distF);
-    const float omega=g_prevOmega=0.7f*g_prevOmega+0.3f*omegaRaw, maxTurn=omega*(float)dt;
+    const float omega=g_prevOmega=0.7f*g_prevOmega+0.3f*omegaRaw; const float maxTurn=omega*(float)dt_clamped;
 
     float lenScale=1.0f;
     if(hasMove){
-        const float d=clampf(dirX*tgtX+dirY*tgtY,-1.0f,1.0f), ang=std::sqrt(std::max(0.0f,2.0f*(1.0f-d)));
+        const float d=clampf(dirX*tgtX+dirY*tgtY,-1.0f,1.0f);
+        const float ang=std::sqrt(std::max(0.0f, 2.0f*(1.0f - d))); // Korrektur: 2*(1 - cos)
         rotateTowardsLimited(dirX,dirY,tgtX,tgtY,maxTurn);
         lenScale=1.0f-smoothstepf(kTHETA_DAMP_LO,kTHETA_DAMP_HI,ang);
         g_prevDirX=dirX; g_prevDirY=dirY;
@@ -169,24 +185,27 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,const std::vecto
 
     float2 proposed=make_float2(previousOffset.x+dirX*(r*lenScale), previousOffset.y+dirY*(r*lenScale));
 
-    // Handover blend (~300 ms) after freeze
+    // Handover blend (~300 ms) nach Freeze – Zeitfortschritt mit realem dt
     if(g_inHandover){
         g_handoverT+=(float)dt; const float t=clampf(g_handoverT/kHANDOVER_SECONDS,0.0f,1.0f);
         float sx=g_prevDirX, sy=g_prevDirY; if(!normalize2D(sx,sy)){sx=1.0f;sy=0.0f;}
         const float2 seed=make_float2(previousOffset.x+sx*(float)(0.5f*kSEED_STEP_NDC*invZE), previousOffset.y+sy*(float)(0.5f*kSEED_STEP_NDC*invZE));
-        proposed=make_float2(seed.x*(1.0f-t)+proposed.x*t, seed.y*(1.0f-t)+proposed.y*t); if(t>=1.0f) g_inHandover=false;
+        proposed=make_float2(seed.x*(1.0f - t) + proposed.x*t, seed.y*(1.0f - t) + proposed.y*t);
+        if(t>=1.0f) g_inHandover=false;
     }
 
-    // EMA (distance-adaptive)
+    // EMA (distance-adaptive) – mit dt_clamped
     const float dxP=proposed.x-previousOffset.x, dyP=proposed.y-previousOffset.y, d=std::sqrt(dxP*dxP+dyP*dyP);
     const float dn=clampf(d/0.5f,0.0f,1.0f), tau=kEMA_TAU_MAX+(kEMA_TAU_MIN-kEMA_TAU_MAX)*dn;
-    float a=1.0f-std::exp(-(float)dt/std::max(1e-5f,tau)); a=clampf(a,kEMA_ALPHA_MIN,kEMA_ALPHA_MAX);
+    float a=1.0f-std::exp(-(float)dt_clamped/std::max(1e-5f,tau)); a=clampf(a,kEMA_ALPHA_MIN,kEMA_ALPHA_MAX);
     if(Settings::ForceAlwaysZoom && stdS<kMIN_SIGNAL_STD) a=std::max(a,kFORCE_MIN_DRIFT_ALPHA);
     float2 smoothed=make_float2(previousOffset.x*(1.0f-a)+proposed.x*a, previousOffset.y*(1.0f-a)+proposed.y*a);
 
-    // Slew limit (cap step/frame)
+    // Slew limit (cap step/frame) – Unterkante verhindert "Kleben"
     { float ddx=smoothed.x-previousOffset.x, ddy=smoothed.y-previousOffset.y, d2=ddx*ddx+ddy*ddy;
-      const float ms=kSTEP_MAX_NDC*(float)invZE, ms2=ms*ms; if(d2>ms2 && d2>0.0f){ const float s=ms/std::sqrt(d2); smoothed.x=previousOffset.x+ddx*s; smoothed.y=previousOffset.y+ddy*s; } }
+      const float ms_min_abs = 1e-9f;
+      const float ms = std::max(kSTEP_MAX_NDC*(float)invZE, ms_min_abs);
+      const float ms2=ms*ms; if(d2>ms2 && d2>0.0f){ const float s=ms/std::sqrt(d2); smoothed.x=previousOffset.x+ddx*s; smoothed.y=previousOffset.y+ddy*s; } }
 
     // Hysteretic signal gate
     const bool gateIn =(stdS>=kSTD_HI), gateOut=(stdS>=kSTD_LO); g_signalLast = g_signalLast ? gateOut : gateIn;

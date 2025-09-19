@@ -10,13 +10,6 @@
 
 namespace ZoomLogic {
 
-// Fallback fuer make_float2() – nur wenn kein CUDA-Compiler aktiv ist.
-#if !defined(__CUDACC__)
-[[nodiscard]] static inline float2 make_float2(float x, float y) {
-    float2 f; f.x = x; f.y = y; return f;
-}
-#endif
-
 static_assert(sizeof(float2) == 8, "float2 must be 8 bytes");
 
 #ifdef _MSC_VER
@@ -41,7 +34,7 @@ public:
     bool  isNewTarget   = false; // Zielwechsel akzeptiert?
     bool  shouldZoom    = false; // In diesem Frame zoomen?
 
-    float2 newOffset    = make_float2(0.0f, 0.0f); // Zielkoordinate im Fraktalraum
+    float2 newOffset    {0.0f, 0.0f}; // Zielkoordinate im Fraktalraum
 
     // Optionales Material fuer Overlay/Debug:
     std::vector<float> perTileContrast;
@@ -52,7 +45,7 @@ struct ZoomState {
     int   lastAcceptedIndex = -1;
     float lastAcceptedScore = 0.0f;
     int   cooldownLeft      = 0;
-    float2 lastOffset       = make_float2(0.0f, 0.0f);
+    float2 lastOffset       {0.0f, 0.0f};
 
     // Geometrie-Bookkeeping (Debug/Wechsel der Tile-Geometrie)
     int   lastTilesX        = -1;
