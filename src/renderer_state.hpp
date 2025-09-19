@@ -67,7 +67,7 @@ public:
     int                        progressiveCooldownFrames = 0;
 
     // 🎥 OpenGL-Zielpuffer (Interop via CUDA) mit RAII
-    static constexpr int kPboRingSize = 3;
+    static constexpr int kPboRingSize = 4; // ↑ vorher 3
     std::array<Hermelin::GLBuffer, kPboRingSize> pboRing;
     int pboIndex = 0;
     inline Hermelin::GLBuffer& currentPBO() { return pboRing[pboIndex]; }
@@ -78,6 +78,10 @@ public:
     // 🔒 [ZK] GL-Fences je Slot
     std::array<GLsync, kPboRingSize> pboFence{}; // nullptr = kein Fence gesetzt
     bool skipUploadThisFrame = false;
+
+    // 📊 Ring-Statistik (LOG-6)
+    unsigned ringUse[kPboRingSize] = {0,0,0,0};
+    unsigned ringSkip = 0;
 
     // 🕒 Zeitsteuerung pro Frame
     int    frameCount = 0;

@@ -1,7 +1,7 @@
 ///// Otter: Split – Farbraum & Pack nach .cuh; Kernpfad/Neon-Intro/Warze & Launch bleiben hier.
-/// //// Schneefuchs: API unverändert; weniger Zeilen; klare Abhängigkeiten; ASCII-Logs; /WX-fest.
-/// //// Maus: Innen dunkel, außen Palette + Highlights; performantes Packen; minimale Zweige.
-/// //// Datei: src/nacktmull.cu
+//// Schneefuchs: API unverändert; weniger Zeilen; klare Abhängigkeiten; ASCII-Logs; /WX-fest.
+//// Maus: Innen dunkel, außen Palette + Highlights; performantes Packen; minimale Zweige.
+//// Datei: src/nacktmull.cu
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -295,10 +295,13 @@ void mandelbrotUnifiedKernel(
 }
 
 // ============================================================================
-// Public API – Timing + Kernel-Launch (Signatur beibehalten)
+// Public API – Timing + Kernel-Launch (Stream-Variante)
 // ============================================================================
 extern "C" void launch_mandelbrotHybrid(
-    uchar4* out,uint16_t* d_it,int w,int h,float zoom,float2 offset,int maxIter,int /*tile*/) noexcept
+    uchar4* out, uint16_t* d_it,
+    int w, int h, float zoom, float2 offset,
+    int maxIter, int /*tile*/,
+    cudaStream_t stream) noexcept
 {
     using clk = std::chrono::high_resolution_clock;
     try {
@@ -326,6 +329,8 @@ extern "C" void launch_mandelbrotHybrid(
         const dim3 block(Settings::MANDEL_BLOCK_X, Settings::MANDEL_BLOCK_Y);
         const dim3 grid((w+block.x-1)/block.x,(h+block.y-1)/block.y);
 
+        cudaStream_t useStream = stream; // darf nullptr sein → äquivalent zu Stream 0 beim Launch unten
+
         if constexpr (Settings::performanceLogging) {
             cudaEvent_t evStart=nullptr, evStop=nullptr;
             if (cudaEventCreate(&evStart) != cudaSuccess) {
@@ -338,9 +343,9 @@ extern "C" void launch_mandelbrotHybrid(
                 return;
             }
 
-            cudaEventRecord(evStart, 0);
-            mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
-            cudaEventRecord(evStop, 0);
+            cudaEventRecord(evStart, useStream);
+            mandelbrotUnifiedKernel<<<grid,block,0,useStream>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
+            cudaEventRecord(evStop, useStream);
             cudaEventSynchronize(evStop);
 
             float ms=0.0f;
@@ -353,7 +358,7 @@ extern "C" void launch_mandelbrotHybrid(
             cudaEventDestroy(evStart);
             cudaEventDestroy(evStop);
         } else {
-            mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
+            mandelbrotUnifiedKernel<<<grid,block,0,useStream>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
         }
 
         // Periodizitäts-Info nur einmal loggen

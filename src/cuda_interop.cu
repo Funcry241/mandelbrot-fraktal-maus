@@ -24,6 +24,22 @@
 #include <cstring>
 #if !defined(__CUDA_ARCH__)
   #include <chrono>
+  #include <iomanip>
+#endif
+
+// ---- Minimal GL-Forward-Decls (keine schweren GL-Header nötig) --------------
+struct __GLsync; using GLsync = __GLsync*;
+
+// Nur definieren, wenn KEIN GL-/GLEW-Header aktiv ist (verhindert Redefinitionen)
+#if !defined(__gl_h_) && !defined(GLEW_H) && !defined(__glew_h__)
+  using GLuint     = unsigned int;
+  using GLenum     = unsigned int;
+  using GLbitfield = unsigned int;
+  using GLuint64   = unsigned long long;
+  extern "C" {
+      GLenum glClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout);
+      void   glDeleteSync(GLsync sync);
+  }
 #endif
 
 // ---- Kernel (extern C) ------------------------------------------------------
@@ -159,7 +175,7 @@ void renderCudaFrame(
 ){
 #if !defined(__CUDA_ARCH__)
     const auto t0 = std::chrono::high_resolution_clock::now();
-    double mapMs=0.0, mbMs=0.0, entMs=0.0, conMs=0.0;
+    double mapMs=0.0, mbMs=0.0;
 #endif
     if (!s_pboActive) throw std::runtime_error("[FATAL] CUDA PBO not registered!");
     if (width<=0 || height<=0)  throw std::runtime_error("invalid framebuffer dims");
@@ -177,6 +193,28 @@ void renderCudaFrame(
     if (d_iterations.size()<itBytes || d_entropy.size()<enBytes || d_contrast.size()<ctBytes)
         throw std::runtime_error("CudaInterop::renderCudaFrame: device buffers undersized");
 
+    // [LOG-1] Pre-Map Fence-Check & deterministisches Skippen des Uploads
+    {
+        GLsync f = state.pboFence[state.pboIndex];
+        if (f) {
+            // non-blocking Poll; wir wollen nicht bis zum Timeout warten
+            GLenum r = glClientWaitSync(f, 0, 0);
+            if (r == 0x9111 /*GL_TIMEOUT_EXPIRED*/ || r == 0 /*GL_WAIT_FAILED (0) als konservativer Check*/ ) {
+                state.skipUploadThisFrame = true;
+                if (state.pboIndex >= 0 && state.pboIndex < RendererState::kPboRingSize) {
+                    state.ringSkip++; // Statistik
+                }
+                if constexpr (Settings::debugLogging) {
+                    LUCHS_LOG_HOST("[ZK][UP] pre-map fence busy → skip upload this frame (ring=%d)", state.pboIndex);
+                }
+                return; // Kein Map, kein Render/Upload in diesem Frame
+            }
+            // Fence ist signaled → wegräumen
+            glDeleteSync(f);
+            state.pboFence[state.pboIndex] = 0;
+        }
+    }
+
 #if !defined(__CUDA_ARCH__)
     const auto tMap0 = std::chrono::high_resolution_clock::now();
 #endif
@@ -189,6 +227,11 @@ void renderCudaFrame(
 #endif
     const size_t needBytes = size_t(width)*size_t(height)*sizeof(uchar4);
     if (map.bytes < needBytes) throw std::runtime_error("PBO byte size mismatch");
+
+    // Ring-Statistik: erfolgreiche Nutzung dieses Slots
+    if (state.pboIndex >= 0 && state.pboIndex < RendererState::kPboRingSize) {
+        state.ringUse[state.pboIndex]++;
+    }
 
     ensureEventsOnce();
     (void)cudaGetLastError();
@@ -214,7 +257,7 @@ void renderCudaFrame(
 #endif
     if (mbErrLaunch != cudaSuccess || mbErrSync != cudaSuccess) {
         LUCHS_LOG_HOST("[CUDA][ERR] mandelbrot rc_launch=%d rc_sync=%d", (int)mbErrLaunch, (int)mbErrSync);
-        // Sofort Device-Log flushen (Fehlerdiagnose)
+        // [LOG-3] Sofort Device-Log flushen (wenn initialisiert; hier best-effort)
         LuchsLogger::flushDeviceLogToHost(0);
         throw std::runtime_error("CUDA failure: mandelbrot kernel");
     }
@@ -230,21 +273,12 @@ void renderCudaFrame(
         state.evEcDone              // record done-event
     );
 
-#if !defined(__CUDA_ARCH__)
-    // Grobe Aufteilung der gemessenen EC-Zeit (falls nötig separat messen, hier halb/halb)
-    const auto tEC0 = std::chrono::high_resolution_clock::now();
-    const auto tEC1 = std::chrono::high_resolution_clock::now();
-    const double ecMs = std::chrono::duration<double, std::milli>(tEC1 - tEC0).count();
-    entMs = ecMs * 0.5; conMs = ecMs * 0.5;
-#endif
-
     // Host-Transfers (copyStream wartet auf E/C-done Event)
     if (h_entropy.capacity()  < size_t(numTiles)) h_entropy.reserve(size_t(numTiles));
     if (h_contrast.capacity() < size_t(numTiles)) h_contrast.reserve(size_t(numTiles));
     h_entropy.resize(size_t(numTiles));
     h_contrast.resize(size_t(numTiles));
 
-    // Wichtig: auf E/C-Fertig warten
     CUDA_CHECK(cudaStreamWaitEvent(copyStream, state.evEcDone, 0));
 
     CUDA_CHECK(cudaMemcpyAsync(h_entropy.data(),  d_entropy.get(),  enBytes, cudaMemcpyDeviceToHost, copyStream));
@@ -254,26 +288,26 @@ void renderCudaFrame(
         CUDA_CHECK(cudaEventRecord(state.evCopyDone, copyStream));
     }
 
-    // Für den nachfolgenden Upload/Draw benötigen wir die Daten auf dem Host → hier synchronisieren.
-    CUDA_CHECK(cudaStreamSynchronize(copyStream));
-
+    // KEIN spätes Synchronisieren mehr: call-site wartet auf evCopyDone
     shouldZoom = false; newOffset = offset;
 
 #if !defined(__CUDA_ARCH__)
     const auto t1 = std::chrono::high_resolution_clock::now();
     const double totalMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+    // [LOG-2] Timings in State übertragen (hier: PBO-Map & Mandelbrot total)
     state.lastTimings.valid            = true;
     state.lastTimings.pboMap           = mapMs;
     state.lastTimings.mandelbrotTotal  = mbMs;
     state.lastTimings.mandelbrotLaunch = 0.0;
     state.lastTimings.mandelbrotSync   = 0.0;
-    state.lastTimings.entropy          = entMs;
-    state.lastTimings.contrast         = conMs;
+    state.lastTimings.entropy          = 0.0; // exakte E/C über Events separat messen (andere TU)
+    state.lastTimings.contrast         = 0.0;
     state.lastTimings.deviceLogFlush   = 0.0;
 
     if constexpr (Settings::performanceLogging)
         LUCHS_LOG_HOST("[PERF][ZK] map=%.2f mandelbrot=%.2f entropy=%.2f contrast=%.2f total=%.2f",
-                       mapMs, mbMs, entMs, conMs, totalMs);
+                       mapMs, mbMs, state.lastTimings.entropy, state.lastTimings.contrast, totalMs);
 #endif
 }
 

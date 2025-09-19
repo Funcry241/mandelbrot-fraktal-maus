@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <cuda_runtime.h>    // float2, double2, uchar4
+#include <vector_types.h>   // float2, double2, uchar4 (leichtgewichtiger als cuda_runtime.h)
 #include <cstdint>
 #include <cstddef>
 #include <vector>
@@ -29,8 +29,8 @@ struct Params {
 };
 
 struct Stats {
-    int iterationsDone = 0;
-    int pixelsProcessed = 0;
+    int iterationsDone   = 0;
+    int pixelsProcessed  = 0;
 };
 
 // Device orbit data (minimal)
@@ -42,13 +42,13 @@ struct Orbit {
 // Host-owned buffers (example layout)
 struct Buffers {
     std::vector<int> iterations;
-    int width = 0;
+    int width  = 0;
     int height = 0;
 };
 
-// API
-void init(const Params& p);
-void shutdown();
+// API (declarations only; definitions in .cpp/.cu)
+void init(const Params& p) noexcept;
+void shutdown() noexcept;
 void render(const Params& p, Buffers& out);
 
 } // namespace Nacktmull

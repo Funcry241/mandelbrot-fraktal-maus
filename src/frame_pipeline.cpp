@@ -47,6 +47,7 @@ namespace {
 
     constexpr int PERF_WARMUP_FRAMES = 30;
     constexpr int PERF_LOG_EVERY     = 30;
+    constexpr int RING_LOG_EVERY     = 300;
 
     double g_texMs      = 0.0;
     double g_ovlMs      = 0.0;
@@ -213,6 +214,11 @@ void execute(RendererState& state) {
     // Compute (ausgelagert)
     computeCudaFrame(g_ctx, state);
 
+    // [LOG-4] Call-Site-Wait: vor jedem Host-Zugriff sicherstellen, dass die D->H-Copies fertig sind
+    if (state.evCopyDone) {
+        (void)cudaEventSynchronize(state.evCopyDone);
+    }
+
     // Zoom-Command
     applyZoomStep(g_ctx, g_zoomBus);
 
@@ -266,12 +272,24 @@ void execute(RendererState& state) {
         const int frees     = 0;
         const int dflush    = 1;
 
-        // Eine feste ASCII-Zeile, epoch-millis zuerst, dann stabil sortierte Felder
+        // [LOG-5] Eine feste ASCII-Zeile, epoch-millis zuerst, dann stabil sortierte Felder (mit skip)
         LUCHS_LOG_HOST(
-            "[PERF] t=%lld f=%d r=%dx%d zm=%.6g it=%d fps=%.1f mx=%d ma=%d fr=%d df=%d map=%.2f md=%.2f en=%.2f ct=%.2f tx=%.2f ov=%.2f tt=%.2f e0=%.4f c0=%.4f ring=%d pbo=%u tex=%u",
+            "[PERF] t=%lld f=%d r=%dx%d zm=%.6g it=%d fps=%.1f mx=%d ma=%d fr=%d df=%d map=%.2f md=%.2f en=%.2f ct=%.2f tx=%.2f ov=%.2f tt=%.2f e0=%.4f c0=%.4f ring=%d skip=%d pbo=%u tex=%u",
             tEpoch, g_frame, resX, resY, (double)g_ctx.zoom, it, fps, maxfps, mallocs, frees, dflush,
-            mapMs, mandMs, entMs, conMs, txMs, ovMs, ttMs, e0, c0, ringIx, pbo, tex
+            mapMs, mandMs, entMs, conMs, txMs, ovMs, ttMs, e0, c0, ringIx, (int)state.skipUploadThisFrame, pbo, tex
         );
+    }
+
+    // [LOG-6] Periodische Ring-Nutzungsstatistik
+    if constexpr (Settings::performanceLogging) {
+        if ((g_frame % RING_LOG_EVERY) == 0) {
+            LUCHS_LOG_HOST("[RING] use={%u,%u,%u,%u} skip=%u",
+                           state.ringUse[0], state.ringUse[1], state.ringUse[2], state.ringUse[3],
+                           state.ringSkip);
+            // Zähler zurücksetzen
+            state.ringUse[0] = state.ringUse[1] = state.ringUse[2] = state.ringUse[3] = 0;
+            state.ringSkip = 0;
+        }
     }
 }
 

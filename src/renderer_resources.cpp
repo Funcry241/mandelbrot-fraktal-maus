@@ -79,6 +79,14 @@ GLuint createTexture(int width, int height) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,  0);
 
+    if constexpr (Settings::debugLogging) {
+        const GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            LUCHS_LOG_HOST("[GL-TEX][ERR] glTexStorage2D glGetError()=0x%04X (ctx=%s)",
+                           static_cast<unsigned>(err), g_resourceContext);
+        }
+    }
+
     glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prevTex0));
     glActiveTexture(static_cast<GLenum>(prevActiveTex));
 
@@ -93,6 +101,14 @@ GLuint createTexture(int width, int height) {
 // PBO anlegen (GL_PIXEL_UNPACK_BUFFER) – Größe = width*height*4 (RGBA8)
 // -----------------------------------------------------------------------------
 GLuint createPBO(int width, int height) {
+    if (width <= 0 || height <= 0) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ERROR] createPBO invalid size (ctx=%s) w=%d h=%d",
+                           g_resourceContext, width, height);
+        }
+        return 0;
+    }
+
     const size_t bytes = static_cast<size_t>(width) * static_cast<size_t>(height) * 4u;
     GLuint pbo = 0;
     glGenBuffers(1, &pbo);
@@ -146,7 +162,12 @@ void updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height) {
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
     glPixelStorei(GL_UNPACK_SKIP_ROWS,   0);
 
-    glInvalidateTexImage(tex, 0);
+    // Invalidate nur, wenn Funktion verfügbar (GL 4.3 / ARB_invalidate_subdata)
+#if defined(GL_VERSION_4_3)
+    if (GLEW_VERSION_4_3 || GLEW_ARB_invalidate_subdata) {
+        glInvalidateTexImage(tex, 0);
+    }
+#endif
 
     glTexSubImage2D(GL_TEXTURE_2D, 0,
                     0, 0, width, height,
@@ -182,6 +203,10 @@ void peekPBO(GLuint pbo) {
         (void)pbo;
         return;
     }
+
+    GLint prevPBO = 0;
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevPBO);
+
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 
     const GLsizeiptr N = 64; // erste 64 Bytes
@@ -198,8 +223,8 @@ void peekPBO(GLuint pbo) {
         LUCHS_LOG_HOST("[PBO-PEEK][WARN] map failed for pbo=%u (glError=0x%04X)", pbo, err);
     }
 
-    // Kein glGetIntegerv: wir hinterlassen "0" als Unpack-Binding (explizit)
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    // Vorheriges Unpack-Binding wiederherstellen (keine Seiteneffekte)
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prevPBO));
 }
 
 } // namespace OpenGLUtils

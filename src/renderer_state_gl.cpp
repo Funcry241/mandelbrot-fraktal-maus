@@ -74,13 +74,18 @@ void RendererState::reset() {
     // Zoom V3 state clean
     zoomV3State = {};
 
-    // Progressive defaults from Settings
+    // Progressive defaults
     progressiveEnabled         = Settings::progressiveEnabled;
     progressiveCooldownFrames  = 0;
 
-    // Zaunkönig: fences & upload flag
+    // Zaunkönig: fences & upload flag & ring stats
     skipUploadThisFrame = false;
     clearPboFences(*this);
+    std::fill(pboFence.begin(), pboFence.end(), (GLsync)0);
+    pboIndex = 0;
+    // Ring-Statistik zurücksetzen (LOG-6)
+    for (unsigned& u : ringUse) u = 0;
+    ringSkip = 0;
 
     lastTimings = CudaPhaseTimings{};
     lastTimings.resetHostFrame();
@@ -120,14 +125,24 @@ void RendererState::resize(int newWidth, int newHeight) {
 
     // Recreate GL side
     OpenGLUtils::setGLResourceContext("resize");
-    for (auto& b : pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(width, height)); }
+    for (auto& b : pboRing) {
+        b = Hermelin::GLBuffer(OpenGLUtils::createPBO(width, height));
+    }
+
     pboIndex = 0;
     std::fill(pboFence.begin(), pboFence.end(), (GLsync)0);
     skipUploadThisFrame = false;
+
     tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
 
-    { GLuint ids[kPboRingSize] = { pboRing[0].id(), pboRing[1].id(), pboRing[2].id() };
-      CudaInterop::registerAllPBOs(ids, kPboRingSize); }
+    // Dynamisch alle PBO-IDs sammeln und registrieren (Ringgröße = kPboRingSize)
+    {
+        GLuint ids[RendererState::kPboRingSize];
+        for (int i = 0; i < RendererState::kPboRingSize; ++i) {
+            ids[i] = pboRing[i].id();
+        }
+        CudaInterop::registerAllPBOs(ids, RendererState::kPboRingSize);
+    }
 
     recomputePixelScale(*this);
 
@@ -140,6 +155,10 @@ void RendererState::resize(int newWidth, int newHeight) {
 
     setupCudaBuffers(lastTileSize);
     lastTimings.resetHostFrame();
+
+    // Ring-Statistik zum neuen Start nullen (LOG-6)
+    for (unsigned& u : ringUse) u = 0;
+    ringSkip = 0;
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[RESIZE] %d x %d buffers reallocated", width, height);
