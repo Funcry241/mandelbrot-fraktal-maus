@@ -20,6 +20,12 @@ static __device__ __forceinline__ int clamp_int_0_255(int v) {
     return (v > 255) ? 255 : v;
 }
 
+// Streaming store for floats (PTX evict-first). Single, elementare Assembler-Stelle.
+static __device__ __forceinline__ void store_streaming_f32(float* addr, float value) {
+    // PTX: st.global.cs.f32 [addr], value;
+    asm volatile("st.global.cs.f32 [%0], %1;" :: "l"(addr), "f"(value));
+}
+
 namespace {
     // Keep block size in one place so __launch_bounds__ and host launch stay in sync.
     constexpr int EN_BLOCK_THREADS = 256;   // 256 == EN_BINS -> simple, full parallelism
@@ -103,7 +109,8 @@ void entropyKernel(
                 if (p > 0.0f) entropy -= p * __log2f(p);
             }
         }
-        eOut[tileIndex] = entropy;
+        // Streaming store: write-once pattern, no re-read in this kernel.
+        store_streaming_f32(&eOut[tileIndex], entropy);
     }
 }
 
@@ -139,7 +146,9 @@ void contrastKernel(
         }
     }
 
-    cOut[idx] = (cnt > 0) ? (sum / cnt) : 0.0f;
+    const float val = (cnt > 0) ? (sum / cnt) : 0.0f;
+    // Streaming store: contrast is produced once and consumed later.
+    store_streaming_f32(&cOut[idx], val);
 }
 
 // --------------------------- host wrapper: E/C only ---------------------------
