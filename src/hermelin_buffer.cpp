@@ -3,11 +3,11 @@
 ///// Maus: Implementierung klar getrennt vom Interface; keine versteckten Allokationen.
 ///// Datei: src/hermelin_buffer.cpp
 
+#include "pch.hpp"
 #include "hermelin_buffer.hpp"
 #include "luchs_log_host.hpp"
 #include "settings.hpp"
 
-#include <GL/glew.h>
 #include <cuda_runtime_api.h>   // cudaMalloc / cudaFree
 #include <stdexcept>
 #include <limits>
@@ -129,19 +129,19 @@ void GLBuffer::allocate(GLsizeiptr sizeBytes, GLenum usage) {
 
     // Sanity: Größenprüfung gegen GLsizeiptr
     if (sizeBytes < 0) {
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prev));
         throw std::runtime_error("Hermelin: negative size for glBufferData");
     }
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, id_);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, sizeBytes, nullptr, usage);
 
-    GLint realSize = 0;
-    glGetBufferParameteriv(GL_PIXEL_UNPACK_BUFFER, GL_BUFFER_SIZE, &realSize);
+    GLint64 realSize = 0;
+    glGetBufferParameteri64v(GL_PIXEL_UNPACK_BUFFER, GL_BUFFER_SIZE, &realSize);
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[GLBUF] id=%u requested=%lld real=%d usage=0x%X",
-                       id_, static_cast<long long>(sizeBytes), realSize, static_cast<unsigned>(usage));
+        LUCHS_LOG_HOST("[GLBUF] id=%u requested=%lld real=%lld usage=0x%X",
+                       id_, static_cast<long long>(sizeBytes), static_cast<long long>(realSize),
+                       static_cast<unsigned>(usage));
     }
 
     // Restore previous binding
