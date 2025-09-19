@@ -70,19 +70,7 @@ namespace {
 
     // [GLS] Einmalige Scissor-State-Ermittlung statt pro Frame abzufragen
     static bool       s_scissorInit = false;
-    static GLboolean  s_scissorPrev = GL_FALSE;
-
-    // CUDA-Events früher hier genutzt – verbleiben ohne Schaden, falls später wieder erforderlich.
-    static cudaEvent_t g_evStart = nullptr;
-    static cudaEvent_t g_evStop  = nullptr;
-    static bool        g_evInit  = false;
-    static inline void ensureCudaEvents() {
-        if (!g_evInit) {
-            CUDA_CHECK(cudaEventCreate(&g_evStart));
-            CUDA_CHECK(cudaEventCreate(&g_evStop));
-            g_evInit = true;
-        }
-    }
+    static GLboolean  s_scissorPrev = GL_FALSE;   
 } // anon ns
 
 // --------------------------------- frame begin --------------------------------

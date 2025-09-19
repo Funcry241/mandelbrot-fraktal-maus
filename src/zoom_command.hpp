@@ -40,10 +40,6 @@ public:
                       entropy, contrast);
         return std::string(buf);
     }
-
-    [[nodiscard]] static std::string csvHeader() {
-        return "Frame,X,Y,ZoomBefore,ZoomAfter,Entropy,Contrast";
-    }
 };
 
 static_assert(std::is_trivially_copyable<ZoomCommand>::value,
