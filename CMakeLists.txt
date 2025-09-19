@@ -133,6 +133,7 @@ add_executable(mandelbrot_otterdream
   src/nacktmull_api.cpp
   src/renderer_state_cuda.cpp
   src/renderer_state_gl.cpp
+  src/nacktmull_color.cuh
 )
 
 # ---------------------- Compile-Options --------------------

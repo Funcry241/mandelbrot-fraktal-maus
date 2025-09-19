@@ -1,7 +1,7 @@
-///// Otter: Direktfarbe (A=255), kein Compose; Neon-Intro (~2s) + Rüsselwarze (Glanz & Glitzer).
-///// Schneefuchs: API mit Stream-Param; Progressive & Periodizität beibehalten; analytische Gradienten; ZK-Log nur einmal (Debug).
-///// Maus: Innen dunkel, außen Palette + Highlights; performantes Packen & minimale Zweige.
-///// Datei: src/nacktmull.cu
+///// Otter: Split – Farbraum & Pack nach .cuh; Kernpfad/Neon-Intro/Warze & Launch bleiben hier.
+/// //// Schneefuchs: API unverändert; weniger Zeilen; klare Abhängigkeiten; ASCII-Logs; /WX-fest.
+/// //// Maus: Innen dunkel, außen Palette + Highlights; performantes Packen; minimale Zweige.
+/// //// Datei: src/nacktmull.cu
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -14,45 +14,14 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "common.hpp"
-#include "nacktmull_math.cuh"  // pixelToComplex(...)
+#include "nacktmull_math.cuh"   // pixelToComplex(...)
+#include "nacktmull_color.cuh"  // Farb- & Pack-Helfer (header-only)
 
 // ============================================================================
 // Animation-Uniforms (vom Host pro Frame gesetzt)
 // ============================================================================
 __constant__ float g_sinA = 0.0f;  // ~sin(0.30*t)
 __constant__ float g_sinB = 0.0f;  // ~sin(0.80*t)
-
-// ============================================================================
-// Dither (Bayer 8x8) + Helfer
-// ============================================================================
-__device__ __constant__ unsigned char DITHER_BAYER8[64] = {
-     0, 48, 12, 60,  3, 51, 15, 63,
-    32, 16, 44, 28, 35, 19, 47, 31,
-     8, 56,  4, 52, 11, 59,  7, 55,
-    40, 24, 36, 20, 43, 27, 39, 23,
-     2, 50, 14, 62,  1, 49, 13, 61,
-    34, 18, 46, 30, 33, 17, 45, 29,
-    10, 58,  6, 54,  9, 57,  5, 53,
-    42, 26, 38, 22, 41, 25, 37, 21
-};
-__device__ __forceinline__ float bayer8x8_dither(int x, int y){
-    const int idx = ((y & 7) << 3) | (x & 7);
-    return float(DITHER_BAYER8[idx])*(1.0f/64.0f) - 0.5f; // [-0.5..+0.5]
-}
-__device__ __forceinline__ float clamp01(float v){ return fminf(1.0f, fmaxf(0.0f, v)); }
-__device__ __forceinline__ float mixf(float a, float b, float t){ return a + t*(b - a); }
-__device__ __forceinline__ float fractf(float x){ return x - floorf(x); }
-
-__device__ __forceinline__ uchar4 pack_srgb8(float3 rgb, int px, int py){
-    const float d = bayer8x8_dither(px, py);
-    float r = fmaf(255.0f, clamp01(rgb.x), 0.5f + d);
-    float g = fmaf(255.0f, clamp01(rgb.y), 0.5f + d);
-    float b = fmaf(255.0f, clamp01(rgb.z), 0.5f + d);
-    r = fminf(255.0f, fmaxf(0.0f, r));
-    g = fminf(255.0f, fmaxf(0.0f, g));
-    b = fminf(255.0f, fmaxf(0.0f, b));
-    return make_uchar4((unsigned char)r,(unsigned char)g,(unsigned char)b,255);
-}
 
 // ============================================================================
 // Early-out: Haupt-Kardioide + Period-2-Knolle
@@ -68,7 +37,7 @@ __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y){
 }
 
 // ============================================================================
-// Palette (kompakt, "linear gedacht") + Neon-Intro-Boost (~2s)
+// Palette (kompakt) + Neon-Intro-Boost (~2s) – nutzt Farb-Helfer aus .cuh
 // ============================================================================
 __device__ __forceinline__ float3 gtPalette_srgb(float x, bool inSet, float t){
     const float gamma=0.84f, lift=0.08f, baseVibr=1.05f, addVibrMax=0.06f, warmDriftAmp=0.06f;
@@ -111,14 +80,10 @@ __device__ __forceinline__ float3 gtPalette_srgb(float x, bool inSet, float t){
     float3 rgb = make_float3(a.x + (b.x-a.x)*tseg, a.y + (b.y-a.y)*tseg, a.z + (b.z-a.z)*tseg);
 
     // Vibrance + warme Verschiebung um Luma herum
-    const float luma=0.2126f*rgb.x+0.7152f*rgb.y+0.0722f*rgb.z;
-    const float vibr=baseVibrA + addVibrMaxA*clamp01((xprime-0.10f)*(1.0f/0.40f));
-    rgb=make_float3(
-        luma+(rgb.x-luma)*vibr*warmShiftA,
-        luma+(rgb.y-luma)*vibr*1.00f,
-        luma+(rgb.z-luma)*vibr*(2.0f-warmShiftA)
-    );
-    return make_float3(clamp01(rgb.x),clamp01(rgb.y),clamp01(rgb.z));
+    const float luma = zk_luma_srgb(rgb);
+    const float vibr = baseVibrA + addVibrMaxA*clamp01((xprime-0.10f)*(1.0f/0.40f));
+    rgb = zk_vibrance_warm_shift(rgb, luma, vibr, warmShiftA);
+    return rgb;
 }
 
 // ============================================================================
@@ -221,7 +186,7 @@ void mandelbrotUnifiedKernel(
     // Innen: dunkel & solide
     if (insideMainCardioidOrBulb(c.x,c.y)){
         const float3 rgb = gtPalette_srgb(0.0f,true,tSec);
-        out[idx] = pack_srgb8(rgb, x, y);
+        out[idx] = zk_pack_srgb8(rgb, x, y);
         iterOut[idx] = (uint16_t)min(maxIter, 65535);
         if (g_prog.enabled && g_prog.it && g_prog.z){ g_prog.it[idx]=maxIter; g_prog.z[idx]=make_float2(0,0); }
         return;
@@ -255,7 +220,7 @@ void mandelbrotUnifiedKernel(
 
         // Rüsselwarze nur außerhalb (it < iterCap)
         if (it < iterCap){
-            float luma = 0.2126f*rgb.x + 0.7152f*rgb.y + 0.0722f*rgb.z;
+            float luma = zk_luma_srgb(rgb);
             float r2=zx*zx+zy*zy; float smoothX;
             if (r2>1.0000001f && it>0){
                 float r=sqrtf(r2), l2=__log2f(__log2f(r));
@@ -269,7 +234,7 @@ void mandelbrotUnifiedKernel(
             rgb.z = clamp01(rgb.z + add.z);
         }
 
-        out[idx] = pack_srgb8(rgb, x, y);
+        out[idx] = zk_pack_srgb8(rgb, x, y);
         iterOut[idx]=(uint16_t)min(it,65535);
         return;
     }
@@ -311,7 +276,7 @@ void mandelbrotUnifiedKernel(
     float3 rgb = shade_color_only(it, maxIter, zx, zy, tSec);
 
     if (it < maxIter){
-        float luma = 0.2126f*rgb.x + 0.7152f*rgb.y + 0.0722f*rgb.z;
+        float luma = zk_luma_srgb(rgb);
         float r2=zx*zx+zy*zy; float smoothX;
         if (r2>1.0000001f && it>0){
             float r=sqrtf(r2), l2=__log2f(__log2f(r));
@@ -325,7 +290,7 @@ void mandelbrotUnifiedKernel(
         rgb.z = clamp01(rgb.z + add.z);
     }
 
-    out[idx] = pack_srgb8(rgb, x, y);
+    out[idx] = zk_pack_srgb8(rgb, x, y);
     iterOut[idx]=(uint16_t)min(it,65535);
 }
 
@@ -391,7 +356,7 @@ extern "C" void launch_mandelbrotHybrid(
             mandelbrotUnifiedKernel<<<grid,block>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
         }
 
-        // [ZK] Periodizitäts-Info nur einmal loggen
+        // Periodizitäts-Info nur einmal loggen
         static bool s_logPeriodicityOnce = false;
         if constexpr (Settings::debugLogging){
             if (!s_logPeriodicityOnce) {
