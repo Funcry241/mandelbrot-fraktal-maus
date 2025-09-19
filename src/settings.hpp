@@ -75,6 +75,25 @@ namespace Settings {
     // ------------------------------------------------------------------------
     inline constexpr bool preferVSync = true;
 
+// ============================== Interop / Upload =============================
+
+    // ------------------------------------------------------------------------
+    // pboRingSize
+    // Wirkung: Anzahl der Pixel Buffer Objects (PBO) im Upload-Ring
+    //          für CUDA <-> OpenGL Streaming.
+    // Empfehlung:
+    //   - typisch: 3 .. 12
+    //   - Sweet-Spot: 4 .. 8 (Stall-Resistenz vs. VRAM-Verbrauch)
+    //   - 16+ nur bei dokumentierten Treiber-Spikes und genügend VRAM
+    // Effekt:
+    //   - größer  = seltener Map-Stalls, aber mehr VRAM-Bedarf
+    //   - kleiner = weniger VRAM, höhere Wahrscheinlichkeit für Busy-PBO
+    // Speicherbedarf pro Frame:
+    //   bytes ≈ width * height * bytesPerPixel * pboRingSize
+    // Default hier: 8 (balanciert für 1080p/1440p).
+    // ------------------------------------------------------------------------
+    inline constexpr int pboRingSize = 8;
+
 // ============================== Overlays / HUD ===============================
 
     // ------------------------------------------------------------------------

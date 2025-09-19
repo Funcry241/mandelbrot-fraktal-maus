@@ -19,11 +19,16 @@
 namespace RendererLoop {
 
 namespace {
+    // Halte die Kadenz für Loop-Logs/Flush identisch zur PERF-Kadenz in frame_pipeline.cpp
+    // (dort: constexpr int PERF_LOG_EVERY = 30;)
+    constexpr int PERF_LOG_EVERY = 30;
+
     inline void beginFrameLocal(RendererState& state) {
         const double now = glfwGetTime();
         double delta = now - state.lastTime;
         if (delta < 0.0) delta = 0.0;
-        state.deltaTime = static_cast<float>(delta);
+        // Angleichen an FramePipeline: clamp auf >= 1 ms für stabile Ableitungen/FPS
+        state.deltaTime = static_cast<float>(delta < 0.001 ? 0.001 : delta);
         state.lastTime  = now;
         state.frameCount++; // 1-based after first frame
     }
@@ -58,15 +63,16 @@ void renderFrame_impl(RendererState& state) {
         FrameCapture::OnFrameRendered(state.frameCount);
     }
 
-    // Device log flush (debug or periodic)
+    // Device log flush (error-triggered OR periodic with the same cadence as PERF logs)
     if constexpr (Settings::debugLogging) {
         const cudaError_t err = cudaPeekAtLastError();
-        if (err != cudaSuccess || (state.frameCount % 60) == 0) {
+        const bool periodic = (state.frameCount % PERF_LOG_EVERY) == 0;
+        if (err != cudaSuccess || periodic) {
             LUCHS_LOG_HOST("[Loop] flushing device logs (err=%d, frame=%d)",
                            static_cast<int>(err), state.frameCount);
             LuchsLogger::flushDeviceLogToHost(0);
         }
-        if ((state.frameCount % 60) == 0) {
+        if (periodic) {
             LUCHS_LOG_HOST("[Loop] frame=%d dt=%.3f", state.frameCount, state.deltaTime);
         }
     }

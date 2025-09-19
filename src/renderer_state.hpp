@@ -56,21 +56,24 @@ public:
     bool                h_contrastPinned = false;
 
     // 🔗 Analyse/Iteration (Device) mit RAII
-    Hermelin::CudaDeviceBuffer d_iterations; // int[width*height]
+    Hermelin::CudaDeviceBuffer d_iterations; // uint16_t[width*height]
     Hermelin::CudaDeviceBuffer d_entropy;    // float[numTiles]
     Hermelin::CudaDeviceBuffer d_contrast;   // float[numTiles]
 
     // ➕ Progressive-State (Per-Pixel Resume)
     Hermelin::CudaDeviceBuffer d_stateZ;     // float2[width*height]
-    Hermelin::CudaDeviceBuffer d_stateIt;    // int[width*height]
+    Hermelin::CudaDeviceBuffer d_stateIt;    // uint16_t[width*height]
     bool                       progressiveEnabled = true;
     int                        progressiveCooldownFrames = 0;
 
     // 🎥 OpenGL-Zielpuffer (Interop via CUDA) mit RAII
-    static constexpr int kPboRingSize = 4; // ↑ vorher 3
-    std::array<Hermelin::GLBuffer, kPboRingSize> pboRing;
+    // Spiegel von Settings::pboRingSize (numerisch, um Header entkoppelt zu halten).
+    // Konsistenz wird in .cpp/.cu via static_assert geprüft.
+    static constexpr int kPboRingSize = 8; // <— an Settings::pboRingSize angleichen
+
+    std::array<Hermelin::GLBuffer, kPboRingSize> pboRing{};
     int pboIndex = 0;
-    inline Hermelin::GLBuffer& currentPBO() { return pboRing[pboIndex]; }
+    inline Hermelin::GLBuffer&       currentPBO()       { return pboRing[pboIndex]; }
     inline const Hermelin::GLBuffer& currentPBO() const { return pboRing[pboIndex]; }
     inline void advancePboRing() { pboIndex = (pboIndex + 1) % kPboRingSize; }
     Hermelin::GLBuffer tex;
@@ -80,8 +83,8 @@ public:
     bool skipUploadThisFrame = false;
 
     // 📊 Ring-Statistik (LOG-6)
-    unsigned ringUse[kPboRingSize] = {0,0,0,0};
-    unsigned ringSkip = 0;
+    std::array<unsigned, kPboRingSize> ringUse{}; // pro Slot Nutzung
+    unsigned ringSkip = 0;                        // Anzahl „skip upload this frame“
 
     // 🕒 Zeitsteuerung pro Frame
     int    frameCount = 0;

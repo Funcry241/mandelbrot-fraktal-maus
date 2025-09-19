@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <cstdio>     // snprintf for dynamic ring logging
 #include <algorithm>
 #include <vector_types.h>
 #include <vector_functions.h>
@@ -31,6 +32,10 @@
 
 namespace FramePipeline
 {
+
+// Sicherstellen, dass Ringgröße konsistent konfiguriert ist (keine OOBs)
+static_assert(RendererState::kPboRingSize == Settings::pboRingSize,
+              "RendererState::kPboRingSize must match Settings::pboRingSize");
 
 // ------------------------------ TU-lokaler Zustand ----------------------------
 static FrameContext g_ctx;
@@ -71,7 +76,26 @@ namespace {
 
     // [GLS] Einmalige Scissor-State-Ermittlung statt pro Frame abzufragen
     static bool       s_scissorInit = false;
-    static GLboolean  s_scissorPrev = GL_FALSE;   
+    static GLboolean  s_scissorPrev = GL_FALSE;
+
+    // Dynamisches Ring-Logging (ASCII, determiniert), plus Reset der Zähler
+    inline void logAndResetRingStats(RendererState& state) {
+        // Ring-Use kompakt als "{a,b,c,...}" bauen
+        char buf[1024];
+        int  pos = 0;
+        pos += std::snprintf(buf + pos, sizeof(buf) - pos, "{");
+        for (int i = 0; i < RendererState::kPboRingSize; ++i) {
+            pos += std::snprintf(buf + pos, sizeof(buf) - pos, (i == 0 ? "%u" : ",%u"), state.ringUse[i]);
+        }
+        std::snprintf(buf + pos, sizeof(buf) - pos, "}");
+
+        LUCHS_LOG_HOST("[RING] use=%s skip=%u size=%d",
+                       buf, state.ringSkip, RendererState::kPboRingSize);
+
+        // Reset Counters
+        for (int i = 0; i < RendererState::kPboRingSize; ++i) state.ringUse[i] = 0;
+        state.ringSkip = 0;
+    }
 } // anon ns
 
 // --------------------------------- frame begin --------------------------------
@@ -280,15 +304,10 @@ void execute(RendererState& state) {
         );
     }
 
-    // [LOG-6] Periodische Ring-Nutzungsstatistik
+    // [LOG-6] Periodische Ring-Nutzungsstatistik (dynamisch gemäß Ringgröße)
     if constexpr (Settings::performanceLogging) {
         if ((g_frame % RING_LOG_EVERY) == 0) {
-            LUCHS_LOG_HOST("[RING] use={%u,%u,%u,%u} skip=%u",
-                           state.ringUse[0], state.ringUse[1], state.ringUse[2], state.ringUse[3],
-                           state.ringSkip);
-            // Zähler zurücksetzen
-            state.ringUse[0] = state.ringUse[1] = state.ringUse[2] = state.ringUse[3] = 0;
-            state.ringSkip = 0;
+            logAndResetRingStats(state);
         }
     }
 }

@@ -110,6 +110,11 @@ GLuint createPBO(int width, int height) {
     }
 
     const size_t bytes = static_cast<size_t>(width) * static_cast<size_t>(height) * 4u;
+
+    // Vorheriges UNPACK-Binding sichern (keine Seiteneffekte nach außen)
+    GLint prevPBO = 0;
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevPBO);
+
     GLuint pbo = 0;
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -121,11 +126,22 @@ GLuint createPBO(int width, int height) {
     }
 #endif
     glBufferData(GL_PIXEL_UNPACK_BUFFER, static_cast<GLsizeiptr>(bytes), nullptr, GL_STREAM_DRAW);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[GL-PBO] created unpack PBO=%u bytes=%zu (ctx=%s)", pbo, bytes, g_resourceContext);
+        // Realgröße verifizieren (64-bit Query – große PBOs sicher)
+        GLint64 realSize = 0;
+        glGetBufferParameteri64v(GL_PIXEL_UNPACK_BUFFER, GL_BUFFER_SIZE, &realSize);
+        const GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            LUCHS_LOG_HOST("[GL-PBO][ERR] glBufferData/glGetBufferParameteri64v err=0x%04X (ctx=%s)", static_cast<unsigned>(err), g_resourceContext);
+        }
+        LUCHS_LOG_HOST("[GL-PBO] created unpack PBO=%u requested=%zu real=%lld (ctx=%s)",
+                       pbo, bytes, static_cast<long long>(realSize), g_resourceContext);
     }
+
+    // Vorheriges Binding wiederherstellen (statt pauschal auf 0 zu setzen)
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prevPBO));
+
     return pbo;
 }
 

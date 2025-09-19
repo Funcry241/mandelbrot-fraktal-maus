@@ -53,6 +53,13 @@ extern "C" void launch_mandelbrotHybrid(
 
 namespace CudaInterop {
 
+// ----- Ringgröße aus Settings (Single Source of Truth) -----------------------
+static constexpr int kRing = Settings::pboRingSize;
+static_assert(kRing > 0, "Settings::pboRingSize must be > 0");
+// Harter Gleichheits-Check gegen RendererState-Layout – verhindert OOB:
+static_assert(RendererState::kPboRingSize == Settings::pboRingSize,
+              "RendererState::kPboRingSize must match Settings::pboRingSize");
+
 // ---- TU-lokaler Zustand -----------------------------------------------------
 static bear_CudaPBOResource*                     s_pboActive = nullptr;
 static std::unordered_map<GLuint, bear_CudaPBOResource*> s_pboMap;
@@ -201,11 +208,12 @@ void renderCudaFrame(
             GLenum r = glClientWaitSync(f, 0, 0);
             if (r == 0x9111 /*GL_TIMEOUT_EXPIRED*/ || r == 0 /*GL_WAIT_FAILED (0) als konservativer Check*/ ) {
                 state.skipUploadThisFrame = true;
-                if (state.pboIndex >= 0 && state.pboIndex < RendererState::kPboRingSize) {
+                if (state.pboIndex >= 0 && state.pboIndex < kRing) {
                     state.ringSkip++; // Statistik
                 }
                 if constexpr (Settings::debugLogging) {
-                    LUCHS_LOG_HOST("[ZK][UP] pre-map fence busy -> skip upload this frame (ring=%d)", state.pboIndex);
+                    LUCHS_LOG_HOST("[ZK][UP] pre-map fence busy -> skip upload this frame (ring=%d/%d)",
+                                   state.pboIndex, kRing);
                 }
                 return; // Kein Map, kein Render/Upload in diesem Frame
             }
@@ -229,7 +237,7 @@ void renderCudaFrame(
     if (map.bytes < needBytes) throw std::runtime_error("PBO byte size mismatch");
 
     // Ring-Statistik: erfolgreiche Nutzung dieses Slots
-    if (state.pboIndex >= 0 && state.pboIndex < RendererState::kPboRingSize) {
+    if (state.pboIndex >= 0 && state.pboIndex < kRing) {
         state.ringUse[state.pboIndex]++;
     }
 
