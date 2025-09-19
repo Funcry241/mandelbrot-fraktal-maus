@@ -1,6 +1,6 @@
-///// Otter: Split – CUDA-Lifecycle, Host-Pinning, Buffers; keine GL-Abhängigkeit; /WX-fest; ASCII-only.
-///// Schneefuchs: Nur Streams/Events/Pins/Alloc; Helper lokal; klare Logs; kein Host-Sync außer Debug-Check.
-///// Maus: Tile-Berechnung inline; progressive Flags unverändert; API gleich; kleiner, unter 300 Zeilen.
+///// Otter: Streams mit Prioritäten – Render hoch, Copy niedrig; keine GL-Abhängigkeit; ASCII-Logs.
+///// Schneefuchs: Fallback sicher (Range optional); /WX-fest; API unverändert; keine Host-Syncs außer Debug.
+///// Maus: Klare Logs [STREAM]; deterministisches Verhalten; unter 300 Zeilen.
 ///// Datei: src/renderer_state_cuda.cpp
 
 #include "pch.hpp"
@@ -36,16 +36,57 @@ inline void recomputePixelScale(RendererState& rs) noexcept {
 
 void RendererState::createCudaStreamsIfNeeded() {
     CUDA_CHECK(cudaSetDevice(0));
+
+    // Priority-Range abfragen (lo = niedrigste Priorität, hi = höchste Priorität; numerisch: hi <= lo)
+    int lo = 0, hi = 0;
+    const cudaError_t prc = cudaDeviceGetStreamPriorityRange(&lo, &hi);
+    const bool hasRange = (prc == cudaSuccess);
+    const int prRender = hasRange ? hi : 0; // höchste verfügbare Priorität
+    const int prCopy   = hasRange ? lo : 0; // niedrigste verfügbare Priorität
+
     if (!renderStream) {
-        CUDA_CHECK(cudaStreamCreateWithFlags(&renderStream, cudaStreamNonBlocking));
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[STREAM] renderStream created %p (non-blocking)", (void*)renderStream);
+        cudaError_t e = cudaStreamCreateWithPriority(&renderStream, cudaStreamNonBlocking, prRender);
+        if (e != cudaSuccess) {
+            // Fallback ohne Priorität (sollte selten nötig sein)
+            renderStream = nullptr;
+            CUDA_CHECK(cudaStreamCreateWithFlags(&renderStream, cudaStreamNonBlocking));
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[STREAM] renderStream created %p (non-blocking, prio=default, range-avail=%d)",
+                               (void*)renderStream, hasRange ? 1 : 0);
+            }
+        } else {
+            if constexpr (Settings::debugLogging) {
+                if (hasRange) {
+                    LUCHS_LOG_HOST("[STREAM] renderStream created %p (non-blocking, prio=%d, range hi=%d lo=%d)",
+                                   (void*)renderStream, prRender, hi, lo);
+                } else {
+                    LUCHS_LOG_HOST("[STREAM] renderStream created %p (non-blocking, prio=default, no-range)",
+                                   (void*)renderStream);
+                }
+            }
         }
     }
+
     if (!copyStream) {
-        CUDA_CHECK(cudaStreamCreateWithFlags(&copyStream, cudaStreamNonBlocking));
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[STREAM] copyStream created %p (non-blocking)", (void*)copyStream);
+        cudaError_t e = cudaStreamCreateWithPriority(&copyStream, cudaStreamNonBlocking, prCopy);
+        if (e != cudaSuccess) {
+            // Fallback ohne Priorität
+            copyStream = nullptr;
+            CUDA_CHECK(cudaStreamCreateWithFlags(&copyStream, cudaStreamNonBlocking));
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[STREAM] copyStream created %p (non-blocking, prio=default, range-avail=%d)",
+                               (void*)copyStream, hasRange ? 1 : 0);
+            }
+        } else {
+            if constexpr (Settings::debugLogging) {
+                if (hasRange) {
+                    LUCHS_LOG_HOST("[STREAM] copyStream created %p (non-blocking, prio=%d, range hi=%d lo=%d)",
+                                   (void*)copyStream, prCopy, hi, lo);
+                } else {
+                    LUCHS_LOG_HOST("[STREAM] copyStream created %p (non-blocking, prio=default, no-range)",
+                                   (void*)copyStream);
+                }
+            }
         }
     }
 }
