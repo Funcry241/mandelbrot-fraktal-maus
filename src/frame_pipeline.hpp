@@ -12,7 +12,7 @@ class RendererState;
 
 namespace FramePipeline {
 
-// Komplettes Frame ausführen (begin → CUDA/Analyse → Zoom-Step → Draw → Perf-Logs).
+// Komplettes Frame ausführen (begin -> CUDA/Analyse -> Zoom-Step -> Draw -> Perf-Logs).
 // Exponiert nur den stabilen Einstiegspunkt; alle Teilphasen bleiben intern
 // (siehe src/frame_pipeline.cpp), um Header/Source driftfrei zu halten.
 void execute(RendererState& state);

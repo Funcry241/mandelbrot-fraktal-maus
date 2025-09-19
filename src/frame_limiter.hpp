@@ -11,7 +11,7 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 
-namespace pace { // umbenannt von 'fps' → keine Makro-Kollisionen
+namespace pace { // umbenannt von 'fps' -> keine Makro-Kollisionen
 
 class FrameLimiter {
 public:

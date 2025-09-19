@@ -262,12 +262,12 @@ namespace Kolibri {
 
 // ============================== Kolibri/Boost ================================
 // Deep-zoom framerate stabilizer: frame-budget + runtime addIter bounds.
-// Pipeline verwendet dt→addIterRuntime in Resume-Pfad; Kernel-Tuning separat.
+// Pipeline verwendet dt->addIterRuntime in Resume-Pfad; Kernel-Tuning separat.
 // -----------------------------------------------------------------------------
 namespace KolibriBoost {
     // ------------------------------------------------------------------------
     // enable
-    // Wirkung: Schaltet Budget-Regler frei (dt→addIterRuntime) und Kernel-Tuning.
+    // Wirkung: Schaltet Budget-Regler frei (dt->addIterRuntime) und Kernel-Tuning.
     // Empfehlung: true (bool)
     // ------------------------------------------------------------------------
     inline constexpr bool   enable = true;
@@ -284,7 +284,7 @@ namespace KolibriBoost {
     // addIterMin / addIterMax / addIterStep
     // Wirkung: Klemmen und Schrittweite für addIterRuntime (pro Frame).
     // Empfehlung: Min 12..24, Max 40..64, Step 1..4
-    // Effekt: Tighter Min → höhere FPS-Sicherheit; höheres Max → schnellere Schärfe.
+    // Effekt: Tighter Min -> höhere FPS-Sicherheit; höheres Max -> schnellere Schärfe.
     // ------------------------------------------------------------------------
     inline constexpr int addIterMin  = 16;
     inline constexpr int addIterMax  = 48;

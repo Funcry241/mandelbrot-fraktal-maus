@@ -167,7 +167,7 @@ bool Renderer::shouldClose() const {
 }
 
 void Renderer::renderFrame() {
-    // Delegate to pipeline: CUDA → analysis → upload → draw → logs
+    // Delegate to pipeline: CUDA -> analysis -> upload -> draw -> logs
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] Entering Renderer::renderFrame");
     }
@@ -207,7 +207,7 @@ void Renderer::renderFrame() {
 
     // ---------- Tatze 7: Soft-invalidate on abrupt view change (post-pipeline) ----------
     // Detect large jumps in zoom or center (screen-space) and pause progressive resume for one frame.
-    // Thresholds: zoomRatio >= 1.5 OR pan >= 8.0 px → soft invalidate (no memset).
+    // Thresholds: zoomRatio >= 1.5 OR pan >= 8.0 px -> soft invalidate (no memset).
     {
         struct PrevView { bool have=false; double zoom=0.0, cx=0.0, cy=0.0; };
         static PrevView prev;

@@ -39,7 +39,7 @@ static bool write_bmp24_from_rgba(const char* path, int w, int h, const uint8_t*
     const uint32_t offBits = 54; std::memcpy(&hdr[10], &offBits, 4);
     const uint32_t dibSize = 40; std::memcpy(&hdr[14], &dibSize, 4);
     std::memcpy(&hdr[18], &w, 4);
-    std::memcpy(&hdr[22], &h, 4); // positive → bottom-up
+    std::memcpy(&hdr[22], &h, 4); // positive -> bottom-up
     const uint16_t planes = 1;  std::memcpy(&hdr[26], &planes, 2);
     const uint16_t bpp    = 24; std::memcpy(&hdr[28], &bpp, 2);
     std::memcpy(&hdr[34], &pixelDataSize, 4);
@@ -85,7 +85,7 @@ static void enqueue_readback()
     GLint prevPackAlign = 0;
     glGetIntegerv(GL_PACK_ALIGNMENT, &prevPackAlign);
 
-    // Query viewport → width/height of the current framebuffer
+    // Query viewport -> width/height of the current framebuffer
     GLint vp[4] = {0,0,0,0};
     glGetIntegerv(GL_VIEWPORT, vp);
     g_cap.w = vp[2];
@@ -173,7 +173,7 @@ static void try_finish_write()
         if (g_cap.pbo) { glDeleteBuffers(1, &g_cap.pbo); g_cap.pbo = 0; }
         g_cap.done = true;
     }
-    // else: not ready yet → try again next frame (no stall)
+    // else: not ready yet -> try again next frame (no stall)
 }
 
 } // anon namespace

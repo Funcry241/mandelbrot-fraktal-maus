@@ -13,7 +13,7 @@ namespace WarzenschweinOverlay {
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Pfau {
 inline constexpr float UI_MARGIN   = 16.0f;   // Außenabstand zum Rand (px)
-inline constexpr float UI_PADDING  = 12.0f;   // Innenabstand Text→Panelrand (px)
+inline constexpr float UI_PADDING  = 12.0f;   // Innenabstand Text->Panelrand (px)
 inline constexpr float UI_RADIUS   = 12.0f;   // Panel-Eckenradius (px)
 inline constexpr float UI_BORDER   = 1.5f;    // Panel-Randstärke (px)
 inline constexpr float PANEL_ALPHA = 0.84f;   // Panel-Deckkraft (0..1)

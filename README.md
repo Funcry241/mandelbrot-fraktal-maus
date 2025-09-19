@@ -26,7 +26,7 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
 
 * **🚀 CUDA Rendering**  
   2-Pass Mandelbrot-Pipeline (Warmup + Sliced Finish), warp-synchron, CHUNKed (`WARP_CHUNK=64`).
-  * **Survivor-Black**: unfertige Pixel sofort schwarz → *kein Ghosting* zwischen Slices.
+  * **Survivor-Black**: unfertige Pixel sofort schwarz -> *kein Ghosting* zwischen Slices.
   * **Event-Timing**: Ereignisbasierte Messung via CUDA-Events (ohne globales `cudaDeviceSynchronize()` im Normalpfad).
 
 * **🎯 Auto-Zoom mit Entropie- und Kontrastanalyse**  
@@ -36,12 +36,12 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
   Sanfte Schwenks, **Yaw-Rate-Limiter (rad/s)** + Längendämpfung, relative Hysterese & kurzer Lock gegen Flip-Flop.
 
 * **🕳️ Anti-Black-Guard (Cardioid/Bulb-Avoidance)**  
-  Warm-up-Drift und **Void-Bias** schieben den Fokus verlässlich aus Innenbereichen → *kein „Zoom ins Schwarze“*.
+  Warm-up-Drift und **Void-Bias** schieben den Fokus verlässlich aus Innenbereichen -> *kein „Zoom ins Schwarze“*.
 
 * **📈 Progressive Iterationen (Zoom-abhängig)**  
   Iterationszahl steigt automatisch mit dem Zoom-Level. **Standardmäßig aktiv** (abschaltbar).
 
-* **🎨 GT-Palette (Cyan→Amber) + Smooth Coloring**  
+* **🎨 GT-Palette (Cyan->Amber) + Smooth Coloring**  
   Interpolation im **Linearraum** gegen Banding, **Smooth Coloring** via `it - log2(log2(|z|))`.  
   **Streifen-Shading** optional – **standardmäßig aus** (`stripes = 0.0f`) für ringfreie Darstellung.
 
@@ -69,7 +69,7 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
 * **Sliced Survivor Finish** mit **Survivor-Black** (ghosting-frei)
 * **Event-Timing** per CUDA-Events (kostenarm & präzise)
 * **Anti-Black-Guard** (Warm-up-Drift + Void-Bias gegen Cardioid/Bulb-Hänger)
-* **Yaw-Limiter** (rad/s → rad/Frame via `dt`) + **Längendämpfung**
+* **Yaw-Limiter** (rad/s -> rad/Frame via `dt`) + **Längendämpfung**
 * **Hysterese/Lock & dyn. Retarget-Throttle** für ruhiges Zielhalten
 * **Softmax-Sparsification** & robuste **Median/MAD**-Statistik
 * **Epoch-Millis-Logging** (UTC-Millis seit 1970) — kompakt, sortier- & skriptfreundlich

@@ -1,4 +1,4 @@
-///// Otter: Tile-Index → Pixelzentrum; robust geklemmt, schnelle Inline-Helfer.
+///// Otter: Tile-Index -> Pixelzentrum; robust geklemmt, schnelle Inline-Helfer.
 ///// Schneefuchs: noexcept, deterministisch; Assertions nur in Debug; ASCII-only.
 ///// Maus: Keine Logs; Header/Source synchron; API stabil, [[nodiscard]] für Nutzungssicherheit.
 ///// Datei: src/heatmap_utils.hpp

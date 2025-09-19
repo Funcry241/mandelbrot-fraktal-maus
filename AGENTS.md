@@ -16,7 +16,7 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 | Agent/Tool              | Zweck                         | Trigger            | Aktionen                                            |
 | ----------------------- | ----------------------------- | ------------------ | --------------------------------------------------- |
-| **GitHub Actions (CI)** | Build-, Test-, Install-Check  | Push/PR auf `main` | CMake Configure → Ninja Build → `cmake --install`   |
+| **GitHub Actions (CI)** | Build-, Test-, Install-Check  | Push/PR auf `main` | CMake Configure -> Ninja Build -> `cmake --install`   |
 | **Dependabot**          | Abhängigkeits-Updates (vcpkg) | Wöchentlich        | PRs für `vcpkg.json`, CI baut PR                    |
 | **Waschbär-Watchdog**   | Hygiene & Auto-Fixes (lokal)  | On-Demand          | Räumt CMake-Caches, fixt typische GLEW/vcpkg-Fallen |
 
@@ -60,8 +60,8 @@ Die passende Compute Capability deiner GPU findest du in NVIDIAs Übersicht.
   *Hinweis:* Nachricht mit `snprintf` zusammenbauen ist ok — der **finale** Aufruf ist genau **ein** `LUCHS_LOG_DEVICE(const char*)`.
 * **Kein `printf/fprintf`** im Produktionspfad. Logs dürfen **keine** impliziten Synchronisationen auslösen.
 * **Zwei Schalter** (`Settings`):
-  `performanceLogging` → kompakte Messwerte via CUDA-Events  
-  `debugLogging` → detaillierter, ggf. langsamer
+  `performanceLogging` -> kompakte Messwerte via CUDA-Events  
+  `debugLogging` -> detaillierter, ggf. langsamer
 
 ---
 
@@ -75,8 +75,8 @@ Der Mandelbrot-Pfad hält sich an ein weiches Zeitbudget pro Frame. Silk-Lite st
 ## 🎨 Renderer-Pfad & Farbgebung (Status)
 
 * **Aktiver Pfad**: **Direkte Iteration** (Float), Escape-Test **vor** dem Update (`|z|^2 > 4`).  
-  → Heatmap-Vertrag: *Innen* schreibt `iterOut = maxIter`, *Escape* schreibt Iterationsindex.  
-* **Palette**: **GT (Cyan→Amber)** mit Interpolation im **Linearraum** gegen Banding.  
+  -> Heatmap-Vertrag: *Innen* schreibt `iterOut = maxIter`, *Escape* schreibt Iterationsindex.  
+* **Palette**: **GT (Cyan->Amber)** mit Interpolation im **Linearraum** gegen Banding.  
   **Stripes** sind **standardmäßig aus** (`stripes = 0.0f`) für ringfreie Darstellung.  
 * **Mapping**: Projektweit über `screenToComplex(...)` (Koordinaten-Harmonisierung, „Eule“).
 
@@ -148,7 +148,7 @@ cmake --install build --prefix ./dist
 
 ## 🧷 Toolchain & Hardening (Windows)
 
-* **CRT vereinheitlicht**: `/MT` (inkl. NVCC-Host) → keine LNK2038-Mismatches.
+* **CRT vereinheitlicht**: `/MT` (inkl. NVCC-Host) -> keine LNK2038-Mismatches.
 * **`CUDA::cudart_static`**: passt zum `/MT`-CRT.
 * **GLEW dynamisch**: **kein** `GLEW_STATIC`; vcpkg-Triplet passend wählen.
 * **Hardening nur im Host-Link**: `/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf` über `$<HOST_LINK:...>`.
@@ -206,12 +206,12 @@ Separat und knapp:
 
 **GitHub Actions** (`.github/workflows/ci.yml`)
 
-* Configure → Build (Ninja) → Install
+* Configure -> Build (Ninja) -> Install
 * Artefakte: Install-Tree unter `dist/`
 * Prüfungen:
   * CUDA-Kompilation für Presets
   * konsistente CMake-Presets
-  * deterministische Builds (gleiche Inputs → gleiche Outputs)
+  * deterministische Builds (gleiche Inputs -> gleiche Outputs)
 
 **Dependabot**
 
@@ -222,10 +222,10 @@ Separat und knapp:
 
 ## ❓ Troubleshooting (Kurz)
 
-* **`nvcc` fehlt** → **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen
-* **GLEW-Mismatch (z. B. `glew32d.lib`)** → auf **dynamisches GLEW** wechseln und Triplet/Cache prüfen
-* **Schwarze Frames** bei extremem Pan/Zoom → Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs
-* **CUDA-Interop Stalls** → PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences
+* **`nvcc` fehlt** -> **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen
+* **GLEW-Mismatch (z. B. `glew32d.lib`)** -> auf **dynamisches GLEW** wechseln und Triplet/Cache prüfen
+* **Schwarze Frames** bei extremem Pan/Zoom -> Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs
+* **CUDA-Interop Stalls** -> PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences
 
 ---
 

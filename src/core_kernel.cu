@@ -22,7 +22,7 @@ static __device__ __forceinline__ int clamp_int_0_255(int v) {
 
 namespace {
     // Keep block size in one place so __launch_bounds__ and host launch stay in sync.
-    constexpr int EN_BLOCK_THREADS = 256;   // 256 == EN_BINS → simple, full parallelism
+    constexpr int EN_BLOCK_THREADS = 256;   // 256 == EN_BINS -> simple, full parallelism
     constexpr int EN_BINS          = 256;
     constexpr int WARP_SIZE        = 32;
     constexpr int EN_WARPS         = EN_BLOCK_THREADS / WARP_SIZE;
@@ -79,7 +79,7 @@ void entropyKernel(
     }
     __syncthreads();
 
-    // Reduce warp-local histograms into histo[0][*]  (STRIDED → covers all 256 bins)
+    // Reduce warp-local histograms into histo[0][*]  (STRIDED -> covers all 256 bins)
     for (int b = threadIdx.x; b < EN_BINS; b += blockDim.x) {
         int sum = 0;
         #pragma unroll

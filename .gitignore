@@ -5,7 +5,7 @@
 
 # ⚠️ Wichtig: Verzeichnis 'dist' nicht pauschal ignorieren,
 # damit einzelne Dateien via "!" re-includiert werden koennen.
-# → zuerst ignorieren, dann unten die Ausnahmen freigeben!
+# -> zuerst ignorieren, dann unten die Ausnahmen freigeben!
 /dist/*
 !/dist/frame_0100.bmp   # 🦦 Otter: explizit freigeben (Bezug zu Otter)
 # (Optional: falls du das Verzeichnis immer im Repo haben willst)

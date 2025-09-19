@@ -109,7 +109,7 @@ void generateOverlayQuads(const std::string& t, int viewportW, int viewportH, fl
     vOut.clear(); pOut.clear();
     const float scalePx = std::max(1.0f, Settings::hudPixelSize);
 
-    // Außenabstand soll EXAKT UI_MARGIN sein → Content-Anker = MARGIN + PADDING
+    // Außenabstand soll EXAKT UI_MARGIN sein -> Content-Anker = MARGIN + PADDING
     const float marginX = Pfau::UI_MARGIN,  marginY = Pfau::UI_MARGIN;
     const float pad     = Pfau::UI_PADDING;
     const float x0 = (float)WarzenschweinOverlay::snapToPixel(marginX + pad);

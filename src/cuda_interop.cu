@@ -205,11 +205,11 @@ void renderCudaFrame(
                     state.ringSkip++; // Statistik
                 }
                 if constexpr (Settings::debugLogging) {
-                    LUCHS_LOG_HOST("[ZK][UP] pre-map fence busy → skip upload this frame (ring=%d)", state.pboIndex);
+                    LUCHS_LOG_HOST("[ZK][UP] pre-map fence busy -> skip upload this frame (ring=%d)", state.pboIndex);
                 }
                 return; // Kein Map, kein Render/Upload in diesem Frame
             }
-            // Fence ist signaled → wegräumen
+            // Fence ist signaled -> wegräumen
             glDeleteSync(f);
             state.pboFence[state.pboIndex] = 0;
         }

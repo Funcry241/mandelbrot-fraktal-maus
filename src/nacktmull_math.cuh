@@ -41,7 +41,7 @@ __host__ __device__ __forceinline__ float2 pixelToComplex(
     const double ar      = (double)w * invH;           // w/h
     const double invZoomAr = invZoom * ar;             // precombine
 
-    // ndc = px*(2/w)-1, py*(2/h)-1  → via FMA
+    // ndc = px*(2/w)-1, py*(2/h)-1  -> via FMA
     const double sx = 2.0 * invW;
     const double sy = 2.0 * invH;
     const double ndcX = dmadd(px, sx, -1.0);

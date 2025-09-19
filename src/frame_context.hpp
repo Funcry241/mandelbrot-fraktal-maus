@@ -5,7 +5,7 @@
 
 #pragma once
 #include <vector>
-#include <vector_types.h> // float2 (__align__ erzwingt 8-Byte-Alignment → C4324 unter /WX)
+#include <vector_types.h> // float2 (__align__ erzwingt 8-Byte-Alignment -> C4324 unter /WX)
 
 // 🐭 Maus: Intentional alignment due to CUDA float2 members; silence MSVC C4324 lokal.
 // 🦦 Otter: Local pragma keeps /WX global strikt.

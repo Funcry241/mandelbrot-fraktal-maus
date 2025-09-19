@@ -44,7 +44,7 @@ __device__ __forceinline__ float3 gtPalette_srgb(float x, bool inSet, float t){
     const float breathAmp = 0.08f;
 
     // Neon-Intro (0..~2s): Punch ↑, dann weich zurück
-    const float introT = clamp01(t * 0.5f); // t/2s → 0..1
+    const float introT = clamp01(t * 0.5f); // t/2s -> 0..1
     const float gammaA      = mixf(0.72f, gamma,      introT);
     const float liftA       = mixf(lift + 0.12f, lift, introT);
     const float baseVibrA   = mixf(baseVibr * 1.22f,  baseVibr,  introT);
@@ -104,7 +104,7 @@ __device__ __forceinline__ float3 warze_highlight(float2 c, int px, int py, floa
     const float rid = fabsf(__sinf(phiR));
     float m = clamp01(0.60f*rid + 0.40f*(s0*s0)) * maskGain;
 
-    // Analytische Gradienten → Pseudo-Normal von sin(phi0)
+    // Analytische Gradienten -> Pseudo-Normal von sin(phi0)
     const float invr  = rsqrtf(r2), invr2 = invr*invr;
     const float dphidx = kR*(c.x*invr) - kA*(c.y*invr2);
     const float dphidy = kR*(c.y*invr) + kA*(c.x*invr2);
@@ -329,7 +329,7 @@ extern "C" void launch_mandelbrotHybrid(
         const dim3 block(Settings::MANDEL_BLOCK_X, Settings::MANDEL_BLOCK_Y);
         const dim3 grid((w+block.x-1)/block.x,(h+block.y-1)/block.y);
 
-        cudaStream_t useStream = stream; // darf nullptr sein → äquivalent zu Stream 0 beim Launch unten
+        cudaStream_t useStream = stream; // darf nullptr sein -> äquivalent zu Stream 0 beim Launch unten
 
         if constexpr (Settings::performanceLogging) {
             cudaEvent_t evStart=nullptr, evStop=nullptr;

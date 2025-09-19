@@ -9,9 +9,9 @@
 #include <vector>
 #include <string>
 #include <array>
-#include <vector_types.h>        // float2/double2 (__align__-Typen → MSVC C4324)
+#include <vector_types.h>        // float2/double2 (__align__-Typen -> MSVC C4324)
 #include "hermelin_buffer.hpp"   // RAII-Wrapper fuer GL/CUDA-Buffer (by value erforderlich)
-#include "zoom_logic.hpp"        // ZoomLogic::ZoomState (by-value Member → vollständiger Typ noetig)
+#include "zoom_logic.hpp"        // ZoomLogic::ZoomState (by-value Member -> vollständiger Typ noetig)
 
 // Vorwaertsdeklarationen statt schwerer Header
 struct GLFWwindow;
@@ -19,9 +19,9 @@ struct __GLsync; using GLsync = __GLsync*; // [ZK] GLsync vorwaerts deklariert (
 
 // CUDA-Primitive schlank vorwaerts deklarieren (kein cuda_runtime*-Include im Header)
 struct CUstream_st; using cudaStream_t = CUstream_st*; // Ownership liegt beim RendererState
-struct CUevent_st;  using cudaEvent_t  = CUevent_st*;  // Events fuer Render→E/C→Copy Verkettung
+struct CUevent_st;  using cudaEvent_t  = CUevent_st*;  // Events fuer Render->E/C->Copy Verkettung
 
-// MSVC: float2/double2 sind __align__-Typen → C4324 (Padding). Lokal und gezielt unterdruecken.
+// MSVC: float2/double2 sind __align__-Typen -> C4324 (Padding). Lokal und gezielt unterdruecken.
 #if defined(_MSC_VER)
   #pragma warning(push)
   #pragma warning(disable : 4324)
@@ -97,11 +97,11 @@ public:
 
     // 🎬 CUDA Streams (Ownership im State) – 4e/4f
     cudaStream_t renderStream = nullptr; // non-blocking
-    cudaStream_t copyStream   = nullptr; // non-blocking (D→H Copy / Staging)
+    cudaStream_t copyStream   = nullptr; // non-blocking (D->H Copy / Staging)
 
-    // 🎯 CUDA Events zur asynchronen Verkettung (Render → E/C → Copy)
+    // 🎯 CUDA Events zur asynchronen Verkettung (Render -> E/C -> Copy)
     cudaEvent_t  evEcDone   = nullptr; // signalisiert: Entropy/Contrast fertig (auf renderStream recorded)
-    cudaEvent_t  evCopyDone = nullptr; // optional: D→H Copy fertig (auf copyStream recorded)
+    cudaEvent_t  evCopyDone = nullptr; // optional: D->H Copy fertig (auf copyStream recorded)
 
     // ⏱️ Timings – CUDA + HOST konsolidiert
     struct CudaPhaseTimings {
