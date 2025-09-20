@@ -13,7 +13,6 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <GLFW/glfw3.h>
 
 int main()
 {
