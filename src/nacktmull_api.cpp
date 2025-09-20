@@ -16,6 +16,7 @@
 #include "common.hpp"
 #include "core_kernel.h"
 #include "perturbation_orbit.hpp"
+#include <vector_types.h>
 #include <vector_functions.h>
 #include <cuda_runtime.h>
 #include <algorithm>
