@@ -1,7 +1,7 @@
 ///// Otter: sRGB-Pack & Farbhefler; header-only.
-/////  Schneefuchs: Keine Device-Globals; reine Funktionen; /WX-fest.
-/////  Maus: Performantes Packen; minimale Zweige.
-/////  Datei: src/nacktmull_color.cuh
+///// Schneefuchs: Keine Device-Globals; reine Funktionen; /WX-fest.
+///// Maus: Performantes Packen; minimale Zweige.
+///// Datei: src/nacktmull_color.cuh
 
 #pragma once
 

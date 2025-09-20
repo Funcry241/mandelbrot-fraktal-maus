@@ -1,19 +1,18 @@
-///// Otter: PCH für dynamisches GLEW; stabile Include-Reihenfolge; DLL-Import unter Windows.
-///// Schneefuchs: Keine impliziten GL-Includes; deterministisch; ASCII-only.
-///// Maus: GLEW/GLFW nur hier; andere Header schlank halten; keine Seiteneffekte.
+///// Otter: PCH for dynamic GLEW; stable include order; DLL import on Windows.
+///// Schneefuchs: No implicit GL includes elsewhere; deterministic; ASCII-only.
+///// Maus: GLEW/GLFW only here; other headers slim; no side effects.
 ///// Datei: src/pch.hpp
 
 #pragma once
 
 // ======================
-// CUDA 13: Vektor-Deprecation zentral stummschalten
-// (wir nutzen die Legacy-Typen nicht aktiv, aber Includes können warnen)
+// CUDA 13: silence vector deprecation centrally
 #ifndef __NV_NO_VECTOR_DEPRECATION_DIAG
-  #define __NV_NO_VECTOR_DEPRECATION_DIAG 1
+#define __NV_NO_VECTOR_DEPRECATION_DIAG 1
 #endif
 
 // ======================
-// C/C++ Standard (PCH)
+// C/C++ standard (PCH)
 // ======================
 #include <algorithm>
 #include <cmath>
@@ -32,7 +31,7 @@
 #include <vector>
 
 // ===============
-// Plattform: Win
+// Platform: Win
 // ===============
 #ifdef _WIN32
   #ifndef WIN32_LEAN_AND_MEAN
@@ -44,18 +43,23 @@
   #include <windows.h>
 #endif
 
+// ======================
+// CUDA essentials
+// ======================
+#include <cuda_runtime.h> // brings float3/uchar4/make_uchar4, etc.
+
 // =====================
 // OpenGL include order
 // =====================
-// Verhindert, dass GLFW eigene GL-Header nachlädt:
+// Prevent GLFW from pulling GL headers:
 #ifndef GLFW_INCLUDE_NONE
   #define GLFW_INCLUDE_NONE
 #endif
-// Keine Alt-GL-Header über andere Pfade einziehen:
+// Do not include legacy <GL/gl.h> via other paths:
 #ifndef GL_DO_NOT_INCLUDE_GL_H
   #define GL_DO_NOT_INCLUDE_GL_H
 #endif
-// GLEW ohne GLU/Imaging (wird nicht benötigt):
+// GLEW without GLU/Imaging:
 #ifndef GLEW_NO_GLU
   #define GLEW_NO_GLU
 #endif
@@ -63,7 +67,7 @@
   #define GLEW_NO_IMAGING
 #endif
 
-// Sicherstellen, dass wir dynamisches GLEW nutzen:
+// Ensure dynamic GLEW:
 #ifdef GLEW_STATIC
   #undef GLEW_STATIC
 #endif
@@ -73,6 +77,6 @@
   #endif
 #endif
 
-// Reihenfolge: erst GLEW, dann GLFW
+// Order: GLEW first, then GLFW
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
