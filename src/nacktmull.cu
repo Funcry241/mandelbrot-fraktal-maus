@@ -28,12 +28,12 @@ __constant__ float g_sinB = 0.0f;  // ~sin(0.80*t)
 // Perturbation: device-side controls & buffers (set by host)
 //   - g_pert:     compact param pack (active==0 -> classical path)
 //   - g_zrefGlob: pointer to GLOBAL orbit buffer (if store==Global)
-//   - zrefConst:  CONST orbit buffer (defined in core_kernel.cu)
+//   - zrefConst:  CONST orbit buffer (decl in core_kernel.h, def in core_kernel.cu)
 //   - d_deltaMax: per-frame telemetry (max |delta|), updated by kernel
 // ============================================================================
 __device__ __constant__ PerturbParams g_pert = {0,0,0,PertStore::Const, {0.0,0.0}, 0.0, 0};
 __device__ const double2* g_zrefGlob = nullptr;
-extern __constant__ double2 zrefConst[];   // from core_kernel.cu
+// zrefConst comes from core_kernel.h (extern with known size) — no redeclaration here.
 extern __device__ float d_deltaMax;        // from core_kernel.cu
 
 // ============================================================================

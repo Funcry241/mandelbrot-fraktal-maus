@@ -37,7 +37,7 @@ enum class PertStore : uint8_t { Const = 0, Global = 1 };
 #endif
 
 // Contract: if p.active == 0 → classical path (ignore others)
-struct PerturbParams {
+struct PerturbParams final {
     int        active;
     int        len;
     int        segSize;
@@ -61,6 +61,9 @@ struct PerturbHeader {
 
 // CONST reference-orbit buffer (device). Must match the definition in core_kernel.cu.
 extern __constant__ double2 zrefConst[Settings::zrefMaxLen];
+
+// PERT telemetry symbol (device): max |delta| per frame, updated by kernel.
+extern __device__ float d_deltaMax;
 
 // Optional unified Mandelbrot launch (declaration only).
 extern "C" void launchMandelbrotUnified(

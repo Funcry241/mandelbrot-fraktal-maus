@@ -50,9 +50,9 @@ void entropyKernel(
     const int tilesY = (h + tile - 1) / tile;
     if (tX >= tilesX || tY >= tilesY) return;
 
-    const int startX = tX * tile;
-    const int startY = tY * tile;
-    const int tileIndex = tY * tilesX + tX;
+    const int startX   = tX * tile;
+    const int startY   = tY * tile;
+    const int tileIndex= tY * tilesX + tX;
 
     __shared__ int histo[EN_WARPS][EN_BINS];
 
@@ -209,11 +209,18 @@ extern "C" void computeCudaEntropyContrast(
                        tilesX, tilesY, tilesTotal, tile, maxIter, (void*)stream);
     }
 
+    // Launch + deterministic, single-line numeric RC logs (no sync)
     entropyKernel<<<enGrid, enBlock, 0, stream>>>(d_it, d_e, w, h, tile, maxIter);
-    (void)cudaPeekAtLastError();
+    {
+        cudaError_t rc = cudaGetLastError();
+        if (rc != cudaSuccess) LUCHS_LOG_HOST("[CUDA][EC] rc_launch_entropy=%d", (int)rc);
+    }
 
     contrastKernel<<<ctGrid, ctBlock, 0, stream>>>(d_e, d_c, tilesX, tilesY);
-    (void)cudaPeekAtLastError();
+    {
+        cudaError_t rc = cudaGetLastError();
+        if (rc != cudaSuccess) LUCHS_LOG_HOST("[CUDA][EC] rc_launch_contrast=%d", (int)rc);
+    }
 
     if (ecDoneEvent) {
         EC_NT_CHECK(cudaEventRecord(ecDoneEvent, stream));
