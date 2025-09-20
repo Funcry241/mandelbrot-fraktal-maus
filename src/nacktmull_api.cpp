@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <exception>
 #include <vector>
+#include <cmath> // std::abs
 
 // Device symbol for CONST-path upload (defined in core_kernel.cu)
 extern __constant__ double2 zrefConst[];
@@ -111,7 +112,13 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
             try {
                 std::vector<double2> orbit;
                 int len = 0;
-                buildReferenceOrbit(c_now, Settings::zrefMaxLen, Settings::zrefSegSize, orbit, len);
+                buildReferenceOrbit(
+                    c_now,
+                    std::min(Settings::zrefMaxLen, state.maxIterations),
+                    Settings::zrefSegSize,
+                    orbit,
+                    len
+                );
 
                 if (len > 0) {
                     // Choose CONST vs GLOBAL store
@@ -136,9 +143,9 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
                         state.perturbStore = PertStore::Global;
                     }
 
-                    state.c_ref      = c_now;
-                    state.zrefCount  = len;
-                    state.zrefSegSize= Settings::zrefSegSize;
+                    state.c_ref       = c_now;
+                    state.zrefCount   = len;
+                    state.zrefSegSize = Settings::zrefSegSize;
                     state.rebaseCount += 1;
 
                     if constexpr (Settings::debugLogging) {

@@ -335,13 +335,25 @@ void execute(RendererState& state) {
         }
     }
 
-    // [LOG-7] Perturbation telemetry placeholder (aktiv sobald Perturbation verdrahtet ist)
+    // [LOG-7] Perturbation telemetry (active when reference orbit present)
     if constexpr (Settings::performanceLogging) {
         if ((g_frame % PERT_LOG_EVERY) == 0) {
-            // Active bleibt 0, bis Schritt 3 (Perturbation) Host/Kernel-seitig eingebaut ist.
+            const int   iterLen = state.zrefCount;
+            const int   segSize = state.zrefSegSize;
+            const int   segCnt  = (segSize > 0 && iterLen > 0) ? (iterLen / segSize) : 0;
+            const int   active  = (iterLen > 0) ? 1 : 0;
+            const double refX   = active ? static_cast<double>(state.c_ref.x) : 0.0;
+            const double refY   = active ? static_cast<double>(state.c_ref.y) : 0.0;
+            const double dMax   = static_cast<double>(state.deltaMaxLast);
+            const int   rebases = state.rebaseCount;
+
+            // store: OFF/CONST/GLOBAL without depending on enum headers here
+            const int storeInt  = static_cast<int>(state.perturbStore);
+            const char* store   = (active == 0) ? "OFF" : (storeInt == 0 ? "CONST" : "GLOBAL");
+
             LUCHS_LOG_HOST(
                 "[PERT] active=%d refX=%.17g refY=%.17g iterLen=%d segSize=%d segCnt=%d deltaMax=%.3e rebases=%d store=%s",
-                0, 0.0, 0.0, 0, 0, 0, 0.0, 0, "OFF"
+                active, refX, refY, iterLen, segSize, segCnt, dMax, rebases, store
             );
         }
     }

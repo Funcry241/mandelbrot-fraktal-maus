@@ -1,7 +1,7 @@
 ///// Otter: Deterministic host-side reference-orbit builder; double-precision only.
 ///// Schneefuchs: Header-only API; no hidden defaults; single source of truth is the caller's params.
-// /// Maus: ASCII-only sanity logging in .cpp; this header introduces no logging.
-// /// Datei: src/perturbation_orbit.hpp
+///// Maus: ASCII-only sanity logging in .cpp; this header introduces no logging.
+///// Datei: src/perturbation_orbit.hpp
 
 #pragma once
 

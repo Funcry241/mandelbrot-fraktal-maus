@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <string>
+#include <cstdint>
 
 #include "fps_meter.hpp"
 #include "frame_context.hpp"   // ← WICHTIG: liefert die *Definition* von FrameContext
@@ -21,7 +22,6 @@ static inline void appendKV(std::string& buf, const char* label, const char* val
 }
 
 std::string build(const FrameContext& ctx, const RendererState& state) {
-    (void)state; // reserviert für spätere Erweiterungen
     std::string hud;
     hud.reserve(256);
 
@@ -50,6 +50,15 @@ std::string build(const FrameContext& ctx, const RendererState& state) {
             std::snprintf(v, sizeof(v), "n/a");
         }
         appendKV(hud, "tiles", v);
+    }
+
+    // Optionaler PERT-Mini-Status (nur wenn aktiv)
+    if (state.zrefCount > 0) {
+        const bool isConst = (static_cast<int>(static_cast<std::uint8_t>(state.perturbStore)) == 0);
+        const char* store  = isConst ? "CONST" : "GLOBAL";
+        char v[64];
+        std::snprintf(v, sizeof(v), "on store=%s len=%d", store, state.zrefCount);
+        appendKV(hud, "PERT", v);
     }
 
     return hud;
