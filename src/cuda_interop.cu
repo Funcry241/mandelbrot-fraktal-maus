@@ -43,13 +43,16 @@ struct __GLsync; using GLsync = __GLsync*;
 #endif
 
 // ---- Kernel (extern C) ------------------------------------------------------
-// Stream-Parameter in der Deklaration (Render-Stream kommt von außen)
+// (Legacy signature; Perturbation-Parameter folgen in der Kernel-TU.)
 extern "C" void launch_mandelbrotHybrid(
     uchar4* out, uint16_t* d_it,
     int w, int h, float zoom, float2 offset,
     int maxIter, int tile,
     cudaStream_t stream
 );
+
+// PERT Telemetrie-Symbol (wird im Render-Kernel aktualisiert)
+extern __device__ float d_deltaMax;
 
 namespace CudaInterop {
 
@@ -244,10 +247,21 @@ void renderCudaFrame(
     ensureEventsOnce();
     (void)cudaGetLastError();
 
+    // --------- PERT: d_deltaMax vor Frame nullen (wenn Orbit aktiv) ---------
+    // Aktivität: konservativ nur anhand State (kein Settings-Zweig notwendig).
+    const bool pertActive = (state.zrefCount > 0);
+    static void* s_deltaMaxDev = nullptr;
+    if (pertActive) {
+        if (!s_deltaMaxDev) { CUDA_CHECK(cudaGetSymbolAddress(&s_deltaMaxDev, d_deltaMax)); }
+        CUDA_CHECK(cudaMemsetAsync(s_deltaMaxDev, 0, sizeof(float), renderStream));
+    } else {
+        state.deltaMaxLast = 0.0;
+    }
+
     // Timing-Event auf DEM Render-Stream (nicht Stream 0)
     CUDA_CHECK(cudaEventRecord(s_evStart, renderStream));
 
-    // Kernel-Launch auf dem übergebenen Stream
+    // Kernel-Launch auf dem übergebenen Stream (Legacy-Signatur)
     launch_mandelbrotHybrid(static_cast<uchar4*>(map.ptr),
                             static_cast<uint16_t*>(d_iterations.get()),
                             width, height, zoom, offset, maxIterations, tileSize,
@@ -270,6 +284,16 @@ void renderCudaFrame(
         throw std::runtime_error("CUDA failure: mandelbrot kernel");
     }
 
+    // --------- PERT: deltaMax vom Gerät in den Host spiegeln ----------------
+    if (pertActive) {
+        float h_deltaMax = 0.0f;
+        // Wir kopieren auf den Copy-Stream, nach dem Render-Stopp-Event
+        CUDA_CHECK(cudaStreamWaitEvent(copyStream, s_evStop, 0));
+        CUDA_CHECK(cudaMemcpyFromSymbolAsync(&h_deltaMax, d_deltaMax, sizeof(float), 0, cudaMemcpyDeviceToHost, copyStream));
+        CUDA_CHECK(cudaStreamSynchronize(copyStream));
+        state.deltaMaxLast = (double)h_deltaMax;
+    }
+
     // ---------------- E/C-Streaming (Minimal: 2 Streams) ----------------
     // E/C läuft auf dem renderStream hinter dem Mandelbrot-Render und setzt ein Done-Event.
     ::computeCudaEntropyContrast(
@@ -277,7 +301,7 @@ void renderCudaFrame(
         static_cast<float*>(d_entropy.get()),
         static_cast<float*>(d_contrast.get()),
         width, height, tileSize, maxIterations,
-        renderStream,                // Launch-Stream
+        renderStream,               // Launch-Stream
         state.evEcDone              // record done-event
     );
 

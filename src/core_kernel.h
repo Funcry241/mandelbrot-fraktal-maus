@@ -8,64 +8,74 @@
 #include <cstdint>
 #include <cuda_runtime_api.h>
 #include <vector_types.h>
+#include "settings.hpp" // for Settings::zrefMaxLen
 
 // NOTE [Otter]:
 // Public E/C entrypoint now supports async launches.
-// - No host-side synchronization inside this function.
-// - Both entropy and contrast kernels must be launched on `stream`.
-// - If `ecDoneEvent` is provided (non-null), it is recorded on `stream` after the last E/C kernel.
-// - Callers that omit the new arguments keep previous behavior (default stream, no event).
 extern "C" void computeCudaEntropyContrast(
-    const uint16_t* d_iterations,  // per-pixel iteration counts (device)
-    float*          d_entropyOut,  // per-tile entropy (device)
-    float*          d_contrastOut, // per-tile contrast (device)
+    const uint16_t* d_iterations,
+    float*          d_entropyOut,
+    float*          d_contrastOut,
     int             width,
     int             height,
     int             tileSize,
     int             maxIterations,
-    cudaStream_t    stream      = nullptr,  // default stream (legacy)
-    cudaEvent_t     ecDoneEvent = nullptr   // no event by default
+    cudaStream_t    stream      = nullptr,
+    cudaEvent_t     ecDoneEvent = nullptr
 );
 
 // ============================================================================
 // Perturbation (Reference-Orbit) – always-on support
-// - Header-only additions; existing callers unaffected.
-// - Kernels launched via the new unified entrypoint MUST use the provided stream.
-// - No host-side synchronization inside these functions.
 // ============================================================================
 
 enum class PertStore : uint8_t { Const = 0, Global = 1 };
 
-// Header passed to the kernel (by value) to describe the active reference orbit.
-struct PerturbHeader {
-    double2 c_ref;     // reference center in C
-    double  pxScale;   // pixel scale (|ΔC| per screen pixel) — from a single canonical source
-    int     iterLen;   // total reference-iteration length available in zref buffer
-    int     segSize;   // segment size used for building/streaming the orbit
-    int     version;   // monotonically increasing version to detect stale uploads
+// MSVC C4324 (padding due to alignment) – disable locally under /WX.
+#ifdef _MSC_VER
+  #pragma warning(push)
+  #pragma warning(disable:4324)
+#endif
+
+// Contract: if p.active == 0 → classical path (ignore others)
+struct PerturbParams {
+    int        active;
+    int        len;
+    int        segSize;
+    PertStore  store;
+    double2    c_ref;
+    double     deltaGuard;
+    int        version;
 };
 
-// Unified Mandelbrot launch with progressive + perturbation path.
-// Requirements:
-//  - d_iterations/d_stateZ/d_stateIt must be valid device pointers (may be null if feature disabled).
-//  - d_zref must point to device memory containing `zrefCount` elements (double2).
-//  - `hdr` is passed by value (copied to kernel params/const regs).
-//  - Always launches on `stream`; no host sync inside.
+struct PerturbHeader {
+    double2 c_ref;
+    double  pxScale;
+    int     iterLen;
+    int     segSize;
+    int     version;
+};
+
+#ifdef _MSC_VER
+  #pragma warning(pop)
+#endif
+
+// CONST reference-orbit buffer (device). Must match the definition in core_kernel.cu.
+extern __constant__ double2 zrefConst[Settings::zrefMaxLen];
+
+// Optional unified Mandelbrot launch (declaration only).
 extern "C" void launchMandelbrotUnified(
-    uint16_t*       d_iterations,   // [out] per-pixel iteration counts (device)
-    float2*         d_stateZ,       // [in/out] progressive Z state (device) or nullptr
-    uint16_t*       d_stateIt,      // [in/out] progressive iteration state (device) or nullptr
+    uint16_t*       d_iterations,
+    float2*         d_stateZ,
+    uint16_t*       d_stateIt,
     int             width,
     int             height,
-    double2         center,         // current view center in C
-    double2         pixelScale,     // canonical pixel scale (x,y)
-    double          zoom,           // current zoom (for telemetry-only if not needed)
+    double2         center,
+    double2         pixelScale,
+    double          zoom,
     int             maxIterations,
-    // --- Perturbation (always-on path expects a valid orbit; callers ensure readiness)
-    const double2*  d_zref,         // device pointer to reference-orbit samples
-    int             zrefCount,      // number of samples available at d_zref
-    PerturbHeader   hdr,            // orbit metadata (by value)
-    PertStore       store,          // where d_zref lives (Const/Global) — for telemetry/log-only decisions
-    // --- Launch control
+    const double2*  d_zref,
+    int             zrefCount,
+    PerturbHeader   hdr,
+    PertStore       store,
     cudaStream_t    stream = nullptr
 );

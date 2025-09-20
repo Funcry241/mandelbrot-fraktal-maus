@@ -15,6 +15,9 @@
 __constant__ double2 zrefConst[Settings::zrefMaxLen];
 static_assert(Settings::zrefMaxLen > 0, "Settings::zrefMaxLen must be > 0");
 
+// ---------------------- PERT telemetry (max |delta| per frame) ---------------
+__device__ float d_deltaMax = 0.0f; // updated by render kernel (block-reduced), read back via cudaMemcpyFromSymbol
+
 // --------------------------------- helpers -----------------------------------
 static __device__ __forceinline__ int clamp_int_0_255(int v) {
     v = (v < 0) ? 0 : v;

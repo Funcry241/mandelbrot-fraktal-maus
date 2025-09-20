@@ -203,6 +203,25 @@ namespace KolibriBoost {
     // ------------------------------------------------------------------------
     inline constexpr double storeSwitchZoom = 3e5;
 
+    // ------------------------------------------------------------------------
+    // deltaGuardAbs
+    // Wirkung: Abbruchschwelle |δ| für Perturbations-Telemetrie/Fallback
+    //          (in „Fraktal-Einheiten“). Sobald |δ| diese Schwelle überschreitet,
+    //          darf der Gerätepytorch laute Fallbacks triggern (in diesem Schritt:
+    //          nur Telemetrie, keine Bildänderung).
+    // Empfehlung: 2.0 .. 16.0 (double)
+    // Default: 4.0
+    // ------------------------------------------------------------------------
+    inline constexpr double deltaGuardAbs = 4.0;
+
+    // ------------------------------------------------------------------------
+    // pertDevLogEvery
+    // Wirkung: Rate-Limit für optionale [PERT][DEV]-Blocklogs im Kernel.
+    // Empfehlung: 30 .. 240 (int)
+    // Default: 60
+    // ------------------------------------------------------------------------
+    inline constexpr int    pertDevLogEvery = 60;
+
     // Hinweis: Ehemalige Einstellungen "perturbSegSize", "perturbUseConstUpTo",
     // "perturbDeltaGuardK", "perturbRebaseDeltaPx" sind ersetzt/vereinheitlicht
     // durch zrefSegSize, zrefMaxLen, storeSwitchZoom und deltaMaxRebase.

@@ -1,7 +1,7 @@
 ///// Otter: Split – Farbraum & Pack nach .cuh; Kernpfad/Neon-Intro/Warze & Launch bleiben hier.
-//// Schneefuchs: API unverändert; weniger Zeilen; klare Abhängigkeiten; ASCII-Logs; /WX-fest.
-//// Maus: Innen dunkel, außen Palette + Highlights; performantes Packen; minimale Zweige.
-//// Datei: src/nacktmull.cu
+///// Schneefuchs: API unverändert; weniger Zeilen; klare Abhängigkeiten; ASCII-Logs; /WX-fest.
+///// Maus: Innen dunkel, außen Palette + Highlights; performantes Packen; minimale Zweige.
+///// Datei: src/nacktmull.cu
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -16,12 +16,25 @@
 #include "common.hpp"
 #include "nacktmull_math.cuh"   // pixelToComplex(...)
 #include "nacktmull_color.cuh"  // Farb- & Pack-Helfer (header-only)
+#include "core_kernel.h"        // PerturbParams, PertStore
 
 // ============================================================================
 // Animation-Uniforms (vom Host pro Frame gesetzt)
 // ============================================================================
 __constant__ float g_sinA = 0.0f;  // ~sin(0.30*t)
 __constant__ float g_sinB = 0.0f;  // ~sin(0.80*t)
+
+// ============================================================================
+// Perturbation: device-side controls & buffers (set by host)
+//   - g_pert:     compact param pack (active==0 -> classical path)
+//   - g_zrefGlob: pointer to GLOBAL orbit buffer (if store==Global)
+//   - zrefConst:  CONST orbit buffer (defined in core_kernel.cu)
+//   - d_deltaMax: per-frame telemetry (max |delta|), updated by kernel
+// ============================================================================
+__device__ __constant__ PerturbParams g_pert = {0,0,0,PertStore::Const, {0.0,0.0}, 0.0, 0};
+__device__ const double2* g_zrefGlob = nullptr;
+extern __constant__ double2 zrefConst[];   // from core_kernel.cu
+extern __device__ float d_deltaMax;        // from core_kernel.cu
 
 // ============================================================================
 // Early-out: Haupt-Kardioide + Period-2-Knolle
@@ -170,6 +183,12 @@ extern "C" void nacktmull_set_progressive(const void* zDev,const void* itDev,
 
 // ============================================================================
 // Unified Kernel – Direct ODER Progressive (branch by g_prog.enabled)
+// - PERT (telemetry only): if g_pert.active!=0, track delta along z_ref
+//   using double precision recurrence:
+//     delta = 2*z_ref[i]*delta + delta^2 + (c - g_pert.c_ref)
+//   Guard: stop per-thread tracking if |delta| > g_pert.deltaGuard or non-finite.
+//   At block end: atomicMax onto d_deltaMax (float bits).
+//   This does NOT alter image (classic iteration remains authoritative).
 // ============================================================================
 __global__ __launch_bounds__(Settings::MANDEL_BLOCK_X * Settings::MANDEL_BLOCK_Y)
 void mandelbrotUnifiedKernel(
@@ -195,6 +214,12 @@ void mandelbrotUnifiedKernel(
     const bool prog = (g_prog.enabled && g_prog.z && g_prog.it && g_prog.addIter>0);
     const float esc2=4.0f;
 
+    // ---------------------- PERT init (telemetry only) -----------------------
+    const bool pert_on = (g_pert.active != 0) && (g_pert.len > 0);
+    bool trackPert = pert_on;
+    double2 delta = make_double2(0.0, 0.0);
+    double  dmax  = 0.0;
+
     // Progressive Pfad
     if (prog){
         int it = (int)g_prog.it[idx];
@@ -211,6 +236,10 @@ void mandelbrotUnifiedKernel(
         for (int s=0;s<stepLimit;++s){
             const float x2=zx*zx, y2=zy*zy;
             if (x2+y2>esc2){ break; }
+
+            // (Optional) PERT telemetry for progressive: use approx i index if available
+            // For simplicity in this step we skip PERT inside progressive to avoid
+            // mismatched i indexing; classical path remains telemetry source.
             const float xt=x2-y2+c.x; zy=__fmaf_rn(2.0f*zx,zy,c.y); zx=xt; ++it;
         }
         g_prog.it[idx]=(uint16_t)min(it,65535); g_prog.z[idx]=make_float2(zx,zy);
@@ -257,9 +286,41 @@ void mandelbrotUnifiedKernel(
     for (; i < maxIter; ) {
         #pragma unroll
         for (int j = 0; j < WARP_CHUNK && i < maxIter; ++j, ++i) {
+            // -------- PERT delta update (telemetry only) --------
+            if (trackPert && i < g_pert.len) {
+                double2 zr;
+                if (g_pert.store == PertStore::Const) {
+                    zr = zrefConst[i];
+                } else {
+                    // GLOBAL path requires valid pointer; if null -> stop tracking
+                    if (!g_zrefGlob) { trackPert = false; }
+                    else { zr = g_zrefGlob[i]; }
+                }
+                if (trackPert) {
+                    const double2 delta_sq = make_double2(delta.x*delta.x - delta.y*delta.y,
+                                                          2.0*delta.x*delta.y);
+                    const double2 two_zr_delta = make_double2(2.0*zr.x*delta.x - 2.0*zr.y*delta.y,
+                                                              2.0*zr.x*delta.y + 2.0*zr.y*delta.x);
+                    const double2 c_minus_ref = make_double2((double)c.x - g_pert.c_ref.x,
+                                                             (double)c.y - g_pert.c_ref.y);
+                    delta.x = two_zr_delta.x + delta_sq.x + c_minus_ref.x;
+                    delta.y = two_zr_delta.y + delta_sq.y + c_minus_ref.y;
+                    const double mag2 = delta.x*delta.x + delta.y*delta.y;
+                    const double mag  = sqrt(mag2);
+                    if (mag > dmax) dmax = mag;
+                    if (!isfinite(mag2) || mag > g_pert.deltaGuard) {
+                        // stop telemetry for this thread (classic path continues)
+                        trackPert = false;
+                        // (Optional rate-limited dev log could go here)
+                    }
+                }
+            }
+
+            // klassische Iteration
             const float x2 = zx*zx, y2 = zy*zy;
             if (x2 + y2 > esc2) { it = i; done = true; break; }
             const float xt = x2 - y2 + c.x; zy = __fmaf_rn(2.0f*zx, zy, c.y); zx = xt;
+
             if constexpr (Settings::periodicityEnabled) {
                 const int step = i - lastProbe;
                 if (step >= perN) {
@@ -271,6 +332,20 @@ void mandelbrotUnifiedKernel(
             }
         }
         if (__all_sync(mask, done)) break;
+    }
+
+    // [PERT] Block reduction -> global d_deltaMax (float bits)
+    if (pert_on) {
+        __shared__ unsigned int smax_bits;
+        if (threadIdx.x==0 && threadIdx.y==0) smax_bits = 0u;
+        __syncthreads();
+        const float dmax_f = (float)dmax;
+        unsigned int bits = __float_as_uint(dmax_f);
+        atomicMax(&smax_bits, bits);
+        __syncthreads();
+        if (threadIdx.x==0 && threadIdx.y==0) {
+            atomicMax((unsigned int*)&d_deltaMax, smax_bits);
+        }
     }
 
     float3 rgb = shade_color_only(it, maxIter, zx, zy, tSec);
@@ -374,4 +449,15 @@ extern "C" void launch_mandelbrotHybrid(
         LUCHS_LOG_HOST("[NACKTMULL][ERR] unexpected exception in launch_mandelbrotHybrid");
         return;
     }
+}
+
+// ============================================================================
+// Optional helper: set perturbation params & GLOBAL orbit pointer from host.
+// (Non-breaking addition; callers may ignore.)
+// ============================================================================
+extern "C" void nacktmull_set_perturb(const PerturbParams& p, const double2* zrefGlobalDev) noexcept
+{
+    (void)cudaMemcpyToSymbol(g_pert, &p, sizeof(PerturbParams));
+    // store device pointer for GLOBAL path
+    (void)cudaMemcpyToSymbol(g_zrefGlob, &zrefGlobalDev, sizeof(zrefGlobalDev));
 }
