@@ -1,7 +1,8 @@
-///// Otter: Defines g_pert + g_zrefGlob; implements nacktmull_set_perturb.
-///  Schneefuchs: Tiny TU; avoids bloating kernel TU; /WX-safe.
-///  Maus: Pointer is device-global; set via cudaMemcpyToSymbol.
+///// Otter: Definiert g_pert/g_zrefGlob; implementiert nacktmull_set_perturb.
+///// Schneefuchs: Eigene TU; ohne Logs; /WX-fest; schlank.
+///// Maus: Minimale Includes; klare Datenpfade.
 ///// Datei: src/nacktmull_pert.cu
+
 #include <cuda_runtime.h>
 #include <vector_types.h>
 #include "nacktmull_pert.cuh"

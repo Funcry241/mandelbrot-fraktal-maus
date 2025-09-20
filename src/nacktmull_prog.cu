@@ -1,6 +1,6 @@
-///// Otter: Defines g_prog + implements nacktmull_set_progressive.
-///  Schneefuchs: Separate TU to cut size; API unchanged; /WX-safe.
-///  Maus: Minimal includes; deterministic logging on failure only.
+///// Otter: Definiert g_prog und implementiert nacktmull_set_progressive.
+///// Schneefuchs: Eigene TU zum Schrumpfen von Kernel-TUs; Logging nur bei Fehler; /WX-fest.
+///// Maus: Minimale Includes; keine globalen Nebenwirkungen.
 ///// Datei: src/nacktmull_prog.cu
 
 #include <cuda_runtime.h>

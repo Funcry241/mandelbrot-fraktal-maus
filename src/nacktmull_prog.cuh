@@ -1,10 +1,13 @@
+///// Otter: Deklariert Progressive-State (g_prog) + Setter-API.
+///// Schneefuchs: Header-only Deklarationen; keine Seiteneffekte; basisnahe Includes.
+///// Maus: C-Schnittstelle; deterministisch; klein.
 ///// Datei: src/nacktmull_prog.cuh
+
 #pragma once
 #include <cuda_runtime.h>
 #include <vector_types.h>
 #include <cstdint>
 
-// Progressive-Status (__constant__) + Setter (API unverändert)
 struct NacktmullProgState {
     float2*   z;
     uint16_t* it;

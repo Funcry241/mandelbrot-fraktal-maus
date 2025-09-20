@@ -1,8 +1,8 @@
-///// Otter: gtPalette_srgb, warze_highlight, shade_color_only – header-only.
-///  Schneefuchs: No globals defined; uses extern __constant__ g_sinA/B; /WX-safe.
-///  Maus: Innen schwarz, außen Palette + Glitzer; uses color helpers (.cuh).
+///// Otter: Palette, Warzen-Highlights, Shade-Funktionen; header-only; nutzt g_sinA/g_sinB.
+///// Schneefuchs: Keine dynamischen Zustände; Soft-Edge schaltbar; Pack über color.cuh.
+///// Maus: Innen dunkel; außen farbig & weich; minimale Rechenäste.
 ///// Datei: src/nacktmull_shade.cuh
-#pragma once
+
 #include <cuda_runtime.h>
 #include <cmath>
 #include "nacktmull_color.cuh"   // zk_luma_srgb, zk_vibrance_warm_shift, zk_pack_srgb8

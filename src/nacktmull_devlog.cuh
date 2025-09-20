@@ -1,6 +1,6 @@
-///// Otter: Device-only guard log helpers; single-line ASCII; no varargs.
-///// Schneefuchs: Header-only; depends on luchs_cuda_log_buffer.hpp; /WX-safe.
-///  Maus: Tiny, deterministic; ints only; one final LUCHS_LOG_DEVICE(const char*).
+///// Otter: Device-only Minimal-Logger für Guard-Hits; ASCII-only, 1 Zeile.
+///// Schneefuchs: Header-only; fällt auf No-Op zurück, wenn kein LUCHS_LOG_DEVICE; /WX-fest.
+///// Maus: Nur ints; keine Formatkosten; rate-limited.
 ///// Datei: src/nacktmull_devlog.cuh
 
 #pragma once

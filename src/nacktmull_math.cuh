@@ -1,7 +1,8 @@
-///// Otter: MAUS header normalized; ASCII-only; no functional changes.
-///// Schneefuchs: Header format per rules #60–62; path normalized.
-///// Maus: Keep this as the only top header block; exact four lines.
+///// Otter: pixelToComplex & kleine Math-Helfer; double-präzise Mapping.
+///// Schneefuchs: Header-only; keine Seiteneffekte; minimale Abhängigkeiten.
+///// Maus: Vorhersagbar; knapp; schnell.
 ///// Datei: src/nacktmull_math.cuh
+
 #pragma once
 
 #include <cuda_runtime.h>     // __host__/__device__
