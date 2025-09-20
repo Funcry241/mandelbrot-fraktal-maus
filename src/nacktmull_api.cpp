@@ -5,20 +5,25 @@
 
 #include "pch.hpp"
 #include "nacktmull_api.hpp"
-#include <GL/glew.h>             
-#include "cuda_interop.hpp"      
+#include <GL/glew.h>
+#include "cuda_interop.hpp"
 #include "frame_context.hpp"
 #include "renderer_state.hpp"
-#include "zoom_logic.hpp"        
+#include "zoom_logic.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
-#include "common.hpp"            
-#include "core_kernel.h"         
-#include <vector_functions.h>    
+#include "common.hpp"
+#include "core_kernel.h"
+#include "perturbation_orbit.hpp"
+#include <vector_functions.h>
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <exception>
+#include <vector>
+
+// Device symbol for CONST-path upload (defined in core_kernel.cu)
+extern __constant__ double2 zrefConst[];
 
 namespace NacktmullAPI
 {
@@ -80,6 +85,89 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
 
     if ((!state.renderStream || !state.copyStream) && Settings::debugLogging) {
         LUCHS_LOG_HOST("[STREAM][WARN] fallback used (render=%p, copy=%p)", (void*)renderStrm, (void*)copyStrm);
+    }
+
+    // ============================ PERT: Orbit-Upload ============================
+    // Build+Upload reference orbit when active and rebase is needed.
+    if (Settings::pertEnable && fctx.zoom >= Settings::pertZoomMin)
+    {
+        // Canonical pixel scale (screen→complex): sy = 2/height * 1/zoom; sx = sy * aspect.
+        const double invZoom = (fctx.zoom != 0.0) ? (1.0 / fctx.zoom) : 1.0;
+        const double ar      = (fctx.height > 0) ? double(fctx.width) / double(fctx.height) : 1.0;
+        const double sy      = (fctx.height > 0) ? (2.0 / double(fctx.height)) * invZoom : 2.0 * invZoom;
+        const double sx      = sy * ar;
+
+        const double2 c_now{ double(fctx.offset.x), double(fctx.offset.y) };
+
+        bool needRebase = (state.zrefCount <= 0);
+        if (!needRebase) {
+            const double dx = c_now.x - state.c_ref.x;
+            const double dy = c_now.y - state.c_ref.y;
+            const double dpx = std::max(std::abs(dx) / std::max(sx, 1e-300), std::abs(dy) / std::max(sy, 1e-300));
+            if (dpx > Settings::deltaMaxRebase) needRebase = true;
+        }
+
+        if (needRebase) {
+            try {
+                std::vector<double2> orbit;
+                int len = 0;
+                buildReferenceOrbit(c_now, Settings::zrefMaxLen, Settings::zrefSegSize, orbit, len);
+
+                if (len > 0) {
+                    // Choose CONST vs GLOBAL store
+                    const bool preferConst = (fctx.zoom < Settings::storeSwitchZoom) && (len <= Settings::zrefMaxLen);
+
+                    if (preferConst) {
+                        // Upload to constant memory asynchronously on render stream
+                        CUDA_CHECK(cudaMemcpyToSymbolAsync(
+                            zrefConst, orbit.data(), size_t(len) * sizeof(double2),
+                            0, cudaMemcpyHostToDevice, renderStrm));
+                        // Free any previous GLOBAL buffer
+                        state.freeZrefGlobal();
+                        state.perturbStore = PertStore::Const;
+                        // Maintain version monotonicity even for CONST path
+                        state.zrefVersion += 1; if (state.zrefVersion == 0) state.zrefVersion = 1;
+                    } else {
+                        // Ensure GLOBAL buffer size and upload
+                        state.allocateZrefGlobal(len);
+                        CUDA_CHECK(cudaMemcpyAsync(
+                            state.d_zrefGlobal.get(), orbit.data(),
+                            size_t(len) * sizeof(double2), cudaMemcpyHostToDevice, renderStrm));
+                        state.perturbStore = PertStore::Global;
+                    }
+
+                    state.c_ref      = c_now;
+                    state.zrefCount  = len;
+                    state.zrefSegSize= Settings::zrefSegSize;
+                    state.rebaseCount += 1;
+
+                    if constexpr (Settings::debugLogging) {
+                        LUCHS_LOG_HOST("[PERT] upload ok store=%s len=%d seg=%d ver=%d zoom=%.3e",
+                                       (state.perturbStore == PertStore::Const ? "CONST" : "GLOBAL"),
+                                       state.zrefCount, state.zrefSegSize, state.zrefVersion, fctx.zoom);
+                    }
+                } else {
+                    static bool s_warnedOnce = false;
+                    if (!s_warnedOnce) {
+                        LUCHS_LOG_HOST("[PERT][WARN] orbit empty -> fallback");
+                        s_warnedOnce = true;
+                    }
+                    // Ensure no stale state is used
+                    state.freeZrefGlobal();
+                    state.zrefCount = 0;
+                }
+            } catch (const std::exception& ex) {
+                LUCHS_LOG_HOST("[PERT][ERROR] build/upload failed: %s", ex.what());
+                state.freeZrefGlobal();
+                state.zrefCount = 0;
+            }
+        }
+    } else {
+        // Pert inactive at this zoom: ensure no stale GLOBAL buffer influences telemetry/launch.
+        if (state.zrefCount > 0) {
+            state.freeZrefGlobal();
+            state.zrefCount = 0;
+        }
     }
 
     // ======================== DEVICE RENDER (Iterations/PBO) ========================

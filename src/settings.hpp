@@ -105,9 +105,9 @@ namespace Settings {
 
 // ============================== Checks / Periodizität ========================
 
-    inline constexpr bool   periodicityEnabled      = true;
-    inline constexpr int    periodicityCheckInterval= 96;
-    inline constexpr double periodicityEps2         = 1e-14;
+    inline constexpr bool   periodicityEnabled       = true;
+    inline constexpr int    periodicityCheckInterval = 96;
+    inline constexpr double periodicityEps2          = 1e-14;
 
 // ============================== Progressive / State ==========================
 
@@ -145,20 +145,66 @@ namespace KolibriBoost {
     inline constexpr int    addIterStep   = 2;
 } // namespace KolibriBoost
 
-// ============================== Perturbation =================================
-// Always-on Orbit-Perturbation Parameter (kein Off-Switch im Build).
-// Host/Kernel verwenden EINEN kanonischen pxScale (siehe FramePipeline/coords).
-    // Segmentgröße für den Referenz-Orbit (Host-Aufbau/Upload).
-    inline constexpr int    perturbSegSize        = 2048;   // 1024..4096
+// ============================== Perturbation (Orbit) =========================
+// Ein Pfad, sofortige Nutzung – gemäß "Genfer Großente v2.0".
+// *Single source of truth*: Alle Pert-Schalter hier; keine Duplikate anderswo.
+    // ------------------------------------------------------------------------
+    // pertEnable
+    // Wirkung: Aktiviert den Perturbation-Orbit-Pfad (Host-Upload + Kernel).
+    // Empfehlung: false .. true (bool)
+    // Effekt: true = Pert aktiviert; false = klassischer Mandelbrot-Pfad.
+    // Hinweis: Codepfade müssen trotzdem sauber kompilieren.
+    // ------------------------------------------------------------------------
+    inline constexpr bool   pertEnable = true;
 
-    // Schwelle (Elemente) bis zu der __constant__ Speicher bevorzugt wird,
-    // darüber GLOBAL (mit Reuse). Fallback ist immer GLOBAL.
-    inline constexpr int    perturbUseConstUpTo   = 8192;   // 4K..16K
+    // ------------------------------------------------------------------------
+    // pertZoomMin
+    // Wirkung: Unterhalb dieses Zooms bleibt Pert aus (klassischer Pfad).
+    // Empfehlung: 1e4 .. 1e7 (double)
+    // Effekt: Höher = späterer Pert-Einsatz; niedriger = früherer Einsatz.
+    // ------------------------------------------------------------------------
+    inline constexpr double pertZoomMin = 1e5;
 
-    // Guard-Faktor K: zulässiges |δ| ≤ K * pxScale (Screen-Pixel-Maß).
-    inline constexpr double perturbDeltaGuardK    = 6.0;    // 4.0..10.0
+    // ------------------------------------------------------------------------
+    // zrefMaxLen
+    // Wirkung: Maximalgröße des Referenz-Orbits (Anzahl double2 Elemente).
+    // Empfehlung: ≤ 4096 für __constant__ (64 KiB), größere Werte erfordern
+    //             GLOBAL-Store (Device-Mem) – Const-Array bleibt trotzdem
+    //             auf zrefMaxLen dimensioniert.
+    // Effekt: Höher = längere Referenzbahnen möglich; mehr Speicher.
+    // ------------------------------------------------------------------------
+    inline constexpr int    zrefMaxLen   = 4000;
 
-    // Rebase-Schwelle in Pixeln (Screen Space): bei Δview ≥ RebaseDeltaPx → Rebase.
-    inline constexpr double perturbRebaseDeltaPx  = 1.25;   // 0.75..2.0
+    // ------------------------------------------------------------------------
+    // zrefSegSize
+    // Wirkung: Segmentgröße beim Orbit-Aufbau/Upload (Host), auch Telemetrie.
+    // Empfehlung: 1024 .. 4096 (int), Potenzen von 2 bevorzugt.
+    // Effekt: Größer = weniger Upload-Aufrufe, mehr Latenz je Segment.
+    // ------------------------------------------------------------------------
+    inline constexpr int    zrefSegSize  = 2048;
+
+    // ------------------------------------------------------------------------
+    // deltaMaxRebase
+    // Wirkung: Rebase-Grenze für |δ| in *Pixelmaß* (pxScale). Bei
+    //          |δ| > deltaMaxRebase * pxScale → Rebase erforderlich.
+    // Empfehlung: 0.75 .. 2.0 (double)
+    // Effekt: Kleiner = häufigere Rebases (stabiler, mehr Overhead);
+    //         Größer  = seltener, Risiko von Pert-Fehlern steigt.
+    // ------------------------------------------------------------------------
+    inline constexpr double deltaMaxRebase = 1.25;
+
+    // ------------------------------------------------------------------------
+    // storeSwitchZoom  (Const → Global)
+    // Wirkung: Ab diesem Zoom wird der Orbit grundsätzlich im GLOBAL-Speicher
+    //          geführt (auch wenn zrefLen ≤ zrefMaxLen). Darunter bevorzugt
+    //          CONST (sofern zrefLen ≤ zrefMaxLen), sonst GLOBAL.
+    // Empfehlung: 2e5 .. 1e7 (double)
+    // Effekt: Früher GLOBAL = konstante Pfadlatenz bei sehr tiefem Zoom.
+    // ------------------------------------------------------------------------
+    inline constexpr double storeSwitchZoom = 3e5;
+
+    // Hinweis: Ehemalige Einstellungen "perturbSegSize", "perturbUseConstUpTo",
+    // "perturbDeltaGuardK", "perturbRebaseDeltaPx" sind ersetzt/vereinheitlicht
+    // durch zrefSegSize, zrefMaxLen, storeSwitchZoom und deltaMaxRebase.
 
 } // namespace Settings

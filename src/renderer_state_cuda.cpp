@@ -1,14 +1,14 @@
 ///// Otter: Streams mit Prioritäten – Render hoch, Copy niedrig; keine GL-Abhängigkeit; ASCII-Logs.
 ///// Schneefuchs: Fallback sicher (Range optional); /WX-fest; API unverändert; keine Host-Syncs außer Debug.
 ///// Maus: Klare Logs [STREAM]; deterministisches Verhalten; unter 300 Zeilen.
-///// Datei: src/renderer_state_cuda.cpp
+/// Datei: src/renderer_state_cuda.cpp
 
 #include "pch.hpp"
 #include "renderer_state.hpp"
 #include "settings.hpp"
 #include "cuda_interop.hpp"
 #include "common.hpp"
-#include "luchs_log_host.hpp"    
+#include "luchs_log_host.hpp"
 #include <algorithm>
 #include <cstring>
 #include <cuda_runtime_api.h>
@@ -333,4 +333,50 @@ void RendererState::invalidateProgressiveState(bool hardReset) noexcept {
             LUCHS_LOG_HOST("[PROG] soft invalidate: cooldown=%d", progressiveCooldownFrames);
         }
     }
+}
+
+// ============================ Zref Global Allocation ==========================
+
+void RendererState::allocateZrefGlobal(int len) {
+    CUDA_CHECK(cudaSetDevice(0));
+    if (len <= 0) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZREF] alloc request len<=0 -> free");
+        }
+        freeZrefGlobal();
+        return;
+    }
+
+    const size_t needBytes = static_cast<size_t>(len) * sizeof(double2);
+    const size_t haveBytes = d_zrefGlobal.size();
+
+    if (haveBytes < needBytes) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ALLOC] d_zrefGlobal grow: %zu -> %zu (len %d)", haveBytes, needBytes, len);
+        }
+        d_zrefGlobal.allocate(needBytes);
+    }
+
+    zrefCount   = len;
+    zrefSegSize = Settings::zrefSegSize;
+    zrefVersion += 1;
+    if (zrefVersion == 0) zrefVersion = 1; // avoid 0 as valid version if it is used as sentinel
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[ZREF] ready: ptr=%p bytes=%zu len=%d seg=%d ver=%d",
+                       d_zrefGlobal.get(), d_zrefGlobal.size(), zrefCount, zrefSegSize, zrefVersion);
+    }
+}
+
+void RendererState::freeZrefGlobal() noexcept {
+    const size_t had = d_zrefGlobal.size();
+    if (had) {
+        d_zrefGlobal.free();
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZREF] free: %zu -> 0", had);
+        }
+    }
+    zrefCount   = 0;
+    zrefSegSize = 0;
+    // zrefVersion intentionally not reset to keep monotonicity; callers can compare.
 }

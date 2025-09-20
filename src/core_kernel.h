@@ -7,7 +7,7 @@
 
 #include <cstdint>
 #include <cuda_runtime_api.h>
-#include <vector_types.h>   
+#include <vector_types.h>
 
 // NOTE [Otter]:
 // Public E/C entrypoint now supports async launches.

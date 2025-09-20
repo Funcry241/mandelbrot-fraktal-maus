@@ -1,9 +1,8 @@
+#pragma once
+
 ///// Otter: Zaunkönig [ZK] – PBO-Fences & saubere Ring-Disziplin; Header schlank, keine PCH; Nacktmull-Pullover.
 ///// Schneefuchs: [ZK] GLsync vorwärts deklariert; Speicher/Buffer exakt; State entkoppelt; MSVC-Align-Warnung lokal gekapselt.
 ///// Maus: [ZK] Flags klar benannt (pboFence, skipUploadThisFrame); tileSize explizit; Progressive (z,it) mit Cooldown; ASCII-only.
-///// Datei: src/renderer_state.hpp
-
-#pragma once
 
 // Leichte Includes im Header (keine PCH)
 #include <cstdint>              // uint8_t for PertStore fwd-decl
@@ -113,14 +112,19 @@ public:
     cudaEvent_t  evCopyDone = nullptr; // optional: D->H Copy fertig (auf copyStream recorded)
 
     // 🧭 Perturbation / Reference-Orbit (aktiv, fest eingebaut)
-    PertStore    perturbStore   = static_cast<PertStore>(0); // Const (numerisch, da nur fwd-deklariert)
-    double2*     d_zrefGlobal   = nullptr;                   // nur belegt, wenn PertStore::Global
-    int          zrefCount      = 0;                         // Anzahl Elemente (double2) im aktuellen Orbit
-    int          zrefSegSize    = 0;                         // Segmentgroesse (Host/Upload)
-    int          zrefVersion    = 0;                         // Versionszaehler fuer Orbit-Updates
-    double2      c_ref{0.0, 0.0};                            // Referenzzentrum in C
-    double       deltaMaxLast   = 0.0;                       // zuletzt beobachtetes |δ|max
-    int          rebaseCount    = 0;                         // Anzahl Rebase-Operationen seit Start
+public:
+    // Helpers (in src/renderer_state_cuda.cpp implementiert)
+    void allocateZrefGlobal(int len);
+    void freeZrefGlobal() noexcept;
+
+    PertStore                 perturbStore   = static_cast<PertStore>(0); // Const (numerisch, da nur fwd-deklariert)
+    Hermelin::CudaDeviceBuffer d_zrefGlobal;                              // GLOBAL-Store (Device-Mem, RAII)
+    int          zrefCount      = 0;                                      // Anzahl Elemente (double2) im aktuellen Orbit
+    int          zrefSegSize    = 0;                                      // Segmentgroesse (Host/Upload)
+    int          zrefVersion    = 0;                                      // Versionszaehler fuer Orbit-Updates
+    double2      c_ref{0.0, 0.0};                                         // Referenzzentrum in C
+    double       deltaMaxLast   = 0.0;                                    // zuletzt beobachtetes |δ|max
+    int          rebaseCount    = 0;                                      // Anzahl Rebase-Operationen seit Start
 
     // ⏱️ Timings – CUDA + HOST konsolidiert
     struct CudaPhaseTimings {
