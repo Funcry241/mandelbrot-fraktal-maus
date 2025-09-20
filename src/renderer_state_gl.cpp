@@ -9,6 +9,8 @@
 #include "cuda_interop.hpp"
 #include "common.hpp"
 #include "renderer_resources.hpp"
+#include "luchs_log_host.hpp"    // CUDA_CHECK + ASCII logs
+#include <vector_functions.h>    // make_double2
 
 #include <algorithm>
 
@@ -47,6 +49,10 @@ RendererState::~RendererState() {
 // =================================== Reset ===================================
 
 void RendererState::reset() {
+    // Ringgröße-Guard (TU-lokal, kompiliert weg)
+    static_assert(RendererState::kPboRingSize == Settings::pboRingSize,
+                  "RendererState::kPboRingSize must match Settings::pboRingSize");
+
     zoom   = static_cast<double>(Settings::initialZoom);
     center = make_double2(static_cast<double>(Settings::initialOffsetX),
                           static_cast<double>(Settings::initialOffsetY));
@@ -90,7 +96,7 @@ void RendererState::reset() {
     lastTimings = CudaPhaseTimings{};
     lastTimings.resetHostFrame();
 
-    // Ensure infra is present
+    // Ensure infra is present (CUDA-Seite kümmert sich um Details)
     createCudaStreamsIfNeeded();
     createCudaEventsIfNeeded();
 }

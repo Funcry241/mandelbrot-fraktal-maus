@@ -6,6 +6,7 @@
 #pragma once
 
 // Leichte Includes im Header (keine PCH)
+#include <cstdint>              // uint8_t for PertStore fwd-decl
 #include <vector>
 #include <string>
 #include <array>
@@ -20,6 +21,11 @@ struct __GLsync; using GLsync = __GLsync*; // [ZK] GLsync vorwaerts deklariert (
 // CUDA-Primitive schlank vorwaerts deklarieren (kein cuda_runtime*-Include im Header)
 struct CUstream_st; using cudaStream_t = CUstream_st*; // Ownership liegt beim RendererState
 struct CUevent_st;  using cudaEvent_t  = CUevent_st*;  // Events fuer Render->E/C->Copy Verkettung
+
+// Perturbation: Speicherort des Referenzorbits
+// Nur Vorwaertsdeklaration hier, die kanonische Definition steht in core_kernel.h.
+// WICHTIG: Enumerator-Werte (Const=0, Global=1) muessen dort so definiert sein.
+enum class PertStore : std::uint8_t;
 
 // MSVC: float2/double2 sind __align__-Typen -> C4324 (Padding). Lokal und gezielt unterdruecken.
 #if defined(_MSC_VER)
@@ -105,6 +111,16 @@ public:
     // 🎯 CUDA Events zur asynchronen Verkettung (Render -> E/C -> Copy)
     cudaEvent_t  evEcDone   = nullptr; // signalisiert: Entropy/Contrast fertig (auf renderStream recorded)
     cudaEvent_t  evCopyDone = nullptr; // optional: D->H Copy fertig (auf copyStream recorded)
+
+    // 🧭 Perturbation / Reference-Orbit (aktiv, fest eingebaut)
+    PertStore    perturbStore   = static_cast<PertStore>(0); // Const (numerisch, da nur fwd-deklariert)
+    double2*     d_zrefGlobal   = nullptr;                   // nur belegt, wenn PertStore::Global
+    int          zrefCount      = 0;                         // Anzahl Elemente (double2) im aktuellen Orbit
+    int          zrefSegSize    = 0;                         // Segmentgroesse (Host/Upload)
+    int          zrefVersion    = 0;                         // Versionszaehler fuer Orbit-Updates
+    double2      c_ref{0.0, 0.0};                            // Referenzzentrum in C
+    double       deltaMaxLast   = 0.0;                       // zuletzt beobachtetes |δ|max
+    int          rebaseCount    = 0;                         // Anzahl Rebase-Operationen seit Start
 
     // ⏱️ Timings – CUDA + HOST konsolidiert
     struct CudaPhaseTimings {

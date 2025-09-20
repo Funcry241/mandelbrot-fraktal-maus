@@ -8,18 +8,20 @@
 #include "settings.hpp"
 #include "cuda_interop.hpp"
 #include "common.hpp"
-
+#include "luchs_log_host.hpp"    
 #include <algorithm>
 #include <cstring>
-
 #include <cuda_runtime_api.h>
 
 namespace {
 // ----- Tiles & PixelScale (CUDA-seitig genutzt) --------------------------------
 inline void computeTiles(int width, int height, int tileSize,
                          int& tilesX, int& tilesY, int& numTiles) noexcept {
-    tilesX   = (width  + tileSize - 1) / tileSize;
-    tilesY   = (height + tileSize - 1) / tileSize;
+    const int ts = (tileSize > 0) ? tileSize : 1;
+    tilesX   = (width  + ts - 1) / ts;
+    tilesY   = (height + ts - 1) / ts;
+    if (tilesX < 1) tilesX = 1;
+    if (tilesY < 1) tilesY = 1;
     numTiles = tilesX * tilesY;
 }
 

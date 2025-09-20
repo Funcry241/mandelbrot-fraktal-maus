@@ -1,10 +1,9 @@
 ///// Otter: Renderer-Core – GL init + window; enables filtered KHR_debug (noisy severities off); no zoom logic here.
-///**/ Schneefuchs: Strict CUDA/GL separation; deterministic ASCII logs; resources clearly owned; duplicate resize removed.
-///**/ Maus: Progressive cooldown + Tatze 7 soft-invalidate on view jumps (post-pipeline, no memset).
+///// Schneefuchs: Strict CUDA/GL separation; deterministic ASCII logs; resources clearly owned; duplicate resize removed.
+///// Maus: Progressive cooldown + Tatze 7 soft-invalidate on view jumps (post-pipeline, no memset).
 ///// Datei: src/renderer_core.cu
 
 #include "pch.hpp"
-
 #include "nacktmull_api.hpp"
 #include "renderer_state.hpp"
 #include "settings.hpp"
@@ -16,12 +15,11 @@
 #include "heatmap_overlay.hpp"
 #include "frame_pipeline.hpp"
 #include "luchs_log_host.hpp"
-
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <stdexcept>
-#include <algorithm> // std::max
-#include <cmath>     // std::abs
+#include <algorithm> 
+#include <cmath>     
 
 // --- OpenGL KHR_debug (asynchronous) + sRGB default FB capability logging ---
 namespace {
@@ -39,7 +37,6 @@ namespace {
         glEnable(GL_DEBUG_OUTPUT); // asynchronous (no sync debug)
 
         // Filter out very noisy severities to minimize runtime overhead
-        // (available in GL 4.3 core or KHR_debug)
     #ifdef GL_DEBUG_SEVERITY_NOTIFICATION
         glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
     #endif
@@ -123,18 +120,29 @@ bool Renderer::initGL() {
                        glslVer ? glslVer : "?");
     }
 
-    // Note: VSync preference is initialized exactly once in renderer_loop.cpp (initVSyncOnce).
-    // Renderer core does not touch swap interval here to avoid conflicting policies.
-
-    // Create GL resources: PBO + texture (immutable storage)
+    // Create GL resources: PBO ring + texture (immutable storage)
     if (!glResourcesInitialized) {
         OpenGLUtils::setGLResourceContext("init");
-        for (auto& b : state.pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(state.width, state.height)); }
+
+        // Ringgröße gegen Settings sichern
+        static_assert(RendererState::kPboRingSize == Settings::pboRingSize,
+                      "RendererState::kPboRingSize must match Settings::pboRingSize");
+
+        for (auto& b : state.pboRing) {
+            b = Hermelin::GLBuffer(OpenGLUtils::createPBO(state.width, state.height));
+        }
         state.pboIndex = 0;
+
         state.tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(state.width, state.height));
 
-        // Register PBO with CUDA (CudaInterop encapsulates CUDA-13 compatible path)
-        CudaInterop::registerPBO(state.currentPBO());
+        // Register ALL PBOs with CUDA once (keine doppelte Registrierung im Core)
+        {
+            GLuint ids[RendererState::kPboRingSize];
+            for (int i = 0; i < RendererState::kPboRingSize; ++i) {
+                ids[i] = state.pboRing[i].id();
+            }
+            CudaInterop::registerAllPBOs(ids, RendererState::kPboRingSize);
+        }
 
         // Clean GL state: unbind PBO
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -143,8 +151,8 @@ bool Renderer::initGL() {
         if constexpr (Settings::debugLogging) {
             GLint boundPBO = 0;
             glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundPBO);
-            LUCHS_LOG_HOST("[CHECK] initGL - GL PBO bound: %d | PBO ID: %u",
-                           boundPBO, state.currentPBO().id());
+            LUCHS_LOG_HOST("[CHECK] initGL - GL PBO bound: %d | PBO0 ID: %u",
+                           boundPBO, state.pboRing[0].id());
         }
     }
 
@@ -173,7 +181,6 @@ void Renderer::renderFrame() {
     }
 
     // Progressive resume: set __constant__ program state once per frame (gated by cooldown)
-    // Enables kernel-side "resume" only if: global + runtime flags true, state buffers present, and not in cooldown.
     {
         const bool inCooldown = (state.progressiveCooldownFrames > 0);
         const bool progReady =
@@ -292,7 +299,7 @@ void Renderer::resize(int newW, int newH) {
     }
     if (newW == state.width && newH == state.height) return;
 
-    // State updates PBO/texture/device buffers and re-registers PBO if needed.
+    // State updates PBO/texture/device buffers and re-registers PBOs if needed.
     state.resize(newW, newH);
 }
 
@@ -303,8 +310,8 @@ void Renderer::cleanup() {
     RendererPipeline::cleanup();
     HeatmapOverlay::cleanup();
 
-    // Release CUDA interop (no GL context required)
-    CudaInterop::unregisterPBO();
+    // Release CUDA interop (all PBOs)
+    CudaInterop::unregisterAllPBOs();
 
     // Destroy window (and GL context)
     RendererWindow::destroyWindow(state.window);

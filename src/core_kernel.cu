@@ -4,11 +4,9 @@
 ///// Datei: src/core_kernel.cu
 
 #include "pch.hpp"
-
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <cmath>
-
 #include "core_kernel.h"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
@@ -179,6 +177,21 @@ extern "C" void computeCudaEntropyContrast(
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[EC] invalid-dims queued zero-fill tiles=%zu stream=%p evt=%p",
                            tilesTotal0, (void*)stream, (void*)ecDoneEvent);
+        }
+        return;
+    }
+
+    // Pointer guards (defensive; keep deterministic logs)
+    if (!d_it || !d_e || !d_c) {
+        const int    tilesX0     = (w + tile - 1) / tile;
+        const int    tilesY0     = (h + tile - 1) / tile;
+        const size_t tilesTotal0 = size_t(tilesX0) * size_t(tilesY0);
+        if (d_e) EC_NT_CHECK(cudaMemsetAsync(d_e, 0, tilesTotal0 * sizeof(float), stream));
+        if (d_c) EC_NT_CHECK(cudaMemsetAsync(d_c, 0, tilesTotal0 * sizeof(float), stream));
+        if (ecDoneEvent) EC_NT_CHECK(cudaEventRecord(ecDoneEvent, stream));
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[EC] null-ptr guard it=%p e=%p c=%p -> zeroed tiles=%zu stream=%p evt=%p",
+                           (void*)d_it, (void*)d_e, (void*)d_c, tilesTotal0, (void*)stream, (void*)ecDoneEvent);
         }
         return;
     }

@@ -5,18 +5,17 @@
 
 #include "pch.hpp"
 #include "nacktmull_api.hpp"
-
-#include <GL/glew.h>             // GLsync, glClientWaitSync, glDeleteSync
-#include "cuda_interop.hpp"      // CudaInterop::{registerPBO,renderCudaFrame}
+#include <GL/glew.h>             
+#include "cuda_interop.hpp"      
 #include "frame_context.hpp"
 #include "renderer_state.hpp"
-#include "zoom_logic.hpp"        // evaluateZoomTarget(...)
+#include "zoom_logic.hpp"        
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "luchs_cuda_log_buffer.hpp"
-#include "common.hpp"            // CUDA_CHECK
-
-#include <vector_functions.h>    // make_float2
+#include "common.hpp"            
+#include "core_kernel.h"         
+#include <vector_functions.h>    
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <exception>
@@ -54,7 +53,7 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
     state.pboIndex = next;
     state.skipUploadThisFrame = false;
 
-    // Jetzt den freien Slot der CUDA-Seite zuordnen
+    // Hinweis: Resize/Init registriert alle PBOs; per-frame Register ist idempotent implementiert.
     CudaInterop::registerPBO(state.currentPBO());
 
     if constexpr (Settings::debugLogging) {
@@ -72,42 +71,33 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
         return;
     }
 
+    // Allokation + Host-Pinning sicherstellen
     state.setupCudaBuffers(fctx.tileSize);
 
-    if constexpr (Settings::debugLogging) {
-        const size_t totalPixels         = size_t(fctx.width) * size_t(fctx.height);
-        const size_t need_it_bytes       = totalPixels * sizeof(uint16_t);
-        const size_t need_entropy_bytes  = size_t(numTiles) * sizeof(float);
-        const size_t need_contrast_bytes = size_t(numTiles) * sizeof(float);
-        LUCHS_LOG_HOST("[SANITY] tiles=%d (%d x %d) pixels=%zu need(it=%zu entropy=%zu contrast=%zu) alloc(it=%zu entropy=%zu contrast=%zu)",
-                       numTiles, tilesX, tilesY, totalPixels,
-                       need_it_bytes, need_entropy_bytes, need_contrast_bytes,
-                       state.d_iterations.size(), state.d_entropy.size(), state.d_contrast.size());
+    // Streams: bevorzugt State-Streams, deterministischer Fallback = 0
+    cudaStream_t renderStrm = state.renderStream ? state.renderStream : (cudaStream_t)0;
+    cudaStream_t copyStrm   = state.copyStream   ? state.copyStream   : renderStrm;
+
+    if ((!state.renderStream || !state.copyStream) && Settings::debugLogging) {
+        LUCHS_LOG_HOST("[STREAM][WARN] fallback used (render=%p, copy=%p)", (void*)renderStrm, (void*)copyStrm);
     }
 
-    // Device-Render (Iterations -> Shade) + E/C-Analyse (erzeugt Host-Arrays)
+    // ======================== DEVICE RENDER (Iterations/PBO) ========================
     try {
         const float2 gpuOffset    = make_float2((float)fctx.offset.x, (float)fctx.offset.y);
         float2       gpuNewOffset = gpuOffset;
 
-        // Streams: bevorzugt State-Streams, deterministischer Fallback = 0
-        cudaStream_t renderStrm = state.renderStream ? state.renderStream : (cudaStream_t)0;
-        cudaStream_t copyStrm   = state.copyStream   ? state.copyStream   : renderStrm;
-
-        if ((!state.renderStream || !state.copyStream) && Settings::debugLogging) {
-            LUCHS_LOG_HOST("[STREAM][WARN] fallback used (render=%p, copy=%p)", (void*)renderStrm, (void*)copyStrm);
-        }
-
+        // Renderpfad erzeugt mind. d_iterations und füllt aktuellen PBO-Slot.
         CudaInterop::renderCudaFrame(
             state.d_iterations,
-            state.d_entropy,
+            /* (E/C device buffers are handled below) */ state.d_entropy,
             state.d_contrast,
             fctx.width,
             fctx.height,
             fctx.zoom,
             gpuOffset,
             fctx.maxIterations,
-            fctx.h_entropy,
+            /* (host mirrors not used here) */ fctx.h_entropy,
             fctx.h_contrast,
             gpuNewOffset,
             fctx.shouldZoom,
@@ -116,13 +106,13 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
             renderStrm,
             copyStrm
         );
-        // gpuNewOffset wird aktuell nicht verwendet (Zoom-Analyse folgt unten)
+        (void)gpuNewOffset; // Zoom-Analyse folgt separat
     } catch (const std::exception& ex) { // [[unlikely]]
         LUCHS_LOG_HOST("[ERROR] renderCudaFrame threw: %s", ex.what());
         LuchsLogger::flushDeviceLogToHost(0);
     }
 
-    // Device-Logs: nur bei Fehler sofort spülen (periodisch: am Frameende)
+    // Unmittelbar nach Render: Fehler prüfen (nur für Logs/Flush)
     {
         const cudaError_t err = cudaPeekAtLastError();
         if (err != cudaSuccess) [[unlikely]] {
@@ -131,14 +121,48 @@ void computeCudaFrame(FrameContext& fctx, RendererState& state)
         }
     }
 
-    // Zoom-Analyse (nur Hostdaten h_entropy/h_contrast)
+    // ======================= ENTROPY/CONTRAST (E/C) CHAIN ==========================
+    // Vollständig asynchron:
+    //  - Launch beider E/C-Kernels auf renderStrm
+    //  - Event am Ende der Kette (evEcDone)
+    //  - copyStrm wartet auf evEcDone, dann D->H copies
+    //  - evCopyDone signalisiert Host-Fertigstellung
+    {
+        computeCudaEntropyContrast(
+            static_cast<const uint16_t*>(state.d_iterations.get()),
+            static_cast<float*>(state.d_entropy.get()),
+            static_cast<float*>(state.d_contrast.get()),
+            fctx.width, fctx.height, fctx.tileSize, fctx.maxIterations,
+            renderStrm,                   // <<< Stream
+            state.evEcDone                // <<< Event nach Contrast
+        );
+
+        // Gate copies on E/C completion
+        CUDA_CHECK(cudaStreamWaitEvent(copyStrm, state.evEcDone, 0));
+
+        const size_t tilesTotal = static_cast<size_t>(numTiles);
+        if (tilesTotal) {
+            // D->H Kopien (Hostpuffer liegen in RendererState; pinned wenn verfügbar)
+            CUDA_CHECK(cudaMemcpyAsync(
+                state.h_entropy.data(),  state.d_entropy.get(),
+                tilesTotal * sizeof(float), cudaMemcpyDeviceToHost, copyStrm));
+            CUDA_CHECK(cudaMemcpyAsync(
+                state.h_contrast.data(), state.d_contrast.get(),
+                tilesTotal * sizeof(float), cudaMemcpyDeviceToHost, copyStrm));
+        }
+
+        // Signal: Host darf lesen (FramePipeline synchronisiert darauf)
+        CUDA_CHECK(cudaEventRecord(state.evCopyDone, copyStrm));
+    }
+
+    // ============================= ZOOM-ANALYSE (Host) =============================
     {
         const float2 currOff = make_float2((float)fctx.offset.x, (float)fctx.offset.y);
         const float2 prevOff = currOff;
 
         auto zr = ZoomLogic::evaluateZoomTarget(
-            fctx.h_entropy,
-            fctx.h_contrast,
+            state.h_entropy,                // aus RendererState
+            state.h_contrast,               // aus RendererState
             tilesX, tilesY,
             fctx.width, fctx.height,
             currOff, fctx.zoom,

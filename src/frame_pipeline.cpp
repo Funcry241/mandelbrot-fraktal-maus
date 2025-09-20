@@ -1,6 +1,6 @@
-///// Otter: Central frame pipeline; timing + PBO mapping logged in one fixed ASCII line.
-///// Schneefuchs: Headers/Sources in sync; no duplicate includes.
-///// Maus: Performance logging default ON; epoch-millis, stable field order.
+///// Otter: Central frame pipeline; timing + PBO mapping logged in one fixed ASCII line (+PERT placeholder).
+///// Schneefuchs: Headers/Sources in sync; no duplicate includes; stable field order for logs.
+///// Maus: Performance logging default ON; epoch-millis timestamps; modulo device-log flush.
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
@@ -12,7 +12,6 @@
 #include <vector_types.h>
 #include <vector_functions.h>
 #include <cuda_runtime.h>
-
 #include "renderer_resources.hpp"
 #include "renderer_pipeline.hpp"
 #include "cuda_interop.hpp"
@@ -52,7 +51,9 @@ namespace {
 
     constexpr int PERF_WARMUP_FRAMES = 30;
     constexpr int PERF_LOG_EVERY     = 30;
+    constexpr int PERT_LOG_EVERY     = 30;   // PERT-Placeholder cadence (gleitend mit PERF abgestimmt)
     constexpr int RING_LOG_EVERY     = 300;
+    constexpr int DEVLOG_FLUSH_EVERY = 30;   // Device-Log-Flush cadence (modulo), kein „jedes Frame“
 
     double g_texMs      = 0.0;
     double g_ovlMs      = 0.0;
@@ -80,7 +81,6 @@ namespace {
 
     // Dynamisches Ring-Logging (ASCII, determiniert), plus Reset der Zähler
     inline void logAndResetRingStats(RendererState& state) {
-        // Ring-Use kompakt als "{a,b,c,...}" bauen
         char buf[1024];
         int  pos = 0;
         pos += std::snprintf(buf + pos, sizeof(buf) - pos, "{");
@@ -92,9 +92,17 @@ namespace {
         LUCHS_LOG_HOST("[RING] use=%s skip=%u size=%d",
                        buf, state.ringSkip, RendererState::kPboRingSize);
 
-        // Reset Counters
         for (int i = 0; i < RendererState::kPboRingSize; ++i) state.ringUse[i] = 0;
         state.ringSkip = 0;
+    }
+
+    // Kachelanzahl für den aktuellen Frame berechnen (stabil, ohne Branches im Log-Pfad)
+    inline void computeTiles(int width, int height, int tilePx, int& outX, int& outY) {
+        const int px = (tilePx > 0) ? tilePx : 1;
+        outX = (width  + px - 1) / px;
+        outY = (height + px - 1) / px;
+        if (outX < 1) outX = 1;
+        if (outY < 1) outY = 1;
     }
 } // anon ns
 
@@ -177,7 +185,8 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
     const auto tOv0 = Clock::now();
 
     if (fctx.overlayActive) {
-        HeatmapOverlay::drawOverlay(fctx.h_entropy, fctx.h_contrast,
+        // NOTE: Overlay-Daten kommen aus RendererState (D->H Kopien laufen dorthin).
+        HeatmapOverlay::drawOverlay(state.h_entropy, state.h_contrast,
                                     fctx.width, fctx.height, fctx.tileSize,
                                     state.tex.id(), state);
     }
@@ -238,6 +247,13 @@ void execute(RendererState& state) {
     // Compute (ausgelagert)
     computeCudaFrame(g_ctx, state);
 
+    // [LOG-Device] Flush rate-limited (kein „jedes Frame“)
+    if constexpr (Settings::performanceLogging) {
+        if ((g_frame % DEVLOG_FLUSH_EVERY) == 0) {
+            LuchsLogger::flushDeviceLogToHost(0);
+        }
+    }
+
     // [LOG-4] Call-Site-Wait: vor jedem Host-Zugriff sicherstellen, dass die D->H-Copies fertig sind
     if (state.evCopyDone) {
         (void)cudaEventSynchronize(state.evCopyDone);
@@ -264,9 +280,6 @@ void execute(RendererState& state) {
     FpsMeter::updateCoreMs(g_frameTotal);
 
     if (perfShouldLog(g_frame)) {
-        // Device-Log flushen (ASCII-only, deterministic)
-        LuchsLogger::flushDeviceLogToHost(0);
-
         // Felder sammeln (stabile Reihenfolge)
         const long long tEpoch = epochMillisNow();
         const int    resX = g_ctx.width;
@@ -296,11 +309,22 @@ void execute(RendererState& state) {
         const int frees     = 0;
         const int dflush    = 1;
 
-        // [LOG-5] Eine feste ASCII-Zeile, epoch-millis zuerst, dann stabil sortierte Felder (mit skip)
+        // NEU: progressive Budget-Felder (stabile Position kurz nach fps)
+        const int addIter   = Settings::progressiveAddIter;
+        const int iterCap   = state.maxIterations;
+
+        // Tiles zur Diagnose aufnehmen (stabile Metrik)
+        int tilesX = 1, tilesY = 1;
+        computeTiles(resX, resY, g_ctx.tileSize, tilesX, tilesY);
+
+        // [LOG-5] Eine feste ASCII-Zeile, epoch-millis zuerst, dann stabil sortierte Felder
         LUCHS_LOG_HOST(
-            "[PERF] t=%lld f=%d r=%dx%d zm=%.6g it=%d fps=%.1f mx=%d ma=%d fr=%d df=%d map=%.2f md=%.2f en=%.2f ct=%.2f tx=%.2f ov=%.2f tt=%.2f e0=%.4f c0=%.4f ring=%d skip=%d pbo=%u tex=%u",
-            tEpoch, g_frame, resX, resY, (double)g_ctx.zoom, it, fps, maxfps, mallocs, frees, dflush,
-            mapMs, mandMs, entMs, conMs, txMs, ovMs, ttMs, e0, c0, ringIx, (int)state.skipUploadThisFrame, pbo, tex
+            "[PERF] t=%lld f=%d r=%dx%d zm=%.6g it=%d fps=%.1f ai=%d cap=%d mx=%d ma=%d fr=%d df=%d "
+            "map=%.2f md=%.2f en=%.2f ct=%.2f tx=%.2f ov=%.2f tt=%.2f "
+            "e0=%.4f c0=%.4f tile=%d tiles=%dx%d ring=%d skip=%d pbo=%u tex=%u",
+            tEpoch, g_frame, resX, resY, (double)g_ctx.zoom, it, fps, addIter, iterCap, maxfps, mallocs, frees, dflush,
+            mapMs, mandMs, entMs, conMs, txMs, ovMs, ttMs,
+            e0, c0, g_ctx.tileSize, tilesX, tilesY, ringIx, (int)state.skipUploadThisFrame, pbo, tex
         );
     }
 
@@ -308,6 +332,17 @@ void execute(RendererState& state) {
     if constexpr (Settings::performanceLogging) {
         if ((g_frame % RING_LOG_EVERY) == 0) {
             logAndResetRingStats(state);
+        }
+    }
+
+    // [LOG-7] Perturbation telemetry placeholder (aktiv sobald Perturbation verdrahtet ist)
+    if constexpr (Settings::performanceLogging) {
+        if ((g_frame % PERT_LOG_EVERY) == 0) {
+            // Active bleibt 0, bis Schritt 3 (Perturbation) Host/Kernel-seitig eingebaut ist.
+            LUCHS_LOG_HOST(
+                "[PERT] active=%d refX=%.17g refY=%.17g iterLen=%d segSize=%d segCnt=%d deltaMax=%.3e rebases=%d store=%s",
+                0, 0.0, 0.0, 0, 0, 0, 0.0, 0, "OFF"
+            );
         }
     }
 }
