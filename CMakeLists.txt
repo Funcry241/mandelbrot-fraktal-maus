@@ -135,6 +135,8 @@ add_executable(mandelbrot_otterdream
   src/renderer_state_gl.cpp
   src/nacktmull_color.cuh
   src/perturbation_orbit.cpp
+  src/nacktmull_prog.cu
+  src/nacktmull_pert.cu
 )
 
 # ---------------------- Compile-Options --------------------

@@ -1,8 +1,7 @@
-///// Otter: Split – Farbraum & Pack nach .cuh; Kernpfad/Neon-Intro/Warze & Launch bleiben hier.
-///// Schneefuchs: API unverändert; weniger Zeilen; klare Abhängigkeiten; ASCII-Logs; /WX-fest.
-///// Maus: Innen dunkel, außen Palette + Highlights; performantes Packen; minimale Zweige.
+///// Otter: Split – Kernel & Launch only; shading + devlog + prog/pert moved.
+///  Schneefuchs: API unverändert; kleiner TU; klare Abhängigkeiten; /WX-fest.
+///  Maus: Innen dunkel, außen Palette + Highlights; minimale Zweige.
 ///// Datei: src/nacktmull.cu
-
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <vector_types.h>
@@ -14,17 +13,14 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "common.hpp"
-#include "nacktmull_math.cuh"   // pixelToComplex(...)
-#include "nacktmull_color.cuh"  // Farb- & Pack-Helfer (header-only)
-#include "core_kernel.h"        // PerturbParams, PertStore
+#include "nacktmull_math.cuh"     // pixelToComplex(...)
+#include "nacktmull_shade.cuh"    // gtPalette_srgb, warze_highlight, shade_color_only
+#include "nacktmull_devlog.cuh"   // nm_dev_log_guard_hit(...)
+#include "nacktmull_prog.cuh"     // g_prog + setter (in eigener TU)
+#include "nacktmull_pert.cuh"     // g_pert/g_zrefGlob + setter
+#include "core_kernel.h"          // zrefConst, PerturbParams, PertStore
 
-// --- Device-Log: Header (falls vorhanden) + Fallback -------------------------
-#include "luchs_cuda_log_buffer.hpp"   // definiert i. d. R. LUCHS_LOG_DEVICE
-#ifndef LUCHS_LOG_DEVICE
-#define LUCHS_LOG_DEVICE(msg) do { (void)(msg); } while(0)
-#endif
-
-// --- DE-Soft-Edge lokale Defaults (falls nicht in Settings.hpp vorhanden) ----
+// --- DE-Soft-Edge Defaults (falls nicht in Settings.hpp definiert) ----------
 #ifndef DE_SOFT_EDGE_ENABLE
 #define DE_SOFT_EDGE_ENABLE 1
 #endif
@@ -33,22 +29,13 @@
 #endif
 
 // ============================================================================
-// Animation-Uniforms (vom Host pro Frame gesetzt)
+// Animation Uniforms (definiert hier; von Launch pro Frame gesetzt)
 // ============================================================================
 __constant__ float g_sinA = 0.0f;  // ~sin(0.30*t)
 __constant__ float g_sinB = 0.0f;  // ~sin(0.80*t)
 
-// ============================================================================
-// Perturbation: device-side controls & buffers (set by host)
-//   - g_pert:     compact param pack (active==0 -> classical path)
-//   - g_zrefGlob: pointer to GLOBAL orbit buffer (if store==Global)
-//   - zrefConst:  CONST orbit buffer (decl in core_kernel.h, def in core_kernel.cu)
-//   - d_deltaMax: per-frame telemetry (max |delta|), updated by kernel
-// ============================================================================
-__device__ __constant__ PerturbParams g_pert = {0,0,0,PertStore::Const, {0.0,0.0}, 0.0, 0};
-__device__ const double2* g_zrefGlob = nullptr;
-// zrefConst comes from core_kernel.h (extern with known size) — no redeclaration here.
-extern __device__ float d_deltaMax;        // from core_kernel.cu
+// Telemetrie aus anderer TU
+extern __device__ float d_deltaMax; // defined in core_kernel.cu
 
 // ============================================================================
 // Early-out: Haupt-Kardioide + Period-2-Knolle
@@ -64,175 +51,7 @@ __device__ __forceinline__ bool insideMainCardioidOrBulb(float x, float y){
 }
 
 // ============================================================================
-// Palette (kompakt) + Neon-Intro-Boost (~2s) – nutzt Farb-Helfer aus .cuh
-// ============================================================================
-__device__ __forceinline__ float3 gtPalette_srgb(float x, bool inSet, float t){
-    const float gamma=0.84f, lift=0.08f, baseVibr=1.05f, addVibrMax=0.06f, warmDriftAmp=0.06f;
-    const float breathAmp = 0.08f;
-
-    // Neon-Intro (0..~2s): Punch ↑, dann weich zurück
-    const float introT = clamp01(t * 0.5f); // t/2s -> 0..1
-    const float gammaA      = mixf(0.72f, gamma,      introT);
-    const float liftA       = mixf(lift + 0.12f, lift, introT);
-    const float baseVibrA   = mixf(baseVibr * 1.22f,  baseVibr,  introT);
-    const float addVibrMaxA = mixf(addVibrMax * 1.35f,addVibrMax,introT);
-    const float warmShiftA  = mixf(1.08f, (1.00f + warmDriftAmp*g_sinA), introT);
-
-    if (inSet) return make_float3(0.f,0.f,0.f); // Set-Innen dunkel
-
-    x = clamp01(__powf(clamp01(x), gammaA));
-    x = clamp01((x + liftA) / (1.0f + liftA));
-    const float xprime = clamp01(x + breathAmp*g_sinB*x*(1.0f - x));
-
-    // 8-Knoten-Farbspur
-    const float  p[8] = {0.00f,0.10f,0.22f,0.38f,0.55f,0.72f,0.88f,1.00f};
-    const float3 cLn[8] = {
-        make_float3(0.0033465f,0.0043914f,0.0103298f),
-        make_float3(0.0103298f,0.0241576f,0.1589608f),
-        make_float3(0.0129830f,0.3813260f,0.6375969f),
-        make_float3(0.1980693f,0.7758222f,0.5457245f),
-        make_float3(1.0000000f,0.7454042f,0.2541521f),
-        make_float3(0.9301109f,0.3762621f,0.0423114f),
-        make_float3(0.5775804f,0.0648033f,0.1946178f),
-        make_float3(0.9559734f,0.9473065f,0.9215819f)
-    };
-    int j = 0;
-    #pragma unroll
-    for (int i=0; i<7; ++i) { if (xprime >= p[i]) j = i; }
-    const float span = fmaxf(p[j+1] - p[j], 1e-6f);
-    float tseg = clamp01((xprime - p[j]) / span);
-    tseg = tseg*tseg*(3.f-2.f*tseg); // smoothstep
-
-    float3 a=cLn[j], b=cLn[j+1];
-    float3 rgb = make_float3(a.x + (b.x-a.x)*tseg, a.y + (b.y-a.y)*tseg, a.z + (b.z-a.z)*tseg);
-
-    // Vibrance + warme Verschiebung um Luma herum
-    const float luma = zk_luma_srgb(rgb);
-    const float vibr = baseVibrA + addVibrMaxA*clamp01((xprime-0.10f)*(1.0f/0.40f));
-    rgb = zk_vibrance_warm_shift(rgb, luma, vibr, warmShiftA);
-    return rgb;
-}
-
-// ============================================================================
-// Rüsselwarze: Glanz & Glitzer (analytische Gradienten, performant)
-// ============================================================================
-__device__ __forceinline__ float3 warze_highlight(float2 c, int px, int py, float t, float maskGain){
-    const float kR=9.0f, kA=5.0f;
-    const float wob = 0.9f*g_sinA + 0.5f*g_sinB;
-
-    // Polarkoordinaten + Phasen
-    const float r2 = fmaxf(c.x*c.x + c.y*c.y, 1e-20f);
-    const float r  = sqrtf(r2);
-    const float ang= atan2f(c.y, c.x);
-    const float phi0 = kR*r + kA*ang + wob;
-    const float phiR = 0.5f*kR*r - 1.2f*kA*ang + 1.7f*wob;
-
-    float s0, c0; __sincosf(phi0, &s0, &c0);
-    const float rid = fabsf(__sinf(phiR));
-    float m = clamp01(0.60f*rid + 0.40f*(s0*s0)) * maskGain;
-
-    // Analytische Gradienten -> Pseudo-Normal von sin(phi0)
-    const float invr  = rsqrtf(r2), invr2 = invr*invr;
-    const float dphidx = kR*(c.x*invr) - kA*(c.y*invr2);
-    const float dphidy = kR*(c.y*invr) + kA*(c.x*invr2);
-    float2 n = make_float2(-c0*dphidx, -c0*dphidy);
-    float invn = rsqrtf(fmaxf(n.x*n.x+n.y*n.y, 1e-18f));
-    n.x *= invn; n.y *= invn;
-
-    // Licht + Spekular
-    const float2 L = make_float2(__cosf(0.21f*t), __sinf(0.17f*t));
-    float spec = __powf(fmaxf(0.0f, n.x*L.x + n.y*L.y), 22.0f) * m;
-
-    // Glitzer: pixelgesät & zeitlich moduliert
-    float seed = __sinf((px*12.9898f + py*78.233f) + 6.2831853f*fractf(0.123f*t));
-    float glint = __powf(fmaxf(0.0f, seed) * fmaxf(0.0f, __sinf(5.0f*s0 + 2.0f*wob)), 8.0f) * m;
-    float tw = 0.5f + 0.5f*__sinf(2.4f*t + 0.8f*px + 1.1f*py);
-
-    float glow = glint * tw;
-    float3 h = make_float3(spec + glow, spec + glow*0.92f, spec + glow*0.85f);
-    h.x *= 0.85f; h.y *= 0.85f; h.z *= 0.85f; // leichte Gesamtdämpfung
-    return h;
-}
-
-// ============================================================================
-// Basisshading (ohne Alpha / ohne Compose)
-// ============================================================================
-__device__ __forceinline__ float3 shade_color_only(
-    int it,int maxIter,float zx,float zy,float t)
-{
-    if (it>=maxIter){
-        return gtPalette_srgb(0.0f,true,t);
-    } else {
-        const float r2=zx*zx+zy*zy;
-        if (r2>1.0000001f && it>0){
-            const float r=sqrtf(r2), l2=__log2f(__log2f(r));
-            float x=((float)it - l2) / (float)maxIter;
-            float edge=clamp01(1.0f-0.75f*l2);
-            x=clamp01(x+0.15f*edge*(1.0f-x));
-            return gtPalette_srgb(x,false,t);
-        } else {
-            return gtPalette_srgb(clamp01((float)it/(float)maxIter),false,t);
-        }
-    }
-}
-
-// ============================================================================
-// Progressive-Status (__constant__) + Setter (API unverändert)
-// ============================================================================
-struct NacktmullProgState { float2* z; uint16_t* it; int addIter; int iterCap; int enabled; };
-__device__ __constant__ NacktmullProgState g_prog = { nullptr,nullptr,0,0,0 };
-
-extern "C" void nacktmull_set_progressive(const void* zDev,const void* itDev,
-                                          int addIter,int iterCap,int enabled) noexcept
-{
-    NacktmullProgState h{};
-    h.z=(float2*)zDev; h.it=(uint16_t*)itDev; h.addIter=addIter; h.iterCap=iterCap; h.enabled=enabled?1:0;
-    cudaError_t err = cudaMemcpyToSymbol(g_prog,&h,sizeof(h));
-    if constexpr (Settings::debugLogging) {
-        if (err != cudaSuccess) {
-            LUCHS_LOG_HOST("[NACKTMULL][WARN] memcpyToSymbol(g_prog) failed: err=%d", (int)err);
-        }
-    }
-}
-
-// ============================================================================
-// Device-safe Minimal-Formatter für Guard-Logs (nur ints, 1 Zeile)
-// ============================================================================
-__device__ __forceinline__ int dev_append(char* dst, const char* s){
-    int n=0; while (s[n]) { dst[n]=s[n]; ++n; } return n;
-}
-__device__ __forceinline__ int dev_itoa(char* dst, int v){
-    unsigned int x = (v<0) ? (unsigned)(-v) : (unsigned)v;
-    char tmp[12]; int k=0;
-    do { tmp[k++] = char('0' + (x % 10)); x/=10; } while(x);
-    int p=0;
-    if (v<0) dst[p++]='-';
-    for (int i=k-1;i>=0;--i) dst[p++]=tmp[i];
-    return p;
-}
-__device__ __forceinline__ void dev_log_guard_hit(int x,int y,int i,int len,int ver){
-    char buf[96]; int p=0;
-    p += dev_append(buf+p, "[PERT][GUARD] xy=");
-    p += dev_itoa(buf+p, x);
-    buf[p++]=','; p+=dev_itoa(buf+p,y);
-    p += dev_append(buf+p, " i=");
-    p += dev_itoa(buf+p, i);
-    p += dev_append(buf+p, " len=");
-    p += dev_itoa(buf+p, len);
-    p += dev_append(buf+p, " ver=");
-    p += dev_itoa(buf+p, ver);
-    buf[p]=0;
-    LUCHS_LOG_DEVICE(buf);
-}
-
-// ============================================================================
 // Unified Kernel – Direct ODER Progressive (branch by g_prog.enabled)
-// - PERT ACTIVE PATH: z = z_ref + delta, delta (double) via
-//     delta = 2*z_ref[i]*delta + delta^2 + (c - g_pert.c_ref)
-//   Guard: !finite(delta) oder |delta| > deltaGuard -> Fallback klassisch.
-//   DE: w = 2*z*w + 1 (Start w=0) -> Soft-Edge als Palette-Weichmacher.
-//   Blockende: atomicMax(|delta|_max) -> d_deltaMax (float bits).
-// - Klassischer Pfad: unverändert (mit Periodizität, Warp-Frühstopp).
 // ============================================================================
 __global__ __launch_bounds__(Settings::MANDEL_BLOCK_X * Settings::MANDEL_BLOCK_Y)
 void mandelbrotUnifiedKernel(
@@ -259,7 +78,7 @@ void mandelbrotUnifiedKernel(
     const bool pert_on = (g_pert.active != 0) && (g_pert.len > 0);
     const float esc2=4.0f;
 
-    // Progressive Pfad – vorerst ohne PERT (Index-Mapping später)
+    // Progressive Pfad – (aktuell klassisch; Warmstart folgt in nächstem Schritt)
     if (prog){
         int it = (int)g_prog.it[idx];
         float2 z0 = g_prog.z[idx];
@@ -314,7 +133,6 @@ void mandelbrotUnifiedKernel(
         for (; it < maxIter; ++it) {
             if (it >= g_pert.len) { fallback = true; break; }
 
-            // Load reference orbit sample
             double2 zr;
             if (g_pert.store == PertStore::Const) {
                 zr = zrefConst[it];
@@ -323,7 +141,6 @@ void mandelbrotUnifiedKernel(
                 zr = g_zrefGlob[it];
             }
 
-            // delta_{n+1} = 2*z_ref*delta + delta^2 + (c - c_ref)
             const double2 delta_sq = make_double2(delta.x*delta.x - delta.y*delta.y,
                                                   2.0*delta.x*delta.y);
             const double2 two_zr_delta = make_double2(2.0*zr.x*delta.x - 2.0*zr.y*delta.y,
@@ -333,34 +150,30 @@ void mandelbrotUnifiedKernel(
             delta.x = two_zr_delta.x + delta_sq.x + c_minus_ref.x;
             delta.y = two_zr_delta.y + delta_sq.y + c_minus_ref.y;
 
-            // |delta| track + Guard -> Fallback
             const double mag2 = delta.x*delta.x + delta.y*delta.y;
             const double mag  = sqrt(mag2);
             if (mag > dmax) dmax = mag;
             if (!isfinite(mag2) || mag > g_pert.deltaGuard) {
                 if constexpr (Settings::debugLogging) {
                     if ((it % Settings::pertDevLogEvery) == 0) {
-                        dev_log_guard_hit(x, y, it, g_pert.len, g_pert.version); // device-only ints
+                        nm_dev_log_guard_hit(x, y, it, g_pert.len, g_pert.version);
                     }
                 }
                 fallback = true;
                 break;
             }
 
-            // z = z_ref + delta  (double for accuracy)
             const double zx_d = zr.x + delta.x;
             const double zy_d = zr.y + delta.y;
 
-            // w = 2*z*w + 1
             const double2 wnew = make_double2(2.0*zx_d*wder.x - 2.0*zy_d*wder.y + 1.0,
                                               2.0*zx_d*wder.y + 2.0*zy_d*wder.x);
             wder = wnew;
 
-            // Bailout
             const double r2 = zx_d*zx_d + zy_d*zy_d;
             if (r2 > 4.0) {
                 zx_out = (float)zx_d; zy_out = (float)zy_d;
-                ++it; // smooth escape uses next-iteration notion
+                ++it;
                 break;
             }
         }
@@ -378,7 +191,6 @@ void mandelbrotUnifiedKernel(
         }
 
         if (!fallback) {
-            // Shade + optional DE Soft-Edge to modulate highlight amplitude only
             float3 rgb = shade_color_only(it, maxIter, zx_out, zy_out, tSec);
 
             if (it < maxIter){
@@ -399,7 +211,7 @@ void mandelbrotUnifiedKernel(
 #if DE_SOFT_EDGE_ENABLE
                 {
                     float r = sqrtf(zx_out*zx_out + zy_out*zy_out);
-                    float wabs = (float)sqrt(wder.x*wder.x + wder.y*wder.y); // statt hypot()
+                    float wabs = (float)sqrt(wder.x*wder.x + wder.y*wder.y);
                     wabs = fmaxf(wabs, 1e-18f);
                     float de = 0.5f * logf(fmaxf(r, 1e-12f)) * (r / wabs);
                     float soft = clamp01(1.0f - (float)DE_SOFT_K * de);
@@ -416,14 +228,14 @@ void mandelbrotUnifiedKernel(
             iterOut[idx] = (uint16_t)min(it, 65535);
             return;
         }
-        // else: Guard/Limit -> klassischer Pfad (Bildidentität)
+        // else: Guard -> klassischer Pfad
     }
 
     // ========================================================================
-    // Klassischer Pfad (Referenz, Telemetrie bleibt aktiv falls pert_on)
+    // Klassischer Pfad
     // ========================================================================
     float zx=0.f, zy=0.f;
-    int it = maxIter; // default: bounded
+    int it = maxIter;
 
     float px=0.f, py=0.f; int lastProbe=0;
     const int   perN  = Settings::periodicityCheckInterval;
@@ -442,7 +254,6 @@ void mandelbrotUnifiedKernel(
     for (; i < maxIter; ) {
         #pragma unroll
         for (int j = 0; j < WARP_CHUNK && i < maxIter; ++j, ++i) {
-            // -------- PERT delta update (telemetry only) --------
             if (trackPert && i < g_pert.len) {
                 double2 zr;
                 if (g_pert.store == PertStore::Const) {
@@ -464,14 +275,13 @@ void mandelbrotUnifiedKernel(
                     const double mag  = sqrt(mag2);
                     if (mag > dmax) dmax = mag;
                     if (!isfinite(mag2) || mag > g_pert.deltaGuard) {
-                        trackPert = false; // stop telemetry; image path unchanged
+                        trackPert = false;
                     }
                 }
             }
 
-            // klassische Iteration
             const float x2 = zx*zx, y2 = zy*zy;
-            if (x2 + y2 > esc2) { it = i; done = true; break; }
+            if (x2 + y2 > 4.0f) { it = i; done = true; break; }
             const float xt = x2 - y2 + c.x; zy = __fmaf_rn(2.0f*zx, zy, c.y); zx = xt;
 
             if constexpr (Settings::periodicityEnabled) {
@@ -487,7 +297,6 @@ void mandelbrotUnifiedKernel(
         if (__all_sync(mask, done)) break;
     }
 
-    // [PERT] Block reduction -> global d_deltaMax (float bits)
     if (pert_on) {
         __shared__ unsigned int smax_bits;
         if (threadIdx.x==0 && threadIdx.y==0) smax_bits = 0u;
@@ -541,21 +350,18 @@ extern "C" void launch_mandelbrotHybrid(
             return;
         }
 
-        // Anim-Uniforms (Fehler nur loggen)
-        {
-            const float sinA = sinf(0.30f * tSec);
-            const float sinB = sinf(0.80f * tSec);
-            cudaError_t e1 = cudaMemcpyToSymbol(g_sinA, &sinA, sizeof(float));
-            cudaError_t e2 = cudaMemcpyToSymbol(g_sinB, &sinB, sizeof(float));
-            if (e1 != cudaSuccess || e2 != cudaSuccess) {
-                LUCHS_LOG_HOST("[NACKTMULL][WARN] memcpyToSymbol failed: a=%d b=%d",(int)e1,(int)e2);
-            }
+        const float sinA = sinf(0.30f * tSec);
+        const float sinB = sinf(0.80f * tSec);
+        cudaError_t e1 = cudaMemcpyToSymbol(g_sinA, &sinA, sizeof(float));
+        cudaError_t e2 = cudaMemcpyToSymbol(g_sinB, &sinB, sizeof(float));
+        if (e1 != cudaSuccess || e2 != cudaSuccess) {
+            LUCHS_LOG_HOST("[NACKTMULL][WARN] memcpyToSymbol failed: a=%d b=%d",(int)e1,(int)e2);
         }
 
         const dim3 block(Settings::MANDEL_BLOCK_X, Settings::MANDEL_BLOCK_Y);
         const dim3 grid((w+block.x-1)/block.x,(h+block.y-1)/block.y);
 
-        cudaStream_t useStream = stream; // darf nullptr sein -> äquivalent zu Stream 0 beim Launch unten
+        cudaStream_t useStream = stream;
 
         if constexpr (Settings::performanceLogging) {
             cudaEvent_t evStart=nullptr, evStop=nullptr;
@@ -578,8 +384,8 @@ extern "C" void launch_mandelbrotHybrid(
             if (cudaEventElapsedTime(&ms, evStart, evStop) != cudaSuccess) {
                 LUCHS_LOG_HOST("[PERF][WARN] cudaEventElapsedTime failed");
             } else {
-                LUCHS_LOG_HOST("[PERF] nacktmull unified kern=%.2f ms itMax=%d bx=%d by=%d unroll=%d chunk=%d",
-                               ms, maxIter, (int)block.x, (int)block.y, (int)Settings::MANDEL_UNROLL, (int)WARP_CHUNK);
+                LUCHS_LOG_HOST("[PERF] nacktmull unified kern=%.2f ms itMax=%d bx=%d by=%d unroll=%d",
+                               ms, maxIter, (int)block.x, (int)block.y, (int)Settings::MANDEL_UNROLL);
             }
             cudaEventDestroy(evStart);
             cudaEventDestroy(evStop);
@@ -587,7 +393,6 @@ extern "C" void launch_mandelbrotHybrid(
             mandelbrotUnifiedKernel<<<grid,block,0,useStream>>>(out,d_it,w,h,zoom,offset,maxIter,tSec);
         }
 
-        // Periodizitäts-Info nur einmal loggen
         static bool s_logPeriodicityOnce = false;
         if constexpr (Settings::debugLogging){
             if (!s_logPeriodicityOnce) {
@@ -600,15 +405,4 @@ extern "C" void launch_mandelbrotHybrid(
         LUCHS_LOG_HOST("[NACKTMULL][ERR] unexpected exception in launch_mandelbrotHybrid");
         return;
     }
-}
-
-// ============================================================================
-// Optional helper: set perturbation params & GLOBAL orbit pointer from host.
-// (Non-breaking addition; callers may ignore.)
-// ============================================================================
-extern "C" void nacktmull_set_perturb(const PerturbParams& p, const double2* zrefGlobalDev) noexcept
-{
-    (void)cudaMemcpyToSymbol(g_pert, &p, sizeof(PerturbParams));
-    // store device pointer for GLOBAL path
-    (void)cudaMemcpyToSymbol(g_zrefGlob, &zrefGlobalDev, sizeof(zrefGlobalDev));
 }
