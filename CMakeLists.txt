@@ -74,8 +74,8 @@ foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
   endif()
 endforeach()
 
-# Windows: regulär via CONFIG (vcpkg liefert GLEW::GLEW / GLEW::glew)
-# Linux: per importiertem Ziel aus vcpkg_installed (robust gg. Find-GLEW-Issues)
+# Windows: via CONFIG (vcpkg liefert GLEW::GLEW / GLEW::glew)
+# Linux: Imported target aus vcpkg_installed (robust gg. Find-GLEW-Issues)
 if(WIN32)
   find_package(GLEW CONFIG REQUIRED)
   if(TARGET GLEW::GLEW)
@@ -117,8 +117,7 @@ add_executable(mandelbrot_otterdream
   src/renderer_window.cpp
   src/renderer_resources.cpp
   src/heatmap_overlay.cpp
-  src/warzenschwein_overlay.cpp
-  src/cuda_interop.cu
+  src/warzenschwein_overlay.cpp  
   src/core_kernel.cu
   src/zoom_logic.cpp
   src/zoom_command.cpp
@@ -140,6 +139,12 @@ add_executable(mandelbrot_otterdream
   src/nacktmull_kernel_helpers.cuh
   src/nacktmull_launch.cu
   src/nacktmull_anim.cu
+
+  # Gesplittete Interop-TUs
+  src/cuda_interop_state.cpp
+  src/cuda_interop_pbo.cpp
+  src/cuda_interop_ctx.cpp
+  src/cuda_interop_render.cu
 )
 
 # ---------------------- Compile-Options --------------------
@@ -148,7 +153,7 @@ if(MSVC)
   set_property(TARGET mandelbrot_otterdream PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-  # Host (C++) STRIKT mit /WX; CUDA-Host ebenfalls /WX, aber gezielt C4505 aus CUDA CRT unterdrücken
+  # Host (C++) strikt mit /WX; CUDA-Host ebenfalls /WX – aber gezielt C4505 dämpfen
   target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /permissive- /Zc:__cplusplus>
     $<$<COMPILE_LANGUAGE:CUDA>:
@@ -198,13 +203,14 @@ target_include_directories(mandelbrot_otterdream PRIVATE
 )
 
 # ---------------------- Defines ----------------------------
+# Kompakt halten; keine GLEW_STATIC-Defines
 target_compile_definitions(mandelbrot_otterdream PRIVATE
   GLEW_NO_IMAGING
   GLEW_NO_GLU
 )
 
 # ---------------------- Link -------------------------------
-# Bei SC/Resolve verlinkt CMake cudadevrt i. d. R. selbst; falls nicht vorhanden, guarden.
+# Bei SC/Resolve verlinkt CMake cudadevrt i. d. R. selbst; Guard hilft bei älteren Toolchains
 target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
   ${GLEW_TARGET}

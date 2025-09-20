@@ -1,183 +1,69 @@
-///// Otter: PBO-RAII – sicher unmap im Dtor; No-arg map & unmapAndLog.
-///// Schneefuchs: deterministische ASCII-Logs; numerische CUDA-Codes.
-///// Maus: Keine Side-Effects – GL-Bindings werden sauber restauriert.
+///// Otter: OpenGL PBO interop; map/unmap + pointer retrieval logged deterministically.
+///// Schneefuchs: No shared state here; pure RAII around cudaGraphicsResource.
+///// Maus: Numeric CUDA rc only via CUDA_CHECK; ASCII logs; quiet when disabled.
 ///// Datei: src/bear_CudaPBOResource.cpp
-
 #include "pch.hpp"
 #include "bear_CudaPBOResource.hpp"
 #include "luchs_log_host.hpp"
 #include "settings.hpp"
 
-#include <chrono>
-#include <utility>           // std::exchange
-#include <GL/glew.h>
-#include <cuda_gl_interop.h> // CUDA-GL interop API
+#include <cuda_gl_interop.h>
+#include <cuda_runtime.h>
 
 namespace CudaInterop {
 
-// 🐻 Konstruktor – registriert PBO bei Erstellung
-bear_CudaPBOResource::bear_CudaPBOResource(GLuint pboId) {
-    resource_ = nullptr;
-    mapped_   = false;
-    lastSize_ = 0;
-
-    // 🦊 Preserve-then-bind; alten Binding-Status danach wiederherstellen.
-    GLint prevBinding = 0;
-    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevBinding);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboId);
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PBO] Bind PBO %u (prev=%d)", pboId, prevBinding);
-    }
-
-    cudaError_t err = cudaGraphicsGLRegisterBuffer(&resource_, pboId, cudaGraphicsRegisterFlagsWriteDiscard);
-    if (err != cudaSuccess) {
+bear_CudaPBOResource::bear_CudaPBOResource(unsigned int glBufferId)
+    : m_glId(glBufferId), m_gr(nullptr)
+{
+    cudaError_t rc = cudaGraphicsGLRegisterBuffer(&m_gr, m_glId, cudaGraphicsRegisterFlagsNone);
+    if (rc != cudaSuccess) {
+        m_gr = nullptr;
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ERROR] cudaGraphicsGLRegisterBuffer code=%d", (int)err);
+            LUCHS_LOG_HOST("[CUDA-Interop][PBO] register id=%u failed rc=%d", m_glId, (int)rc);
         }
-        resource_ = nullptr;
-    } else {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[DEBUG] Registered PBO %u as CUDA resource %p", pboId, (void*)resource_);
-        }
-    }
-
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, (GLuint)prevBinding);
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PBO] Restore GL_PIXEL_UNPACK_BUFFER_BINDING to %d", prevBinding);
+    } else if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CUDA-Interop][PBO] registered id=%u", m_glId);
     }
 }
 
-// 🐻 Destruktor – unmap (falls nötig) und deregistrieren
 bear_CudaPBOResource::~bear_CudaPBOResource() {
-    if (resource_) {
-        if (mapped_) {
-            (void)cudaGraphicsUnmapResources(1, &resource_, 0);
-            mapped_ = false;
-        }
-        cudaError_t err = cudaGraphicsUnregisterResource(resource_);
+    if (m_gr) {
+        cudaError_t rc = cudaGraphicsUnregisterResource(m_gr);
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PBO] cudaGraphicsUnregisterResource code=%d", (int)err);
+            LUCHS_LOG_HOST("[CUDA-Interop][PBO] unregister id=%u rc=%d", m_glId, (int)rc);
         }
-        resource_ = nullptr;
-        lastSize_ = 0;
+        (void)rc;
+        m_gr = nullptr;
     }
 }
 
-// 🐻 mapAndLog – mappt (idempotent), liefert DevPtr + Size (geloggt)
-void* bear_CudaPBOResource::mapAndLog(size_t& sizeOut) {
-    void* devPtr = nullptr;
-    sizeOut = 0;
+cudaGraphicsResource* bear_CudaPBOResource::get() const {
+    return m_gr;
+}
 
-    if (!resource_) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ERROR] mapAndLog() called with null resource");
-        }
-        return nullptr;
-    }
+void* bear_CudaPBOResource::mapAndLog(size_t& bytesOut) {
+    bytesOut = 0;
+    if (!m_gr) return nullptr;
 
-    cudaError_t err = cudaSuccess;
-    auto tMapStart = std::chrono::high_resolution_clock::now();
+    CUDA_CHECK(cudaGraphicsMapResources(1, &m_gr, 0));
 
-    if (!mapped_) {
-        err = cudaGraphicsMapResources(1, &resource_, 0);
-        if constexpr (Settings::debugLogging) {
-            auto tMapEnd = std::chrono::high_resolution_clock::now();
-            const double mapMs = std::chrono::duration<double, std::milli>(tMapEnd - tMapStart).count();
-            LUCHS_LOG_HOST("[PERF] MapResources: %.3f ms", mapMs);
-            LUCHS_LOG_HOST("[PBO] cudaGraphicsMapResources code=%d", (int)err);
-        }
-        if (err != cudaSuccess) return nullptr;
-        mapped_ = true;
-    }
+    void*  ptr   = nullptr;
+    size_t bytes = 0;
+    CUDA_CHECK(cudaGraphicsResourceGetMappedPointer(&ptr, &bytes, m_gr));
+    bytesOut = bytes;
 
-    err = cudaGraphicsResourceGetMappedPointer(&devPtr, &sizeOut, resource_);
-    lastSize_ = (err == cudaSuccess) ? sizeOut : 0;
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PBO] ResourceGetMappedPointer code=%d ptr=%p size=%zu", (int)err, devPtr, sizeOut);
+        LUCHS_LOG_HOST("[PBO][MAP] id=%u ptr=%p bytes=%zu", m_glId, ptr, bytes);
     }
-    if (err != cudaSuccess) {
-        // Cleanup auf Fehlerfall, um geleakten Map-Status zu vermeiden
-        (void)cudaGraphicsUnmapResources(1, &resource_, 0);
-        mapped_ = false;
-        devPtr  = nullptr;
-        sizeOut = 0;
-        lastSize_ = 0;
-        return nullptr;
-    }
-
-    return devPtr;
+    return ptr;
 }
 
-// 🐻 Overload: typisierter Pixelpointer (uchar4), Groesse wird intern geloggt
-uchar4* bear_CudaPBOResource::mapAndLog() {
-    size_t sz = 0;
-    void* p = mapAndLog(sz);
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PBO] mapAndLog(void) size=%zu bytes", sz);
-    }
-    return reinterpret_cast<uchar4*>(p);
-}
-
-// 🐻 Overload mit Größenprüfung (Guard gegen PBO-Mismatch)
-uchar4* bear_CudaPBOResource::mapAndLogExpect(size_t expectedBytes) {
-    size_t sz = 0;
-    uchar4* p = mapAndLog();
-    sz = lastSize_;
-    if (p && expectedBytes && sz < expectedBytes) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ERROR] PBO mapped size too small: have=%zu need=%zu", sz, expectedBytes);
-        }
-        unmap(); // sauber zurücksetzen
-        return nullptr;
-    }
-    return p;
-}
-
-// 🐻 unmap – nur wenn gemappt
 void bear_CudaPBOResource::unmap() {
-    if (!resource_ || !mapped_) return;
-    const cudaError_t err = cudaGraphicsUnmapResources(1, &resource_, 0);
-    mapped_ = false;
+    if (!m_gr) return;
+    CUDA_CHECK(cudaGraphicsUnmapResources(1, &m_gr, 0));
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PBO] cudaGraphicsUnmapResources code=%d", (int)err);
+        LUCHS_LOG_HOST("[PBO][UNMAP] id=%u", m_glId);
     }
-}
-
-// 🐻 unmapAndLog – symmetrische Zeitmessung
-void bear_CudaPBOResource::unmapAndLog() {
-    if (!resource_ || !mapped_) return;
-    auto t0 = std::chrono::high_resolution_clock::now();
-    unmap();
-    auto t1 = std::chrono::high_resolution_clock::now();
-    const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PERF] UnmapResources: %.3f ms", ms);
-    }
-}
-
-// Getter
-cudaGraphicsResource_t bear_CudaPBOResource::get() const noexcept { return resource_; }
-bool  bear_CudaPBOResource::isMapped() const noexcept { return mapped_; }
-size_t bear_CudaPBOResource::lastSize() const noexcept { return lastSize_; }
-
-// Moves
-bear_CudaPBOResource::bear_CudaPBOResource(bear_CudaPBOResource&& other) noexcept
-: resource_(std::exchange(other.resource_, nullptr)),
-  mapped_(std::exchange(other.mapped_, false)),
-  lastSize_(std::exchange(other.lastSize_, 0)) {}
-
-bear_CudaPBOResource& bear_CudaPBOResource::operator=(bear_CudaPBOResource&& other) noexcept {
-    if (this != &other) {
-        if (resource_) {
-            if (mapped_) (void)cudaGraphicsUnmapResources(1, &resource_, 0);
-            (void)cudaGraphicsUnregisterResource(resource_);
-        }
-        resource_ = std::exchange(other.resource_, nullptr);
-        mapped_   = std::exchange(other.mapped_, false);
-        lastSize_ = std::exchange(other.lastSize_, 0);
-    }
-    return *this;
 }
 
 } // namespace CudaInterop
