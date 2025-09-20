@@ -69,7 +69,7 @@ void renderFrame_impl(RendererState& state) {
         const bool periodic   = (state.frameCount > WARMUP_FRAMES) && ((state.frameCount % PERF_LOG_EVERY) == 0);
 
         if (err != cudaSuccess) {
-            LUCHS_LOG_HOST("[Loop][CUDA] lastError rc=%d frame=%d — flushing device logs",
+            LUCHS_LOG_HOST("[Loop][CUDA] lastError rc=%d frame=%d - flushing device logs",
                            static_cast<int>(err), state.frameCount);
             LuchsLogger::flushDeviceLogToHost(0);
         } else if (periodic) {

@@ -1,8 +1,9 @@
-#pragma once
-
 ///// Otter: Zaunkönig [ZK] – PBO-Fences & saubere Ring-Disziplin; Header schlank, keine PCH; Nacktmull-Pullover.
 ///// Schneefuchs: [ZK] GLsync vorwärts deklariert; Speicher/Buffer exakt; State entkoppelt; MSVC-Align-Warnung lokal gekapselt.
 ///// Maus: [ZK] Flags klar benannt (pboFence, skipUploadThisFrame); tileSize explizit; Progressive (z,it) mit Cooldown; ASCII-only.
+///// Datei: src/renderer_state.hpp
+
+#pragma once
 
 // Leichte Includes im Header (keine PCH)
 #include <cstdint>              // uint8_t for PertStore fwd-decl
@@ -10,6 +11,7 @@
 #include <string>
 #include <array>
 #include <vector_types.h>        // float2/double2 (__align__-Typen -> MSVC C4324)
+#include <cuda_runtime_api.h>    // 🔒 Verhindert Alias-Konflikte: liefert offizielle cudaStream_t/cudaEvent_t
 #include "hermelin_buffer.hpp"   // RAII-Wrapper fuer GL/CUDA-Buffer (by value erforderlich)
 #include "zoom_logic.hpp"        // ZoomLogic::ZoomState (by-value Member -> vollständiger Typ noetig)
 
@@ -17,9 +19,7 @@
 struct GLFWwindow;
 struct __GLsync; using GLsync = __GLsync*; // [ZK] GLsync vorwaerts deklariert (keine GL-Header hier)
 
-// CUDA-Primitive schlank vorwaerts deklarieren (kein cuda_runtime*-Include im Header)
-struct CUstream_st; using cudaStream_t = CUstream_st*; // Ownership liegt beim RendererState
-struct CUevent_st;  using cudaEvent_t  = CUevent_st*;  // Events fuer Render->E/C->Copy Verkettung
+// CUDA-Primitive: **keine** Eigen-Aliasse mehr; wir nutzen die echten Typen aus <cuda_runtime_api.h>
 
 // Perturbation: Speicherort des Referenzorbits
 // Nur Vorwaertsdeklaration hier, die kanonische Definition steht in core_kernel.h.

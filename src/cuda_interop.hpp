@@ -8,9 +8,7 @@
 #include <cstddef>
 #include <vector>               // std::vector<float>
 #include <vector_types.h>       // float2 (leichtgewichtig, keine PCH)
-
-// CUDA: nur schlanke Vorwärtsdeklaration (keine schweren cuda_runtime*-Includes)
-struct CUstream_st; using cudaStream_t = CUstream_st*;
+#include <cuda_runtime_api.h>   // echte cudaStream_t-Definition (keine Alias-Vorwaertsdeklaration)
 
 // Projekt-Typen nur vorwärts deklarieren, um Abhängigkeiten zu reduzieren
 namespace Hermelin {
