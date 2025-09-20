@@ -54,6 +54,9 @@ extern "C" void launch_mandelbrotHybrid(
 // PERT Telemetrie-Symbol (wird im Render-Kernel aktualisiert)
 extern __device__ float d_deltaMax;
 
+// PERT Param-Setter (in src/nacktmull.cu definiert)
+extern "C" void nacktmull_set_perturb(const PerturbParams& p, const double2* zrefGlobalDev);
+
 namespace CudaInterop {
 
 // ----- Ringgröße aus Settings (Single Source of Truth) -----------------------
@@ -254,7 +257,6 @@ void renderCudaFrame(
         (void)cudaGetLastError();
 
         // --------- PERT: d_deltaMax vor Frame nullen (wenn Orbit aktiv) ---------
-        // Aktivität: konservativ nur anhand State (kein Settings-Zweig notwendig).
         const bool pertActive = (state.zrefCount > 0);
         static void* s_deltaMaxDev = nullptr;
         if (pertActive) {
@@ -262,6 +264,24 @@ void renderCudaFrame(
             CUDA_CHECK(cudaMemsetAsync(s_deltaMaxDev, 0, sizeof(float), renderStream));
         } else {
             state.deltaMaxLast = 0.0;
+        }
+
+        // --------- PERT: Parameter setzen (g_pert + GLOBAL-Zeiger) -------------
+        {
+            PerturbParams p{};
+            p.active     = (state.zrefCount > 0) ? 1 : 0;
+            p.len        = state.zrefCount;
+            p.segSize    = state.zrefSegSize;
+            p.store      = state.perturbStore;
+            p.c_ref      = state.c_ref;
+            p.deltaGuard = Settings::deltaGuardAbs;
+            p.version    = state.zrefVersion;
+
+            const double2* zrefPtr = nullptr;
+            if (p.active && p.store == PertStore::Global) {
+                zrefPtr = static_cast<const double2*>(state.d_zrefGlobal.get());
+            }
+            nacktmull_set_perturb(p, zrefPtr);
         }
 
         // Timing-Event auf DEM Render-Stream (nicht Stream 0)

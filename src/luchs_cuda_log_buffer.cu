@@ -52,7 +52,6 @@ namespace LuchsLogger {
             local[len++] = ':';
             // write decimal line number
             int l = (line < 0) ? 0 : line;
-            // max 10 digits for 32-bit int
             int digits[10]; int dcount = 0;
             if (l == 0) { digits[dcount++] = 0; }
             while (l > 0 && dcount < 10) { digits[dcount++] = l % 10; l /= 10; }
@@ -63,7 +62,7 @@ namespace LuchsLogger {
         }
 
         // 3) delimiter " | "
-        if (len + 3 < int(LOG_MESSAGE_MAX)) {
+        if (len + 2 < int(LOG_MESSAGE_MAX)) {
             local[len++] = '|';
             local[len++] = ' ';
         }
@@ -78,7 +77,7 @@ namespace LuchsLogger {
             local[len++] = '\n';
         }
 
-        // Reserve space atomically
+        // Reserve space atomically (CUDA 13 atomic_ref)
         auto ref = cuda::atomic_ref<unsigned long long, cuda::thread_scope_device>(d_logOffset);
         unsigned long long idx = ref.fetch_add((unsigned long long)len, cuda::memory_order_relaxed);
 
@@ -120,7 +119,10 @@ namespace LuchsLogger {
             return;
         }
         resetLogKernel<<<1,1,0,s_logStream>>>();
-        CUDA_CHECK(cudaStreamSynchronize(s_logStream));
+        cudaError_t e = cudaStreamSynchronize(s_logStream);
+        if (e != cudaSuccess && Settings::debugLogging) {
+            LUCHS_LOG_HOST("[LuchsBaby ERROR] reset sync rc=%d", (int)e);
+        }
     }
 
     // =========================================================================
@@ -129,25 +131,26 @@ namespace LuchsLogger {
 
     void initCudaLogBuffer(cudaStream_t stream) {
         if (s_isInitialized) return;
-        s_logStream = (stream == nullptr) ? 0 : stream;
+        s_logStream = stream ? stream : 0;
 
         // Clear device state
         resetLogKernel<<<1,1,0,s_logStream>>>();
-        CUDA_CHECK(cudaGetLastError());
-        CUDA_CHECK(cudaStreamSynchronize(s_logStream));
+        cudaError_t e1 = cudaGetLastError();
+        cudaError_t e2 = cudaStreamSynchronize(s_logStream);
 
         // Clear host staging
         std::memset(h_logBuffer, 0, sizeof(h_logBuffer));
 
         s_isInitialized = true;
+
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[LuchsBaby] LogBuffer initialized (size=%zu, stream=%p)", (size_t)LOG_BUFFER_SIZE, (void*)s_logStream);
+            LUCHS_LOG_HOST("[LuchsBaby] LogBuffer init rc_launch=%d rc_sync=%d size=%zu stream=%p",
+                           (int)e1, (int)e2, (size_t)LOG_BUFFER_SIZE, (void*)s_logStream);
         }
     }
 
     void freeCudaLogBuffer() {
         if (!s_isInitialized) return;
-        // nothing to free (symbols are static), reset for good measure
         resetLogKernel<<<1,1,0,s_logStream>>>();
         (void)cudaGetLastError();
         (void)cudaStreamSynchronize(s_logStream);
@@ -175,13 +178,19 @@ namespace LuchsLogger {
         }
 
         // Normalize stream
-        cudaStream_t useStream = (stream == nullptr) ? s_logStream : stream;
+        cudaStream_t useStream = stream ? stream : s_logStream;
 
         // 1) Fetch current offset
         unsigned long long used = 0ULL;
-        CUDA_CHECK(cudaMemcpyFromSymbolAsync(
-            &used, d_logOffset, sizeof(used), 0, cudaMemcpyDeviceToHost, useStream));
-        CUDA_CHECK(cudaStreamSynchronize(useStream));
+        cudaError_t e1 = cudaMemcpyFromSymbolAsync(
+            &used, d_logOffset, sizeof(used), 0, cudaMemcpyDeviceToHost, useStream);
+        cudaError_t e2 = cudaStreamSynchronize(useStream);
+
+        if constexpr (Settings::debugLogging) {
+            if (e1 != cudaSuccess || e2 != cudaSuccess) {
+                LUCHS_LOG_HOST("[LuchsBaby ERROR] flush read-offset rc_copy=%d rc_sync=%d", (int)e1, (int)e2);
+            }
+        }
 
         if (used == 0ULL) {
             if constexpr (Settings::debugLogging) {
@@ -195,9 +204,15 @@ namespace LuchsLogger {
                         ? (LOG_BUFFER_SIZE - 1)
                         : (size_t)used;
 
-        CUDA_CHECK(cudaMemcpyFromSymbolAsync(
-            h_logBuffer, d_logBuffer, toCopy, 0, cudaMemcpyDeviceToHost, useStream));
-        CUDA_CHECK(cudaStreamSynchronize(useStream));
+        cudaError_t e3 = cudaMemcpyFromSymbolAsync(
+            h_logBuffer, d_logBuffer, toCopy, 0, cudaMemcpyDeviceToHost, useStream);
+        cudaError_t e4 = cudaStreamSynchronize(useStream);
+
+        if constexpr (Settings::debugLogging) {
+            if (e3 != cudaSuccess || e4 != cudaSuccess) {
+                LUCHS_LOG_HOST("[LuchsBaby ERROR] flush copy-bytes rc_copy=%d rc_sync=%d", (int)e3, (int)e4);
+            }
+        }
 
         // ensure 0-termination for safe host-side parsing
         h_logBuffer[toCopy] = 0;

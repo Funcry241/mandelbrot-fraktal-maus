@@ -4,7 +4,7 @@
 ///// Datei: src/luchs_cuda_log_buffer.hpp
 
 #pragma once
-#include <cuda_runtime.h>
+#include <cuda_runtime.h>   // cudaStream_t
 #include <cuda.h>
 #include <cstddef>
 #include <cstdio>
@@ -20,11 +20,17 @@ static constexpr size_t LOG_MESSAGE_MAX = 512;         // hard cap per single de
 // ============================================================================
 namespace LuchsLogger {
 
+    // ------------------------------------------------------------------------
+    // Device & kernel declarations only when compiling with NVCC/Clang-CUDA
+    // (Host-only translation units won't see CUDA attributes.)
+    // ------------------------------------------------------------------------
+#if defined(__CUDACC__)
     // Device-side call, stores message into the device log buffer (ASCII)
     __device__ void deviceLog(const char* file, int line, const char* msg);
 
     // Kernel to reset the log buffer (internal use)
     __global__ void resetLogKernel();
+#endif
 
     // Host-side: reset the device log buffer
     void resetDeviceLog();
@@ -51,3 +57,16 @@ namespace LuchsLogger {
     bool isCudaLogBufferInitialized();
 
 } // namespace LuchsLogger
+
+// ----------------------------------------------------------------------------
+// Convenience macro for device logging:
+// - In device code expands to LuchsLogger::deviceLog(...)
+// - In host-only code it's a no-op (safe to include this header anywhere)
+// ----------------------------------------------------------------------------
+#ifndef LUCHS_LOG_DEVICE
+  #if defined(__CUDA_ARCH__)
+    #define LUCHS_LOG_DEVICE(MSG) ::LuchsLogger::deviceLog(__FILE__, __LINE__, (MSG))
+  #else
+    #define LUCHS_LOG_DEVICE(MSG) do { (void)(MSG); } while(0)
+  #endif
+#endif

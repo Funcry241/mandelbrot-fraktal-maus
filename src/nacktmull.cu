@@ -18,6 +18,20 @@
 #include "nacktmull_color.cuh"  // Farb- & Pack-Helfer (header-only)
 #include "core_kernel.h"        // PerturbParams, PertStore
 
+// --- Device-Log: Header (falls vorhanden) + Fallback -------------------------
+#include "luchs_cuda_log_buffer.hpp"   // definiert i. d. R. LUCHS_LOG_DEVICE
+#ifndef LUCHS_LOG_DEVICE
+#define LUCHS_LOG_DEVICE(msg) do { (void)(msg); } while(0)
+#endif
+
+// --- DE-Soft-Edge lokale Defaults (falls nicht in Settings.hpp vorhanden) ----
+#ifndef DE_SOFT_EDGE_ENABLE
+#define DE_SOFT_EDGE_ENABLE 1
+#endif
+#ifndef DE_SOFT_K
+#define DE_SOFT_K 0.6f
+#endif
+
 // ============================================================================
 // Animation-Uniforms (vom Host pro Frame gesetzt)
 // ============================================================================
@@ -182,13 +196,43 @@ extern "C" void nacktmull_set_progressive(const void* zDev,const void* itDev,
 }
 
 // ============================================================================
+// Device-safe Minimal-Formatter für Guard-Logs (nur ints, 1 Zeile)
+// ============================================================================
+__device__ __forceinline__ int dev_append(char* dst, const char* s){
+    int n=0; while (s[n]) { dst[n]=s[n]; ++n; } return n;
+}
+__device__ __forceinline__ int dev_itoa(char* dst, int v){
+    unsigned int x = (v<0) ? (unsigned)(-v) : (unsigned)v;
+    char tmp[12]; int k=0;
+    do { tmp[k++] = char('0' + (x % 10)); x/=10; } while(x);
+    int p=0;
+    if (v<0) dst[p++]='-';
+    for (int i=k-1;i>=0;--i) dst[p++]=tmp[i];
+    return p;
+}
+__device__ __forceinline__ void dev_log_guard_hit(int x,int y,int i,int len,int ver){
+    char buf[96]; int p=0;
+    p += dev_append(buf+p, "[PERT][GUARD] xy=");
+    p += dev_itoa(buf+p, x);
+    buf[p++]=','; p+=dev_itoa(buf+p,y);
+    p += dev_append(buf+p, " i=");
+    p += dev_itoa(buf+p, i);
+    p += dev_append(buf+p, " len=");
+    p += dev_itoa(buf+p, len);
+    p += dev_append(buf+p, " ver=");
+    p += dev_itoa(buf+p, ver);
+    buf[p]=0;
+    LUCHS_LOG_DEVICE(buf);
+}
+
+// ============================================================================
 // Unified Kernel – Direct ODER Progressive (branch by g_prog.enabled)
-// - PERT (telemetry only): if g_pert.active!=0, track delta along z_ref
-//   using double precision recurrence:
+// - PERT ACTIVE PATH: z = z_ref + delta, delta (double) via
 //     delta = 2*z_ref[i]*delta + delta^2 + (c - g_pert.c_ref)
-//   Guard: stop per-thread tracking if |delta| > g_pert.deltaGuard or non-finite.
-//   At block end: atomicMax onto d_deltaMax (float bits).
-//   This does NOT alter image (classic iteration remains authoritative).
+//   Guard: !finite(delta) oder |delta| > deltaGuard -> Fallback klassisch.
+//   DE: w = 2*z*w + 1 (Start w=0) -> Soft-Edge als Palette-Weichmacher.
+//   Blockende: atomicMax(|delta|_max) -> d_deltaMax (float bits).
+// - Klassischer Pfad: unverändert (mit Periodizität, Warp-Frühstopp).
 // ============================================================================
 __global__ __launch_bounds__(Settings::MANDEL_BLOCK_X * Settings::MANDEL_BLOCK_Y)
 void mandelbrotUnifiedKernel(
@@ -212,15 +256,10 @@ void mandelbrotUnifiedKernel(
     }
 
     const bool prog = (g_prog.enabled && g_prog.z && g_prog.it && g_prog.addIter>0);
+    const bool pert_on = (g_pert.active != 0) && (g_pert.len > 0);
     const float esc2=4.0f;
 
-    // ---------------------- PERT init (telemetry only) -----------------------
-    const bool pert_on = (g_pert.active != 0) && (g_pert.len > 0);
-    bool trackPert = pert_on;
-    double2 delta = make_double2(0.0, 0.0);
-    double  dmax  = 0.0;
-
-    // Progressive Pfad
+    // Progressive Pfad – vorerst ohne PERT (Index-Mapping später)
     if (prog){
         int it = (int)g_prog.it[idx];
         float2 z0 = g_prog.z[idx];
@@ -236,18 +275,11 @@ void mandelbrotUnifiedKernel(
         for (int s=0;s<stepLimit;++s){
             const float x2=zx*zx, y2=zy*zy;
             if (x2+y2>esc2){ break; }
-
-            // (Optional) PERT telemetry for progressive: use approx i index if available
-            // For simplicity in this step we skip PERT inside progressive to avoid
-            // mismatched i indexing; classical path remains telemetry source.
             const float xt=x2-y2+c.x; zy=__fmaf_rn(2.0f*zx,zy,c.y); zx=xt; ++it;
         }
         g_prog.it[idx]=(uint16_t)min(it,65535); g_prog.z[idx]=make_float2(zx,zy);
 
-        // Basispalette
         float3 rgb = shade_color_only(it, iterCap, zx, zy, tSec);
-
-        // Rüsselwarze nur außerhalb (it < iterCap)
         if (it < iterCap){
             float luma = zk_luma_srgb(rgb);
             float r2=zx*zx+zy*zy; float smoothX;
@@ -268,7 +300,128 @@ void mandelbrotUnifiedKernel(
         return;
     }
 
-    // [ZK] Direct Pfad (mit Periodizität) + Warp-Frühstopp (Chunk + Vote)
+    // ========================================================================
+    // PERT ACTIVE PATH (klassik bleibt Fallback & Referenz)
+    // ========================================================================
+    double dmax = 0.0;
+    if (pert_on) {
+        double2 delta = make_double2(0.0, 0.0);
+        double2 wder  = make_double2(0.0, 0.0); // w = 2*z*w + 1
+        int it = 0;
+        bool fallback = false;
+        float zx_out = 0.f, zy_out = 0.f;
+
+        for (; it < maxIter; ++it) {
+            if (it >= g_pert.len) { fallback = true; break; }
+
+            // Load reference orbit sample
+            double2 zr;
+            if (g_pert.store == PertStore::Const) {
+                zr = zrefConst[it];
+            } else {
+                if (!g_zrefGlob) { fallback = true; break; }
+                zr = g_zrefGlob[it];
+            }
+
+            // delta_{n+1} = 2*z_ref*delta + delta^2 + (c - c_ref)
+            const double2 delta_sq = make_double2(delta.x*delta.x - delta.y*delta.y,
+                                                  2.0*delta.x*delta.y);
+            const double2 two_zr_delta = make_double2(2.0*zr.x*delta.x - 2.0*zr.y*delta.y,
+                                                      2.0*zr.x*delta.y + 2.0*zr.y*delta.x);
+            const double2 c_minus_ref = make_double2((double)c.x - g_pert.c_ref.x,
+                                                     (double)c.y - g_pert.c_ref.y);
+            delta.x = two_zr_delta.x + delta_sq.x + c_minus_ref.x;
+            delta.y = two_zr_delta.y + delta_sq.y + c_minus_ref.y;
+
+            // |delta| track + Guard -> Fallback
+            const double mag2 = delta.x*delta.x + delta.y*delta.y;
+            const double mag  = sqrt(mag2);
+            if (mag > dmax) dmax = mag;
+            if (!isfinite(mag2) || mag > g_pert.deltaGuard) {
+                if constexpr (Settings::debugLogging) {
+                    if ((it % Settings::pertDevLogEvery) == 0) {
+                        dev_log_guard_hit(x, y, it, g_pert.len, g_pert.version); // device-only ints
+                    }
+                }
+                fallback = true;
+                break;
+            }
+
+            // z = z_ref + delta  (double for accuracy)
+            const double zx_d = zr.x + delta.x;
+            const double zy_d = zr.y + delta.y;
+
+            // w = 2*z*w + 1
+            const double2 wnew = make_double2(2.0*zx_d*wder.x - 2.0*zy_d*wder.y + 1.0,
+                                              2.0*zx_d*wder.y + 2.0*zy_d*wder.x);
+            wder = wnew;
+
+            // Bailout
+            const double r2 = zx_d*zx_d + zy_d*zy_d;
+            if (r2 > 4.0) {
+                zx_out = (float)zx_d; zy_out = (float)zy_d;
+                ++it; // smooth escape uses next-iteration notion
+                break;
+            }
+        }
+
+        // Block-Reduce -> d_deltaMax (float bits)
+        {
+            __shared__ unsigned int smax_bits2;
+            if (threadIdx.x==0 && threadIdx.y==0) smax_bits2 = 0u;
+            __syncthreads();
+            atomicMax(&smax_bits2, __float_as_uint((float)dmax));
+            __syncthreads();
+            if (threadIdx.x==0 && threadIdx.y==0) {
+                atomicMax((unsigned int*)&d_deltaMax, smax_bits2);
+            }
+        }
+
+        if (!fallback) {
+            // Shade + optional DE Soft-Edge to modulate highlight amplitude only
+            float3 rgb = shade_color_only(it, maxIter, zx_out, zy_out, tSec);
+
+            if (it < maxIter){
+                float ampBase;
+                {
+                    float luma = zk_luma_srgb(rgb);
+                    float r2f=zx_out*zx_out+zy_out*zy_out; float smoothX;
+                    if (r2f>1.0000001f && it>0){
+                        float r_=sqrtf(r2f), l2=__log2f(__log2f(r_));
+                        smoothX = clamp01(((float)it - l2) / (float)maxIter);
+                    } else {
+                        smoothX = clamp01((float)it / (float)maxIter);
+                    }
+                    ampBase = (0.35f + 0.65f*luma) * (0.55f + 0.45f*smoothX);
+                }
+
+                float amp = ampBase;
+#if DE_SOFT_EDGE_ENABLE
+                {
+                    float r = sqrtf(zx_out*zx_out + zy_out*zy_out);
+                    float wabs = (float)sqrt(wder.x*wder.x + wder.y*wder.y); // statt hypot()
+                    wabs = fmaxf(wabs, 1e-18f);
+                    float de = 0.5f * logf(fmaxf(r, 1e-12f)) * (r / wabs);
+                    float soft = clamp01(1.0f - (float)DE_SOFT_K * de);
+                    amp *= soft;
+                }
+#endif
+                float3 add = warze_highlight(c, x, y, tSec, amp);
+                rgb.x = clamp01(rgb.x + add.x);
+                rgb.y = clamp01(rgb.y + add.y);
+                rgb.z = clamp01(rgb.z + add.z);
+            }
+
+            out[idx]     = zk_pack_srgb8(rgb, x, y);
+            iterOut[idx] = (uint16_t)min(it, 65535);
+            return;
+        }
+        // else: Guard/Limit -> klassischer Pfad (Bildidentität)
+    }
+
+    // ========================================================================
+    // Klassischer Pfad (Referenz, Telemetrie bleibt aktiv falls pert_on)
+    // ========================================================================
     float zx=0.f, zy=0.f;
     int it = maxIter; // default: bounded
 
@@ -279,6 +432,9 @@ void mandelbrotUnifiedKernel(
     #ifndef WARP_CHUNK
     #define WARP_CHUNK 8
     #endif
+
+    bool trackPert = pert_on;
+    double2 delta = make_double2(0.0, 0.0);
 
     unsigned mask = __activemask();
     bool done = false;
@@ -292,7 +448,6 @@ void mandelbrotUnifiedKernel(
                 if (g_pert.store == PertStore::Const) {
                     zr = zrefConst[i];
                 } else {
-                    // GLOBAL path requires valid pointer; if null -> stop tracking
                     if (!g_zrefGlob) { trackPert = false; }
                     else { zr = g_zrefGlob[i]; }
                 }
@@ -309,9 +464,7 @@ void mandelbrotUnifiedKernel(
                     const double mag  = sqrt(mag2);
                     if (mag > dmax) dmax = mag;
                     if (!isfinite(mag2) || mag > g_pert.deltaGuard) {
-                        // stop telemetry for this thread (classic path continues)
-                        trackPert = false;
-                        // (Optional rate-limited dev log could go here)
+                        trackPert = false; // stop telemetry; image path unchanged
                     }
                 }
             }
@@ -339,9 +492,7 @@ void mandelbrotUnifiedKernel(
         __shared__ unsigned int smax_bits;
         if (threadIdx.x==0 && threadIdx.y==0) smax_bits = 0u;
         __syncthreads();
-        const float dmax_f = (float)dmax;
-        unsigned int bits = __float_as_uint(dmax_f);
-        atomicMax(&smax_bits, bits);
+        atomicMax(&smax_bits, __float_as_uint((float)dmax));
         __syncthreads();
         if (threadIdx.x==0 && threadIdx.y==0) {
             atomicMax((unsigned int*)&d_deltaMax, smax_bits);
