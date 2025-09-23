@@ -14,6 +14,11 @@
 #include <vector_types.h>
 #include <vector_functions.h>
 
+// Adapter-Dependencies (Renderer/Interop) — benötigt für evaluateAndApply(...)
+#include "frame_context.hpp"
+#include "renderer_state.hpp"
+#include "cuda_interop.hpp"
+
 namespace {
 constexpr float kALPHA_E=1.0f, kBETA_C=0.5f, kTEMP_BASE=1.0f, kMIN_SIGNAL_STD=0.15f;
 constexpr float kSTD_HI=0.18f, kSTD_LO=0.12f;
@@ -224,6 +229,33 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,const std::vecto
             (float)invZE, out.distance, (float)ndcLen, a, maxTurn, temp);
     }
     return out;
+}
+
+// Convenience-Adapter: setzt shouldZoom/newOffset direkt im FrameContext,
+// respektiert die globale Pauseflagge aus CudaInterop.
+void evaluateAndApply(FrameContext& fctx, RendererState& state, ZoomState& bus, float /*gain*/) noexcept {
+    // Pause?
+    if (CudaInterop::getPauseZoom()) {
+        fctx.shouldZoom = false;
+        fctx.newOffset  = fctx.offset;
+        return;
+    }
+
+    const int tilesX = (fctx.width  + fctx.tileSize - 1) / fctx.tileSize;
+    const int tilesY = (fctx.height + fctx.tileSize - 1) / fctx.tileSize;
+
+    const float2 prev = fctx.offset;
+    ZoomResult zr = evaluateZoomTarget(
+        state.h_entropy, state.h_contrast,
+        tilesX, tilesY,
+        fctx.width, fctx.height,
+        fctx.offset, fctx.zoom,
+        prev,
+        bus
+    );
+
+    fctx.shouldZoom = zr.shouldZoom;
+    fctx.newOffset  = zr.newOffset;
 }
 
 } // namespace ZoomLogic

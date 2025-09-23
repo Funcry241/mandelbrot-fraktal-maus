@@ -8,6 +8,10 @@
 #include <vector>
 #include <vector_types.h>   // float2
 
+// Globale Forward-Decls (verhindert "ZoomLogic::FrameContext"-Schatten-Typen)
+struct FrameContext;
+class  RendererState;
+
 namespace ZoomLogic {
 
 static_assert(sizeof(float2) == 8, "float2 must be 8 bytes");
@@ -62,8 +66,6 @@ struct ZoomState {
     const std::vector<float>& entropy,
     int width, int height, int tileSize) noexcept;
 
-// Zoom V2 – eine API, eine Quelle der Wahrheit fuer Tiles.
-//  - Entropie/Kontrast pro Frame normalisieren (median/MAD)
 //  - Score = alpha*E' + beta*C'
 //  - Hysterese & Cooldown stabilisieren die Zielwahl
 //  - Offset-Glaettung (EMA), setzt shouldZoom
@@ -76,5 +78,12 @@ struct ZoomState {
     float2 currentOffset, float zoom,
     float2 previousOffset,
     ZoomState& state) noexcept;
+
+// Convenience-Adapter für die Pipeline.
+// Setzt shouldZoom/newOffset direkt im FrameContext; respektiert Pause.
+void evaluateAndApply(::FrameContext& fctx,
+                      ::RendererState& state,
+                      ZoomState& bus,
+                      float gain) noexcept;
 
 } // namespace ZoomLogic

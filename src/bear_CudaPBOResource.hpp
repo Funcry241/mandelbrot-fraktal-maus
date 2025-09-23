@@ -10,7 +10,8 @@
 #include <cstddef>          // size_t
 #include <GL/glew.h>        // GLuint
 #include <cuda_gl_interop.h>
-#include <vector_types.h>   // uchar4
+// Avoid leaking CUDA vector types in public headers.
+struct uchar4; // forward-declare for pointer-only usage
 
 namespace CudaInterop {
 

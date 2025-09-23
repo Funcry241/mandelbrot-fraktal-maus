@@ -1,11 +1,13 @@
 ///// Otter: Header-only Zoom commands; host helper implemented; ASCII-only.
-/// ///// Schneefuchs: Implementiert buildAndPushZoomCommand im FramePipeline-Namespace.
-/// ///// Maus: Specht-1 – Wrapper-Ziel, entkoppelt von TU-Interna; testbar.
-/// ///// Datei: src/zoom_command.cpp
+///// Schneefuchs: Implementiert buildAndPushZoomCommand im FramePipeline-Namespace.
+///// Maus: Specht-1 – Wrapper-Ziel, entkoppelt von TU-Interna; testbar.
+///// Datei: src/zoom_command.cpp
 
 #include "pch.hpp"
 #include "zoom_command.hpp"
 #include "frame_context.hpp"
+#include "settings.hpp"
+#include "luchs_log_host.hpp"
 
 #include <vector_types.h>
 #include <vector_functions.h> // make_float2
@@ -17,34 +19,43 @@ namespace FramePipeline
 //   extern void buildAndPushZoomCommand(FrameContext&, CommandBus&, int frameIndex, float zoomGain);
 void buildAndPushZoomCommand(FrameContext& fctx, CommandBus& bus, int frameIndex, float zoomGain)
 {
-    if (!fctx.shouldZoom) return;
+    if (!fctx.shouldZoom) {
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOMCMD] frame=%d no-op", frameIndex);
+        }
+        return;
+    }
 
-    const double2 diff = {
-        fctx.newOffset.x - fctx.offset.x,
-        fctx.newOffset.y - fctx.offset.y
-    };
-    const float prevZoom = fctx.zoom;
+    // Vorher-Zustand sichern
+    const float2 oldOffset = fctx.offset;
+    const float  oldZoom   = fctx.zoom;
 
-    fctx.offset = fctx.newOffset;
-    fctx.zoom  *= zoomGain;
-
+    // Command füllen (UI/History/Telemetry)
     ZoomCommand cmd;
     cmd.frameIndex = frameIndex;
-    cmd.oldOffset  = make_float2(
-        static_cast<float>(fctx.offset.x - diff.x),
-        static_cast<float>(fctx.offset.y - diff.y)
-    );
-    cmd.zoomBefore = prevZoom;
-    cmd.newOffset  = make_float2(
-        static_cast<float>(fctx.newOffset.x),
-        static_cast<float>(fctx.newOffset.y)
-    );
-    cmd.zoomAfter  = fctx.zoom;
-    cmd.entropy    = fctx.lastEntropy;
-    cmd.contrast   = fctx.lastContrast;
+    cmd.oldOffset  = oldOffset;
+    cmd.zoomBefore = oldZoom;
+    cmd.newOffset  = fctx.newOffset;
+    cmd.zoomAfter  = oldZoom * zoomGain;
+
+    // Falls ZoomCommand diese Felder hat, neutral setzen (FrameContext trägt sie nicht mehr):
+    // (Kein Schaden, wenn das Struct diese Felder weiterhin definiert.)
+    cmd.entropy  = 0.0f;
+    cmd.contrast = 0.0f;
 
     bus.push(cmd);
-    fctx.timeSinceLastZoom = 0.0f;
+
+    // FrameContext jetzt auf neuen Zustand umstellen
+    fctx.offset = fctx.newOffset;
+    fctx.zoom   = cmd.zoomAfter;
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[ZOOMCMD] frame=%d gain=%.6f off:(%.6f,%.6f)->(%.6f,%.6f) zoom:%.6f->%.6f",
+                       frameIndex, (double)zoomGain,
+                       oldOffset.x, oldOffset.y,
+                       fctx.newOffset.x, fctx.newOffset.y,
+                       (double)oldZoom, (double)fctx.zoom);
+    }
 }
 
 } // namespace FramePipeline

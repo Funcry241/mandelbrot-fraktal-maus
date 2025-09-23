@@ -23,12 +23,10 @@ public:
 
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
+    Renderer(Renderer&&) = delete;
+    Renderer& operator=(Renderer&&) = delete;
 
 private:
-    RendererState state;
+    RendererState state;   // Muss im .cu-Konstruktor via Initializer-Liste mit (width,height) gebaut werden
     bool glInitialized = false;
-    bool glResourcesInitialized = false;
-
-    void freeDeviceBuffers();
-    void cleanup();
 };

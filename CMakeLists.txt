@@ -1,6 +1,6 @@
 ##### Otter: CUDA 13 guard; CCCL/CUB/Thrust via CUDAToolkit; dynamic GLEW (no GLEW_STATIC); Ninja response-files.
 ##### Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; duplicate-free defines; safe device-runtime link.
-##### Maus: Arch 80/86/89/90; CUDA C++20; deterministic build; no late vcpkg hacks; fail early if CUDA < 13.0; keep /WX and silence C4505 only for CUDA TUs.
+##### Maus: Arch 80/86/89/90; CUDA C++20; deterministic build; fail early if CUDA < 13.0; silence C4505 only for CUDA TUs; Capybara-only path.
 ##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
@@ -112,28 +112,33 @@ add_executable(mandelbrot_otterdream
   src/luchs_log_host.cpp
   src/luchs_cuda_log_buffer.cu
   src/renderer_core.cu
-  src/renderer_loop.cpp  
+  src/renderer_loop.cpp
   src/renderer_pipeline.cpp
   src/renderer_window.cpp
   src/renderer_resources.cpp
   src/heatmap_overlay.cpp
   src/warzenschwein_overlay.cpp
   src/cuda_interop.cu
-  src/core_kernel.cu
+  # Capybara path
+  src/capybara_render_kernel.cu
+  src/colorize_iterations.cu
+  # Zoom & control
   src/zoom_logic.cpp
   src/zoom_command.cpp
+  # Frame + context + utilities
   src/frame_pipeline.cpp
   src/frame_context.cpp
   src/hermelin_buffer.cpp
   src/bear_CudaPBOResource.cpp
   src/frame_capture.cpp
   src/fps_meter.cpp
-  src/hud_text.cpp
-  src/nacktmull.cu
-  src/nacktmull_api.cpp
   src/renderer_state_cuda.cpp
   src/renderer_state_gl.cpp
-  src/nacktmull_color.cuh
+  # --- Legacy entfernt ---
+  # src/core_kernel.cu           # classic kernels removed (no launch_mandelbrotHybrid / EC)
+  # src/nacktmull.cu
+  # src/nacktmull_api.cpp
+  # src/nacktmull_color.cuh
 )
 
 # ---------------------- Compile-Options --------------------
@@ -144,7 +149,7 @@ if(MSVC)
 
   # Host (C++) STRIKT mit /WX; CUDA-Host ebenfalls /WX, aber gezielt C4505 aus CUDA CRT unterdrücken
   target_compile_options(mandelbrot_otterdream PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /permissive- /Zc:__cplusplus>
+    $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /permissive- /Zc:__cplusplus /Brepro>
     $<$<COMPILE_LANGUAGE:CUDA>:
       -Xcompiler=/W4
       -Xcompiler=/WX
@@ -152,6 +157,7 @@ if(MSVC)
       -Xcompiler=/Zc:__cplusplus
       -Xcompiler=/wd4505
       -Xcompiler=/MT$<$<CONFIG:Debug>:d>
+      -Xcompiler=/Brepro
     >
   )
 else()
@@ -195,10 +201,14 @@ target_include_directories(mandelbrot_otterdream PRIVATE
 target_compile_definitions(mandelbrot_otterdream PRIVATE
   GLEW_NO_IMAGING
   GLEW_NO_GLU
+  CAPY_DEFAULT_ON=1
+)
+# CUDA 13 vector-types deprecation guard (harmless if unused)
+target_compile_definitions(mandelbrot_otterdream PRIVATE
+  $<$<COMPILE_LANGUAGE:CUDA>:__NV_NO_VECTOR_DEPRECATION_DIAG>
 )
 
 # ---------------------- Link -------------------------------
-# Bei SC/Resolve verlinkt CMake cudadevrt i. d. R. selbst; falls nicht vorhanden, guarden.
 target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
   ${GLEW_TARGET}
@@ -213,7 +223,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_link_options(mandelbrot_otterdream PRIVATE -pthread)
 endif()
 
-# Windows: Host-Linker-Härtung (nur C++-Host, nicht Device-Link)
+# Windows: Host-Linker-Härtung + deterministisch (Host-Link)
 if(MSVC)
   target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<COMPILE_LANGUAGE:CXX>>:/guard:cf>
@@ -222,6 +232,7 @@ if(MSVC)
     $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO /OPT:REF /OPT:ICF>>
     $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
     $<$<CONFIG:RelWithDebInfo>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
+    $<HOST_LINK:/Brepro>
   )
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "HIGHENTROPYVA erfordert 64-bit (/MACHINE:X64). Bitte 64-bit Toolchain verwenden.")

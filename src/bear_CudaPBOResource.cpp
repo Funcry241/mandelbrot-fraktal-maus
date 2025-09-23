@@ -121,9 +121,8 @@ uchar4* bear_CudaPBOResource::mapAndLog() {
 
 // 🐻 Overload mit Größenprüfung (Guard gegen PBO-Mismatch)
 uchar4* bear_CudaPBOResource::mapAndLogExpect(size_t expectedBytes) {
-    size_t sz = 0;
     uchar4* p = mapAndLog();
-    sz = lastSize_;
+    const size_t sz = lastSize_;
     if (p && expectedBytes && sz < expectedBytes) {
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ERROR] PBO mapped size too small: have=%zu need=%zu", sz, expectedBytes);

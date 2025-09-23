@@ -11,17 +11,17 @@
 #include <array>
 #include <vector_types.h>        // float2/double2 (__align__-Typen -> MSVC C4324)
 #include "hermelin_buffer.hpp"   // RAII-Wrapper fuer GL/CUDA-Buffer (by value erforderlich)
-#include "zoom_logic.hpp"        // ZoomLogic::ZoomState (by-value Member -> vollständiger Typ noetig)
+#include "zoom_logic.hpp"        // ZoomLogic::ZoomState (by-value Member -> vollständiger Typ nötig)
 
 // Vorwaertsdeklarationen statt schwerer Header
 struct GLFWwindow;
-struct __GLsync; using GLsync = __GLsync*; // [ZK] GLsync vorwaerts deklariert (keine GL-Header hier)
+struct __GLsync; using GLsync = __GLsync*; // [ZK] GLsync vorwärts deklariert (keine GL-Header hier)
 
-// CUDA-Primitive schlank vorwaerts deklarieren (kein cuda_runtime*-Include im Header)
+// CUDA-Primitive schlank vorwärts deklarieren (kein cuda_runtime*-Include im Header)
 struct CUstream_st; using cudaStream_t = CUstream_st*; // Ownership liegt beim RendererState
-struct CUevent_st;  using cudaEvent_t  = CUevent_st*;  // Events fuer Render->E/C->Copy Verkettung
+struct CUevent_st;  using cudaEvent_t  = CUevent_st*;  // Events für Render-Ketten
 
-// MSVC: float2/double2 sind __align__-Typen -> C4324 (Padding). Lokal und gezielt unterdruecken.
+// MSVC: float2/double2 sind __align__-Typen -> C4324 (Padding). Lokal und gezielt unterdrücken.
 #if defined(_MSC_VER)
   #pragma warning(push)
   #pragma warning(disable : 4324)
@@ -47,7 +47,7 @@ public:
     float  fps       = 0.0f;
     float  deltaTime = 0.0f;
 
-    // 🧩 Analysepuffer (Host)
+    // 🧩 Analyse/Overlay (Host) – EC-Pfad aktuell entfernt; Vektoren dürfen leer sein.
     int                 lastTileSize = 0;
     std::vector<float>  h_entropy;
     std::vector<float>  h_contrast;
@@ -55,10 +55,11 @@ public:
     bool                h_entropyPinned  = false;
     bool                h_contrastPinned = false;
 
-    // 🔗 Analyse/Iteration (Device) mit RAII
+    // 🔗 GPU-Puffer (RAII)
+    // Iterationspuffer ist aktiv; EC-Puffer werden toleriert/weitergereicht (No-Op im aktuellen Pfad).
     Hermelin::CudaDeviceBuffer d_iterations; // uint16_t[width*height]
-    Hermelin::CudaDeviceBuffer d_entropy;    // float[numTiles]
-    Hermelin::CudaDeviceBuffer d_contrast;   // float[numTiles]
+    Hermelin::CudaDeviceBuffer d_entropy;    // float[numTiles]   (legacy/overlay)
+    Hermelin::CudaDeviceBuffer d_contrast;   // float[numTiles]   (legacy/overlay)
 
     // ➕ Progressive-State (Per-Pixel Resume)
     Hermelin::CudaDeviceBuffer d_stateZ;     // float2[width*height]
@@ -68,7 +69,7 @@ public:
 
     // 🎥 OpenGL-Zielpuffer (Interop via CUDA) mit RAII
     // Spiegel von Settings::pboRingSize (numerisch, um Header entkoppelt zu halten).
-    // Konsistenz wird in .cpp/.cu via static_assert geprüft.
+    // Konsistenz wird in TU(s) via static_assert geprüft.
     static constexpr int kPboRingSize = 8; // <— an Settings::pboRingSize angleichen
 
     std::array<Hermelin::GLBuffer, kPboRingSize> pboRing{};
@@ -98,13 +99,15 @@ public:
     bool        warzenschweinOverlayEnabled = false;
     std::string warzenschweinText;
 
-    // 🎬 CUDA Streams (Ownership im State) – 4e/4f
-    cudaStream_t renderStream = nullptr; // non-blocking
-    cudaStream_t copyStream   = nullptr; // non-blocking (D->H Copy / Staging)
+    // 🎬 CUDA Streams (Ownership im State) – non-blocking
+    cudaStream_t renderStream = nullptr;
+    cudaStream_t copyStream   = nullptr;
 
-    // 🎯 CUDA Events zur asynchronen Verkettung (Render -> E/C -> Copy)
-    cudaEvent_t  evEcDone   = nullptr; // signalisiert: Entropy/Contrast fertig (auf renderStream recorded)
-    cudaEvent_t  evCopyDone = nullptr; // optional: D->H Copy fertig (auf copyStream recorded)
+    // 🎯 CUDA Events zur asynchronen Verkettung
+    // evEcDone wurde früher für EC benutzt; im Render-only Pfad wird es nach dem Rendern aufgezeichnet,
+    // damit nachgelagerte Stufen (optional) warten können.
+    cudaEvent_t  evEcDone   = nullptr;
+    cudaEvent_t  evCopyDone = nullptr; // optional: D->H-Transfers fertig (derzeit kaum genutzt)
 
     // ⏱️ Timings – CUDA + HOST konsolidiert
     struct CudaPhaseTimings {
@@ -112,8 +115,8 @@ public:
         double mandelbrotTotal  = 0.0;
         double mandelbrotLaunch = 0.0;
         double mandelbrotSync   = 0.0;
-        double entropy          = 0.0;
-        double contrast         = 0.0;
+        double entropy          = 0.0; // legacy
+        double contrast         = 0.0; // legacy
         double deviceLogFlush   = 0.0;
         double pboMap           = 0.0;
         double uploadMs         = 0.0;

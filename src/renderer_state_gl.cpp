@@ -4,6 +4,9 @@
 ///// Datei: src/renderer_state_gl.cpp
 
 #include "pch.hpp"
+#include "luchs_log_host.hpp"
+#include <GL/glew.h>
+
 #include "renderer_state.hpp"
 #include "settings.hpp"
 #include "cuda_interop.hpp"
@@ -11,11 +14,6 @@
 #include "renderer_resources.hpp"
 
 #include <algorithm>
-
-// GL forward utils expected in renderer_resources.hpp
-// - OpenGLUtils::setGLResourceContext(const char*)
-// - OpenGLUtils::createPBO(int w,int h)
-// - OpenGLUtils::createTexture(int w,int h)
 
 namespace {
 // ----- PixelScale (GL-Seite nutzt Reset/Resize) --------------------------------
@@ -48,8 +46,8 @@ RendererState::~RendererState() {
 
 void RendererState::reset() {
     zoom   = static_cast<double>(Settings::initialZoom);
-    center = make_double2(static_cast<double>(Settings::initialOffsetX),
-                          static_cast<double>(Settings::initialOffsetY));
+    center = double2{ static_cast<double>(Settings::initialOffsetX),
+                      static_cast<double>(Settings::initialOffsetY) };
     recomputePixelScale(*this);
 
     baseIterations = Settings::INITIAL_ITERATIONS;
@@ -83,7 +81,6 @@ void RendererState::reset() {
     clearPboFences(*this);
     std::fill(pboFence.begin(), pboFence.end(), (GLsync)0);
     pboIndex = 0;
-    // Ring-Statistik zurücksetzen (LOG-6)
     for (unsigned& u : ringUse) u = 0;
     ringSkip = 0;
 

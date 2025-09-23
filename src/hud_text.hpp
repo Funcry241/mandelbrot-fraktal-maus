@@ -8,7 +8,7 @@
 #include <string>
 
 // Schlank: nur Forward-Declarations statt schwerer Includes.
-class FrameContext;
+struct FrameContext;
 class RendererState;
 
 namespace HudText {

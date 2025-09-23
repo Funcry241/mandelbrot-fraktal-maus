@@ -1,152 +1,108 @@
 ///// Otter: Renderer-Core – GL init + window; enables filtered KHR_debug (noisy severities off); no zoom logic here.
-///**/ Schneefuchs: Strict CUDA/GL separation; deterministic ASCII logs; resources clearly owned; duplicate resize removed.
-///**/ Maus: Progressive cooldown + Tatze 7 soft-invalidate on view jumps (post-pipeline, no memset).
+///// Schneefuchs: Strict CUDA/GL separation; deterministic ASCII logs; resources clearly owned; duplicate resize removed.
+///// Maus: Progressive cooldown + Tatze 7 soft-invalidate on view jumps (post-pipeline, no memset).
 ///// Datei: src/renderer_core.cu
 
 #include "pch.hpp"
+#include "luchs_log_host.hpp"   // LUCHS_LOG_HOST
+#include <GL/glew.h>            // GLEW + KHR_debug tokens
 
-#include "nacktmull_api.hpp"
-#include "renderer_state.hpp"
-#include "settings.hpp"
 #include "renderer_core.hpp"
+#include "renderer_state.hpp"
 #include "renderer_window.hpp"
 #include "renderer_pipeline.hpp"
 #include "renderer_resources.hpp"
 #include "cuda_interop.hpp"
 #include "heatmap_overlay.hpp"
 #include "frame_pipeline.hpp"
-#include "luchs_log_host.hpp"
+#include "settings.hpp"
 
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
 #include <stdexcept>
-#include <algorithm> // std::max
-#include <cmath>     // std::abs
+#include <algorithm>
 
-// --- OpenGL KHR_debug (asynchronous) + sRGB default FB capability logging ---
 namespace {
-    // KHR_debug callback: ASCII-only, non-blocking
-    static void APIENTRY GlDebugCallback(GLenum source, GLenum type, GLuint id,
-                                         GLenum severity, GLsizei length, const GLchar* message, const void* userParam) {
-        (void)length; (void)userParam;
-        LUCHS_LOG_HOST("[GL-DBG] src=%u type=%u id=%u sev=%u msg=%s",
-                       (unsigned)source, (unsigned)type, id, (unsigned)severity,
-                       message ? message : "(null)");
+    void APIENTRY GlDebugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei,
+                                  const GLchar* message, const void*) {
+        // Filter: skip noisy severities
+        if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
+        if (severity == GL_DEBUG_SEVERITY_LOW)          return;
+
+        const char* src =
+            source == GL_DEBUG_SOURCE_API             ? "API" :
+            source == GL_DEBUG_SOURCE_WINDOW_SYSTEM   ? "WIN" :
+            source == GL_DEBUG_SOURCE_SHADER_COMPILER ? "SHDR" :
+            source == GL_DEBUG_SOURCE_THIRD_PARTY     ? "3RD" :
+            source == GL_DEBUG_SOURCE_APPLICATION     ? "APP" : "OTH";
+
+        const char* typ =
+            type == GL_DEBUG_TYPE_ERROR               ? "ERR"  :
+            type == GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR ? "DEPR" :
+            type == GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR  ? "UNDEF":
+            type == GL_DEBUG_TYPE_PORTABILITY         ? "PORT" :
+            type == GL_DEBUG_TYPE_PERFORMANCE         ? "PERF" :
+            type == GL_DEBUG_TYPE_MARKER              ? "MARK" :
+            type == GL_DEBUG_TYPE_PUSH_GROUP          ? "PUSH" :
+            type == GL_DEBUG_TYPE_POP_GROUP           ? "POP"  : "OTH";
+
+        const char* sev =
+            severity == GL_DEBUG_SEVERITY_HIGH   ? "HIGH" :
+            severity == GL_DEBUG_SEVERITY_MEDIUM ? "MED"  : "LOW";
+
+        LUCHS_LOG_HOST("[GLDBG][%s][%s][%s] id=%u msg=\"%s\"", src, typ, sev, id, message);
     }
+} // anon
 
-    static void EnableGlDebugOutputOnce() {
-    #ifdef GL_DEBUG_OUTPUT
-        glEnable(GL_DEBUG_OUTPUT); // asynchronous (no sync debug)
+// --- Renderer impl ------------------------------------------------------------
 
-        // Filter out very noisy severities to minimize runtime overhead
-        // (available in GL 4.3 core or KHR_debug)
-    #ifdef GL_DEBUG_SEVERITY_NOTIFICATION
-        glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
-    #endif
-    #ifdef GL_DEBUG_SEVERITY_LOW
-        glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_LOW, 0, nullptr, GL_FALSE);
-    #endif
-
-        glDebugMessageCallback(GlDebugCallback, nullptr);
-        LUCHS_LOG_HOST("[GL] KHR_debug enabled (async, low+notification filtered)");
-    #endif
-        // Log default framebuffer sRGB capability (once)
-        GLint enc = 0;
-        glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT,
-            GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING, &enc);
-        const bool fbIsSRGB = (enc == GL_SRGB);
-        LUCHS_LOG_HOST("[GL] Default FB sRGB capable: %d", fbIsSRGB ? 1 : 0);
-    }
-} // namespace
-
-Renderer::Renderer(int width, int height)
-: state(width, height)
+Renderer::Renderer(int w, int h)
+: state(w, h) // RendererState hat keinen Default-Konstruktor
 {
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[DEBUG] Renderer::Renderer() started");
-    }
 }
 
-Renderer::~Renderer() {
-    cleanup();
-}
+Renderer::~Renderer() = default;
 
 bool Renderer::initGL() {
-    if (glInitialized) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[WARN] Renderer::initGL() called twice; ignoring");
-        }
-        return true;
-    }
-
     // Create window + GL context
     state.window = RendererWindow::createWindow(state.width, state.height, this);
     if (!state.window) {
-        LUCHS_LOG_HOST("[ERROR] Failed to create GLFW window");
-        return false;
+        throw std::runtime_error("GLFW window init failed");
     }
 
-    // createWindow() already makes context current; second call is harmless.
-    glfwMakeContextCurrent(state.window);
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[DEBUG] OpenGL context made current");
-        if (glfwGetCurrentContext() != state.window) {
-            LUCHS_LOG_HOST("[ERROR] Current OpenGL context is not the GLFW window!");
-        } else {
-            LUCHS_LOG_HOST("[CHECK] OpenGL context correctly bound to window");
+    // GLEW init (post-context)
+    glewExperimental = GL_TRUE;
+    GLenum rc = glewInit();
+    if (rc != GLEW_OK) {
+        LUCHS_LOG_HOST("[INIT][ERR] glewInit rc=%u", (unsigned)rc);
+        throw std::runtime_error("GLEW init failed");
+    }
+
+    // Enable KHR_debug with filtered severities
+    glEnable(GL_DEBUG_OUTPUT);
+    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+    glDebugMessageCallback(&GlDebugCallback, nullptr);
+    glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
+    glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_LOW,           0, nullptr, GL_FALSE);
+
+    // SRGB default FB capability (info only) – robust gegen Token-Varianten
+    {
+        GLint srgbCap = 0;
+        bool logged = false;
+        #ifdef GL_FRAMEBUFFER_SRGB_CAPABLE
+            glGetIntegerv(GL_FRAMEBUFFER_SRGB_CAPABLE, &srgbCap);
+            LUCHS_LOG_HOST("[INIT] GL sRGB-capable default FB: %d", (int)srgbCap);
+            logged = true;
+        #elif defined(GL_FRAMEBUFFER_SRGB_CAPABLE_EXT)
+            glGetIntegerv(GL_FRAMEBUFFER_SRGB_CAPABLE_EXT, &srgbCap);
+            LUCHS_LOG_HOST("[INIT] GL sRGB-capable default FB (EXT): %d", (int)srgbCap);
+            logged = true;
+        #endif
+        if (!logged) {
+            LUCHS_LOG_HOST("[INIT] GL sRGB-capable default FB: token-missing");
         }
     }
 
-    // GLEW init (idempotent enough; log errors clearly)
-    GLenum glewErr = glewInit();
-    if (glewErr != GLEW_OK) {
-        LUCHS_LOG_HOST("[FATAL] glewInit failed: %s",
-                       reinterpret_cast<const char*>(glewGetErrorString(glewErr)));
-        RendererWindow::destroyWindow(state.window);
-        state.window = nullptr;
-        return false;
-    }
-
-    // Enable GL debug output (filtered) and log default FB sRGB capability
-    EnableGlDebugOutputOnce();
-
-    // --- Log OpenGL & GLSL versions (requested) ---
-    if constexpr (Settings::debugLogging) {
-        GLint major = 0, minor = 0;
-        glGetIntegerv(GL_MAJOR_VERSION, &major);
-        glGetIntegerv(GL_MINOR_VERSION, &minor);
-        const char* glVer   = reinterpret_cast<const char*>(glGetString(GL_VERSION));
-        const char* glslVer = reinterpret_cast<const char*>(glGetString(GL_SHADING_LANGUAGE_VERSION));
-        LUCHS_LOG_HOST("[GL] OpenGL %d.%d | %s | GLSL %s",
-                       major, minor,
-                       glVer ? glVer : "?",
-                       glslVer ? glslVer : "?");
-    }
-
-    // Note: VSync preference is initialized exactly once in renderer_loop.cpp (initVSyncOnce).
-    // Renderer core does not touch swap interval here to avoid conflicting policies.
-
-    // Create GL resources: PBO + texture (immutable storage)
-    if (!glResourcesInitialized) {
-        OpenGLUtils::setGLResourceContext("init");
-        for (auto& b : state.pboRing) { b = Hermelin::GLBuffer(OpenGLUtils::createPBO(state.width, state.height)); }
-        state.pboIndex = 0;
-        state.tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(state.width, state.height));
-
-        // Register PBO with CUDA (CudaInterop encapsulates CUDA-13 compatible path)
-        CudaInterop::registerPBO(state.currentPBO());
-
-        // Clean GL state: unbind PBO
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
-        glResourcesInitialized = true;
-        if constexpr (Settings::debugLogging) {
-            GLint boundPBO = 0;
-            glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &boundPBO);
-            LUCHS_LOG_HOST("[CHECK] initGL - GL PBO bound: %d | PBO ID: %u",
-                           boundPBO, state.currentPBO().id());
-        }
-    }
+    // CUDA context log
+    CudaInterop::logCudaDeviceContext("init");
 
     glInitialized = true;
     if constexpr (Settings::debugLogging) {
@@ -166,153 +122,11 @@ bool Renderer::shouldClose() const {
     return RendererWindow::shouldClose(state.window);
 }
 
-void Renderer::renderFrame() {
-    // Delegate to pipeline: CUDA -> analysis -> upload -> draw -> logs
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PIPE] Entering Renderer::renderFrame");
-    }
-
-    // Progressive resume: set __constant__ program state once per frame (gated by cooldown)
-    // Enables kernel-side "resume" only if: global + runtime flags true, state buffers present, and not in cooldown.
-    {
-        const bool inCooldown = (state.progressiveCooldownFrames > 0);
-        const bool progReady =
-            Settings::progressiveEnabled &&
-            state.progressiveEnabled &&
-            (state.d_stateZ.get()  != nullptr) &&
-            (state.d_stateIt.get() != nullptr) &&
-            !inCooldown;
-
-        const int addIter = Settings::progressiveAddIter; // per-frame budget
-        const int iterCap = state.maxIterations;
-        const int enabled = progReady ? 1 : 0;
-
-        nacktmull_set_progressive(
-            state.d_stateZ.get(),
-            state.d_stateIt.get(),
-            addIter,
-            iterCap,
-            enabled
-        );
-
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PROG] set_progressive enabled=%d cooldown=%d addIter=%d cap=%d z=%p it=%p",
-                           enabled, state.progressiveCooldownFrames, addIter, iterCap,
-                           (void*)state.d_stateZ.get(), (void*)state.d_stateIt.get());
-        }
-    }
-
-    // Execute one frame (no device-wide sync in this path)
-    FramePipeline::execute(state);
-
-    // ---------- Tatze 7: Soft-invalidate on abrupt view change (post-pipeline) ----------
-    // Detect large jumps in zoom or center (screen-space) and pause progressive resume for one frame.
-    // Thresholds: zoomRatio >= 1.5 OR pan >= 8.0 px -> soft invalidate (no memset).
-    {
-        struct PrevView { bool have=false; double zoom=0.0, cx=0.0, cy=0.0; };
-        static PrevView prev;
-
-        bool justInvalidated = false;
-
-        if (prev.have) {
-            const double z0 = std::max(prev.zoom, 1e-30);
-            const double z1 = std::max((double)state.zoom, 1e-30);
-            const double zoomRatio = (z1 > z0) ? (z1 / z0) : (z0 / z1);
-
-            // Screen-space pan in pixels
-            const double psx = std::max(std::abs(state.pixelScale.x), 1e-30);
-            const double psy = std::max(std::abs(state.pixelScale.y), 1e-30);
-            const double dxPix = std::abs(((double)state.center.x - prev.cx) / psx);
-            const double dyPix = std::abs(((double)state.center.y - prev.cy) / psy);
-            const double panPix = std::max(dxPix, dyPix);
-
-            const bool jump = (zoomRatio >= 1.5) || (panPix >= 8.0);
-
-            if (jump) {
-                state.invalidateProgressiveState(/*hardReset=*/false);
-                justInvalidated = true;
-                if constexpr (Settings::debugLogging) {
-                    LUCHS_LOG_HOST("[PROG] soft-invalidate: zoomRatio=%.3f panPix=%.2f (th=1.5/8)",
-                                   zoomRatio, panPix);
-                }
-            }
-        }
-
-        // Decrement cooldown unless we invalidated just now; when it hits zero, re-enable progressive.
-        if (state.progressiveCooldownFrames > 0) {
-            if (!justInvalidated) {
-                --state.progressiveCooldownFrames;
-                if (state.progressiveCooldownFrames == 0) {
-                    state.progressiveEnabled = true;
-                    if constexpr (Settings::debugLogging) {
-                        LUCHS_LOG_HOST("[PROG] cooldown finished -> progressiveEnabled=true");
-                    }
-                }
-            } else {
-                if constexpr (Settings::debugLogging) {
-                    LUCHS_LOG_HOST("[PROG] cooldown kept at %d (fresh invalidate this frame)",
-                                   state.progressiveCooldownFrames);
-                }
-            }
-        }
-
-        // Update previous view state at end of frame
-        prev.zoom = (double)state.zoom;
-        prev.cx   = (double)state.center.x;
-        prev.cy   = (double)state.center.y;
-        prev.have = true;
-    }
-    // ---------- End Tatze 7 --------------------------------------------------------
-
-    // Present window / pump events
-    glfwSwapBuffers(state.window);
-    glfwPollEvents();
-}
-
-void Renderer::freeDeviceBuffers() {
-    // GPU/GL buffers
-    state.d_iterations.free();
-    state.d_entropy.free();
-    state.d_contrast.free();
-
-    // Progressive per-pixel state
-    state.d_stateZ.free();
-    state.d_stateIt.free();
-
-    for (auto& b : state.pboRing) { b.free(); }
-    state.tex.free();
-}
-
 void Renderer::resize(int newW, int newH) {
-    if (newW <= 0 || newH <= 0) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[WARN] Renderer::resize ignored invalid size %dx%d", newW, newH);
-        }
-        return;
-    }
-    if (newW == state.width && newH == state.height) return;
-
-    // State updates PBO/texture/device buffers and re-registers PBO if needed.
+    // GLFW-Callback ruft das; Größe und alle GL/CUDA-Ressourcen werden im State gehandhabt
     state.resize(newW, newH);
 }
 
-void Renderer::cleanup() {
-    if (!glInitialized) return;
-
-    // GL-dependent: pipeline first
-    RendererPipeline::cleanup();
-    HeatmapOverlay::cleanup();
-
-    // Release CUDA interop (no GL context required)
-    CudaInterop::unregisterPBO();
-
-    // Destroy window (and GL context)
-    RendererWindow::destroyWindow(state.window);
-
-    // Host-side
-    freeDeviceBuffers();
-    glfwTerminate();
-
-    glInitialized = false;
-    glResourcesInitialized = false;
+void Renderer::renderFrame() {
+    FramePipeline::execute(state);
 }
