@@ -309,20 +309,3 @@ void RendererState::setupCudaBuffers(int tileSize) {
 
     lastTileSize = tileSize;
 }
-
-// ========================= Progressive State Control ==========================
-
-void RendererState::invalidateProgressiveState(bool hardReset) noexcept {
-    progressiveEnabled        = false;
-    progressiveCooldownFrames = 2;
-
-    if (hardReset) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PROG] hardReset requested (state will be cleared on next allocation)");
-        }
-    } else {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PROG] soft invalidate: cooldown=%d", progressiveCooldownFrames);
-        }
-    }
-}

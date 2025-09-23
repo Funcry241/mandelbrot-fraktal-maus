@@ -123,8 +123,7 @@ add_executable(mandelbrot_otterdream
   src/capybara_render_kernel.cu
   src/colorize_iterations.cu
   # Zoom & control
-  src/zoom_logic.cpp
-  src/zoom_command.cpp
+  src/zoom_logic.cpp  
   # Frame + context + utilities
   src/frame_pipeline.cpp
   src/frame_context.cpp
@@ -133,12 +132,7 @@ add_executable(mandelbrot_otterdream
   src/frame_capture.cpp
   src/fps_meter.cpp
   src/renderer_state_cuda.cpp
-  src/renderer_state_gl.cpp
-  # --- Legacy entfernt ---
-  # src/core_kernel.cu           # classic kernels removed (no launch_mandelbrotHybrid / EC)
-  # src/nacktmull.cu
-  # src/nacktmull_api.cpp
-  # src/nacktmull_color.cuh
+  src/renderer_state_gl.cpp  
 )
 
 # ---------------------- Compile-Options --------------------

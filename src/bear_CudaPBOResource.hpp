@@ -1,8 +1,3 @@
-///// Otter: PBO-RAII – kompatibel zur Frame-Pipeline (No-arg map, unmapAndLog).
-///// Schneefuchs: Header/Source synchron; kein verdeckter Funktionswechsel.
-///// Maus: ASCII-Logs; nur LUCHS_LOG_HOST im Hostpfad.
-///// Datei: src/bear_CudaPBOResource.hpp
-
 #pragma once
 #ifndef BEAR_CUDA_PBO_RESOURCE_HPP
 #define BEAR_CUDA_PBO_RESOURCE_HPP

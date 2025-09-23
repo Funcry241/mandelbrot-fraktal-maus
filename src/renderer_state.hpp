@@ -131,8 +131,7 @@ public:
     ~RendererState();
     void reset();
     void setupCudaBuffers(int tileSize);
-    void resize(int newWidth, int newHeight);
-    void invalidateProgressiveState(bool hardReset) noexcept;
+    void resize(int newWidth, int newHeight);    
 
 private:
     // Stream-/Event-Lifecycle
