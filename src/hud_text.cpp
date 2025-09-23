@@ -1,5 +1,5 @@
-///// Otter: HUD-Text – kompakte ASCII-Anzeige (zoom, offset, fps, tiles); robust gegen edge cases.
-///// Schneefuchs: Header mit vollständigen Typdefinitionen; deterministisch; keine iostreams.
+///// Otter: HUD-Text - kompakte ASCII-Anzeige (zoom, offset, fps, tiles); robust gegen edge cases.
+///// Schneefuchs: Header mit vollstaendigen Typdefinitionen; deterministisch; keine iostreams.
 ///// Maus: Nur LUCHS_LOG_* im Projekt; hier keine Logs, reine Textformatierung.
 ///// Datei: src/hud_text.cpp
 
@@ -9,19 +9,22 @@
 #include <string>
 
 #include "fps_meter.hpp"
-#include "frame_context.hpp"   // ← WICHTIG: liefert die *Definition* von FrameContext
-#include "renderer_state.hpp"  // ← dito für RendererState (auch wenn aktuell ungenutzt)
+#include "frame_context.hpp"   // WICHTIG: liefert die Definition von FrameContext
+#include "renderer_state.hpp"  // dito fuer RendererState (auch wenn aktuell ungenutzt)
 
 namespace HudText {
 
 static inline void appendKV(std::string& buf, const char* label, const char* value) {
     char line[96];
     const int n = std::snprintf(line, sizeof(line), "%10s  %-18s\n", label, value);
-    if (n > 0) buf.append(line, static_cast<size_t>(std::min(n, static_cast<int>(sizeof(line)))));
+    if (n > 0) {
+        const size_t toAppend = static_cast<size_t>(std::min(n, static_cast<int>(sizeof(line))));
+        buf.append(line, toAppend);
+    }
 }
 
 std::string build(const FrameContext& ctx, const RendererState& state) {
-    (void)state; // reserviert für spätere Erweiterungen
+    (void)state; // reserviert fuer spaetere Erweiterungen
     std::string hud;
     hud.reserve(256);
 
