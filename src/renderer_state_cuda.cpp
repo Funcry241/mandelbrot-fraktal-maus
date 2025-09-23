@@ -1,6 +1,6 @@
 ///// Otter: Streams mit Prioritäten – Render hoch, Copy niedrig; keine GL-Abhängigkeit; ASCII-Logs.
-///// Schneefuchs: Fallback sicher (Range optional); /WX-fest; API unverändert; keine Host-Syncs außer Debug.
-///// Maus: Klare Logs [STREAM]; deterministisches Verhalten; unter 300 Zeilen.
+///// Schneefuchs: EC/Wrapper entfernt – keine Entropy/Contrast-Alloc/Pin mehr; /WX-fest; Header/Source synchron.
+///// Maus: Klare [STREAM]/[EVENT]/[ALLOC]/[DEBUG]-Logs; deterministisches Verhalten; unter 300 Zeilen.
 ///// Datei: src/renderer_state_cuda.cpp
 
 #include "pch.hpp"
@@ -11,8 +11,8 @@
 #include "luchs_log_host.hpp"
 
 #include <algorithm>
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 
 #include <cuda_runtime_api.h>
 
@@ -134,43 +134,16 @@ void RendererState::destroyCudaEventsIfAny() noexcept {
     }
 }
 
-// =============================== Host Pinning =================================
+// =============================== Host Pinning (No-Op) =========================
+// EC/Wrapper-Pfad ist entfernt. Die Pin/Unpin-Hooks bleiben als No-Op erhalten,
+// um Header/Source synchron zu halten und ABI-Stabilität zu wahren.
 
 void RendererState::ensureHostPinnedForAnalysis() {
-    // Register host vectors as pinned (idempotent). Must be sized already.
-    if (!h_entropy.empty() && !h_entropyPinned) {
-        CUDA_CHECK(cudaHostRegister(h_entropy.data(), h_entropy.size() * sizeof(float), cudaHostRegisterDefault));
-        h_entropyPinned = true;
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIN] h_entropy pinned ptr=%p bytes=%zu",
-                           (void*)h_entropy.data(), h_entropy.size() * sizeof(float));
-        }
-    }
-    if (!h_contrast.empty() && !h_contrastPinned) {
-        CUDA_CHECK(cudaHostRegister(h_contrast.data(), h_contrast.size() * sizeof(float), cudaHostRegisterDefault));
-        h_contrastPinned = true;
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIN] h_contrast pinned ptr=%p bytes=%zu",
-                           (void*)h_contrast.data(), h_contrast.size() * sizeof(float));
-        }
-    }
+    // no-op (EC disabled)
 }
 
 void RendererState::unpinHostAnalysisIfAny() noexcept {
-    if (h_entropyPinned && !h_entropy.empty()) {
-        cudaHostUnregister(h_entropy.data());
-        h_entropyPinned = false;
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIN] h_entropy unpinned ptr=%p", (void*)h_entropy.data());
-        }
-    }
-    if (h_contrastPinned && !h_contrast.empty()) {
-        cudaHostUnregister(h_contrast.data());
-        h_contrastPinned = false;
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIN] h_contrast unpinned ptr=%p", (void*)h_contrast.data());
-        }
-    }
+    // no-op (EC disabled)
 }
 
 // ================================== Ctor (kein Dtor hier!) ====================
@@ -194,29 +167,23 @@ void RendererState::setupCudaBuffers(int tileSize) {
     }
     tileSize = std::clamp(tileSize, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
 
-    const size_t totalPixels    = size_t(width) * size_t(height);
+    const size_t totalPixels = size_t(width) * size_t(height);
     int tilesX = 0, tilesY = 0, numTiles = 0;
     computeTiles(width, height, tileSize, tilesX, tilesY, numTiles);
 
-    const size_t it_bytes       = totalPixels * sizeof(uint16_t);
-    const size_t entropy_bytes  = size_t(numTiles) * sizeof(float);
-    const size_t contrast_bytes = size_t(numTiles) * sizeof(float);
+    const size_t it_bytes  = totalPixels * sizeof(uint16_t);
 
-    const bool   wantProg       = Settings::progressiveEnabled;
-    const size_t z_bytes        = totalPixels * sizeof(float2);
-    const size_t it2_bytes      = totalPixels * sizeof(uint16_t);
+    const bool   wantProg  = Settings::progressiveEnabled;
+    const size_t z_bytes   = totalPixels * sizeof(float2);
+    const size_t it2_bytes = totalPixels * sizeof(uint16_t);
 
     const bool sizesOk =
-        d_iterations.size() >= it_bytes      &&
-        d_entropy.size()    >= entropy_bytes &&
-        d_contrast.size()   >= contrast_bytes &&
+        d_iterations.size() >= it_bytes &&
         (!wantProg || (d_stateZ.size() >= z_bytes && d_stateIt.size() >= it2_bytes)) &&
-        h_entropy.size()    == size_t(numTiles) &&
-        h_contrast.size()   == size_t(numTiles) &&
-        lastTileSize        == tileSize;
+        lastTileSize == tileSize;
 
     if (sizesOk) {
-        ensureHostPinnedForAnalysis();
+        // (EC disabled) — keine Host-Pinning-/Mirror-Aktionen
         return;
     }
 
@@ -238,22 +205,6 @@ void RendererState::setupCudaBuffers(int tileSize) {
                 LUCHS_LOG_HOST("[ALLOC] d_iterations grow: %zu -> %zu", haveIt, it_bytes);
             }
             d_iterations.allocate(it_bytes);
-        }
-
-        const size_t haveE = d_entropy.size();
-        if (haveE < entropy_bytes) {
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ALLOC] d_entropy grow: %zu -> %zu (tiles %d)", haveE, entropy_bytes, numTiles);
-            }
-            d_entropy.allocate(entropy_bytes);
-        }
-
-        const size_t haveC = d_contrast.size();
-        if (haveC < contrast_bytes) {
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ALLOC] d_contrast grow: %zu -> %zu (tiles %d)", haveC, contrast_bytes, numTiles);
-            }
-            d_contrast.allocate(contrast_bytes);
         }
 
         if (wantProg) {
@@ -280,28 +231,9 @@ void RendererState::setupCudaBuffers(int tileSize) {
         }
     }
 
-    // Host mirrors (reserve worst case by MIN_TILE_SIZE, then size exact)
-    {
-        const int tilesXmax = (width  + Settings::MIN_TILE_SIZE - 1) / Settings::MIN_TILE_SIZE;
-        const int tilesYmax = (height + Settings::MIN_TILE_SIZE - 1) / Settings::MIN_TILE_SIZE;
-        const size_t numTilesMax = size_t(tilesXmax) * size_t(tilesYmax);
-
-        // Unregister before vector might reallocate
-        unpinHostAnalysisIfAny();
-
-        if (h_entropy.capacity()  < numTilesMax)  h_entropy.reserve(numTilesMax);
-        if (h_contrast.capacity() < numTilesMax)  h_contrast.reserve(numTilesMax);
-        h_entropy.resize(size_t(numTiles));
-        h_contrast.resize(size_t(numTiles));
-
-        ensureHostPinnedForAnalysis();
-    }
-
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ALLOC] buffers ready: it=%p(%zu) entropy=%p(%zu) contrast=%p(%zu) z=%p(%zu) it2=%p(%zu) | %dx%d px, tileSize=%d -> tiles=%d",
+        LUCHS_LOG_HOST("[ALLOC] buffers ready: it=%p(%zu) z=%p(%zu) it2=%p(%zu) | %dx%d px, tileSize=%d -> tiles=%d",
                        d_iterations.get(), d_iterations.size(),
-                       d_entropy.get(),    d_entropy.size(),
-                       d_contrast.get(),   d_contrast.size(),
                        Settings::progressiveEnabled ? d_stateZ.get()  : nullptr, Settings::progressiveEnabled ? d_stateZ.size()  : 0,
                        Settings::progressiveEnabled ? d_stateIt.get() : nullptr, Settings::progressiveEnabled ? d_stateIt.size() : 0,
                        width, height, tileSize, numTiles);

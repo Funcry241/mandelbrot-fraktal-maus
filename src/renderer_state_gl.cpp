@@ -1,5 +1,5 @@
 ///// Otter: Split – GL-Fences, PBO-Ring, Resize, Reset & Dtor; saubere Ring-Disziplin.
-///// Schneefuchs: GLsync-Abräumung zentral; Upload-Skip init; Header unverändert; /WX-fest.
+///// Schneefuchs: EC-Pfade entfernt (keine Host-Mirror/Pinning mehr); GLsync-Abräumung zentral; /WX-fest.
 ///// Maus: PixelScale-Recompute lokal; Events/Streams via CUDA-TU; Logs ASCII-only; unter 300 Zeilen.
 ///// Datei: src/renderer_state_gl.cpp
 
@@ -37,7 +37,7 @@ inline void clearPboFences(RendererState& rs) noexcept {
 
 RendererState::~RendererState() {
     clearPboFences(*this);
-    unpinHostAnalysisIfAny();
+    // EC: entfernt – kein Host-Unpinning mehr notwendig
     destroyCudaEventsIfAny();
     destroyCudaStreamsIfAny();
 }
@@ -63,11 +63,6 @@ void RendererState::reset() {
     heatmapOverlayEnabled       = Settings::heatmapOverlayEnabled;
     warzenschweinOverlayEnabled = Settings::warzenschweinOverlayEnabled;
     warzenschweinText.clear();
-
-    // Host mirrors (unpinned first to avoid stale registrations after resize)
-    unpinHostAnalysisIfAny();
-    h_entropy.clear();
-    h_contrast.clear();
 
     // Zoom V3 state clean
     zoomV3State = {};
@@ -105,9 +100,7 @@ void RendererState::resize(int newWidth, int newHeight) {
     // GL / CUDA teardown for old size
     clearPboFences(*this);
 
-    d_iterations.free();
-    d_entropy.free();
-    d_contrast.free();
+    d_iterations.free();    
     d_stateZ.free();
     d_stateIt.free();
 

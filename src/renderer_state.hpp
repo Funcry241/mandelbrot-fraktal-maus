@@ -1,6 +1,6 @@
-///// Otter: Zaunkönig [ZK] – PBO-Fences & saubere Ring-Disziplin; Header schlank, keine PCH; Nacktmull-Pullover.
-///// Schneefuchs: [ZK] GLsync vorwärts deklariert; Speicher/Buffer exakt; State entkoppelt; MSVC-Align-Warnung lokal gekapselt.
-///// Maus: [ZK] Flags klar benannt (pboFence, skipUploadThisFrame); tileSize explizit; Progressive (z,it) mit Cooldown; ASCII-only.
+///// Otter: Zaunkönig [ZK] – PBO-Fences & saubere Ring-Disziplin; Header schlank, keine PCH; Capybara Single-Path.
+///// Schneefuchs: EC/Wrapper entfernt – Felder als Legacy markiert; GLsync vorwärts deklariert; /WX-fest; State entkoppelt.
+///// Maus: Klare Flags (pboFence, skipUploadThisFrame); tileSize explizit; Progressive (z,it) mit Cooldown; ASCII-only.
 ///// Datei: src/renderer_state.hpp
 
 #pragma once
@@ -47,16 +47,16 @@ public:
     float  fps       = 0.0f;
     float  deltaTime = 0.0f;
 
-    // 🧩 Analyse/Overlay (Host) – EC-Pfad aktuell entfernt; Vektoren dürfen leer sein.
+    // 🧩 Analyse/Overlay (Host) — EC-Pfad aktuell deaktiviert.
+    // Diese Felder bleiben als Legacy-Placeholder erhalten, damit optionale Overlays/HUD kompilieren.
     int                 lastTileSize = 0;
-    std::vector<float>  h_entropy;
-    std::vector<float>  h_contrast;
-    // Optional: Host-Pinning-Status (Registrierung erfolgt im .cpp)
-    bool                h_entropyPinned  = false;
-    bool                h_contrastPinned = false;
+    std::vector<float>  h_entropy;         // legacy/overlay (leer im aktiven Pfad)
+    std::vector<float>  h_contrast;        // legacy/overlay (leer im aktiven Pfad)
+    bool                h_entropyPinned  = false; // legacy/no-op
+    bool                h_contrastPinned = false; // legacy/no-op
 
     // 🔗 GPU-Puffer (RAII)
-    // Iterationspuffer ist aktiv; EC-Puffer werden toleriert/weitergereicht (No-Op im aktuellen Pfad).
+    // Iterationspuffer ist aktiv; EC-Puffer bleiben als Legacy-Platzhalter erhalten (No-Op im aktiven Pfad).
     Hermelin::CudaDeviceBuffer d_iterations; // uint16_t[width*height]
     Hermelin::CudaDeviceBuffer d_entropy;    // float[numTiles]   (legacy/overlay)
     Hermelin::CudaDeviceBuffer d_contrast;   // float[numTiles]   (legacy/overlay)
@@ -131,7 +131,7 @@ public:
     ~RendererState();
     void reset();
     void setupCudaBuffers(int tileSize);
-    void resize(int newWidth, int newHeight);    
+    void resize(int newWidth, int newHeight);
 
 private:
     // Stream-/Event-Lifecycle
@@ -139,8 +139,10 @@ private:
     void destroyCudaStreamsIfAny() noexcept;  // zerstört beide, setzt auf nullptr
     void createCudaEventsIfNeeded();          // legt evEcDone/evCopyDone (DisableTiming) an
     void destroyCudaEventsIfAny() noexcept;   // zerstört Events, setzt auf nullptr
-    void ensureHostPinnedForAnalysis();       // registriert h_entropy/h_contrast als pinned (idempotent)
-    void unpinHostAnalysisIfAny() noexcept;   // deregistriert pinned Hostpuffer bei Resize/Shutdown
+
+    // Legacy-No-Op Hooks (EC deaktiviert)
+    void ensureHostPinnedForAnalysis();       // no-op
+    void unpinHostAnalysisIfAny() noexcept;   // no-op
 };
 
 #if defined(_MSC_VER)

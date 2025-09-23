@@ -1,5 +1,5 @@
 <!-- Datei: README.md -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 81 – CI-validiert, Silk-Lite Zoom integriert, Auto-Tuner statt JSON-Reload. Logs jetzt mit Epoch-Millis, strikt einzeilig. CUDA 13 ist Pflicht; GLEW dynamisch. Schneefuchs: „Nur was synchron ist, bleibt stabil.“ -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 81+ – CI-validiert, Silk-Lite Zoom integriert, Capybara Single-Path (keine EC/Wrapper), Logs als Epoch-Millis. CUDA 13 Pflicht; GLEW dynamisch. Schneefuchs: „Nur was synchron ist, bleibt stabil.“ -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
@@ -17,23 +17,22 @@
 Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeige für moderne NVIDIA-GPUs. Der Renderer zoomt automatisch in interessante Regionen und erhöht fortlaufend die Detailtiefe.
 Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom — und kompakte **Epoch-Millis**-Logs.
 
-> **Wichtig (Änderung)**: Ab diesem Stand verwendet OtterDream im Kern **direkte Iteration** (`z_{n+1} = z_n^2 + c`).  
-> Es gibt **keinen Referenz-Orbit / keine Perturbation** mehr im aktiven Pfad. Die API bleibt unverändert.
+> **Wichtig (Änderung)**: Ab diesem Stand rendert OtterDream über einen **einzigen aktiven Pfad**:  
+> **Capybara → Iterationen → Colorizer → PBO**.  
+> Es gibt **keinen Referenz-Orbit / keine Perturbation** und **keine EC/Wrapper** im aktiven Code.
 
 ---
 
 ## 🧠 Features
 
-* **🚀 CUDA Rendering**  
-  2-Pass Mandelbrot-Pipeline (Warmup + Sliced Finish), warp-synchron, CHUNKed (`WARP_CHUNK=64`).
-  * **Survivor-Black**: unfertige Pixel sofort schwarz -> *kein Ghosting* zwischen Slices.
-  * **Event-Timing**: Ereignisbasierte Messung via CUDA-Events (ohne globales `cudaDeviceSynchronize()` im Normalpfad).
+* **🚀 CUDA Rendering (Capybara)**  
+  Iterations-Render über Capybara, ereignisbasiertes **Event-Timing** via CUDA-Events (ohne globales `cudaDeviceSynchronize()` im Normalpfad).  
+  * **Survivor-Black**: unfertige Pixel sofort schwarz -> *kein Ghosting* zwischen Slices.  
+  * **WARP_CHUNK**-basiertes Pacing (warp-synchron).
 
-* **🎯 Auto-Zoom mit Entropie- und Kontrastanalyse**  
-  Softmax-Schwerpunkt über **Median/MAD**-normalisierte Scores; Softmax-Sparsification für ruhige Ziele.
-
-* **🪶 Silk-Lite Motion Planner**  
-  Sanfte Schwenks, **Yaw-Rate-Limiter (rad/s)** + Längendämpfung, relative Hysterese & kurzer Lock gegen Flip-Flop.
+* **🪶 Silk-Lite Motion Planner (Auto-Zoom)**  
+  Sanfte Schwenks, **Yaw-Rate-Limiter** (rad/s) + Längendämpfung, relative Hysterese & kurzer Lock gegen Flip-Flop.  
+  **Hinweis:** Die frühere Entropie/Kontrast-Analyse ist aktuell **deaktiviert**; es wirkt der **ForceAlwaysZoom**-Fallback für stetige Bewegung.
 
 * **🕳️ Anti-Black-Guard (Cardioid/Bulb-Avoidance)**  
   Warm-up-Drift und **Void-Bias** schieben den Fokus verlässlich aus Innenbereichen -> *kein „Zoom ins Schwarze“*.
@@ -41,37 +40,32 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
 * **📈 Progressive Iterationen (Zoom-abhängig)**  
   Iterationszahl steigt automatisch mit dem Zoom-Level. **Standardmäßig aktiv** (abschaltbar).
 
-* **🎨 GT-Palette (Cyan->Amber) + Smooth Coloring**  
+* **🎨 GT-Palette (Cyan→Amber) + Smooth Coloring**  
   Interpolation im **Linearraum** gegen Banding, **Smooth Coloring** via `it - log2(log2(|z|))`.  
-  **Streifen-Shading** optional – **standardmäßig aus** (`stripes = 0.0f`) für ringfreie Darstellung.
-
-* **🔍 Adaptive Tile-Größe**  
-  Automatische Tile-Anpassung für bessere Detailauswertung bei starkem Zoom.
+  **Streifen-Shading** optional – **standardmäßig aus** (`stripes = 0.0f`) für ringfreie Darstellung.  
+  **Mapping-Vertrag:** *Innenpunkte schreiben `iterOut = maxIter`*, Escape schreibt die Iterationsnummer.
 
 * **🖼️ Echtzeit-OpenGL + CUDA-Interop**  
   Anzeige via Fullscreen-Quad, direkte PBO-Verbindung (`cudaGraphicsGLRegisterBuffer`).
 
 * **📊 Heatmap-Overlay (Eule – Preview)**  
-  Visualisierung von Entropie/Kontrast pro Tile (GPU-Shader-Variante im Aufbau).  
-  **Heatmap-Vertrag**: *Innenpunkte schreiben `iterOut = maxIter`*, Escape schreibt die Iterationsnummer.
+  GPU-Shader-Variante im Aufbau; **derzeit ohne EC-Signal**.
 
 * **🧰 HUD & ASCII-Debug (Warzenschwein)**  
   FPS, Zoom, Offset – optional. **Logging ist ASCII-only** und wirkt nicht auf Berechnungs-/Render-Pfade.
 
 * **🤖 Auto-Tuner**  
-  Findet ohne Neustart zyklisch optimale Zoom-/Analyseparameter und schreibt sie ins Log (kein JSON-Reload nötig).
+  Findet ohne Neustart zyklisch sinnvolle Ziel-/Zoom-Parameter und schreibt sie ins Log (kein JSON-Reload nötig).
 
 ---
 
 ## 🆕 Neu in dieser Version (Alpha 81+)
 
-* **Direkte Iteration** als Standardpfad (kein Referenz-Orbit / keine Perturbation im aktiven Code)
-* **Sliced Survivor Finish** mit **Survivor-Black** (ghosting-frei)
-* **Event-Timing** per CUDA-Events (kostenarm & präzise)
-* **Anti-Black-Guard** (Warm-up-Drift + Void-Bias gegen Cardioid/Bulb-Hänger)
-* **Yaw-Limiter** (rad/s -> rad/Frame via `dt`) + **Längendämpfung**
-* **Hysterese/Lock & dyn. Retarget-Throttle** für ruhiges Zielhalten
-* **Softmax-Sparsification** & robuste **Median/MAD**-Statistik
+* **Single-Path Renderer**: Capybara → Colorizer → PBO (klassischer/perturbierter Pfad sowie EC-Wrapper entfernt)
+* **Survivor-Black** (ghosting-frei) & **Event-Timing** (CUDA-Events)
+* **Anti-Black-Guard** (Warm-up-Drift + Void-Bias)
+* **Yaw-Limiter** + **Längendämpfung**, **Hysterese/Lock** & dyn. **Retarget-Throttle**
+* **Softmax-Sparsification** (Designbestandteil; aktuell ohne EC-Eingang aktiv)  
 * **Epoch-Millis-Logging** (UTC-Millis seit 1970) — kompakt, sortier- & skriptfreundlich
 
 ---
@@ -100,7 +94,7 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom —
 ## 🔧 Build-Anleitung
 
 > **Hinweis:** Der Build läuft vollständig über **Standard-CMake** (host-agnostisch).
-> Ein **optionales** PowerShell-Skript `build.ps1` ist enthalten, wird aber nicht benötigt.
+> Ein **optionales** PowerShell-Skript `build.ps1` kann vorhanden sein, wird aber nicht benötigt.
 
 ### 1) Repository & vcpkg holen
 
@@ -111,7 +105,7 @@ cd mandelbrot-fraktal-maus
 git clone https://github.com/microsoft/vcpkg.git
 cd vcpkg
 ./bootstrap-vcpkg.sh            # Linux/macOS
-.ootstrap-vcpkg.bat           # Windows (PowerShell oder CMD)
+bootstrap-vcpkg.bat             # Windows (PowerShell oder CMD)
 cd ..
 ```
 
@@ -125,7 +119,7 @@ cmake --build build --config Release
 # (optional) Installationsbaum erzeugen
 cmake --install build --prefix .\dist
 # Ausführen
-.uild\mandelbrot_otterdream.exe
+.\dist\mandelbrot_otterdream.exe
 ```
 
 ### 3) Linux (GCC + Ninja)
@@ -136,7 +130,7 @@ cmake --build build --config Release
 # (optional) Installationsbaum erzeugen
 cmake --install build --prefix ./dist
 # Ausführen
-./build/mandelbrot_otterdream
+./dist/mandelbrot_otterdream
 ```
 
 > **Tipp:** Abweichende Compute Capability beim Konfigurieren überschreiben:
@@ -150,7 +144,7 @@ cmake --install build --prefix ./dist
 ### ⌨️ Keyboard Controls
 
 * `P`: Auto-Zoom pausieren/fortsetzen
-* `H`: Heatmap-Overlay ein/aus
+* `H`: Heatmap-Overlay ein/aus (derzeit ohne EC-Daten)
 * `T`: HUD (Warzenschwein) ein/aus
 
 > Hinweis: `Space` ist derzeit **nicht** gemappt (kein Alias zu `P`).
@@ -162,6 +156,10 @@ cmake --install build --prefix ./dist
 **Seit Alpha 41 gilt:** Header und Source bleiben **synchron**. Kein Drift, kein API-Bruch. Die Robbe wacht.
 
 > „API-Änderung ohne Header-Update? Dann OOU-OOU und Build-Fehler!“
+
+**Referenz-Signaturen (aktuell):**
+* `src/capybara_frame_pipeline.cuh` → **`capy_render(...)`**
+* `src/cuda_interop.hpp` → **`renderCudaFrame(...)`** (Overloads)
 
 ---
 
@@ -177,15 +175,14 @@ cmake --install build --prefix ./dist
 * **Survivor-Black**: Ghosting-freie Slices
 * **Hysterese/Lock**: verhindert Ziel-Flip-Flops
 * **Retarget-Throttle**: CPU-schonend, ruhiger Kurs
-* **Softmax-Sparsification**: ignoriert irrelevante Tails
+* **Softmax-Sparsification**: ignoriert irrelevante Tails (EC aktuell deaktiviert)
 
 ---
 
 ## 🧭 Zoomgerichtet & geschmacksgetestet
 
-Silk-Lite koppelt **Analyse (Entropie/Kontrast)** und **Bewegung**:
-Top-k-Tiles bilden per Softmax einen Schwerpunkt; der Motion-Planner fährt dorthin mit begrenzter Yaw-Rate, Dämpfung und kurzer Lock-Phase.
-Ergebnis: zielstrebig, ruckfrei — ohne „ins Schwarze“ zu kippen.
+Silk-Lite koppelt **Zielwahl** und **Bewegung**. Der Designpfad sieht Entropie/Kontrast als Signalquelle vor; aktuell ist EC **deaktiviert**.  
+Der Planner arbeitet daher mit **ForceAlwaysZoom**, Yaw-Limiter, Dämpfung, Hysterese/Lock und Retarget-Throttle für ruhige, stetige Kamerafahrten — ohne „ins Schwarze“ zu kippen.
 
 ---
 
@@ -193,8 +190,7 @@ Ergebnis: zielstrebig, ruckfrei — ohne „ins Schwarze“ zu kippen.
 
 * **Logging**: ASCII-only; strikt **einzeilig** pro Event. Zeitstempel sind **Epoch-Millis (UTC)**.  
   `debugLogging` für Diagnose; `performanceLogging` misst budgetschonend via CUDA-Events.
-* **ForceAlwaysZoom**: hält den Zoomfluss aktiv (mit weicher Drift, falls kein starkes Signal vorliegt).
-* **Tier-Codename-Pflege**: Nicht genutzte/retirierte Namen stehen im **[Friedhof](Friedhof.md)** (Doppelvergabe vermeiden).
+* **Tier-Codename-Pflege**: Nicht genutzte/retirierte Namen stehen im **Friedhof** (Doppelvergabe vermeiden).
 
 ---
 

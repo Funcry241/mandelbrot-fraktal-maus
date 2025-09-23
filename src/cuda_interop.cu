@@ -126,36 +126,25 @@ void logCudaDeviceContext(const char* tag) noexcept {
 
 void renderCudaFrame(
     Hermelin::CudaDeviceBuffer& d_iterations,
-    Hermelin::CudaDeviceBuffer& d_entropy,
-    Hermelin::CudaDeviceBuffer& d_contrast,
     int   width,
     int   height,
     float zoom,
     float offsetX,
     float offsetY,
     int   maxIterations,
-    std::vector<float>& h_entropy,
-    std::vector<float>& h_contrast,
     float& newOffsetX,
     float& newOffsetY,
     bool&  shouldZoom,
-    int    tileSize,
     RendererState& state,
-    cudaStream_t renderStream,
-    cudaStream_t copyStream
+    cudaStream_t renderStream
 ){
-    (void)d_entropy; (void)d_contrast;
-    (void)h_entropy; (void)h_contrast;
-    (void)copyStream;
-    (void)newOffsetX; (void)newOffsetY; (void)shouldZoom; // zoom handled upstream
-    (void)zoom; // /WX: avoid C4100 in NVCC host pass
+    (void)zoom;           // /WX: avoid unused in NVCC host pass; zoom handled upstream
+    (void)newOffsetX;     // zoom/offset update handled in higher-level logic
+    (void)newOffsetY;
+    (void)shouldZoom;
 
     if (!s_pboActive) throw std::runtime_error("[FATAL] CUDA PBO not registered!");
     if (width <= 0 || height <= 0) throw std::runtime_error("invalid framebuffer dims");
-    if (tileSize <= 0) {
-        int was = tileSize; tileSize = Settings::BASE_TILE_SIZE;
-        LUCHS_LOG_HOST("[WARN] tileSize<=0 (%d) -> using %d", was, tileSize);
-    }
 
     ensureEventsOnce();
     (void)cudaGetLastError(); // clear sticky
@@ -174,26 +163,25 @@ void renderCudaFrame(
     const double cx   = (double)offsetX;
     const double cy   = (double)offsetY;
     const double step = std::max(std::abs(state.pixelScale.x), std::abs(state.pixelScale.y));
+
     CUDA_CHECK(cudaEventRecord(s_evStart, renderStream));
-    capy_render_and_analyze(
+    capy_render(
         static_cast<uint16_t*>(d_iterations.get()),
-        nullptr, nullptr, // EC removed
         width, height,
         cx, cy,
         step, step,
         maxIterations,
-        /*tileSize*/   tileSize,   // kept for ABI parity
         renderStream,
-        state.evEcDone,
-        Settings::capybaraEnabled
+        state.evEcDone // reuse existing event slot; name kept for ABI parity
     );
     CUDA_CHECK(cudaEventRecord(s_evStop, renderStream));
+
     if constexpr (Settings::performanceLogging) {
         cudaError_t rcCapySync = cudaEventSynchronize(s_evStop);
         if (rcCapySync != cudaSuccess) {
             LUCHS_LOG_HOST("[CUDA][ERR] capybara sync rc=%d", (int)rcCapySync);
             LuchsLogger::flushDeviceLogToHost(0);
-            throw std::runtime_error("CUDA failure: capy_render_and_analyze");
+            throw std::runtime_error("CUDA failure: capy_render");
         }
     }
 
@@ -206,6 +194,7 @@ void renderCudaFrame(
         renderStream
     );
     CUDA_CHECK(cudaEventRecord(s_evStop, renderStream));
+
     if constexpr (Settings::performanceLogging) {
         cudaError_t rcColSync = cudaEventSynchronize(s_evStop);
         if (rcColSync != cudaSuccess) {
@@ -215,30 +204,24 @@ void renderCudaFrame(
         }
     }
 
-    // ---- 4) done; MapGuard dtor will unmap --------------------------------
-    (void)renderStream;
+    // ---- 4) done; MapGuard dtor will unmap -------------------------------
 }
 
 void renderCudaFrame(RendererState& state, const FrameContext& fctx, float& newOffsetX, float& newOffsetY) {
     float offx = fctx.offset.x;
     float offy = fctx.offset.y;
     bool  shouldZoom = false;
+
     renderCudaFrame(
         state.d_iterations,
-        state.d_entropy,
-        state.d_contrast,
         fctx.width, fctx.height,
         fctx.zoom,
         offx, offy,
         fctx.maxIterations,
-        /*h_entropy*/ const_cast<std::vector<float>&>(state.h_entropy),
-        /*h_contrast*/const_cast<std::vector<float>&>(state.h_contrast),
         newOffsetX, newOffsetY,
         shouldZoom,
-        fctx.tileSize,
         state,
-        state.renderStream,
-        state.copyStream
+        state.renderStream
     );
 }
 
