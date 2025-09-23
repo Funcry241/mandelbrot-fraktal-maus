@@ -1,8 +1,3 @@
-///// Otter: HUD-Text - kompakte ASCII-Anzeige (zoom, offset, fps, tiles); robust gegen edge cases.
-///// Schneefuchs: Header mit vollstaendigen Typdefinitionen; deterministisch; keine iostreams.
-///// Maus: Nur LUCHS_LOG_* im Projekt; hier keine Logs, reine Textformatierung.
-///// Datei: src/hud_text.cpp
-
 #include "hud_text.hpp"
 #include <algorithm>
 #include <cstdio>
@@ -10,7 +5,7 @@
 
 #include "fps_meter.hpp"
 #include "frame_context.hpp"   // WICHTIG: liefert die Definition von FrameContext
-#include "renderer_state.hpp"  // dito fuer RendererState (auch wenn aktuell ungenutzt)
+#include "renderer_state.hpp"  // dito fuer RendererState
 
 namespace HudText {
 
@@ -24,17 +19,16 @@ static inline void appendKV(std::string& buf, const char* label, const char* val
 }
 
 std::string build(const FrameContext& ctx, const RendererState& state) {
-    (void)state; // reserviert fuer spaetere Erweiterungen
     std::string hud;
     hud.reserve(256);
 
     { char v[64]; std::snprintf(v, sizeof(v), "%.6e", static_cast<double>(ctx.zoom)); appendKV(hud, "zoom", v); }
     { char v[64]; std::snprintf(v, sizeof(v), "%.4f, %.4f", static_cast<double>(ctx.offset.x), static_cast<double>(ctx.offset.y)); appendKV(hud, "offset", v); }
 
-    // fps actual (max) – Schutz gegen dt <= 0; max aus FpsMeter
+    // fps actual (max) – aus Host-Framezeit in ms (state.lastTimings.frameTotalMs)
     {
-        const double dt  = (ctx.frameTime > 0.0) ? static_cast<double>(ctx.frameTime) : 1.0;
-        const double fps = 1.0 / dt;
+        const double dtMs = (state.lastTimings.frameTotalMs > 0.0) ? state.lastTimings.frameTotalMs : 1000.0; // Fallback 1s
+        const double fps  = 1000.0 / dtMs;
         const int    maxFpsInt = FpsMeter::currentMaxFpsInt();
         char v[64];
         std::snprintf(v, sizeof(v), "%.1f (%d)", fps, maxFpsInt);

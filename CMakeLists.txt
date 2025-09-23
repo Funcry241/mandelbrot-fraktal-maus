@@ -117,6 +117,7 @@ add_executable(mandelbrot_otterdream
   src/renderer_window.cpp
   src/renderer_resources.cpp
   src/heatmap_overlay.cpp
+  src/hud_text.cpp
   src/warzenschwein_overlay.cpp
   src/cuda_interop.cu
   # Capybara path
@@ -132,7 +133,7 @@ add_executable(mandelbrot_otterdream
   src/frame_capture.cpp
   src/fps_meter.cpp
   src/renderer_state_cuda.cpp
-  src/renderer_state_gl.cpp  
+  src/renderer_state_gl.cpp    
 )
 
 # ---------------------- Compile-Options --------------------

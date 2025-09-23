@@ -178,6 +178,7 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
                                     state.tex.id(), state);
     }
 
+    // HUD-Text via Warzenschwein-Overlay (Text kommt aus state.warzenschweinText)
     if constexpr (Settings::warzenschweinOverlayEnabled) {
         if (!state.warzenschweinText.empty()) {
             WarzenschweinOverlay::drawOverlay(static_cast<float>(state.zoom));
@@ -232,6 +233,11 @@ void execute(RendererState& state) {
     // Optional Zoom evaluieren (Pause global via CudaInterop)
     if (!CudaInterop::getPauseZoom()) {
         ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, kZOOM_GAIN);
+    }
+
+    // HUD-Text für Warzenschwein-Overlay vorbereiten
+    if constexpr (Settings::warzenschweinOverlayEnabled) {
+        state.warzenschweinText = HudText::build(g_ctx, state);
     }
 
     // Draw
