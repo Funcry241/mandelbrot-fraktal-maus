@@ -81,7 +81,7 @@ void RendererState::reset() {
     clearPboFences(*this);
     std::fill(pboFence.begin(), pboFence.end(), (GLsync)0);
     pboIndex = 0;
-    for (unsigned& u : ringUse) u = 0;
+    std::fill(ringUse.begin(), ringUse.end(), 0u);
     ringSkip = 0;
 
     lastTimings = CudaPhaseTimings{};
@@ -154,7 +154,7 @@ void RendererState::resize(int newWidth, int newHeight) {
     lastTimings.resetHostFrame();
 
     // Ring-Statistik zum neuen Start nullen (LOG-6)
-    for (unsigned& u : ringUse) u = 0;
+    std::fill(ringUse.begin(), ringUse.end(), 0u);
     ringSkip = 0;
 
     if constexpr (Settings::debugLogging) {
