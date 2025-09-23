@@ -21,7 +21,6 @@
 #include "hud_text.hpp"
 #include "fps_meter.hpp"
 #include "luchs_log_host.hpp"
-#include "luchs_cuda_log_buffer.hpp"
 #include "common.hpp"
 #include "settings.hpp"
 
@@ -153,6 +152,7 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
 
     OpenGLUtils::setGLResourceContext("draw");
 
+    // --- Texture upload (measure) ---
     if (!state.skipUploadThisFrame) {
         OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(), state.tex.id(), fctx.width, fctx.height);
         if (state.pboFence[state.pboIndex]) { glDeleteSync(state.pboFence[state.pboIndex]); state.pboFence[state.pboIndex]=0; }
@@ -167,6 +167,8 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
             LUCHS_LOG_HOST("[ZK][UP] skip upload pbo=%u ring=%d", state.currentPBO().id(), state.pboIndex);
         }
     }
+    const auto tUploadEnd = Clock::now();
+    g_texMs = std::chrono::duration_cast<msd>(tUploadEnd - t0).count();
 
     // Heatmap Overlay (falls aktiv) – Host-Daten liegen im RendererState
     const auto tOv0 = Clock::now();
