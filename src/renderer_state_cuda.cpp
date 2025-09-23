@@ -8,23 +8,27 @@
 #include "settings.hpp"
 #include "cuda_interop.hpp"
 #include "common.hpp"
-#include "luchs_log_host.hpp"
 
 #include <algorithm>
 #include <cstring>
 
 #include <cuda_runtime_api.h>
 
-// Forward-declare private interop diagnostic without pulling heavy headers.
-namespace CudaInterop { void logCudaDeviceContext(const char* tag) noexcept; }
-
 namespace {
-// ----- Tiles (CUDA-seitig genutzt) --------------------------------------------
+// ----- Tiles & PixelScale (CUDA-seitig genutzt) --------------------------------
 inline void computeTiles(int width, int height, int tileSize,
                          int& tilesX, int& tilesY, int& numTiles) noexcept {
     tilesX   = (width  + tileSize - 1) / tileSize;
     tilesY   = (height + tileSize - 1) / tileSize;
     numTiles = tilesX * tilesY;
+}
+
+inline void recomputePixelScale(RendererState& rs) noexcept {
+    const double invZoom = (rs.zoom != 0.0) ? (1.0 / rs.zoom) : 1.0;
+    const double ar      = (rs.height > 0) ? (double)rs.width / (double)rs.height : 1.0;
+    const double sy      = (rs.height > 0) ? (2.0 / (double)rs.height) * invZoom : 2.0 * invZoom;
+    rs.pixelScale.y = sy;
+    rs.pixelScale.x = sy * ar;
 }
 } // namespace
 
@@ -33,7 +37,7 @@ inline void computeTiles(int width, int height, int tileSize,
 void RendererState::createCudaStreamsIfNeeded() {
     CUDA_CHECK(cudaSetDevice(0));
 
-    // Priority-Range abfragen (lo = niedrigste Priorität, hi = höchste Priorität; numerisch: hi <= lo)
+    // Priority-Range abfragen (lo = niedrigste Priorität, hi = höchste; numerisch: hi <= lo)
     int lo = 0, hi = 0;
     const cudaError_t prc = cudaDeviceGetStreamPriorityRange(&lo, &hi);
     const bool hasRange = (prc == cudaSuccess);
@@ -43,7 +47,7 @@ void RendererState::createCudaStreamsIfNeeded() {
     if (!renderStream) {
         cudaError_t e = cudaStreamCreateWithPriority(&renderStream, cudaStreamNonBlocking, prRender);
         if (e != cudaSuccess) {
-            // Fallback ohne Priorität (sollte selten nötig sein)
+            // Fallback ohne Priorität
             renderStream = nullptr;
             CUDA_CHECK(cudaStreamCreateWithFlags(&renderStream, cudaStreamNonBlocking));
             if constexpr (Settings::debugLogging) {
@@ -179,7 +183,7 @@ void RendererState::unpinHostAnalysisIfAny() noexcept {
 
 RendererState::RendererState(int w, int h)
 : width(w), height(h) {
-    // Streams/Events first, Reset handled in GL/host TU (calls back into CUDA helpers)
+    // Streams/Events first, Reset handled in GL-TU (calls back into CUDA helpers)
     createCudaStreamsIfNeeded();
     createCudaEventsIfNeeded();
     // Reset ist in renderer_state_gl.cpp implementiert (benötigt GL-Fence-Clear)
