@@ -13,7 +13,6 @@
 #include "renderer_pipeline.hpp"
 #include "renderer_resources.hpp"
 #include "cuda_interop.hpp"
-#include "heatmap_overlay.hpp"
 #include "frame_pipeline.hpp"
 #include "settings.hpp"
 
@@ -76,12 +75,25 @@ bool Renderer::initGL() {
         throw std::runtime_error("GLEW init failed");
     }
 
-    // Enable KHR_debug with filtered severities
-    glEnable(GL_DEBUG_OUTPUT);
-    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-    glDebugMessageCallback(&GlDebugCallback, nullptr);
-    glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
-    glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_LOW,           0, nullptr, GL_FALSE);
+    // Enable KHR_debug with filtered severities (robust guards)
+    if (GLEW_KHR_debug || GLEW_VERSION_4_3) {
+        #ifdef GL_DEBUG_OUTPUT
+        glEnable(GL_DEBUG_OUTPUT);
+        #endif
+        #ifdef GL_DEBUG_OUTPUT_SYNCHRONOUS
+        glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+        #endif
+
+        if (glDebugMessageCallback) {
+            glDebugMessageCallback(&GlDebugCallback, nullptr);
+        }
+        if (glDebugMessageControl) {
+            glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
+            glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_LOW,           0, nullptr, GL_FALSE);
+        }
+    } else {
+        LUCHS_LOG_HOST("[INIT] KHR_debug not available");
+    }
 
     // SRGB default FB capability (info only) – robust gegen Token-Varianten
     {
