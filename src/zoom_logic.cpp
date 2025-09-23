@@ -115,8 +115,8 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,const std::vecto
 
     // Median/MAD (alloc-light)
     thread_local std::vector<float> e, contr; e.clear(); contr.clear(); e.reserve((size_t)total); contr.reserve((size_t)total);
-    e.insert(e.end(),entropy.begin(),entropy.begin()+total);
-    contr.insert(contr.end(),contrast.begin(),contrast.begin()+total);
+    e.insert( e.end(), entropy.begin(),  entropy.begin()+total );
+    contr.insert( contr.end(), contrast.begin(), contrast.begin()+total );
     const float eMed=median_inplace(e), eMad=mad_from_center_inplace(e,eMed);
     const float cMed=median_inplace(contr), cMad=mad_from_center_inplace(contr,cMed);
 
@@ -233,7 +233,7 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,const std::vecto
 
 // Convenience-Adapter: setzt shouldZoom/newOffset direkt im FrameContext,
 // respektiert die globale Pauseflagge aus CudaInterop.
-void evaluateAndApply(FrameContext& fctx, RendererState& state, ZoomState& bus, float /*gain*/) noexcept {
+void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& bus, float /*gain*/) noexcept {
     // Pause?
     if (CudaInterop::getPauseZoom()) {
         fctx.shouldZoom = false;
