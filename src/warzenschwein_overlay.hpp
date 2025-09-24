@@ -1,7 +1,8 @@
 ///// Otter: Projekt „Pfau“ – vereinheitlichte UI-Konstanten (Alpha/Margin/Radius) und Doku.
-//\/\/ Schneefuchs: MAUS-Header (#62) strikt; ASCII-only; Header nur deklarativ, keine API-Änderung.
-//\/\/ Maus: Pfau-Werte sind final verdrahtet (keine Alternativen); Pixel-Snapping-Helfer bereit.
+///// Schneefuchs: MAUS-Header (#62) strikt; ASCII-only; Header nur deklarativ, keine API-Änderung.
+///// Maus: Pfau-Werte sind final verdrahtet (keine Alternativen); Pixel-Snapping-Helfer bereit.
 ///// Datei: src/warzenschwein_overlay.hpp
+
 #pragma once
 #include <string>
 #include <vector>

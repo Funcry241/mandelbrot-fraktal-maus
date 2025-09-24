@@ -1,86 +1,48 @@
-///// Otter: Schlanke Zoom-API; Hysterese-stabil; optionales Overlay-Material; ASCII-only.
-///// Schneefuchs: Tiles (tilesX/tilesY) explizit vom Aufrufer; keine versteckte Geometrie; /WX-fest.
-///// Maus: Eine klare API, ein Zustand, eine Entscheidung – deterministisch & instanzierbar.
+///// Otter: Public API for Silk-Lite auto-pan/zoom with robust drift fallback.
+///// Schneefuchs: Header bleibt schlank; Forward-Decls statt schwerer Includes; /WX-fest.
+///// Maus: Keine float2-Felder in Public-API-Strukturen (vermeidet MSVC C4324); ASCII-only.
 ///// Datei: src/zoom_logic.hpp
 
 #pragma once
 
 #include <vector>
-#include <vector_types.h>   // float2
+#include <cstddef>
+#include <vector_types.h> // float2 in Funktionssignaturen
 
-// Globale Forward-Decls (verhindert "ZoomLogic::FrameContext"-Schatten-Typen)
-struct FrameContext;
-class  RendererState;
+// Schlanke Forward-Decls (keine Zyklen):
+struct FrameContext;     // definiert in frame_context.hpp (struct)
+class  RendererState;    // definiert in renderer_state.hpp (class)
 
 namespace ZoomLogic {
 
-static_assert(sizeof(float2) == 8, "float2 must be 8 bytes");
+// Kleiner, trivially-constructible Zustand (by-value in RendererState erlaubt)
+struct ZoomState {};
 
-#ifdef _MSC_VER
-  #pragma warning(push)
-  #pragma warning(disable : 4324) // structure was padded due to alignment specifier
-#endif
-
-// Ergebnisstruktur fuer das Auto-Zoom-Ziel.
-class ZoomResult {
-public:
-    int   bestIndex     = -1;    // Index des besten Tiles (Rasterindex)
-    float bestEntropy   = 0.0f;  // Entropie dieses Tiles
-    float bestContrast  = 0.0f;  // Kontrastwert
-    float bestScore     = 0.0f;  // Gesamtscore (normalisiert, V2)
-
-    float distance      = 0.0f;  // Entfernung zu previousOffset
-    float minDistance   = 0.0f;  // Deadzone
-
-    float relEntropyGain  = 0.0f;
-    float relContrastGain = 0.0f;
-
-    bool  isNewTarget   = false; // Zielwechsel akzeptiert?
-    bool  shouldZoom    = false; // In diesem Frame zoomen?
-
-    float2 newOffset    {0.0f, 0.0f}; // Zielkoordinate im Fraktalraum
-
-    // Optionales Material fuer Overlay/Debug:
-    std::vector<float> perTileContrast;
+// Ergebnis der Zielauswahl (ohne float2, um C4324 sicher zu vermeiden)
+struct ZoomResult {
+    float newOffsetX = 0.0f;
+    float newOffsetY = 0.0f;
+    float distance   = 0.0f;   // |newOffset - previousOffset|
+    float minDistance= 0.02f;  // rein informativ
+    int   bestIndex  = -1;     // Ziel-Tile oder -1
+    bool  isNewTarget= false;
+    bool  shouldZoom = false;
 };
 
-// Persistenter, minimaler Zustand des Zoomers (kein Global).
-struct ZoomState {
-    int   lastAcceptedIndex = -1;
-    float lastAcceptedScore = 0.0f;
-    int   cooldownLeft      = 0;
-    float2 lastOffset       {0.0f, 0.0f};
+// Optionales Hilfsmaß (robuste Nachbarschaftsdifferenz)
+float computeEntropyContrast(const std::vector<float>& entropy,
+                             int width, int height, int tileSize) noexcept;
 
-    // Geometrie-Bookkeeping (Debug/Wechsel der Tile-Geometrie)
-    int   lastTilesX        = -1;
-    int   lastTilesY        = -1;
-};
+// Kern: bestes Ziel evaluieren und Bewegung vorschlagen
+ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
+                              const std::vector<float>& contrast,
+                              int tilesX, int tilesY,
+                              int width, int height,
+                              float2 currentOffset, float zoom,
+                              float2 previousOffset,
+                              ZoomState& state) noexcept;
 
-#ifdef _MSC_VER
-  #pragma warning(pop)
-#endif
-
-// (Optional) Kontrastanalyse ueber Tile-Nachbarn.
-// Rueckgabe 0.0f bei unplausibler Geometrie.
-[[nodiscard]] float computeEntropyContrast(
-    const std::vector<float>& entropy,
-    int width, int height, int tileSize) noexcept;
-
-//  - Score = alpha*E' + beta*C'
-//  - Hysterese & Cooldown stabilisieren die Zielwahl
-//  - Offset-Glaettung (EMA), setzt shouldZoom
-//  - Aktualisiert ZoomState in-place (kein Global)
-[[nodiscard]] ZoomResult evaluateZoomTarget(
-    const std::vector<float>& entropy,
-    const std::vector<float>& contrast,
-    int tilesX, int tilesY,
-    int width, int height,
-    float2 currentOffset, float zoom,
-    float2 previousOffset,
-    ZoomState& state) noexcept;
-
-// Convenience-Adapter für die Pipeline.
-// Setzt shouldZoom/newOffset direkt im FrameContext; respektiert Pause.
+// Pipeline-Adapter: schreibt shouldZoom/newOffset in fctx
 void evaluateAndApply(::FrameContext& fctx,
                       ::RendererState& state,
                       ZoomState& bus,
