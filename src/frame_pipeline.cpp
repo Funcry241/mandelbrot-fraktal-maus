@@ -123,6 +123,22 @@ static void beginFrame(FrameContext& fctx, RendererState& state) {
     ++g_frame;
 }
 
+// ------------------------------- CUDA (Compute) -------------------------------
+static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[PIPE] compute begin: tile=%d it=%d zoom=%.6f",
+                       fctx.tileSize, fctx.maxIterations, (double)fctx.zoom);
+    }
+
+    // Übergibt REFERENZEN auf newOffset.{x,y}, damit CUDA den neuen Mittelpunkt zurückschreibt.
+    CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[PIPE] compute end: newOffset=(%.9f,%.9f)",
+                       (double)fctx.newOffset.x, (double)fctx.newOffset.y);
+    }
+}
+
 // ------------------------------ draw (GL upload + FSQ) -----------------------
 static void drawFrame(FrameContext& fctx, RendererState& state) {
     const auto t0 = Clock::now();
@@ -239,8 +255,8 @@ void execute(RendererState& state) {
         }
     }
 
-    // Compute (direkter Wrapper-Aufruf)
-    CudaInterop::renderCudaFrame(state, g_ctx, g_ctx.offset.x, g_ctx.offset.y);
+    // Compute (ausgelagert; schreibt newOffset.{x,y})
+    computeCudaFrame(g_ctx, state);
 
     // Optional Zoom evaluieren (Pause global via CudaInterop)
     if (!CudaInterop::getPauseZoom()) {
