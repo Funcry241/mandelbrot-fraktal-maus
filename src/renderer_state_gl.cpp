@@ -12,6 +12,7 @@
 #include "cuda_interop.hpp"
 #include "common.hpp"
 #include "renderer_resources.hpp"
+#include "zoom_logic.hpp"   // <- für computeTileSizeFromZoom
 
 #include <algorithm>
 
@@ -37,7 +38,12 @@ inline void clearPboFences(RendererState& rs) noexcept {
 
 RendererState::~RendererState() {
     clearPboFences(*this);
-    // EC: entfernt – kein Host-Unpinning mehr notwendig
+    // GL: Ring + Texture freigeben (falls noch vorhanden)
+    CudaInterop::unregisterAllPBOs();
+    for (auto& b : pboRing) { b.free(); }
+    tex.free();
+
+    // CUDA: Streams/Events
     destroyCudaEventsIfAny();
     destroyCudaStreamsIfAny();
 }
@@ -74,7 +80,6 @@ void RendererState::reset() {
     // Zaunkönig: fences & upload flag & ring stats
     skipUploadThisFrame = false;
     clearPboFences(*this);
-    std::fill(pboFence.begin(), pboFence.end(), (GLsync)0);
     pboIndex = 0;
     std::fill(ringUse.begin(), ringUse.end(), 0u);
     ringSkip = 0;
@@ -82,7 +87,7 @@ void RendererState::reset() {
     lastTimings = CudaPhaseTimings{};
     lastTimings.resetHostFrame();
 
-    // Ensure infra is present
+    // Ensure CUDA infra is present
     createCudaStreamsIfNeeded();
     createCudaEventsIfNeeded();
 }
@@ -100,7 +105,7 @@ void RendererState::resize(int newWidth, int newHeight) {
     // GL / CUDA teardown for old size
     clearPboFences(*this);
 
-    d_iterations.free();    
+    d_iterations.free();
     d_stateZ.free();
     d_stateIt.free();
 
@@ -127,7 +132,7 @@ void RendererState::resize(int newWidth, int newHeight) {
 
     // Dynamisch alle PBO-IDs sammeln und registrieren (Ringgröße = kPboRingSize)
     {
-        GLuint ids[RendererState::kPboRingSize];
+        unsigned int ids[RendererState::kPboRingSize];
         for (int i = 0; i < RendererState::kPboRingSize; ++i) {
             ids[i] = pboRing[i].id();
         }

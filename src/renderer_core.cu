@@ -11,7 +11,6 @@
 #include "renderer_state.hpp"
 #include "renderer_window.hpp"
 #include "renderer_pipeline.hpp"
-#include "renderer_resources.hpp"
 #include "cuda_interop.hpp"
 #include "frame_pipeline.hpp"
 #include "settings.hpp"
@@ -121,10 +120,14 @@ bool Renderer::initGL() {
         LUCHS_LOG_HOST("[INIT] GL init complete (w=%d h=%d)", state.width, state.height);
     }
 
-    // Prepare GPU pipeline
+    // Prepare GPU pipeline (shaders, programs, etc.)
     RendererPipeline::init();
 
-    // Allocate device buffers (tileSize stays configured in pipeline/zoom logic)
+    // One-time creation/registration of GL targets (Texture + PBO ring)
+    // Uses RendererState::resize to setup GL + register PBOs with CUDA.
+    state.resize(state.width, state.height);
+
+    // Allocate device buffers (independent of GL; tile size is a safe base)
     state.setupCudaBuffers(Settings::BASE_TILE_SIZE > 0 ? Settings::BASE_TILE_SIZE : 16);
 
     return true;

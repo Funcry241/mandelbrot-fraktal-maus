@@ -2,9 +2,9 @@
 ///// Schneefuchs: Header format per rules #60–62; path normalized.
 ///// Maus: Keep this as the only top header block; exact four lines.
 ///// Datei: src/renderer_pipeline.cpp
+
 #include "pch.hpp"
 #include "renderer_pipeline.hpp"
-#include "renderer_resources.hpp"   // OpenGLUtils::updateTextureFromPBO(...)
 #include "common.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
@@ -138,10 +138,16 @@ static void ensurePipeline() {
 
     // Seed tracked fixed-function states and texture unit/bindings (one-time)
     // Query once to initialize; later we track ourselves to avoid per-frame glGet*
-    GLint activeTex = 0; glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTex);
+    GLint activeTex = 0; 
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTex);
     s_lastActiveTex = (GLenum)activeTex;
-    GLint boundTex2D = 0; glActiveTexture(GL_TEXTURE0); glGetIntegerv(GL_TEXTURE_BINDING_2D, &boundTex2D);
+
+    GLint boundTex2D = 0; 
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &boundTex2D);
     s_lastTex2D = (GLuint)boundTex2D;
+    // restore previous active unit to avoid side effects
+    glActiveTexture((GLenum)activeTex);
 
     s_depthEnabled = glIsEnabled(GL_DEPTH_TEST);
     s_cullEnabled  = glIsEnabled(GL_CULL_FACE);
@@ -150,7 +156,9 @@ static void ensurePipeline() {
 #endif
 
     if constexpr (Settings::performanceLogging || Settings::debugLogging) {
-        glGenQueries(1, &sTimeQuery);
+        if (GLEW_VERSION_3_3 || GLEW_ARB_timer_query) {
+            glGenQueries(1, &sTimeQuery);
+        }
     }
 
     if constexpr (Settings::debugLogging) {

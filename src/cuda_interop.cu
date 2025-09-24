@@ -166,7 +166,7 @@ void renderCudaFrame(
 
     if (!s_pboActive) {
         LUCHS_LOG_HOST("[PBO][ERR] render called without registered PBOs");
-        LuchsLogger::flushDeviceLogToHost(0);
+        // WICHTIG: Kein Device-Log-Flush hier (Logger evtl. noch nicht init)
         state.skipUploadThisFrame = true;
         return;
     }

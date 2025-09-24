@@ -5,25 +5,25 @@
 
 #pragma once
 
-#include <cstdint>
-#include <cuda_runtime_api.h>
+#include <cuda_runtime_api.h>  // cudaStream_t
 
-#include "hermelin_buffer.hpp"   // Hermelin::CudaDeviceBuffer
-#include "renderer_state.hpp"    // RendererState
-#include "frame_context.hpp"     // FrameContext
+// Vorwärtsdeklarationen statt schwerer Includes
+namespace Hermelin { class CudaDeviceBuffer; }
+class RendererState;
+struct FrameContext;
 
 namespace CudaInterop {
 
 // Runtime environment checks & diagnostics
 bool precheckCudaRuntime() noexcept;
 void logCudaDeviceContext(const char* tag) noexcept;
-void logCudaContext(const char* tag) noexcept; // alias to logCudaDeviceContext
+void logCudaContext(const char* tag) noexcept; // Alias auf logCudaDeviceContext
 
 // Global pause toggle for zoom logic
 void setPauseZoom(bool paused) noexcept;
 bool getPauseZoom() noexcept;
 
-// PBO resource lifecycle
+// PBO resource lifecycle (IDs sind OpenGL-PBO-IDs)
 void registerAllPBOs(const unsigned int* pboIds, int count);
 void unregisterAllPBOs() noexcept;
 
