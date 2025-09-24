@@ -213,14 +213,20 @@ void renderCudaFrame(
     }
 
     // ---- 2) Capybara render (iterations) --------------------------------
-    const double cx   = (double)offsetX;
-    const double cy   = (double)offsetY;
+    const double cx = (double)offsetX;
+    const double cy = (double)offsetY;
 
-    // Schrittweite aus State ableiten (quadratische Pixel). Fallback falls PixelScale ~ 0.
-    double step = std::max(std::abs((double)state.pixelScale.x), std::abs((double)state.pixelScale.y));
-    if (!(step > 0.0)) {
-        const double baseSpan = 3.5;
-        step = baseSpan / (std::max(1, width) * std::max(1.0f, zoom));
+    // Schrittweiten direkt aus dem GL-seitig gepflegten PixelScale übernehmen
+    double stepX = (double)state.pixelScale.x;
+    double stepY = (double)state.pixelScale.y;
+
+    // Bildschirm-Y zeigt nach unten -> imaginäre Achse nach unten
+    if (stepY > 0.0) stepY = -stepY;
+
+    // Fallback bei degenerierten Werten
+    if (!std::isfinite(stepX) || !std::isfinite(stepY) || stepX == 0.0 || stepY == 0.0) {
+        stepX = 3.5 / std::max(1, width);   // ca. -2.5..1.0
+        stepY = -2.0 / std::max(1, height); // ca. -1.0..1.0 (negativ!)
     }
 
     cudaError_t rc = cudaEventRecord(s_evStart, renderStream);
@@ -230,7 +236,7 @@ void renderCudaFrame(
         static_cast<uint16_t*>(d_iterations.get()),
         width, height,
         cx, cy,
-        step, step,
+        stepX, stepY,
         maxIterations,
         renderStream,
         state.evEcDone // optional event reuse
