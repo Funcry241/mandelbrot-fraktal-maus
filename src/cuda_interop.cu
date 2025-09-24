@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstring>
 #include <chrono>
+#include <cmath>
 #include <algorithm>   // std::max, std::abs
 
 #include <GL/glew.h>
@@ -30,6 +31,7 @@ namespace {
     // ---- CUDA timing events (lazy) ---------------------------------------
     static cudaEvent_t s_evStart = nullptr;
     static cudaEvent_t s_evStop  = nullptr;
+
     inline void ensureEventsOnce() {
         static bool done = false;
         if (done) return;
@@ -55,7 +57,7 @@ namespace {
     // ---- Global pause flag for zoom logic --------------------------------
     static bool s_pauseZoom = false;
 
-    // Guard to map the current ring entry and unmap at scope end
+    // RAII-Guard: map beim Bau, unmap beim Zerstören
     struct MapGuard {
         CudaInterop::bear_CudaPBOResource* res = nullptr;
         void*   ptr   = nullptr;
@@ -74,6 +76,12 @@ namespace {
         auto e = cudaDeviceGetAttribute(&v, attr, dev);
         if (e != cudaSuccess) return -1;
         return v;
+    }
+
+    static inline void throw_with_log(const char* msg, cudaError_t rc) {
+        LUCHS_LOG_HOST("[CUDA][ERR] %s rc=%d", msg ? msg : "(null)", (int)rc);
+        LuchsLogger::flushDeviceLogToHost(0);
+        throw std::runtime_error(msg ? msg : "CUDA error");
     }
 } // anon
 
@@ -134,12 +142,9 @@ void logCudaDeviceContext(const char* tag) noexcept {
                    (tag?tag:"-"), rt, drv, dev, name, ccM, ccN, mp, smpb);
 }
 
-static inline void throw_with_log(const char* msg, cudaError_t rc) {
-    LUCHS_LOG_HOST("[CUDA][ERR] %s rc=%d", msg ? msg : "(null)", (int)rc);
-    LuchsLogger::flushDeviceLogToHost(0);
-    throw std::runtime_error(msg ? msg : "CUDA error");
-}
-
+// ----------------------------------------------------------------------------------
+// Hauptpfad: Capybara render -> colorize to PBO (ohne Host-Sync; optional Perf-Sync)
+// ----------------------------------------------------------------------------------
 void renderCudaFrame(
     Hermelin::CudaDeviceBuffer& d_iterations,
     int   width,
@@ -155,12 +160,21 @@ void renderCudaFrame(
     cudaStream_t renderStream
 ){
     (void)zoom;           // /WX: avoid unused in NVCC host pass; zoom handled upstream
-    (void)newOffsetX;     // zoom/offset update handled in higher-level logic
+    (void)newOffsetX;     // zoom/offset update handled upstream
     (void)newOffsetY;
     (void)shouldZoom;
 
-    if (!s_pboActive) throw std::runtime_error("[FATAL] CUDA PBO not registered!");
-    if (width <= 0 || height <= 0) throw std::runtime_error("invalid framebuffer dims");
+    if (!s_pboActive) {
+        LUCHS_LOG_HOST("[PBO][ERR] render called without registered PBOs");
+        LuchsLogger::flushDeviceLogToHost(0);
+        state.skipUploadThisFrame = true;
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        LUCHS_LOG_HOST("[CUDA][ERR] invalid framebuffer dims %dx%d", width, height);
+        state.skipUploadThisFrame = true;
+        return;
+    }
 
     ensureEventsOnce();
     (void)cudaGetLastError(); // clear sticky
@@ -168,11 +182,34 @@ void renderCudaFrame(
     // ---- 1) Map current PBO slot ----------------------------------------
     const size_t needBytes = size_t(width) * size_t(height) * sizeof(uchar4);
     const int ix = (state.pboIndex >= 0 && state.pboIndex < (int)s_pboResources.size()) ? state.pboIndex : 0;
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[PBO][MAP] try ring=%d need=%zu", ix, (size_t)needBytes);
+    }
+
     MapGuard map(&s_pboResources[ix]);
-    if (!map.ptr) throw std::runtime_error("pboResource->map() returned null");
-    if (map.bytes < needBytes) throw std::runtime_error("PBO byte size mismatch");
+
+    // deterministische Fehlerpfade: loggen + Frame degradieren, NICHT werfen
+    if (!map.ptr) {
+        cudaError_t rcMap = cudaGetLastError(); // evtl. von Map
+        LUCHS_LOG_HOST("[PBO][MAP][ERR] null ptr ring=%d need=%zu rc=%d", ix, (size_t)needBytes, (int)rcMap);
+        LuchsLogger::flushDeviceLogToHost(0);
+        state.skipUploadThisFrame = true;
+        return; // Frame ohne Upload beenden
+    }
+    if (map.bytes < needBytes) {
+        LUCHS_LOG_HOST("[PBO][MAP][ERR] size mismatch ring=%d got=%zu need=%zu", ix, (size_t)map.bytes, (size_t)needBytes);
+        LuchsLogger::flushDeviceLogToHost(0);
+        state.skipUploadThisFrame = true;
+        return;
+    }
+
     if (state.pboIndex >= 0 && state.pboIndex < (int)s_pboResources.size()) {
         state.ringUse[state.pboIndex]++;
+    }
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[PBO][MAP] ok ring=%d ptr=%p bytes=%zu", ix, map.ptr, (size_t)map.bytes);
     }
 
     // ---- 2) Capybara render (iterations) --------------------------------
@@ -182,7 +219,6 @@ void renderCudaFrame(
     // Schrittweite aus State ableiten (quadratische Pixel). Fallback falls PixelScale ~ 0.
     double step = std::max(std::abs((double)state.pixelScale.x), std::abs((double)state.pixelScale.y));
     if (!(step > 0.0)) {
-        // Fallback: klassischer Span basierend auf Zoom/Width
         const double baseSpan = 3.5;
         step = baseSpan / (std::max(1, width) * std::max(1.0f, zoom));
     }
@@ -197,7 +233,7 @@ void renderCudaFrame(
         step, step,
         maxIterations,
         renderStream,
-        state.evEcDone // reuse existing event slot; name kept for ABI parity
+        state.evEcDone // optional event reuse
     );
 
     // Launch-Fehler peek (numerisch loggen)
