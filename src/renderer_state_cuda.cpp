@@ -173,7 +173,8 @@ void RendererState::setupCudaBuffers(int tileSize) {
 
     const size_t it_bytes  = totalPixels * sizeof(uint16_t);
 
-    const bool   wantProg  = Settings::progressiveEnabled;
+    // Laufzeit-Flag aus dem State (nicht aus Settings), damit Umschalten greift
+    const bool   wantProg  = progressiveEnabled;
     const size_t z_bytes   = totalPixels * sizeof(float2);
     const size_t it2_bytes = totalPixels * sizeof(uint16_t);
 
@@ -231,27 +232,28 @@ void RendererState::setupCudaBuffers(int tileSize) {
             }
         }
 
-        // Deterministische Erstbelegung (nur bei Neu/Grow)
+        // Deterministische Erstbelegung (nur bei Neu/Grow) – asynchron im Render-Stream
         if (didAllocIt) {
-            CUDA_CHECK(cudaMemset(d_iterations.get(), 0, it_bytes));
+            CUDA_CHECK(cudaMemsetAsync(d_iterations.get(), 0, it_bytes, renderStream));
             if constexpr (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[DEBUG] memset d_iterations bytes=%zu", it_bytes);
             }
         }
         if (wantProg && didAllocZ) {
-            CUDA_CHECK(cudaMemset(d_stateZ.get(), 0, z_bytes));
+            CUDA_CHECK(cudaMemsetAsync(d_stateZ.get(), 0, z_bytes, renderStream));
             if constexpr (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[DEBUG] memset d_stateZ bytes=%zu", z_bytes);
             }
         }
         if (wantProg && didAllocIt2) {
-            CUDA_CHECK(cudaMemset(d_stateIt.get(), 0, it2_bytes));
+            CUDA_CHECK(cudaMemsetAsync(d_stateIt.get(), 0, it2_bytes, renderStream));
             if constexpr (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[DEBUG] memset d_stateIt bytes=%zu", it2_bytes);
             }
         }
 
         if constexpr (Settings::debugLogging) {
+            // Debug: sicherstellen, dass die asynchronen Memsets abgeschlossen sind
             CUDA_CHECK(cudaDeviceSynchronize());
             cudaError_t lastErr = cudaGetLastError();
             LUCHS_LOG_HOST("[CHECK] post-alloc sync: err=%d", (int)lastErr);
@@ -261,8 +263,8 @@ void RendererState::setupCudaBuffers(int tileSize) {
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[ALLOC] buffers ready: it=%p(%zu) z=%p(%zu) it2=%p(%zu) | %dx%d px, tileSize=%d -> tiles=%d",
                        d_iterations.get(), d_iterations.size(),
-                       Settings::progressiveEnabled ? d_stateZ.get()  : nullptr, Settings::progressiveEnabled ? d_stateZ.size()  : 0,
-                       Settings::progressiveEnabled ? d_stateIt.get() : nullptr, Settings::progressiveEnabled ? d_stateIt.size() : 0,
+                       progressiveEnabled ? d_stateZ.get()  : nullptr, progressiveEnabled ? d_stateZ.size()  : 0,
+                       progressiveEnabled ? d_stateIt.get() : nullptr, progressiveEnabled ? d_stateIt.size() : 0,
                        width, height, tileSize, numTiles);
     }
 
