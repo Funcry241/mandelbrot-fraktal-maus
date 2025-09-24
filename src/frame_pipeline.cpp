@@ -117,36 +117,6 @@ namespace {
         }
         return t;
     }
-
-    // ---------- Neue Ring-Disziplin: non-blocking Advance nach Upload ----------
-    inline void advanceRingIfPossible(RendererState& state) {
-        const int N = RendererState::kPboRingSize;
-        int nextIx  = state.pboIndex; // default: bleiben
-        for (int step = 1; step <= N; ++step) {
-            const int cand = (state.pboIndex + step) % N;
-            GLsync& f = state.pboFence[cand];
-            if (!f) { nextIx = cand; break; }
-            const GLenum r = glClientWaitSync(f, 0 /*GL_SYNC_FLUSH_COMMANDS_BIT off*/, 0 /*no wait*/);
-            if (r == GL_ALREADY_SIGNALED || r == GL_CONDITION_SATISFIED) {
-                glDeleteSync(f);
-                f = 0;
-                nextIx = cand;
-                break;
-            }
-        }
-        if (nextIx == state.pboIndex) {
-            // Kein freier Slot ohne Blockieren -> im selben Slot bleiben, Statistik hochzählen
-            ++state.ringSkip;
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[RING] no free slot; stay=%d", state.pboIndex);
-            }
-        } else {
-            state.pboIndex = nextIx;
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[RING] advance to %d", state.pboIndex);
-            }
-        }
-    }
 } // anon ns
 
 // --------------------------------- frame begin --------------------------------
@@ -221,8 +191,8 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
     const auto tUploadEnd = Clock::now();
     g_texMs = std::chrono::duration_cast<msd>(tUploadEnd - t0).count();
 
-    // Nach dem Upload einen freien Ring-Slot für die NÄCHSTE Frame-Compute wählen (non-blocking).
-    advanceRingIfPossible(state);
+    // *** FEHLENDER SCHRITT: Texture auf den Bildschirm malen (FSQ) ***
+    RendererPipeline::drawFullscreenQuad(state.tex.id());
 
     // Heatmap Overlay (falls aktiv)
     const auto tOv0 = Clock::now();
