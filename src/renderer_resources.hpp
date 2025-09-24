@@ -1,29 +1,24 @@
-///// Otter: Public API + Back-Compat Adapters; ASCII-Logs; keine versteckte API-Drift.
-///// Schneefuchs: Header/Source synchron; GL4.3-Core-Annahme; deterministisch.
-///// Maus: Header schlank – keine PCH/Settings/Log-Includes; Host-Logs nur in .cpp.
+///// Otter: Header-only API für GL-Ressourcen; minimaler Surface; keine Seiteneffekte.
+///// Schneefuchs: Nur Deklarationen; keine Implementierungen/inline; /WX-fest.
+///// Maus: Stabile Signaturen ohne GL-Header-Abhängigkeit (unsigned int statt GLuint).
 ///// Datei: src/renderer_resources.hpp
 
 #pragma once
-#ifndef RENDERER_RESOURCES_HPP
-#define RENDERER_RESOURCES_HPP
-
-#include <GL/glew.h> // GLuint, GLsizei
 
 namespace OpenGLUtils {
 
-// Kontextlabel nur für Logs in der .cpp (z. B. "init", "resize", "frame")
-void   setGLResourceContext(const char* context);
+// Kontextlabel für Logs setzen (z. B. "init", "resize", "draw")
+void         setGLResourceContext(const char* context);
 
-// Ressourcen-Erzeugung
-[[nodiscard]] GLuint createPBO(int width, int height);
-[[nodiscard]] GLuint createTexture(int width, int height);
+// Immutable RGBA8-Textur anlegen (1 Mip-Level)
+unsigned int createTexture(int width, int height);
 
-// Upload: PBO -> Texture (robust; sichert/restauriert relevanten GL-State)
-void   updateTextureFromPBO(GLuint pbo, GLuint tex, int width, int height);
+// GL_PIXEL_UNPACK_BUFFER (PBO) anlegen, Größe = width*height*4 (RGBA8)
+unsigned int createPBO(int width, int height);
 
-// Diagnose-Helfer: Liest ein paar Bytes aus dem UNPACK-PBO (nur sinnvoll mit debugLogging)
-void   peekPBO(GLuint pbo);
+// Vollflächen-Upload: Textur aus UNPACK-PBO aktualisieren
+void         updateTextureFromPBO(unsigned int pbo, unsigned int tex, int width, int height);
+
+// (peekPBO wurde vollständig entfernt)
 
 } // namespace OpenGLUtils
-
-#endif // RENDERER_RESOURCES_HPP

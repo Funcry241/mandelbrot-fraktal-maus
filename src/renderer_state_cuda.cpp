@@ -35,7 +35,7 @@ void RendererState::createCudaStreamsIfNeeded() {
     int lo = 0, hi = 0;
     const cudaError_t prc = cudaDeviceGetStreamPriorityRange(&lo, &hi);
     const bool hasRange = (prc == cudaSuccess);
-    const int prRender = hasRange ? hi : 0; // höchste verfügbare Priorität
+    const int prRender = hasRange ? hi : 0; // höchste verfügbare Priorität (numerisch meist negativ)
     const int prCopy   = hasRange ? lo : 0; // niedrigste verfügbare Priorität
 
     if (!renderStream) {
@@ -197,6 +197,10 @@ void RendererState::setupCudaBuffers(int tileSize) {
         CudaInterop::logCudaDeviceContext("setupCudaBuffers");
     }
 
+    bool didAllocIt  = false;
+    bool didAllocZ   = false;
+    bool didAllocIt2 = false;
+
     // Device buffers
     {
         const size_t haveIt = d_iterations.size();
@@ -205,6 +209,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
                 LUCHS_LOG_HOST("[ALLOC] d_iterations grow: %zu -> %zu", haveIt, it_bytes);
             }
             d_iterations.allocate(it_bytes);
+            didAllocIt = true;
         }
 
         if (wantProg) {
@@ -214,6 +219,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
                     LUCHS_LOG_HOST("[ALLOC] d_stateZ grow: %zu -> %zu (px %zu)", haveZ, z_bytes, totalPixels);
                 }
                 d_stateZ.allocate(z_bytes);
+                didAllocZ = true;
             }
             const size_t haveIt2 = d_stateIt.size();
             if (haveIt2 < it2_bytes) {
@@ -221,6 +227,27 @@ void RendererState::setupCudaBuffers(int tileSize) {
                     LUCHS_LOG_HOST("[ALLOC] d_stateIt grow: %zu -> %zu (px %zu)", haveIt2, it2_bytes, totalPixels);
                 }
                 d_stateIt.allocate(it2_bytes);
+                didAllocIt2 = true;
+            }
+        }
+
+        // Deterministische Erstbelegung (nur bei Neu/Grow)
+        if (didAllocIt) {
+            CUDA_CHECK(cudaMemset(d_iterations.get(), 0, it_bytes));
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[DEBUG] memset d_iterations bytes=%zu", it_bytes);
+            }
+        }
+        if (wantProg && didAllocZ) {
+            CUDA_CHECK(cudaMemset(d_stateZ.get(), 0, z_bytes));
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[DEBUG] memset d_stateZ bytes=%zu", z_bytes);
+            }
+        }
+        if (wantProg && didAllocIt2) {
+            CUDA_CHECK(cudaMemset(d_stateIt.get(), 0, it2_bytes));
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[DEBUG] memset d_stateIt bytes=%zu", it2_bytes);
             }
         }
 

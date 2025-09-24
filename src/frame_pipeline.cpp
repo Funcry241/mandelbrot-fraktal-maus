@@ -123,13 +123,6 @@ static void beginFrame(FrameContext& fctx, RendererState& state) {
     ++g_frame;
 }
 
-// ------------------------------- CUDA + analysis ------------------------------
-static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
-    // Neuer, schlanker Wrapper aus cuda_interop.hpp:
-    // übernimmt d_/h_-Puffer und Streams aus 'state' und Parameter aus 'fctx'.
-    CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
-}
-
 // ------------------------------ draw (GL upload + FSQ) -----------------------
 static void drawFrame(FrameContext& fctx, RendererState& state) {
     const auto t0 = Clock::now();
@@ -147,7 +140,6 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PIPE] drawFrame begin: tex=%u pbo=%u %dx%d",
                        state.tex.id(), state.currentPBO().id(), fctx.width, fctx.height);
-        OpenGLUtils::peekPBO(state.currentPBO().id());
     }
 
     OpenGLUtils::setGLResourceContext("draw");
@@ -173,8 +165,25 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
     // Heatmap Overlay (falls aktiv) – Host-Daten liegen im RendererState
     const auto tOv0 = Clock::now();
     if (state.heatmapOverlayEnabled) {
+        // Overlay-Raster darf von Compute-Tiles abweichen, ohne die Datengröße zu verletzen.
+        const int overlayTilePx = (Settings::Kolibri::gridScreenConstant)
+                                  ? Settings::Kolibri::desiredTilePx
+                                  : fctx.tileSize;
+
+        if constexpr (Settings::performanceLogging) {
+            const int compPx   = fctx.tileSize;
+            const int ovTx     = (fctx.width  + overlayTilePx - 1) / overlayTilePx;
+            const int ovTy     = (fctx.height + overlayTilePx - 1) / overlayTilePx;
+            const int compTx   = (fctx.width  + compPx - 1) / compPx;
+            const int compTy   = (fctx.height + compPx - 1) / compPx;
+            if (overlayTilePx != compPx) {
+                LUCHS_LOG_HOST("[GRID] overlayPx=%d overlay=%dx%d computePx=%d compute=%dx%d res=%dx%d",
+                               overlayTilePx, ovTx, ovTy, compPx, compTx, compTy, fctx.width, fctx.height);
+            }
+        }
+
         HeatmapOverlay::drawOverlay(state.h_entropy, state.h_contrast,
-                                    fctx.width, fctx.height, fctx.tileSize,
+                                    fctx.width, fctx.height, overlayTilePx,
                                     state.tex.id(), state);
     }
 
@@ -208,27 +217,30 @@ void execute(RendererState& state) {
     g_ctx.offset        = make_float2(static_cast<float>(state.center.x),
                                       static_cast<float>(state.center.y));
 
-    // Grid/Tile logic (screen-constant mode optional)
-    if constexpr (Settings::Kolibri::gridScreenConstant) {
-        const int tilePx = Settings::Kolibri::desiredTilePx;
-        g_ctx.tileSize = tilePx;
+    // Compute-TileSize wird zentral bestimmt (Ameise): IMMER computeTileSizeFromZoom()
+    // Overlay kann separat ein screen-konstantes Raster loggen/nutzen, ohne Compute zu beeinflussen.
+    g_ctx.tileSize = computeTileSizeFromZoom(g_ctx.zoom);
 
-        static int s_prevTilePx = -1;
+    if constexpr (Settings::Kolibri::gridScreenConstant) {
+        // Nur Logging der Overlay-Rasterung (kein Einfluss auf Compute-Tiles!)
+        static int s_prevOverlayPx = -1;
+        const int overlayPx = Settings::Kolibri::desiredTilePx;
         if constexpr (Settings::performanceLogging) {
-            if (s_prevTilePx != tilePx) {
-                const int logTilesX = (g_ctx.width  + tilePx - 1) / tilePx;
-                const int logTilesY = (g_ctx.height + tilePx - 1) / tilePx;
-                LUCHS_LOG_HOST("[GRID] screen-const tilePx=%d tiles=%dx%d res=%dx%d",
-                               tilePx, logTilesX, logTilesY, g_ctx.width, g_ctx.height);
-                s_prevTilePx = tilePx;
+            if (s_prevOverlayPx != overlayPx) {
+                const int ovTx   = (g_ctx.width  + overlayPx - 1) / overlayPx;
+                const int ovTy   = (g_ctx.height + overlayPx - 1) / overlayPx;
+                const int compPx = g_ctx.tileSize;
+                const int cTx    = (g_ctx.width  + compPx - 1) / compPx;
+                const int cTy    = (g_ctx.height + compPx - 1) / compPx;
+                LUCHS_LOG_HOST("[GRID] screen-const tilePx=%d tiles=%dx%d | computePx=%d tiles=%dx%d res=%dx%d",
+                               overlayPx, ovTx, ovTy, compPx, cTx, cTy, g_ctx.width, g_ctx.height);
+                s_prevOverlayPx = overlayPx;
             }
         }
-    } else {
-        g_ctx.tileSize = computeTileSizeFromZoom(g_ctx.zoom);
     }
 
-    // Compute (ausgelagert)
-    computeCudaFrame(g_ctx, state);
+    // Compute (direkter Wrapper-Aufruf)
+    CudaInterop::renderCudaFrame(state, g_ctx, g_ctx.offset.x, g_ctx.offset.y);
 
     // Optional Zoom evaluieren (Pause global via CudaInterop)
     if (!CudaInterop::getPauseZoom()) {
