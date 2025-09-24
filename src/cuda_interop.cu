@@ -34,8 +34,18 @@ namespace {
         static bool done = false;
         if (done) return;
         done = true;
-        CUDA_CHECK(cudaEventCreate(&s_evStart)); // timing enabled
-        CUDA_CHECK(cudaEventCreate(&s_evStop));
+        cudaError_t rc = cudaEventCreate(&s_evStart); // timing enabled
+        if (rc != cudaSuccess) {
+            LUCHS_LOG_HOST("[CUDA][ERR] eventCreate start rc=%d", (int)rc);
+            LuchsLogger::flushDeviceLogToHost(0);
+            throw std::runtime_error("cudaEventCreate(start) failed");
+        }
+        rc = cudaEventCreate(&s_evStop);
+        if (rc != cudaSuccess) {
+            LUCHS_LOG_HOST("[CUDA][ERR] eventCreate stop rc=%d", (int)rc);
+            LuchsLogger::flushDeviceLogToHost(0);
+            throw std::runtime_error("cudaEventCreate(stop) failed");
+        }
     }
 
     // ---- PBO CUDA resources ----------------------------------------------
@@ -124,6 +134,12 @@ void logCudaDeviceContext(const char* tag) noexcept {
                    (tag?tag:"-"), rt, drv, dev, name, ccM, ccN, mp, smpb);
 }
 
+static inline void throw_with_log(const char* msg, cudaError_t rc) {
+    LUCHS_LOG_HOST("[CUDA][ERR] %s rc=%d", msg ? msg : "(null)", (int)rc);
+    LuchsLogger::flushDeviceLogToHost(0);
+    throw std::runtime_error(msg ? msg : "CUDA error");
+}
+
 void renderCudaFrame(
     Hermelin::CudaDeviceBuffer& d_iterations,
     int   width,
@@ -162,9 +178,18 @@ void renderCudaFrame(
     // ---- 2) Capybara render (iterations) --------------------------------
     const double cx   = (double)offsetX;
     const double cy   = (double)offsetY;
-    const double step = std::max(std::abs(state.pixelScale.x), std::abs(state.pixelScale.y));
 
-    CUDA_CHECK(cudaEventRecord(s_evStart, renderStream));
+    // Schrittweite aus State ableiten (quadratische Pixel). Fallback falls PixelScale ~ 0.
+    double step = std::max(std::abs((double)state.pixelScale.x), std::abs((double)state.pixelScale.y));
+    if (!(step > 0.0)) {
+        // Fallback: klassischer Span basierend auf Zoom/Width
+        const double baseSpan = 3.5;
+        step = baseSpan / (std::max(1, width) * std::max(1.0f, zoom));
+    }
+
+    cudaError_t rc = cudaEventRecord(s_evStart, renderStream);
+    if (rc != cudaSuccess) throw_with_log("eventRecord(start) before capy_render", rc);
+
     capy_render(
         static_cast<uint16_t*>(d_iterations.get()),
         width, height,
@@ -174,34 +199,39 @@ void renderCudaFrame(
         renderStream,
         state.evEcDone // reuse existing event slot; name kept for ABI parity
     );
-    CUDA_CHECK(cudaEventRecord(s_evStop, renderStream));
+
+    // Launch-Fehler peek (numerisch loggen)
+    rc = cudaPeekAtLastError();
+    if (rc != cudaSuccess) throw_with_log("capy_render launch", rc);
+
+    rc = cudaEventRecord(s_evStop, renderStream);
+    if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after capy_render", rc);
 
     if constexpr (Settings::performanceLogging) {
-        cudaError_t rcCapySync = cudaEventSynchronize(s_evStop);
-        if (rcCapySync != cudaSuccess) {
-            LUCHS_LOG_HOST("[CUDA][ERR] capybara sync rc=%d", (int)rcCapySync);
-            LuchsLogger::flushDeviceLogToHost(0);
-            throw std::runtime_error("CUDA failure: capy_render");
-        }
+        cudaError_t rcSync = cudaEventSynchronize(s_evStop);
+        if (rcSync != cudaSuccess) throw_with_log("capy_render sync", rcSync);
     }
 
     // ---- 3) Colorize into mapped PBO ------------------------------------
-    CUDA_CHECK(cudaEventRecord(s_evStart, renderStream));
+    rc = cudaEventRecord(s_evStart, renderStream);
+    if (rc != cudaSuccess) throw_with_log("eventRecord(start) before colorize", rc);
+
     colorize_iterations_to_pbo(
         static_cast<const uint16_t*>(d_iterations.get()),
         static_cast<uchar4*>(map.ptr),
         width, height, maxIterations,
         renderStream
     );
-    CUDA_CHECK(cudaEventRecord(s_evStop, renderStream));
+
+    rc = cudaPeekAtLastError();
+    if (rc != cudaSuccess) throw_with_log("colorize launch", rc);
+
+    rc = cudaEventRecord(s_evStop, renderStream);
+    if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after colorize", rc);
 
     if constexpr (Settings::performanceLogging) {
-        cudaError_t rcColSync = cudaEventSynchronize(s_evStop);
-        if (rcColSync != cudaSuccess) {
-            LUCHS_LOG_HOST("[CUDA][ERR] colorize sync rc=%d", (int)rcColSync);
-            LuchsLogger::flushDeviceLogToHost(0);
-            throw std::runtime_error("CUDA failure: colorize_iterations_to_pbo");
-        }
+        cudaError_t rcSync = cudaEventSynchronize(s_evStop);
+        if (rcSync != cudaSuccess) throw_with_log("colorize sync", rcSync);
     }
 
     // ---- 4) done; MapGuard dtor will unmap -------------------------------

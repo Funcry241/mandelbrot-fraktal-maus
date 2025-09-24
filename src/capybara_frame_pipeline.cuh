@@ -27,21 +27,25 @@ static inline void capy_render(
     cudaEvent_t   doneEvent = nullptr // optional: recorded after render (no host sync)
 )
 {
-    // --- argument hygiene (minimal, consistent) ---
+    // --- Argument hygiene (minimal, consistent) ---
     if (!d_it || w <= 0 || h <= 0 || maxIter < 0) {
         LUCHS_LOG_HOST("[CAPY-FRAME] invalid-args w=%d h=%d maxIter=%d d_it=%p",
                        w, h, maxIter, (void*)d_it);
         return;
     }
 
-    // --- render (Capybara only; classic path removed) ---
+    // --- Render (Capybara only; classic path removed) ---
     launch_mandelbrot_select(
         d_it, w, h, cx, cy, stepX, stepY, maxIter, renderStream,
         /*useCapybara=*/true
     );
 
-    // --- optional event for downstream scheduling ---
+    // --- Optional event for downstream scheduling (no host sync here) ---
     if (doneEvent != nullptr) {
-        CUDA_CHECK(cudaEventRecord(doneEvent, renderStream));
+        const cudaError_t er = cudaEventRecord(doneEvent, renderStream);
+        if (er != cudaSuccess) {
+            LUCHS_LOG_HOST("[CAPY-FRAME][ERR] cudaEventRecord=%d %s",
+                           (int)er, cudaGetErrorString(er));
+        }
     }
 }
