@@ -88,7 +88,6 @@ namespace {
 
     // Dynamisches Ring-Logging (ASCII, determiniert), plus Reset der Zähler
     inline void logAndResetRingStats(RendererState& state) {
-        // Ring-Use kompakt als "{a,b,c,...}" bauen
         char buf[1024];
         int  pos = 0;
         pos += std::snprintf(buf + pos, sizeof(buf) - pos, "{");
@@ -96,13 +95,27 @@ namespace {
             pos += std::snprintf(buf + pos, sizeof(buf) - pos, (i == 0 ? "%u" : ",%u"), state.ringUse[i]);
         }
         std::snprintf(buf + pos, sizeof(buf) - pos, "}");
+        LUCHS_LOG_HOST("[RING] use=%s skip=%u size=%d", buf, state.ringSkip, RendererState::kPboRingSize);
 
-        LUCHS_LOG_HOST("[RING] use=%s skip=%u size=%d",
-                       buf, state.ringSkip, RendererState::kPboRingSize);
-
-        // Reset Counters
         for (int i = 0; i < RendererState::kPboRingSize; ++i) state.ringUse[i] = 0;
         state.ringSkip = 0;
+    }
+
+    // Tile-Size stabilisieren (Vielfaches von 32 für robuste Kernel-Launches)
+    inline int chooseComputeTileSize(float zoom) {
+        int t = computeTileSizeFromZoom(zoom);
+        t = std::clamp(t, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
+        if (t % 32 != 0) {
+            const int up   = ((t + 31) / 32) * 32;
+            const int down = (t / 32) * 32;
+            int cand = (std::abs(up - t) < std::abs(t - down)) ? up : down;
+            if (cand < 32) cand = 32;
+            t = cand;
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[GRID] align compute tile from %d to %d", (int)computeTileSizeFromZoom(zoom), t);
+            }
+        }
+        return t;
     }
 } // anon ns
 
@@ -130,7 +143,7 @@ static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
                        fctx.tileSize, fctx.maxIterations, (double)fctx.zoom);
     }
 
-    // Übergibt REFERENZEN auf newOffset.{x,y}, damit CUDA den neuen Mittelpunkt zurückschreibt.
+    // REFERENZEN auf newOffset.{x,y}, damit CUDA den Mittelpunkt korrekt zurückschreibt
     CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
 
     if constexpr (Settings::debugLogging) {
@@ -178,10 +191,9 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
     const auto tUploadEnd = Clock::now();
     g_texMs = std::chrono::duration_cast<msd>(tUploadEnd - t0).count();
 
-    // Heatmap Overlay (falls aktiv) – Host-Daten liegen im RendererState
+    // Heatmap Overlay (falls aktiv)
     const auto tOv0 = Clock::now();
     if (state.heatmapOverlayEnabled) {
-        // Overlay-Raster darf von Compute-Tiles abweichen, ohne die Datengröße zu verletzen.
         const int overlayTilePx = (Settings::Kolibri::gridScreenConstant)
                                   ? Settings::Kolibri::desiredTilePx
                                   : fctx.tileSize;
@@ -203,7 +215,7 @@ static void drawFrame(FrameContext& fctx, RendererState& state) {
                                     state.tex.id(), state);
     }
 
-    // HUD-Text via Warzenschwein-Overlay (Text kommt aus state.warzenschweinText)
+    // HUD-Text via Warzenschwein-Overlay
     if constexpr (Settings::warzenschweinOverlayEnabled) {
         if (!state.warzenschweinText.empty()) {
             WarzenschweinOverlay::drawOverlay(static_cast<float>(state.zoom));
@@ -233,9 +245,8 @@ void execute(RendererState& state) {
     g_ctx.offset        = make_float2(static_cast<float>(state.center.x),
                                       static_cast<float>(state.center.y));
 
-    // Compute-TileSize wird zentral bestimmt (Ameise): IMMER computeTileSizeFromZoom()
-    // Overlay kann separat ein screen-konstantes Raster loggen/nutzen, ohne Compute zu beeinflussen.
-    g_ctx.tileSize = computeTileSizeFromZoom(g_ctx.zoom);
+    // Compute-TileSize: robust auf Vielfache von 32 normalisieren
+    g_ctx.tileSize = chooseComputeTileSize(g_ctx.zoom);
 
     if constexpr (Settings::Kolibri::gridScreenConstant) {
         // Nur Logging der Overlay-Rasterung (kein Einfluss auf Compute-Tiles!)
@@ -255,15 +266,15 @@ void execute(RendererState& state) {
         }
     }
 
-    // Compute (ausgelagert; schreibt newOffset.{x,y})
+    // Compute (schreibt newOffset.{x,y})
     computeCudaFrame(g_ctx, state);
 
-    // Optional Zoom evaluieren (Pause global via CudaInterop)
+    // Optional Zoom evaluieren
     if (!CudaInterop::getPauseZoom()) {
         ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, kZOOM_GAIN);
     }
 
-    // HUD-Text für Warzenschwein-Overlay vorbereiten
+    // HUD-Text vorbereiten
     if constexpr (Settings::warzenschweinOverlayEnabled) {
         state.warzenschweinText = HudText::build(g_ctx, state);
     }
@@ -283,7 +294,6 @@ void execute(RendererState& state) {
         const double fps    = (g_totMs > 1e-3) ? (1000.0 / g_totMs) : 0.0;
         const double maxfps = (g_texMs > 1e-3) ? (1000.0 / g_texMs) : 0.0;
 
-        // Build stable log line
         const float e0  = state.h_entropy.empty()  ? 0.f : state.h_entropy[0];
         const float c0  = state.h_contrast.empty() ? 0.f : state.h_contrast[0];
         const int   ringIx = state.pboIndex;
@@ -298,7 +308,7 @@ void execute(RendererState& state) {
         );
     }
 
-    // [LOG-6] Periodische Ring-Nutzungsstatistik (dynamisch gemäß Ringgröße)
+    // [LOG-6] Periodische Ring-Nutzungsstatistik
     if constexpr (Settings::performanceLogging) {
         if ((g_frame % RING_LOG_EVERY) == 0) {
             logAndResetRingStats(state);
