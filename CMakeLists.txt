@@ -144,7 +144,7 @@ if(MSVC)
 
   # Host (C++) STRIKT mit /WX; CUDA-Host ebenfalls /WX, aber gezielt C4505 aus CUDA CRT unterdrücken
   target_compile_options(mandelbrot_otterdream PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /permissive- /Zc:__cplusplus /Brepro>
+    $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /sdl /permissive- /Zc:__cplusplus /Brepro>
     $<$<COMPILE_LANGUAGE:CUDA>:
       -Xcompiler=/W4
       -Xcompiler=/WX
