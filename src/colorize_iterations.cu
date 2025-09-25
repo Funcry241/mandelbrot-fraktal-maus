@@ -1,68 +1,147 @@
-///// Otter: Iteration→PBO colorizer + GPU heatmap metrics; compact, branch-light.
-///// Schneefuchs: Uses Settings block geometry; stable HSV ramp with gentle gamma.
-///// Maus: One colorize kernel + one metrics kernel; clamp + pack to RGBA; minimal deps.
+///// Otter: Iteration→PBO colorizer – richer background (deep-space gradient + subtle dither).
+///// Schneefuchs: Bandarm (cosine palette), gamma-eased, deterministic hash; no API changes.
+///// Maus: Interior stays dark with thin halo; outside gets lively but not noisy.
 ///// Datei: src/colorize_iterations.cu
 
 #include <cuda_runtime.h>
 #include <cstdint>
 #include <math.h>
-#include <vector>   // for metrics host export
 
 #include "settings.hpp"
 #include "colorize_iterations.cuh"
 
 // ----------------------------- tiny math helpers ------------------------------
-static __device__ __forceinline__ float clamp01(float x) {
-    return x < 0.f ? 0.f : (x > 1.f ? 1.f : x);
-}
-
-static __device__ __forceinline__ float3 hsv_to_rgb(float h, float s, float v) {
-    // h in [0,1), s,v in [0,1]
-    float r, g, b;
-    float i = floorf(h * 6.0f);
-    float f = h * 6.0f - i;
-    float p = v * (1.0f - s);
-    float q = v * (1.0f - s * f);
-    float t = v * (1.0f - s * (1.0f - f));
-    int   ii = static_cast<int>(i) % 6;
-    if      (ii == 0) { r=v; g=t; b=p; }
-    else if (ii == 1) { r=q; g=v; b=p; }
-    else if (ii == 2) { r=p; g=v; b=t; }
-    else if (ii == 3) { r=p; g=q; b=v; }
-    else if (ii == 4) { r=t; g=p; b=v; }
-    else              { r=v; g=p; b=q; }
-    return make_float3(r, g, b);
-}
-
+static __device__ __forceinline__ float clamp01(float x) { return x < 0.f ? 0.f : (x > 1.f ? 1.f : x); }
 static __device__ __forceinline__ uchar4 pack_rgba(float r, float g, float b, float a=1.0f) {
     r = clamp01(r); g = clamp01(g); b = clamp01(b); a = clamp01(a);
-    return make_uchar4(static_cast<unsigned char>(r * 255.0f + 0.5f),
-                       static_cast<unsigned char>(g * 255.0f + 0.5f),
-                       static_cast<unsigned char>(b * 255.0f + 0.5f),
-                       static_cast<unsigned char>(a * 255.0f + 0.5f));
+    return make_uchar4((unsigned char)(r * 255.0f + 0.5f),
+                       (unsigned char)(g * 255.0f + 0.5f),
+                       (unsigned char)(b * 255.0f + 0.5f),
+                       (unsigned char)(a * 255.0f + 0.5f));
+}
+static __device__ __forceinline__ float3 lerp3(const float3& a, const float3& b, float t){
+    return make_float3(a.x + (b.x - a.x)*t,
+                       a.y + (b.y - a.y)*t,
+                       a.z + (b.z - a.z)*t);
 }
 
+// deterministic 32→[0,1) hash (PCG-ish mix; fixed)
+static __device__ __forceinline__ float hash01(uint32_t x){
+    x ^= x >> 17; x *= 0xed5ad4bbu;
+    x ^= x >> 11; x *= 0xac4c1b51u;
+    x ^= x >> 15; x *= 0x31848babu;
+    x ^= x >> 14;
+    return (x >> 8) * (1.0f / 16777216.0f); // use top 24 bits
+}
+
+// Inigo-Quílez-artige Cosine-Palette
+static __device__ __forceinline__ float3 cosine_palette(float t, float3 a, float3 b, float3 c, float3 d) {
+    const float twoPi = 6.283185307179586f;
+    float3 ct = make_float3(c.x * t + d.x, c.y * t + d.y, c.z * t + d.z);
+    return make_float3(a.x + b.x * cosf(twoPi * ct.x),
+                       a.y + b.y * cosf(twoPi * ct.y),
+                       a.z + b.z * cosf(twoPi * ct.z));
+}
+
+// ---------------------------- tunables (background) ---------------------------
+// Unterhalb dieses Bruchs (rel. Iteration) behandeln wir "Hintergrund".
+static __constant__ float kBG_SPLIT = 0.23f;   // 0..1 — Anteil der Iterationsspanne für „Low-Detail“
+static __constant__ float kBG_NOISE = 0.06f;   // max. Dither-Amplitude (nur im Hintergrundzweig)
+static __constant__ float kBG_BLEND = 0.28f;   // Anteil der Cosine-Farbkomponente im Hintergrund
+
 // ------------------------------ palette mapping ------------------------------
-// A smooth HSV ramp based on normalized iteration count with light easing.
-// Interior pixels (it == maxIter) are rendered as near-black for "Rüsselwarze" look.
-static __device__ __forceinline__ uchar4 color_from_iter(uint16_t it, int maxIter) {
-    if (it >= static_cast<uint16_t>(maxIter)) {
-        // Interior: keep it very dark but not pure black to preserve subtle gradients if needed
-        const float v = 0.02f;
+// Innen bleibt dunkel; außen lebendige Cosine-Palette.
+// Für sehr niedrige Iterationen (Hintergrund) gibt es einen „Deep-Space“-Verlauf
+// + leichtes Dithering, damit große Flächen nicht eintönig blau wirken.
+static __device__ __forceinline__ uchar4 color_from_iter(
+    uint16_t it, int maxIter, int idxLinear)
+{
+    if (maxIter <= 1) {
+        const float v = 0.02f; return pack_rgba(v, v, v, 1.0f);
+    }
+
+    const int interiorEdge = max(0, maxIter - 1);
+    const int haloWidth    = 6;
+
+    // Innenbereich sehr dunkel
+    if ((int)it >= interiorEdge) {
+        const float v = 0.015f;
         return pack_rgba(v, v, v, 1.0f);
     }
 
-    // Normalize and ease a bit to stretch low iterations
-    const float t0 = static_cast<float>(it) / static_cast<float>(maxIter);
-    const float t  = powf(t0, 0.85f); // gentle gamma
+    // Normierung
+    float t0 = (float)it / (float)max(interiorEdge, 1);
+    float t  = powf(t0, 0.82f); // leichte Entzerrung
 
-    // Hue cycles softly over a limited band to avoid rainbow noise
-    const float hue = fmodf(0.62f + 0.38f * t * 1.25f, 1.0f); // 0.62..~1.0
-    const float sat = 0.78f;
-    const float val = 0.98f * (0.35f + 0.65f * t);            // lift with t
+    // ---------- Hintergrund-Behandlung ----------
+    if (t0 < kBG_SPLIT) {
+        // u skaliert die Subspanne [0..kBG_SPLIT] → [0..1]
+        const float u = (kBG_SPLIT > 1e-6f) ? (t0 / kBG_SPLIT) : 0.f;
 
-    const float3 rgb = hsv_to_rgb(hue, sat, val);
-    return pack_rgba(rgb.x, rgb.y, rgb.z, 1.0f);
+        // Deep-Space-Verlauf (kohlig → kühles Indigo)
+        const float3 spaceA = make_float3(0.06f, 0.07f, 0.09f);
+        const float3 spaceB = make_float3(0.10f, 0.11f, 0.16f);
+        float3 bg = lerp3(spaceA, spaceB, powf(u, 1.35f));
+
+        // Etwas Farbleben via Cosine-Palette, schwach beigemischt
+        // (begrenzter Hue-Sweep, damit keine „Regenbogen“-Anmutung)
+        const float3 A = make_float3(0.50f, 0.46f, 0.52f);
+        const float3 B = make_float3(0.36f, 0.30f, 0.34f);
+        const float3 C = make_float3(1.00f, 1.00f, 1.00f);
+        const float3 D = make_float3(0.05f, 0.22f, 0.40f);
+        const float  cycles = 1.35f;
+        float k = t * cycles - floorf(t * cycles); // fract
+        float3 cosCol = cosine_palette(k, A, B, C, D);
+
+        // Mischung (mehr „space“ bei u≈0, mehr Cosine wenn u wächst)
+        const float mixAmt = kBG_BLEND * (0.35f + 0.65f * u);
+        float3 col = lerp3(bg, cosCol, mixAmt);
+
+        // Sehr feines, deterministisches Dithering, das mit u ausfadet
+        float jitter = (hash01((uint32_t)idxLinear * 1664525u) - 0.5f) * (kBG_NOISE * (1.0f - u));
+        col.x = clamp01(col.x + jitter);
+        col.y = clamp01(col.y + jitter);
+        col.z = clamp01(col.z + jitter);
+
+        // leichte Gamma auf Value
+        const float gamma = 0.95f;
+        col.x = powf(col.x, gamma);
+        col.y = powf(col.y, gamma);
+        col.z = powf(col.z, gamma);
+
+        return pack_rgba(col.x, col.y, col.z, 1.0f);
+    }
+
+    // ---------- „Detail“-Palette (außerhalb Hintergrund) ----------
+    // Mehr Varianz: mehrere Zyklen über 0..1 (ohne harte Bänder)
+    const float cycles = 3.25f;
+    float k = t * cycles - floorf(t * cycles);
+
+    // Cosine-Palette-Parameter (fein abgestimmt)
+    const float3 A = make_float3(0.52f, 0.46f, 0.50f);
+    const float3 B = make_float3(0.48f, 0.42f, 0.46f);
+    const float3 C = make_float3(1.00f, 1.00f, 1.00f);
+    const float3 D = make_float3(0.00f, 0.18f, 0.38f);
+
+    float3 col = cosine_palette(k, A, B, C, D);
+
+    // Heller Saum kurz vor innen
+    const int toEdge = interiorEdge - (int)it; // 1..haloWidth
+    if (toEdge > 0 && toEdge <= haloWidth) {
+        const float s = (float)(haloWidth - toEdge + 1) / (float)haloWidth; // 0..1
+        const float boost = 0.18f * s;
+        col.x = clamp01(col.x + boost);
+        col.y = clamp01(col.y + boost);
+        col.z = clamp01(col.z + boost);
+    }
+
+    // leichte Gamma auf Value für knackigere Lichter
+    const float gamma = 0.92f;
+    col.x = powf(col.x, gamma);
+    col.y = powf(col.y, gamma);
+    col.z = powf(col.z, gamma);
+
+    return pack_rgba(col.x, col.y, col.z, 1.0f);
 }
 
 // ---------------------------------- kernel -----------------------------------
@@ -79,7 +158,7 @@ __global__ void kColorizeIterationsToPBO(
     const int idx = y * width + x;
 
     const uint16_t it = d_it[idx];
-    d_out[idx] = color_from_iter(it, maxIter);
+    d_out[idx] = color_from_iter(it, maxIter, idx);
 }
 
 // ---------------------------------- launch -----------------------------------
@@ -92,158 +171,12 @@ extern "C" void colorize_iterations_to_pbo(
     cudaStream_t    stream
 ) noexcept
 {
-    if (!d_iterations || !d_pboOut || width <= 0 || height <= 0 || maxIter <= 0) {
-        return;
-    }
+    if (!d_iterations || !d_pboOut || width <= 0 || height <= 0 || maxIter <= 0) return;
 
     dim3 block(Settings::MANDEL_BLOCK_X, Settings::MANDEL_BLOCK_Y, 1);
     dim3 grid((width  + block.x - 1) / block.x,
               (height + block.y - 1) / block.y,
               1);
 
-    kColorizeIterationsToPBO<<<grid, block, 0, stream>>>(
-        d_iterations, d_pboOut, width, height, maxIter
-    );
-}
-
-// ============================================================================
-// GPU Heatmap Metrics (entropy/contrast) – one tile per block, 1 thread/block
-// ============================================================================
-
-__global__ void colorize_kernel_tile_metrics(const uint16_t* __restrict__ it,
-                                             int w, int h,
-                                             int tilePx, int tilesX,
-                                             float* __restrict__ entropy,
-                                             float* __restrict__ contrast)
-{
-    const int tx = blockIdx.x;
-    const int ty = blockIdx.y;
-    const int tilesY = gridDim.y;
-    if (tx >= tilesX || ty >= tilesY) return;
-
-    const int x0 = tx * tilePx;
-    const int y0 = ty * tilePx;
-    const int x1 = (x0 + tilePx > w) ? w : (x0 + tilePx);
-    const int y1 = (y0 + tilePx > h) ? h : (y0 + tilePx);
-
-    const int tileW = (x1 - x0 > 0) ? (x1 - x0) : 0;
-    const int tileH = (y1 - y0 > 0) ? (y1 - y0) : 0;
-    const int nPix  = tileW * tileH;
-    const int outIx = ty * tilesX + tx;
-
-    if (nPix <= 0) {
-        if (entropy)  entropy[outIx]  = 0.0f;
-        if (contrast) contrast[outIx] = 0.0f;
-        return;
-    }
-
-    // Contrast = stddev over the tile
-    double sum = 0.0, sum2 = 0.0;
-    for (int y = y0; y < y1; ++y) {
-        const uint16_t* row = it + (size_t)y * (size_t)w + x0;
-        for (int x = 0; x < tileW; ++x) {
-            const double v = (double)row[x];
-            sum  += v;
-            sum2 += v * v;
-        }
-    }
-    const double mean = sum / (double)nPix;
-    double var = sum2 / (double)nPix - mean * mean;
-    if (var < 0.0) var = 0.0;
-    const float stdev = (float)sqrt(var);
-    if (contrast) contrast[outIx] = stdev;
-
-    // Entropy via 32 fixed buckets (hash-based, iterations-agnostic)
-    constexpr int B = 32;
-    int hist[B];
-    #pragma unroll
-    for (int i = 0; i < B; ++i) hist[i] = 0;
-
-    for (int y = y0; y < y1; ++y) {
-        const uint16_t* row = it + (size_t)y * (size_t)w + x0;
-        for (int x = 0; x < tileW; ++x) {
-            const uint16_t v = row[x];
-            const int b = ((int)v ^ ((int)v >> 5)) & (B - 1);
-            ++hist[b];
-        }
-    }
-
-    float H = 0.0f;
-    const float invN  = 1.0f / (float)nPix;
-    constexpr float invLn2 = 1.0f / 0.6931471805599453f;
-    for (int i = 0; i < B; ++i) {
-        const float p = (float)hist[i] * invN;
-        if (p > 0.0f) H -= p * (logf(p) * invLn2);
-    }
-    if (entropy) entropy[outIx] = H;
-}
-
-// Static device buffers reused across frames
-static float* s_dEntropy  = nullptr;
-static float* s_dContrast = nullptr;
-static size_t s_tilesCap  = 0;
-
-static bool colorize_ensure_metric_buffers(size_t tiles) {
-    if (tiles <= s_tilesCap && s_dEntropy && s_dContrast) return true;
-
-    if (s_dEntropy)  cudaFree(s_dEntropy);
-    if (s_dContrast) cudaFree(s_dContrast);
-    s_dEntropy = s_dContrast = nullptr;
-    s_tilesCap = 0;
-
-    cudaError_t rc = cudaMalloc((void**)&s_dEntropy,  tiles * sizeof(float));
-    if (rc != cudaSuccess) return false;
-
-    rc = cudaMalloc((void**)&s_dContrast, tiles * sizeof(float));
-    if (rc != cudaSuccess) {
-        cudaFree(s_dEntropy); s_dEntropy = nullptr;
-        return false;
-    }
-
-    s_tilesCap = tiles;
-    return true;
-}
-
-// Public API: compute metrics on GPU and copy to host vectors
-bool colorize_compute_tile_metrics_to_host(
-    const uint16_t* d_iterations,
-    int width, int height, int tilePx,
-    cudaStream_t stream,
-    std::vector<float>& h_entropy,
-    std::vector<float>& h_contrast) noexcept
-{
-    if (!d_iterations || width <= 0 || height <= 0 || tilePx <= 0) return false;
-
-    const int px = (tilePx > 0) ? tilePx : 1;
-    const int tilesX = (width  + px - 1) / px;
-    const int tilesY = (height + px - 1) / px;
-    const size_t tiles = (size_t)tilesX * (size_t)tilesY;
-
-    if (!colorize_ensure_metric_buffers(tiles)) return false;
-
-    dim3 grid((unsigned)tilesX, (unsigned)tilesY, 1);
-    dim3 block(1, 1, 1);
-
-    colorize_kernel_tile_metrics<<<grid, block, 0, stream>>>(
-        d_iterations, width, height, px, tilesX, s_dEntropy, s_dContrast
-    );
-    if (cudaPeekAtLastError() != cudaSuccess) {
-        return false;
-    }
-
-    h_entropy.resize(tiles);
-    h_contrast.resize(tiles);
-
-    cudaError_t rc = cudaMemcpyAsync(h_entropy.data(),  s_dEntropy,  tiles*sizeof(float), cudaMemcpyDeviceToHost, stream);
-    if (rc == cudaSuccess)
-        rc = cudaMemcpyAsync(h_contrast.data(), s_dContrast, tiles*sizeof(float), cudaMemcpyDeviceToHost, stream);
-    if (rc != cudaSuccess) {
-        return false;
-    }
-
-    rc = cudaStreamSynchronize(stream);
-    if (rc != cudaSuccess) {
-        return false;
-    }
-    return true;
+    kColorizeIterationsToPBO<<<grid, block, 0, stream>>>(d_iterations, d_pboOut, width, height, maxIter);
 }

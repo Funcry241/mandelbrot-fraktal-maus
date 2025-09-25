@@ -1,12 +1,12 @@
 ///// Otter: Silk-Lite auto-pan/zoom controller with robust drift fallback (no heatmap required).
 ///// Schneefuchs: Keine API-Drifts; deterministische Schrittweite; MSVC-/WX-fest.
-///// Maus: Sanfter Drift in NDC, Limitierung der Kurvenrate; ASCII-only.
+///// Maus: Sanfter Drift in NDC, Limitierung der Kurvenrate; Edge-Pull & 2nd-best Fallback.
 ///// Datei: src/zoom_logic.cpp
 
 #include "zoom_logic.hpp"
-#include "frame_context.hpp"    // definiert FrameContext (struct)
-#include "renderer_state.hpp"   // definiert RendererState (class)
-#include "cuda_interop.hpp"     // CudaInterop::getPauseZoom()
+#include "frame_context.hpp"
+#include "renderer_state.hpp"
+#include "cuda_interop.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 
@@ -27,11 +27,10 @@ constexpr float kBLEND_A       = 0.22f;  // Low-Pass fürs Offset
 constexpr float kALPHA_E = 1.0f; // Gewicht Entropy
 constexpr float kBETA_C  = 0.5f; // Gewicht Contrast
 
-// Minimaler „Signifikanz“-Score (Z-Skala). Unterhalb → Drift-Fallback.
-constexpr float kMIN_SCORE_SIGMA = 0.35f;
-
-// Approx. Sichtspanne wie in cuda_interop (Fallback, falls pixelScale unbekannt)
-constexpr double kBASE_SPAN = 8.0 / 3.0;
+// Edge-Pull: ab ~0.78 NDC zieht eine weiche Feder zur Mitte
+constexpr float kEDGE_PULL_START = 0.78f;
+constexpr float kEDGE_PULL_FULL  = 0.98f;
+constexpr float kEDGE_PULL_GAIN  = 0.40f;
 
 inline float clampf(float x, float a, float b) { return (x < a) ? a : (x > b ? b : x); }
 
@@ -84,7 +83,7 @@ float median_inplace(std::vector<float>& v) {
 float mad_from_center_inplace(std::vector<float>& v, float center) {
     for (auto& x : v) x = std::fabs(x - center);
     float mad = median_inplace(v);
-    return (mad > 1e-6f) ? mad : 1.0f; // Guard gegen degenerierte Verteilungen
+    return (mad > 1e-6f) ? mad : 1.0f;
 }
 
 // Tileindex → NDC-Zentrum (−1..+1)
@@ -101,18 +100,6 @@ inline void tileIndexToNdcCenter(int tilesX, int tilesY, int idx, float& ndcX, f
 thread_local bool  g_dirInit  = false;
 thread_local float g_prevDirX = 1.0f;
 thread_local float g_prevDirY = 0.0f;
-
-// ---------------------- NDC → Welt-Schrittfaktor ------------------------
-// Welt/Px ≈ (kBASE_SPAN / width) * (1/zoom)  → Welt/NDC = Welt/Px * (width/2)
-// Analog für Y mit height. Das reicht als robustes Approx, wenn pixelScale
-// hier nicht verfügbar ist.
-inline void ndcToWorldScales(int width, int height, float zoom, double& wx, double& wy) {
-    const double invZ = 1.0 / std::max(1e-6, (double)zoom);
-    const double stepPx = kBASE_SPAN / std::max(1, width); // Welt pro Pixel @ zoom=1
-    const double stepNow = stepPx * invZ;                  // Welt pro Pixel @ zoom
-    wx = stepNow * (0.5 * (double)width);
-    wy = stepNow * (0.5 * (double)height);
-}
 
 } // namespace
 
@@ -154,50 +141,51 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
                               float2 previousOffset,
                               ZoomState& /*state*/) noexcept
 {
+    (void)width; (void)height;
     ZoomResult out{};
+
     const int total = (tilesX > 0 && tilesY > 0) ? (tilesX * tilesY) : 0;
-    const bool haveEntropy  = (total > 0) && ((int)entropy.size()  >= total);
-    const bool haveContrast = (total > 0) && ((int)contrast.size() >= total);
+    const bool haveEntropy  = (total > 0) && (static_cast<int>(entropy.size())  >= total);
+    const bool haveContrast = (total > 0) && (static_cast<int>(contrast.size()) >= total);
 
-    auto applyStepWorld = [&](float dirx, float diry, float stepNdc) {
-        double wx, wy; ndcToWorldScales(width, height, zoom, wx, wy);
-        const double dx = (double)dirx * (double)stepNdc * wx;
-        const double dy = (double)diry * (double)stepNdc * wy;
-        const double nx = (double)previousOffset.x + dx;
-        const double ny = (double)previousOffset.y + dy;
-        out.newOffsetX = (float)((1.0 - kBLEND_A) * (double)previousOffset.x + kBLEND_A * nx);
-        out.newOffsetY = (float)((1.0 - kBLEND_A) * (double)previousOffset.y + kBLEND_A * ny);
-        const float ddx = out.newOffsetX - previousOffset.x;
-        const float ddy = out.newOffsetY - previousOffset.y;
-        out.distance = std::sqrt(ddx*ddx + ddy*ddy);
-        out.shouldZoom = true;
-    };
-
-    // --- Kein Signal → deterministischer Drift (aus Innenbereich raus) ---
+    // Kein Signal → deterministischer Drift
     if (!haveEntropy || !haveContrast) {
-        if (!(Settings::ForceAlwaysZoom)) return out;
+        out.shouldZoom = Settings::ForceAlwaysZoom;
+        if (!out.shouldZoom) return out;
 
         float dirx = g_dirInit ? g_prevDirX : 1.0f;
         float diry = g_dirInit ? g_prevDirY : 0.0f;
 
-        bool inBulb = insideCardioidOrBulb(currentOffset.x, currentOffset.y);
-        if (inBulb) antiVoidDriftNDC(currentOffset.x, currentOffset.y, dirx, diry);
+        if (insideCardioidOrBulb(currentOffset.x, currentOffset.y)) {
+            antiVoidDriftNDC(currentOffset.x, currentOffset.y, dirx, diry);
+        }
         if (!normalize2D(dirx, diry)) { dirx = 1.0f; diry = 0.0f; }
 
         rotateTowardsLimited(g_prevDirX, g_prevDirY, dirx, diry, kTURN_MAX_RAD);
-        dirx = g_prevDirX; diry = g_prevDirY; g_dirInit = true;
+        dirx = g_prevDirX; diry = g_prevDirY;
 
-        const float stepNdc = clampf(inBulb ? (kSEED_STEP_NDC * 4.0f) : kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
-        applyStepWorld(dirx, diry, stepNdc);
+        const float invZ = 1.0f / std::max(1e-6f, zoom);
+        const float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
+
+        const float tx = previousOffset.x + dirx * (step * invZ);
+        const float ty = previousOffset.y + diry * (step * invZ);
+
+        out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + tx * kBLEND_A;
+        out.newOffsetY = previousOffset.y * (1.0f - kBLEND_A) + ty * kBLEND_A;
+        const float dx = out.newOffsetX - previousOffset.x;
+        const float dy = out.newOffsetY - previousOffset.y;
+        out.distance = std::sqrt(dx*dx + dy*dy);
+
+        g_dirInit = true;
 
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOM][DRIFT] stepNdc=%.4f dir=(%.3f,%.3f) d=%.6f",
-                           (double)stepNdc, (double)dirx, (double)diry, (double)out.distance);
+            LUCHS_LOG_HOST("[ZOOM][DRIFT] invZ=%.6f stepNdc=%.4f dir=(%.3f,%.3f) d=%.6f",
+                           (double)invZ, (double)step, (double)dirx, (double)diry, (double)out.distance);
         }
         return out;
     }
 
-    // --- Robuste Bewertung via Median/MAD ---
+    // Robuste Bewertung via Median/MAD + Top-2 Kandidaten
     std::vector<float> e = entropy;
     std::vector<float> c = contrast;
 
@@ -206,59 +194,69 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     const float cMed = median_inplace(c);
     const float cMAD = mad_from_center_inplace(c, cMed);
 
-    int   bestI = -1;
-    float bestS = -1e30f;
+    int   bestI = -1, secondI = -1;
+    float bestS = -1e30f, secondS = -1e30f;
 
     for (int i = 0; i < total; ++i) {
         const float ze = (entropy[i]  - eMed) / eMAD;
         const float zc = (contrast[i] - cMed) / cMAD;
         const float s  = kALPHA_E * ze + kBETA_C * zc;
-        if (s > bestS) { bestS = s; bestI = i; }
+        if (s > bestS) { secondS = bestS; secondI = bestI; bestS = s; bestI = i; }
+        else if (s > secondS) { secondS = s; secondI = i; }
     }
 
-    // Schwaches/degeneriertes Signal → Drift mit Boost
-    if (bestI < 0 || !(eMAD > 1e-6f) || !(cMAD > 1e-6f) || bestS < kMIN_SCORE_SIGMA) {
-        if (!(Settings::ForceAlwaysZoom)) return out;
-
-        float dirx = g_dirInit ? g_prevDirX : 1.0f;
-        float diry = g_dirInit ? g_prevDirY : 0.0f;
-        bool inBulb = insideCardioidOrBulb(currentOffset.x, currentOffset.y);
-        if (inBulb) antiVoidDriftNDC(currentOffset.x, currentOffset.y, dirx, diry);
-        if (!normalize2D(dirx, diry)) { dirx = 1.0f; diry = 0.0f; }
-
-        rotateTowardsLimited(g_prevDirX, g_prevDirY, dirx, diry, kTURN_MAX_RAD);
-        dirx = g_prevDirX; diry = g_prevDirY; g_dirInit = true;
-
-        const float stepNdc = clampf(inBulb ? (kSEED_STEP_NDC * 4.0f) : kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
-        applyStepWorld(dirx, diry, stepNdc);
-
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOM][DRIFT*] bestS=%.3f eMAD=%.3g cMAD=%.3g → drift stepNdc=%.4f",
-                           (double)bestS, (double)eMAD, (double)cMAD, (double)stepNdc);
-        }
+    if (bestI < 0) {
+        out.shouldZoom = Settings::ForceAlwaysZoom;
         return out;
     }
 
-    // --- Ziel-Tile → Richtung = NDC-Vektor zum Tilezentrum ---
-    out.bestIndex  = bestI;
+    // Falls „bester“ Tile extrem dunkel/strukturlos ist → nimm #2
+    const bool bestIsVoid =
+        (entropy[bestI]  < std::max(0.02f, 0.25f * eMed)) &&
+        (contrast[bestI] < std::max(0.02f, 0.25f * cMed)) &&
+        (secondI >= 0);
+
+    const int pickI = bestIsVoid ? secondI : bestI;
+    out.bestIndex   = pickI;
     out.isNewTarget = true;
 
     float ndcTX = 0.0f, ndcTY = 0.0f;
-    tileIndexToNdcCenter(tilesX, tilesY, bestI, ndcTX, ndcTY);
+    tileIndexToNdcCenter(tilesX, tilesY, pickI, ndcTX, ndcTY);
 
-    float tdx = ndcTX, tdy = ndcTY;
+    // Edge-Pull: ziehe Richtung leicht zur Bildmitte, wenn Ziel nahe am Rand
+    const float edge = std::max(std::fabs(ndcTX), std::fabs(ndcTY));
+    float edgeBias = 0.0f;
+    if (edge > kEDGE_PULL_START) {
+        const float t = clampf((edge - kEDGE_PULL_START) / (kEDGE_PULL_FULL - kEDGE_PULL_START), 0.0f, 1.0f);
+        edgeBias = kEDGE_PULL_GAIN * t; // 0..kEDGE_PULL_GAIN
+    }
+    float tdx = ndcTX - edgeBias * ndcTX; // Anziehung zur Mitte
+    float tdy = ndcTY - edgeBias * ndcTY;
+
     float hx = g_dirInit ? g_prevDirX : 1.0f;
     float hy = g_dirInit ? g_prevDirY : 0.0f;
     rotateTowardsLimited(hx, hy, tdx, tdy, kTURN_MAX_RAD);
 
     g_prevDirX = hx; g_prevDirY = hy; g_dirInit = true;
 
-    const float stepNdc = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
-    applyStepWorld(hx, hy, stepNdc);
+    const float invZ = 1.0f / std::max(1e-6f, zoom);
+    const float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
+
+    const float tx = previousOffset.x + hx * (step * invZ);
+    const float ty = previousOffset.y + hy * (step * invZ);
+
+    out.shouldZoom = true;
+    out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + tx * kBLEND_A;
+    out.newOffsetY = previousOffset.y * (1.0f - kBLEND_A) + ty * kBLEND_A;
+
+    const float dx = out.newOffsetX - previousOffset.x;
+    const float dy = out.newOffsetY - previousOffset.y;
+    out.distance = std::sqrt(dx*dx + dy*dy);
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ZOOM][TARGET] idx=%d bestS=%.3f ndc=(%.3f,%.3f) stepNdc=%.4f d=%.6f",
-                       bestI, (double)bestS, (double)ndcTX, (double)ndcTY, (double)stepNdc, (double)out.distance);
+        LUCHS_LOG_HOST("[ZOOM][TARGET] idx=%d%s bestS=%.3f edgeBias=%.2f ndc=(%.3f,%.3f) stepNdc=%.4f invZ=%.6f d=%.6f",
+                       pickI, bestIsVoid ? " (fallback#2)" : "", (double)(bestIsVoid ? secondS : bestS),
+                       (double)edgeBias, (double)ndcTX, (double)ndcTY, (double)step, (double)invZ, (double)out.distance);
     }
     return out;
 }
