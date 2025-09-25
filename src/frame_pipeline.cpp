@@ -94,18 +94,18 @@ namespace {
                            fctx.tileSize, fctx.maxIterations, (double)fctx.zoom);
         }
 
-        // REFERENZEN auf newOffset.{x,y}, damit CUDA den Mittelpunkt korrekt zurückschreibt
+        // CUDA rendern; schreibt center in fctx.newOffset.{x,y}
         CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
 
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIPE] compute end]");
+            LUCHS_LOG_HOST("[PIPE] compute end");
         }
 
-        // Upload (PBO→Texture) – Zaunkönig-Ringdisziplin
+        // Upload (PBO → Texture)
         const auto t0 = Clock::now();
         if (!state.skipUploadThisFrame) {
             OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(), state.tex.id(), fctx.width, fctx.height);
-            if (state.pboFence[state.pboIndex]) { glDeleteSync(state.pboFence[state.pboIndex]); state.pboFence[state.pboIndex]=0; }
+            if (state.pboFence[state.pboIndex]) { glDeleteSync(state.pboFence[state.pboIndex]); state.pboFence[state.pboIndex] = 0; }
             state.pboFence[state.pboIndex] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
             if constexpr (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[ZK][UP] fence set pbo=%u ring=%d", state.currentPBO().id(), state.pboIndex);
@@ -120,28 +120,40 @@ namespace {
         const auto tUploadEnd = Clock::now();
         g_texMs = std::chrono::duration_cast<msd>(tUploadEnd - t0).count();
 
-        // Texture auf den Bildschirm malen (FSQ)
+        // Basisbild (FSQ) zeichnen
         RendererPipeline::drawFullscreenQuad(state.tex.id());
 
-        // Overlays timen (Heatmap + HUD)
+        // ---------- KORREKTES GL-STATE für Overlays ----------
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, fctx.width, fctx.height);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        // Overlays timen
         const auto tOv0 = Clock::now();
 
         // Heatmap Overlay (falls aktiv)
         if (state.heatmapOverlayEnabled) {
-            const int overlayTilePx = (Settings::Kolibri::gridScreenConstant)
-                                      ? Settings::Kolibri::desiredTilePx
-                                      : fctx.tileSize;
+            const int overlayTilePx = std::max(1, (Settings::Kolibri::gridScreenConstant)
+                                                  ? Settings::Kolibri::desiredTilePx
+                                                  : fctx.tileSize);
 
             if constexpr (Settings::performanceLogging) {
-                const int compPx   = fctx.tileSize;
-                const int ovTx     = (fctx.width  + overlayTilePx - 1) / overlayTilePx;
-                const int ovTy     = (fctx.height + overlayTilePx - 1) / overlayTilePx;
-                const int compTx   = (fctx.width  + compPx - 1) / compPx;
-                const int compTy   = (fctx.height + compPx - 1) / compPx;
-                if (overlayTilePx != compPx) {
-                    LUCHS_LOG_HOST("[GRID] overlayPx=%d overlay=%dx%d computePx=%d compute=%dx%d res=%dx%d",
-                                   overlayTilePx, ovTx, ovTy, compPx, compTx, compTy, fctx.width, fctx.height);
-                }
+                const int compPx = std::max(1, fctx.tileSize);
+                const int ovTx   = (fctx.width  + overlayTilePx - 1) / overlayTilePx;
+                const int ovTy   = (fctx.height + overlayTilePx - 1) / overlayTilePx;
+                const int compTx = (fctx.width  + compPx - 1) / compPx;
+                const int compTy = (fctx.height + compPx - 1) / compPx;
+                LUCHS_LOG_HOST("[GRID] overlayPx=%d overlay=%dx%d computePx=%d compute=%dx%d res=%dx%d",
+                               overlayTilePx, ovTx, ovTy, compPx, compTx, compTy, fctx.width, fctx.height);
+            }
+
+            // Sichtbarkeits-Diagnose
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[HM] enabled=1 ent=%zu con=%zu tilePx=%d",
+                               state.h_entropy.size(), state.h_contrast.size(), overlayTilePx);
             }
 
             HeatmapOverlay::drawOverlay(state.h_entropy, state.h_contrast,
@@ -149,10 +161,8 @@ namespace {
                                         state.tex.id(), state);
         }
 
-        // HUD-Text via Warzenschwein-Overlay (immer nach Heatmap, damit Text oben liegt)
+        // HUD-Text via Warzenschwein – nach Heatmap, damit Text oben liegt
         if constexpr (Settings::warzenschweinOverlayEnabled) {
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             WarzenschweinOverlay::setText(state.warzenschweinText);
             WarzenschweinOverlay::drawOverlay(fctx.zoom);
         }
