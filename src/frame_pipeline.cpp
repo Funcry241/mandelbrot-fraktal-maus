@@ -7,12 +7,11 @@
 #include <chrono>
 #include <algorithm>
 #include <cstdio>     // snprintf for dynamic ring logging
-#include <vector>     // Heatmap host buffer
-#include <cmath>      // sqrt/log
+#include <cmath>      // sqrt
 
 #include "renderer_resources.hpp"
 #include "renderer_pipeline.hpp"
-#include "cuda_interop.hpp"   // CudaInterop::renderCudaFrame(...), downloadIterationsToHost(...)
+#include "cuda_interop.hpp"   // CudaInterop::renderCudaFrame(...), buildHeatmapMetrics(...)
 #include "frame_context.hpp"
 #include "frame_pipeline.hpp"
 #include "settings.hpp"
@@ -22,7 +21,6 @@
 #include "hud_text.hpp"
 #include "zoom_logic.hpp"
 #include "common.hpp"
-#include "heatmap_utils.hpp"  // HeatmapUtils::{computeTileStatsFromIterations,ensureHostArrays}
 
 #include <vector_types.h>
 #include <vector_functions.h>
@@ -34,10 +32,8 @@ static FrameContext         g_ctx;
 static ZoomLogic::ZoomState g_zoomState;
 static int                  g_frame = 0;
 
-// Kleine Zoom-Stufe pro akzeptiertem Schritt
 static constexpr float kZOOM_GAIN = 1.006f;
 
-// Schneefuchs: lokale Perf-Zwischenspeicher (nur Host-Seite dieser TU)
 namespace {
     using Clock = std::chrono::high_resolution_clock;
     using msd   = std::chrono::duration<double, std::milli>;
@@ -64,17 +60,15 @@ namespace {
         }
     }
 
-    // Epoch-Millis für stabile Zeitachse in Logs
     inline long long epochMillisNow() {
         using namespace std::chrono;
         return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
     }
 
-    // ------------------------------- Frame begin ------------------------------
     static void tickFrameTime() {
         static double last = 0.0;
         const double now = glfwGetTime();
-        last = now; // dt wird aktuell nicht genutzt
+        last = now;
     }
 
     static void beginFrameLocal() {
@@ -82,12 +76,41 @@ namespace {
             const double now = glfwGetTime();
             LUCHS_LOG_HOST("[PIPE] beginFrame: time=%.4f, totalFrames=%d", now, g_frame);
         }
-
-        // Reset Zoom-Flags pro Frame
         tickFrameTime();
         g_ctx.shouldZoom = false;
         g_ctx.newOffset  = g_ctx.offset;
         ++g_frame;
+    }
+
+    // Fallback erzeugen, wenn (noch) keine Daten vorliegen.
+    static void ensureHeatmapHostData(RendererState& state, int width, int height, int tilePx) {
+        const int px = std::max(1, tilePx);
+        const int tx = (width  + px - 1) / px;
+        const int ty = (height + px - 1) / px;
+        const size_t N = static_cast<size_t>(tx) * static_cast<size_t>(ty);
+
+        const bool needEnt = state.h_entropy.size()  != N || state.h_entropy.empty();
+        const bool needCon = state.h_contrast.size() != N || state.h_contrast.empty();
+        if (!needEnt && !needCon) return;
+
+        if (needEnt) state.h_entropy.assign(N, 0.0f);
+        if (needCon) state.h_contrast.assign(N, 0.0f);
+
+        for (int y = 0; y < ty; ++y) {
+            for (int x = 0; x < tx; ++x) {
+                const size_t i = static_cast<size_t>(y) * tx + x;
+                const float fx = (tx > 1) ? (float)x / (float)(tx - 1) : 0.0f;
+                const float fy = (ty > 1) ? (float)y / (float)(ty - 1) : 0.0f;
+                const float r  = std::min(1.0f, std::sqrt(fx*fx + fy*fy));
+                state.h_entropy[i]  = 0.15f + 0.8f * r;
+
+                const int  checker = ((x ^ y) & 1);
+                const float mix    = 0.3f + 0.7f * ((fx + (1.0f - fy)) * 0.5f);
+                state.h_contrast[i] = checker ? mix : (1.0f - mix);
+            }
+        }
+
+        LUCHS_LOG_HOST("[HM][FALLBACK] generated N=%zu tiles=%dx%d tilePx=%d", N, tx, ty, px);
     }
 
     // ------------------------------- CUDA (Compute) -------------------------------
@@ -97,14 +120,12 @@ namespace {
                            fctx.tileSize, fctx.maxIterations, (double)fctx.zoom);
         }
 
-        // CUDA rendern; schreibt center in fctx.newOffset.{x,y}
         CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
 
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[PIPE] compute end");
         }
 
-        // Upload (PBO → Texture) – Zaunkönig-Ringdisziplin
         const auto t0 = Clock::now();
         if (!state.skipUploadThisFrame) {
             OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(), state.tex.id(), fctx.width, fctx.height);
@@ -123,10 +144,9 @@ namespace {
         const auto tUploadEnd = Clock::now();
         g_texMs = std::chrono::duration_cast<msd>(tUploadEnd - t0).count();
 
-        // Basisbild (FSQ) zeichnen
         RendererPipeline::drawFullscreenQuad(state.tex.id());
 
-        // ---------- KORREKTES GL-STATE für Overlays ----------
+        // ---------- GL-STATE für Overlays ----------
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, fctx.width, fctx.height);
         glDisable(GL_DEPTH_TEST);
@@ -135,7 +155,6 @@ namespace {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        // Overlays timen
         const auto tOv0 = Clock::now();
 
         // Heatmap Overlay (falls aktiv)
@@ -144,29 +163,9 @@ namespace {
                                                   ? Settings::Kolibri::desiredTilePx
                                                   : fctx.tileSize);
 
-            // Live-Werte: Iterationspuffer → Host
-            std::vector<uint16_t> hostIterations;
-            bool got = CudaInterop::downloadIterationsToHost(
-                state, fctx.width, fctx.height, hostIterations, state.renderStream
-            );
-
-            if (got) {
-                HeatmapUtils::computeTileStatsFromIterations(
-                    hostIterations,
-                    fctx.width, fctx.height,
-                    overlayTilePx,
-                    fctx.maxIterations,
-                    state.h_entropy,
-                    state.h_contrast
-                );
-            }
-
-            // Fallback sicherstellen, falls Download/Berechnung fehlschlug
-            if (!got || state.h_entropy.empty() || state.h_contrast.empty()) {
-                HeatmapUtils::ensureHostArrays(
-                    state.h_entropy, state.h_contrast,
-                    fctx.width, fctx.height, overlayTilePx
-                );
+            // NEU: GPU-Metriken; bei Fehler auf Fallback
+            if (!CudaInterop::buildHeatmapMetrics(state, fctx.width, fctx.height, overlayTilePx, state.renderStream)) {
+                ensureHeatmapHostData(state, fctx.width, fctx.height, overlayTilePx);
             }
 
             if constexpr (Settings::performanceLogging) {
@@ -184,13 +183,12 @@ namespace {
                                         state.tex.id(), state);
         }
 
-        // HUD-Text via Warzenschwein – nach Heatmap, damit Text oben liegt
+        // HUD danach → on top
         if constexpr (Settings::warzenschweinOverlayEnabled) {
             WarzenschweinOverlay::setText(state.warzenschweinText);
             WarzenschweinOverlay::drawOverlay(fctx.zoom);
         }
 
-        // Overlay-Timing beenden
         const auto tOv1 = Clock::now();
         g_ovlMs = std::chrono::duration_cast<msd>(tOv1 - tOv0).count();
         state.lastTimings.overlaysMs = g_ovlMs;
@@ -200,7 +198,6 @@ namespace {
         }
     }
 
-    // ------------------------------- Ring-Statistik ---------------------------
     static void logAndResetRingStats(RendererState& state) {
         char buf[256]; int pos = 0;
         pos += std::snprintf(buf + pos, sizeof(buf) - pos, "{");
@@ -214,7 +211,6 @@ namespace {
         state.ringSkip = 0;
     }
 
-    // Tile-Size stabilisieren (Vielfaches von 32 für robuste Kernel-Launches)
     inline int chooseComputeTileSize(float zoom) {
         int t = computeTileSizeFromZoom(zoom);
         t = std::clamp(t, Settings::MIN_TILE_SIZE, Settings::MAX_TILE_SIZE);
@@ -232,14 +228,12 @@ namespace {
     }
 } // anon ns
 
-// ---------------------------------- execute ----------------------------------
 namespace FramePipeline {
 void execute(RendererState& state) {
     const auto tFrame0 = Clock::now();
 
     beginFrameLocal();
 
-    // Kontext aus RendererState übernehmen
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
     g_ctx.maxIterations = state.maxIterations;
@@ -247,60 +241,50 @@ void execute(RendererState& state) {
     g_ctx.offset        = make_float2(static_cast<float>(state.center.x),
                                       static_cast<float>(state.center.y));
 
-    // Compute-TileSize: robust auf Vielfache von 32 normalisieren
     g_ctx.tileSize = chooseComputeTileSize(g_ctx.zoom);
 
     if constexpr (Settings::Kolibri::gridScreenConstant) {
-        // Nur Logging der Overlay-Rasterung (kein Einfluss auf Compute-Tiles!)
         static int s_prevOverlayPx = -1;
         const int overlayPx = Settings::Kolibri::desiredTilePx;
         if constexpr (Settings::performanceLogging) {
             if (s_prevOverlayPx != overlayPx) {
-                const int px = std::max(1, overlayPx);         // Guard: kein ÷0
-                const int ts = std::max(1, g_ctx.tileSize);    // Guard: kein ÷0
+                const int px = std::max(1, overlayPx);
+                const int ts = std::max(1, g_ctx.tileSize);
 
-                const int ovTx = (g_ctx.width  + px - 1) / px; // ceil(width/px)
-                const int ovTy = (g_ctx.height + px - 1) / px; // ceil(height/px)
-                const int cTx  = (g_ctx.width  + ts - 1) / ts; // ceil(width/tileSize)
-                const int cTy  = (g_ctx.height + ts - 1) / ts; // ceil(height/tileSize)
+                const int ovTx = (g_ctx.width  + px - 1) / px;
+                const int ovTy = (g_ctx.height + px - 1) / px;
+                const int cTx  = (g_ctx.width  + ts - 1) / ts;
+                const int cTy  = (g_ctx.height + ts - 1) / ts;
 
                 LUCHS_LOG_HOST("[GRID] overlayPx=%d overlay=%dx%d computePx=%d tiles=%dx%d res=%dx%d",
                                px, ovTx, ovTy, ts, cTx, cTy, g_ctx.width, g_ctx.height);
-
-                s_prevOverlayPx = overlayPx; // Originalwert merken (nicht px), damit die Logik stabil bleibt
+                s_prevOverlayPx = overlayPx;
             }
         }
     }
 
-    // HUD-Text vorbereiten (Datenquelle für Warzenschwein) – VOR dem Draw
     if constexpr (Settings::warzenschweinOverlayEnabled) {
         state.warzenschweinText = HudText::build(g_ctx, state);
     }
 
-    // Compute (schreibt newOffset.{x,y})
     computeCudaFrame(g_ctx, state);
 
-    // Optional Zoom evaluieren
     if (!CudaInterop::getPauseZoom()) {
         ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, kZOOM_GAIN);
     }
 
-    // Falls (noch) keine Heatmap-Daten vorliegen, trotzdem sanft zoomen,
-    // damit sofort Bewegung sichtbar ist, bis die CUDA-Metriken fließen.
     if (!CudaInterop::getPauseZoom() &&
         (state.h_entropy.empty() || state.h_contrast.empty()))
     {
-        g_ctx.shouldZoom = true;          // Zoom-Schritt anwenden
-        g_ctx.newOffset  = g_ctx.offset;  // im aktuellen Zentrum bleiben
+        g_ctx.shouldZoom = true;
+        g_ctx.newOffset  = g_ctx.offset;
     }
 
-    // Apply zoom & offset to renderer state (single source of truth)
     if (g_ctx.shouldZoom) {
         state.center.x = g_ctx.newOffset.x;
         state.center.y = g_ctx.newOffset.y;
         state.zoom     *= (double)kZOOM_GAIN;
 
-        // Keep FrameContext in sync
         g_ctx.offset   = g_ctx.newOffset;
         g_ctx.zoom     = static_cast<float>(state.zoom);
 
@@ -310,7 +294,6 @@ void execute(RendererState& state) {
         }
     }
 
-    // Host-Perf (gesamt)
     const auto tFrame1 = Clock::now();
     g_totMs = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
     state.lastTimings.frameTotalMs = g_totMs;
@@ -335,7 +318,6 @@ void execute(RendererState& state) {
         );
     }
 
-    // Periodische Ring-Nutzungsstatistik
     if constexpr (Settings::performanceLogging) {
         if ((g_frame % RING_LOG_EVERY) == 0) {
             logAndResetRingStats(state);

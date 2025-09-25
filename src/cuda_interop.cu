@@ -20,7 +20,6 @@
 #include <stdexcept>
 #include <cstdint>
 #include <cstring>
-#include <chrono>
 #include <cmath>
 #include <algorithm>
 
@@ -90,7 +89,6 @@ static inline void throw_with_log(const char* msg, cudaError_t rc) {
 // GPU-Heatmap-Metriken (Kontrast/Entropie) – Device-Teil
 // ======================================================================
 
-// Ein Tile = ein Block (1 Thread). Später leicht auf Multi-Thread pro Tile erweiterbar.
 __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
                                     int w, int h,
                                     int tilePx, int tilesX,
@@ -99,7 +97,7 @@ __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
 {
     const int tx = blockIdx.x;
     const int ty = blockIdx.y;
-    const int tilesY = gridDim.y; // Guard nutzt tilesY
+    const int tilesY = gridDim.y;
     if (tx >= tilesX || ty >= tilesY) return;
 
     const int x0 = tx * tilePx;
@@ -118,24 +116,21 @@ __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
         return;
     }
 
-    // 1) Kontrast via Std-Abw.
-    double sum = 0.0;
-    double sum2 = 0.0;
+    // Std-Abw. als Kontrast
+    double sum = 0.0, sum2 = 0.0;
     for (int y = y0; y < y1; ++y) {
         const uint16_t* row = it + (size_t)y * (size_t)w + x0;
         for (int x = 0; x < tileW; ++x) {
             const double v = (double)row[x];
-            sum  += v;
-            sum2 += v * v;
+            sum  += v; sum2 += v * v;
         }
     }
     const double mean = sum / (double)nPix;
     double var = sum2 / (double)nPix - mean * mean;
     if (var < 0.0) var = 0.0;
-    const float stddev = (float)sqrt(var);
-    if (contrast) contrast[outIx] = stddev;
+    if (contrast) contrast[outIx] = (float)sqrt(var);
 
-    // 2) Entropie über 32 Buckets (hash-basiert, unabhängig von maxIterations)
+    // Entropie über 32 Buckets (hash-basiert)
     constexpr int B = 32;
     int hist[B];
     #pragma unroll
@@ -152,7 +147,7 @@ __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
 
     float H = 0.0f;
     const float invN = 1.0f / (float)nPix;
-    constexpr float invLn2 = 1.0f / 0.6931471805599453f; // 1/ln(2)
+    constexpr float invLn2 = 1.0f / 0.6931471805599453f;
     for (int i = 0; i < B; ++i) {
         const float p = (float)hist[i] * invN;
         if (p > 0.0f) H -= p * (logf(p) * invLn2);
@@ -160,7 +155,7 @@ __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
     if (entropy) entropy[outIx] = H;
 }
 
-// Caching-Buffer für Entropie/Kontrast (Device)
+// Device-Cache für Metriken
 static float* s_dEntropy  = nullptr;
 static float* s_dContrast = nullptr;
 static size_t s_tilesCap  = 0;
@@ -269,7 +264,7 @@ void renderCudaFrame(
     (void)newOffsetX; (void)newOffsetY; (void)shouldZoom;
 
     if (!s_pboActive) {
-        LUCHS_LOG_HOST("[PBO][ERR] render called without registered PBOs");
+        LUCHS_LOG_HOST("[PBO][ERR] render called without registered PBOs]");
         state.skipUploadThisFrame = true;
         return;
     }
@@ -292,13 +287,12 @@ void renderCudaFrame(
 
     MapGuard map(&s_pboResources[ix]);
 
-    // deterministische Fehlerpfade: loggen + Frame degradieren, NICHT werfen
     if (!map.ptr) {
-        cudaError_t rcMap = cudaGetLastError(); // evtl. von Map
+        cudaError_t rcMap = cudaGetLastError();
         LUCHS_LOG_HOST("[PBO][MAP][ERR] null ptr ring=%d need=%zu rc=%d", ix, (size_t)needBytes, (int)rcMap);
         LuchsLogger::flushDeviceLogToHost(0);
         state.skipUploadThisFrame = true;
-        return; // Frame ohne Upload beenden
+        return;
     }
     if (map.bytes < needBytes) {
         LUCHS_LOG_HOST("[PBO][MAP][ERR] size mismatch ring=%d got=%zu need=%zu", ix, (size_t)map.bytes, (size_t)needBytes);
@@ -315,7 +309,6 @@ void renderCudaFrame(
     const double cx   = (double)offsetX;
     const double cy   = (double)offsetY;
 
-    // Schrittweiten zentral aus Mapping-Helper ableiten
     const double sx = (double)state.pixelScale.x;
     const double sy = (double)state.pixelScale.y;
     double stepX = 0.0, stepY = 0.0;
@@ -336,10 +329,9 @@ void renderCudaFrame(
         stepX, stepY,
         maxIterations,
         renderStream,
-        state.evEcDone // optional event reuse
+        state.evEcDone
     );
 
-    // Launch-Fehler peek (numerisch loggen)
     rc = cudaPeekAtLastError();
     if (rc != cudaSuccess) throw_with_log("capy_render launch", rc);
 
@@ -372,11 +364,63 @@ void renderCudaFrame(
         cudaError_t rcSync = cudaEventSynchronize(s_evStop);
         if (rcSync != cudaSuccess) throw_with_log("colorize sync", rcSync);
     }
-
-    // ---- 4) done; MapGuard dtor will unmap -------------------------------
 }
 
-// ABI-kompatibler Wrapper
+// GPU-Heatmap in Host-Vektoren spiegeln
+bool buildHeatmapMetrics(RendererState& state,
+                         int width, int height, int tilePx,
+                         cudaStream_t stream) noexcept
+{
+    if (width <= 0 || height <= 0 || tilePx <= 0) return false;
+
+    const int px = std::max(1, tilePx);
+    const int tilesX = (width  + px - 1) / px;
+    const int tilesY = (height + px - 1) / px;
+    const size_t tiles = (size_t)tilesX * (size_t)tilesY;
+
+    if (!ensureTileMetricBuffers(tiles)) return false;
+
+    dim3 grid((unsigned)tilesX, (unsigned)tilesY, 1);
+    dim3 block(1, 1, 1);
+
+    kernel_tile_metrics<<<grid, block, 0, stream>>>(
+        static_cast<const uint16_t*>(state.d_iterations.get()),
+        width, height,
+        px, tilesX,
+        s_dEntropy, s_dContrast
+    );
+    cudaError_t rc = cudaPeekAtLastError();
+    if (rc != cudaSuccess) {
+        LUCHS_LOG_HOST("[HM][ERR] kernel launch rc=%d", (int)rc);
+        LuchsLogger::flushDeviceLogToHost(0);
+        return false;
+    }
+
+    state.h_entropy.resize(tiles);
+    state.h_contrast.resize(tiles);
+
+    rc = cudaMemcpyAsync(state.h_entropy.data(),  s_dEntropy,  tiles * sizeof(float), cudaMemcpyDeviceToHost, stream);
+    if (rc == cudaSuccess)
+        rc = cudaMemcpyAsync(state.h_contrast.data(), s_dContrast, tiles * sizeof(float), cudaMemcpyDeviceToHost, stream);
+    if (rc != cudaSuccess) {
+        LUCHS_LOG_HOST("[HM][ERR] memcpyAsync metrics->host rc=%d", (int)rc);
+        LuchsLogger::flushDeviceLogToHost(0);
+        return false;
+    }
+
+    rc = cudaStreamSynchronize(stream);
+    if (rc != cudaSuccess) {
+        LUCHS_LOG_HOST("[HM][ERR] streamSync metrics rc=%d", (int)rc);
+        LuchsLogger::flushDeviceLogToHost(0);
+        return false;
+    }
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[HM][GPU] ok tiles=%dx%d N=%zu tilePx=%d", tilesX, tilesY, tiles, px);
+    }
+    return true;
+}
+
 void renderCudaFrame(RendererState& state, const FrameContext& fctx, float& newOffsetX, float& newOffsetY) {
     float offx = fctx.offset.x;
     float offy = fctx.offset.y;
@@ -395,102 +439,6 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx, float& newO
     );
 }
 
-// Alias für ältere Call-Sites
 void logCudaContext(const char* tag) noexcept { logCudaDeviceContext(tag); }
-
-// ----------------------------------------------------------------------
-// Optional: Iterationsbuffer -> Host spiegeln (Fallback / Debug)
-// ----------------------------------------------------------------------
-bool downloadIterationsToHost(RendererState& state,
-                              int width, int height,
-                              std::vector<uint16_t>& host,
-                              cudaStream_t stream) noexcept
-{
-    if (width <= 0 || height <= 0) return false;
-    const size_t n = (size_t)width * (size_t)height;
-    const size_t bytes = n * sizeof(uint16_t);
-    host.resize(n);
-
-    const void* dptr = state.d_iterations.get();
-    if (!dptr) return false;
-
-    cudaError_t rc = cudaMemcpyAsync(host.data(), dptr, bytes, cudaMemcpyDeviceToHost, stream);
-    if (rc != cudaSuccess) {
-        LUCHS_LOG_HOST("[HM][ERR] memcpyAsync iter->host rc=%d", (int)rc);
-        LuchsLogger::flushDeviceLogToHost(0);
-        return false;
-    }
-    if (stream) {
-        rc = cudaStreamSynchronize(stream);
-        if (rc != cudaSuccess) {
-            LUCHS_LOG_HOST("[HM][ERR] streamSync after memcpy rc=%d", (int)rc);
-            LuchsLogger::flushDeviceLogToHost(0);
-            return false;
-        }
-    }
-    return true;
-}
-
-// ----------------------------------------------------------------------
-// NEU: Heatmap-Metriken auf GPU berechnen und in state.h_* ablegen
-// ----------------------------------------------------------------------
-bool buildHeatmapMetrics(RendererState& state,
-                         int width, int height, int tilePx,
-                         cudaStream_t stream) noexcept
-{
-    if (width <= 0 || height <= 0 || tilePx <= 0) return false;
-
-    const int px = std::max(1, tilePx);
-    const int tilesX = (width  + px - 1) / px;
-    const int tilesY = (height + px - 1) / px;
-    const size_t tiles = (size_t)tilesX * (size_t)tilesY;
-
-    // Device-Buffers sicherstellen
-    if (!ensureTileMetricBuffers(tiles)) return false;
-
-    // Kernel launchen (ein Block pro Tile, 1 Thread)
-    dim3 grid((unsigned)tilesX, (unsigned)tilesY, 1);
-    dim3 block(1, 1, 1);
-
-    kernel_tile_metrics<<<grid, block, 0, stream>>>(
-        static_cast<const uint16_t*>(state.d_iterations.get()),
-        width, height,
-        px, tilesX,
-        s_dEntropy, s_dContrast
-    );
-    cudaError_t rc = cudaPeekAtLastError();
-    if (rc != cudaSuccess) {
-        LUCHS_LOG_HOST("[HM][ERR] kernel launch rc=%d", (int)rc);
-        LuchsLogger::flushDeviceLogToHost(0);
-        return false;
-    }
-
-    // Host-Container vorbereiten
-    state.h_entropy.resize(tiles);
-    state.h_contrast.resize(tiles);
-
-    // Device -> Host kopieren
-    rc = cudaMemcpyAsync(state.h_entropy.data(),  s_dEntropy,  tiles * sizeof(float), cudaMemcpyDeviceToHost, stream);
-    if (rc == cudaSuccess)
-        rc = cudaMemcpyAsync(state.h_contrast.data(), s_dContrast, tiles * sizeof(float), cudaMemcpyDeviceToHost, stream);
-    if (rc != cudaSuccess) {
-        LUCHS_LOG_HOST("[HM][ERR] memcpyAsync metrics->host rc=%d", (int)rc);
-        LuchsLogger::flushDeviceLogToHost(0);
-        return false;
-    }
-
-    // Für unmittelbare Nutzung in derselben Frame-Phase synchronisieren
-    rc = cudaStreamSynchronize(stream);
-    if (rc != cudaSuccess) {
-        LUCHS_LOG_HOST("[HM][ERR] streamSync metrics rc=%d", (int)rc);
-        LuchsLogger::flushDeviceLogToHost(0);
-        return false;
-    }
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[HM][GPU] ok tiles=%dx%d N=%zu tilePx=%d", tilesX, tilesY, tiles, px);
-    }
-    return true;
-}
 
 } // namespace CudaInterop
