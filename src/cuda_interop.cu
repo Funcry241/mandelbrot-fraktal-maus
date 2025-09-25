@@ -28,166 +28,168 @@
 #include <cuda_gl_interop.h>
 
 namespace {
-    // ---- CUDA timing events (lazy) ---------------------------------------
-    static cudaEvent_t s_evStart = nullptr;
-    static cudaEvent_t s_evStop  = nullptr;
 
-    inline void ensureEventsOnce() {
-        static bool done = false;
-        if (done) return;
-        done = true;
-        cudaError_t rc = cudaEventCreate(&s_evStart);
-        if (rc != cudaSuccess) {
-            LUCHS_LOG_HOST("[CUDA][ERR] eventCreate start rc=%d", (int)rc);
-            LuchsLogger::flushDeviceLogToHost(0);
-            throw std::runtime_error("cudaEventCreate(start) failed");
-        }
-        rc = cudaEventCreate(&s_evStop);
-        if (rc != cudaSuccess) {
-            LUCHS_LOG_HOST("[CUDA][ERR] eventCreate stop rc=%d", (int)rc);
-            LuchsLogger::flushDeviceLogToHost(0);
-            throw std::runtime_error("cudaEventCreate(stop) failed");
-        }
-    }
+// ---- CUDA timing events (lazy) ---------------------------------------
+static cudaEvent_t s_evStart = nullptr;
+static cudaEvent_t s_evStop  = nullptr;
 
-    // ---- PBO CUDA resources ----------------------------------------------
-    static std::vector<CudaInterop::bear_CudaPBOResource> s_pboResources;
-    static bool s_pboActive = false;
-
-    // ---- Global pause flag for zoom logic --------------------------------
-    static bool s_pauseZoom = false;
-
-    // ---- Heatmap metric buffers on device --------------------------------
-    static float*  s_d_entropy  = nullptr;
-    static float*  s_d_contrast = nullptr;
-    static size_t  s_metricsN   = 0;
-
-    static void ensureMetricsCapacity(size_t N) {
-        if (N <= s_metricsN) return;
-        if (s_d_entropy)  { cudaFree(s_d_entropy);  s_d_entropy  = nullptr; }
-        if (s_d_contrast) { cudaFree(s_d_contrast); s_d_contrast = nullptr; }
-        if (N) {
-            cudaMalloc(&s_d_entropy,  N * sizeof(float));
-            cudaMalloc(&s_d_contrast, N * sizeof(float));
-        }
-        s_metricsN = N;
-    }
-
-    // ---- RAII-Guard: map/unmap -------------------------------------------
-    struct MapGuard {
-        CudaInterop::bear_CudaPBOResource* res = nullptr;
-        void*   ptr   = nullptr;
-        size_t  bytes = 0;
-        explicit MapGuard(CudaInterop::bear_CudaPBOResource* r) : res(r) {
-            if (res) ptr = res->mapAndLog(bytes);
-        }
-        ~MapGuard() {
-            if (res) res->unmapAndLog();
-        }
-    };
-
-    // ---- helpers ----------------------------------------------------------
-    static int getAttrSafe(cudaDeviceAttr attr, int dev) {
-        int v = 0;
-        auto e = cudaDeviceGetAttribute(&v, attr, dev);
-        if (e != cudaSuccess) return -1;
-        return v;
-    }
-
-    static inline void throw_with_log(const char* msg, cudaError_t rc) {
-        LUCHS_LOG_HOST("[CUDA][ERR] %s rc=%d", msg ? msg : "(null)", (int)rc);
+inline void ensureEventsOnce() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    cudaError_t rc = cudaEventCreate(&s_evStart); // timing enabled
+    if (rc != cudaSuccess) {
+        LUCHS_LOG_HOST("[CUDA][ERR] eventCreate start rc=%d", (int)rc);
         LuchsLogger::flushDeviceLogToHost(0);
-        throw std::runtime_error(msg ? msg : "CUDA error");
+        throw std::runtime_error("cudaEventCreate(start) failed");
+    }
+    rc = cudaEventCreate(&s_evStop);
+    if (rc != cudaSuccess) {
+        LUCHS_LOG_HOST("[CUDA][ERR] eventCreate stop rc=%d", (int)rc);
+        LuchsLogger::flushDeviceLogToHost(0);
+        throw std::runtime_error("cudaEventCreate(stop) failed");
+    }
+}
+
+// ---- PBO CUDA resources ----------------------------------------------
+static std::vector<CudaInterop::bear_CudaPBOResource> s_pboResources;
+static bool s_pboActive = false;
+
+// ---- Global pause flag for zoom logic --------------------------------
+static bool s_pauseZoom = false;
+
+// RAII-Guard: map beim Bau, unmap beim Zerstören
+struct MapGuard {
+    CudaInterop::bear_CudaPBOResource* res = nullptr;
+    void*   ptr   = nullptr;
+    size_t  bytes = 0;
+    explicit MapGuard(CudaInterop::bear_CudaPBOResource* r) : res(r) {
+        if (res) ptr = res->mapAndLog(bytes);
+    }
+    ~MapGuard() {
+        if (res) res->unmapAndLog();
+    }
+};
+
+// Helpers for safe attribute read
+static int getAttrSafe(cudaDeviceAttr attr, int dev) {
+    int v = 0;
+    auto e = cudaDeviceGetAttribute(&v, attr, dev);
+    if (e != cudaSuccess) return -1;
+    return v;
+}
+
+static inline void throw_with_log(const char* msg, cudaError_t rc) {
+    LUCHS_LOG_HOST("[CUDA][ERR] %s rc=%d", msg ? msg : "(null)", (int)rc);
+    LuchsLogger::flushDeviceLogToHost(0);
+    throw std::runtime_error(msg ? msg : "CUDA error");
+}
+
+// ======================================================================
+// GPU-Heatmap-Metriken (Kontrast/Entropie) – Device-Teil
+// ======================================================================
+
+// Ein Tile = ein Block (1 Thread). Später leicht auf Multi-Thread pro Tile erweiterbar.
+__global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
+                                    int w, int h,
+                                    int tilePx, int tilesX,
+                                    float* __restrict__ entropy,
+                                    float* __restrict__ contrast)
+{
+    const int tx = blockIdx.x;
+    const int ty = blockIdx.y;
+    const int tilesY = gridDim.y;                   // benutzt (Guard)
+    if (tx >= tilesX || ty >= tilesY) return;
+
+    const int x0 = tx * tilePx;
+    const int y0 = ty * tilePx;
+    int x1 = x0 + tilePx; if (x1 > w) x1 = w;
+    int y1 = y0 + tilePx; if (y1 > h) y1 = h;
+
+    const int tileW = max(0, x1 - x0);
+    const int tileH = max(0, y1 - y0);
+    const int nPix  = tileW * tileH;
+    const int outIx = ty * tilesX + tx;
+
+    if (nPix <= 0) {
+        if (entropy)  entropy[outIx]  = 0.0f;
+        if (contrast) contrast[outIx] = 0.0f;
+        return;
     }
 
-    // --------- GPU kernel: per-tile entropy & contrast ---------------------
-    __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
-                                        int w, int h, int tilePx, int tilesX,
-                                        float* __restrict__ entropy,
-                                        float* __restrict__ contrast)
-    {
-        const int tx = blockIdx.x, ty = blockIdx.y;
-        if (tx >= tilesX) return;
-
-        const int tilesY = gridDim.y;
-        const int x0 = tx * tilePx;
-        const int y0 = ty * tilePx;
-        int x1 = x0 + tilePx; if (x1 > w) x1 = w;
-        int y1 = y0 + tilePx; if (y1 > h) y1 = h;
-
-        __shared__ unsigned int hist[256];
-        for (int i = threadIdx.x; i < 256; i += blockDim.x) hist[i] = 0u;
-        __syncthreads();
-
-        for (int y = y0 + threadIdx.y; y < y1; y += blockDim.y) {
-            for (int x = x0 + threadIdx.x; x < x1; x += blockDim.x) {
-                const uint16_t v = it[y * w + x];
-                // 12->8 bit bucketing, saturiert
-                unsigned b = (unsigned)(v >> 4); if (b > 255u) b = 255u;
-                atomicAdd(&hist[b], 1u);
-            }
+    // 1) Kontrast via Std-Abw.
+    double sum = 0.0;
+    double sum2 = 0.0;
+    for (int y = y0; y < y1; ++y) {
+        const uint16_t* row = it + (size_t)y * (size_t)w + x0;
+        for (int x = 0; x < tileW; ++x) {
+            const double v = (double)row[x];
+            sum  += v;
+            sum2 += v * v;
         }
-        __syncthreads();
+    }
+    const double mean = sum / (double)nPix;
+    double var = sum2 / (double)nPix - mean * mean;
+    if (var < 0.0) var = 0.0;
+    const float stddev = (float)sqrt(var);
+    if (contrast) contrast[outIx] = stddev;
 
-        if (threadIdx.x == 0 && threadIdx.y == 0) {
-            unsigned int cnt = 0u;
-            for (int i=0;i<256;i++) cnt += hist[i];
-            const float inv = cnt ? 1.0f / cnt : 0.0f;
+    // 2) Entropie über 32 Buckets (hash-basiert, unabhängig von maxIterations)
+    constexpr int B = 32;
+    int hist[B];
+    #pragma unroll
+    for (int i = 0; i < B; ++i) hist[i] = 0;
 
-            float H = 0.f, mu = 0.f, var = 0.f;
-            for (int i=0;i<256;i++) {
-                const float p = hist[i] * inv;
-                if (p > 0.f) H -= p * log2f(p);
-                mu += i * p;
-            }
-            for (int i=0;i<256;i++) {
-                const float p = hist[i] * inv;
-                const float d = i - mu;
-                var += d * d * p;
-            }
-
-            const int idx = ty * tilesX + tx;
-            entropy[idx]  = H;
-            // leichte Normierung, damit ~[0..1] grob passt
-            contrast[idx] = sqrtf(var) / 128.f;
+    for (int y = y0; y < y1; ++y) {
+        const uint16_t* row = it + (size_t)y * (size_t)w + x0;
+        for (int x = 0; x < tileW; ++x) {
+            const uint16_t v = row[x];
+            const int b = ((int)v ^ ((int)v >> 5)) & (B - 1);
+            hist[b] += 1;
         }
     }
 
-    // Compute metrics on GPU and copy to host vectors in RendererState.
-    static void compute_metrics_and_copy_to_host(const uint16_t* d_it,
-                                                 int width, int height,
-                                                 int tilePx,
-                                                 RendererState& state,
-                                                 cudaStream_t stream)
-    {
-        const int px = (tilePx > 0) ? tilePx : 1;
-        const int tilesX = (width  + px - 1) / px;
-        const int tilesY = (height + px - 1) / px;
-        const size_t N   = (size_t)tilesX * (size_t)tilesY;
-        ensureMetricsCapacity(N);
-
-        dim3 grid(tilesX, tilesY);
-        dim3 block(16,16);
-        kernel_tile_metrics<<<grid, block, 0, stream>>>(
-            d_it, width, height, px, tilesX,
-            s_d_entropy, s_d_contrast
-        );
-        cudaError_t rcM = cudaPeekAtLastError();
-        if (rcM != cudaSuccess) throw_with_log("metrics launch", rcM);
-
-        // sync + copy to host
-        rcM = cudaStreamSynchronize(stream);
-        if (rcM != cudaSuccess) throw_with_log("metrics sync", rcM);
-
-        state.h_entropy.resize(N);
-        state.h_contrast.resize(N);
-        cudaMemcpy(state.h_entropy.data(),  s_d_entropy,  N*sizeof(float), cudaMemcpyDeviceToHost);
-        cudaMemcpy(state.h_contrast.data(), s_d_contrast, N*sizeof(float), cudaMemcpyDeviceToHost);
-
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[HM][GPU] tiles=%dx%d N=%zu tilePx=%d", tilesX, tilesY, N, px);
-        }
+    float H = 0.0f;
+    const float invN = 1.0f / (float)nPix;
+    // 1/ln(2)
+    constexpr float invLn2 = 1.0f / 0.6931471805599453f;
+    for (int i = 0; i < B; ++i) {
+        const float p = (float)hist[i] * invN;
+        if (p > 0.0f) H -= p * (logf(p) * invLn2);
     }
+    if (entropy) entropy[outIx] = H;
+}
+
+// Caching-Buffer für Entropie/Kontrast (Device)
+static float* s_dEntropy  = nullptr;
+static float* s_dContrast = nullptr;
+static size_t s_tilesCap  = 0;
+
+static bool ensureTileMetricBuffers(size_t tilesNeeded) {
+    if (tilesNeeded <= s_tilesCap && s_dEntropy && s_dContrast) return true;
+
+    if (s_dEntropy)  cudaFree(s_dEntropy);
+    if (s_dContrast) cudaFree(s_dContrast);
+    s_dEntropy = s_dContrast = nullptr;
+    s_tilesCap = 0;
+
+    cudaError_t rc = cudaMalloc((void**)&s_dEntropy,  tilesNeeded * sizeof(float));
+    if (rc != cudaSuccess) {
+        LUCHS_LOG_HOST("[HM][ERR] cudaMalloc dEntropy tiles=%zu rc=%d", tilesNeeded, (int)rc);
+        LuchsLogger::flushDeviceLogToHost(0);
+        return false;
+    }
+    rc = cudaMalloc((void**)&s_dContrast, tilesNeeded * sizeof(float));
+    if (rc != cudaSuccess) {
+        LUCHS_LOG_HOST("[HM][ERR] cudaMalloc dContrast tiles=%zu rc=%d", tilesNeeded, (int)rc);
+        LuchsLogger::flushDeviceLogToHost(0);
+        cudaFree(s_dEntropy); s_dEntropy = nullptr;
+        return false;
+    }
+    s_tilesCap = tilesNeeded;
+    return true;
+}
+
 } // anon
 
 namespace CudaInterop {
@@ -220,12 +222,8 @@ void registerAllPBOs(const unsigned int* pboIds, int count) {
 }
 
 void unregisterAllPBOs() noexcept {
-    s_pboResources.clear();
+    s_pboResources.clear(); // dtors unmap+unregister
     s_pboActive = false;
-    // free metric buffers too
-    if (s_d_entropy)  { cudaFree(s_d_entropy);  s_d_entropy  = nullptr; }
-    if (s_d_contrast) { cudaFree(s_d_contrast); s_d_contrast = nullptr; }
-    s_metricsN = 0;
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PBO] unregistered all CUDA resources");
     }
@@ -251,9 +249,9 @@ void logCudaDeviceContext(const char* tag) noexcept {
                    (tag?tag:"-"), rt, drv, dev, name, ccM, ccN, mp, smpb);
 }
 
-// ----------------------------------------------------------------------
-// Hauptpfad: render -> colorize to PBO
-// ----------------------------------------------------------------------
+// ----------------------------------------------------------------------------------
+// Hauptpfad: Capybara render -> colorize to PBO (ohne Host-Sync; optional Perf-Sync)
+// ----------------------------------------------------------------------------------
 void renderCudaFrame(
     Hermelin::CudaDeviceBuffer& d_iterations,
     int   width,
@@ -282,8 +280,9 @@ void renderCudaFrame(
     }
 
     ensureEventsOnce();
-    (void)cudaGetLastError();
+    (void)cudaGetLastError(); // clear sticky
 
+    // ---- 1) Map current PBO slot ----------------------------------------
     const size_t needBytes = size_t(width) * size_t(height) * sizeof(uchar4);
     const int ix = (state.pboIndex >= 0 && state.pboIndex < (int)s_pboResources.size()) ? state.pboIndex : 0;
 
@@ -293,12 +292,13 @@ void renderCudaFrame(
 
     MapGuard map(&s_pboResources[ix]);
 
+    // deterministische Fehlerpfade: loggen + Frame degradieren, NICHT werfen
     if (!map.ptr) {
-        cudaError_t rcMap = cudaGetLastError();
+        cudaError_t rcMap = cudaGetLastError(); // evtl. von Map
         LUCHS_LOG_HOST("[PBO][MAP][ERR] null ptr ring=%d need=%zu rc=%d", ix, (size_t)needBytes, (int)rcMap);
         LuchsLogger::flushDeviceLogToHost(0);
         state.skipUploadThisFrame = true;
-        return;
+        return; // Frame ohne Upload beenden
     }
     if (map.bytes < needBytes) {
         LUCHS_LOG_HOST("[PBO][MAP][ERR] size mismatch ring=%d got=%zu need=%zu", ix, (size_t)map.bytes, (size_t)needBytes);
@@ -311,17 +311,19 @@ void renderCudaFrame(
         state.ringUse[state.pboIndex]++;
     }
 
-    // ---- Capybara render (iterations) ----
+    // ---- 2) Capybara render (iterations) --------------------------------
     const double cx   = (double)offsetX;
     const double cy   = (double)offsetY;
 
+    // Quadratische Pixel erzwingen: gleiche Schrittweite in X/Y,
+    // Vorzeichen aus dem GL-PixelScale übernehmen (Y ist oft negativ).
     const double sx = (double)state.pixelScale.x;
     const double sy = (double)state.pixelScale.y;
 
-    // Schrittweite mit 1/zoom skalieren
+    // Schrittweite skaliert mit 1/zoom (robust bei 0/negativen Werten)
     double baseStep = std::max(std::abs(sx), std::abs(sy));
     if (!(baseStep > 0.0)) {
-        constexpr double kBaseSpan = 8.0 / 3.0; // Field-of-view Basisspanne
+        constexpr double kBaseSpan = 8.0 / 3.0;
         baseStep = kBaseSpan / std::max(1, width);
     }
     const double invZ  = 1.0 / std::max(1.0, (double)zoom);
@@ -346,9 +348,10 @@ void renderCudaFrame(
         stepX, stepY,
         maxIterations,
         renderStream,
-        state.evEcDone
+        state.evEcDone // optional event reuse
     );
 
+    // Launch-Fehler peek (numerisch loggen)
     rc = cudaPeekAtLastError();
     if (rc != cudaSuccess) throw_with_log("capy_render launch", rc);
 
@@ -360,7 +363,7 @@ void renderCudaFrame(
         if (rcSync != cudaSuccess) throw_with_log("capy_render sync", rcSync);
     }
 
-    // ---- Colorize into mapped PBO ----
+    // ---- 3) Colorize into mapped PBO ------------------------------------
     rc = cudaEventRecord(s_evStart, renderStream);
     if (rc != cudaSuccess) throw_with_log("eventRecord(start) before colorize", rc);
 
@@ -381,15 +384,16 @@ void renderCudaFrame(
         cudaError_t rcSync = cudaEventSynchronize(s_evStop);
         if (rcSync != cudaSuccess) throw_with_log("colorize sync", rcSync);
     }
+
+    // ---- 4) done; MapGuard dtor will unmap -------------------------------
 }
 
-// ABI-kompatibler Wrapper: hier hängen wir die GPU-Heatmap dran
+// ABI-kompatibler Wrapper
 void renderCudaFrame(RendererState& state, const FrameContext& fctx, float& newOffsetX, float& newOffsetY) {
     float offx = fctx.offset.x;
     float offy = fctx.offset.y;
     bool  shouldZoom = false;
 
-    // 1) Capybara Render + Colorize
     renderCudaFrame(
         state.d_iterations,
         fctx.width, fctx.height,
@@ -401,23 +405,14 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx, float& newO
         state,
         state.renderStream
     );
-
-    // 2) GPU-Heatmap berechnen & hostseitig bereitstellen (Overlay erwartet die Vektoren)
-    const int tilePx = (Settings::Kolibri::gridScreenConstant)
-                     ? std::max(1, Settings::Kolibri::desiredTilePx)
-                     : std::max(1, fctx.tileSize);
-
-    compute_metrics_and_copy_to_host(
-        static_cast<const uint16_t*>(state.d_iterations.get()),
-        fctx.width, fctx.height, tilePx,
-        state,
-        state.renderStream
-    );
 }
 
+// Alias für ältere Call-Sites
 void logCudaContext(const char* tag) noexcept { logCudaDeviceContext(tag); }
 
-// Optionales Debug-Tooling: Iterationsbuffer -> Host spiegeln
+// ----------------------------------------------------------------------
+// Optional: Iterationsbuffer -> Host spiegeln (Fallback / Debug)
+// ----------------------------------------------------------------------
 bool downloadIterationsToHost(RendererState& state,
                               int width, int height,
                               std::vector<uint16_t>& host,
@@ -444,6 +439,68 @@ bool downloadIterationsToHost(RendererState& state,
             LuchsLogger::flushDeviceLogToHost(0);
             return false;
         }
+    }
+    return true;
+}
+
+// ----------------------------------------------------------------------
+// NEU: Heatmap-Metriken auf GPU berechnen und in state.h_* ablegen
+// ----------------------------------------------------------------------
+bool buildHeatmapMetrics(RendererState& state,
+                         int width, int height, int tilePx,
+                         cudaStream_t stream) noexcept
+{
+    if (width <= 0 || height <= 0 || tilePx <= 0) return false;
+
+    const int px = std::max(1, tilePx);
+    const int tilesX = (width  + px - 1) / px;
+    const int tilesY = (height + px - 1) / px;
+    const size_t tiles = (size_t)tilesX * (size_t)tilesY;
+
+    // Device-Buffers sicherstellen
+    if (!ensureTileMetricBuffers(tiles)) return false;
+
+    // Kernel launchen (ein Block pro Tile, 1 Thread)
+    dim3 grid((unsigned)tilesX, (unsigned)tilesY, 1);
+    dim3 block(1, 1, 1);
+
+    kernel_tile_metrics<<<grid, block, 0, stream>>>(
+        static_cast<const uint16_t*>(state.d_iterations.get()),
+        width, height,
+        px, tilesX,
+        s_dEntropy, s_dContrast
+    );
+    cudaError_t rc = cudaPeekAtLastError();
+    if (rc != cudaSuccess) {
+        LUCHS_LOG_HOST("[HM][ERR] kernel launch rc=%d", (int)rc);
+        LuchsLogger::flushDeviceLogToHost(0);
+        return false;
+    }
+
+    // Host-Container vorbereiten
+    state.h_entropy.resize(tiles);
+    state.h_contrast.resize(tiles);
+
+    // Device -> Host kopieren
+    rc = cudaMemcpyAsync(state.h_entropy.data(),  s_dEntropy,  tiles * sizeof(float), cudaMemcpyDeviceToHost, stream);
+    if (rc == cudaSuccess)
+        rc = cudaMemcpyAsync(state.h_contrast.data(), s_dContrast, tiles * sizeof(float), cudaMemcpyDeviceToHost, stream);
+    if (rc != cudaSuccess) {
+        LUCHS_LOG_HOST("[HM][ERR] memcpyAsync metrics->host rc=%d", (int)rc);
+        LuchsLogger::flushDeviceLogToHost(0);
+        return false;
+    }
+
+    // Für unmittelbare Nutzung in derselben Frame-Phase synchronisieren
+    rc = cudaStreamSynchronize(stream);
+    if (rc != cudaSuccess) {
+        LUCHS_LOG_HOST("[HM][ERR] streamSync metrics rc=%d", (int)rc);
+        LuchsLogger::flushDeviceLogToHost(0);
+        return false;
+    }
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[HM][GPU] ok tiles=%dx%d N=%zu tilePx=%d", tilesX, tilesY, tiles, px);
     }
     return true;
 }
