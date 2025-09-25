@@ -87,6 +87,42 @@ namespace {
         ++g_frame;
     }
 
+    // ------------------------------- Helpers ----------------------------------
+    // Erzwinge sichtbare Heatmap-Daten, falls CUDA (noch) nichts geliefert hat.
+    static void ensureHeatmapHostData(RendererState& state, int width, int height, int tilePx) {
+        const int px = std::max(1, tilePx);
+        const int tx = (width  + px - 1) / px;
+        const int ty = (height + px - 1) / px;
+        const size_t N = static_cast<size_t>(tx) * static_cast<size_t>(ty);
+
+        const bool needEnt = state.h_entropy.size()  != N || state.h_entropy.empty();
+        const bool needCon = state.h_contrast.size() != N || state.h_contrast.empty();
+
+        if (!needEnt && !needCon) return;
+
+        if (needEnt) state.h_entropy.assign(N, 0.0f);
+        if (needCon) state.h_contrast.assign(N, 0.0f);
+
+        // Fallback: weiche, sichtbare Gradienten-/Checker-Struktur
+        for (int y = 0; y < ty; ++y) {
+            for (int x = 0; x < tx; ++x) {
+                const size_t i = static_cast<size_t>(y) * tx + x;
+                // Entropie: radialer Verlauf 0..1
+                const float fx = (tx > 1) ? (float)x / (float)(tx - 1) : 0.0f;
+                const float fy = (ty > 1) ? (float)y / (float)(ty - 1) : 0.0f;
+                const float r  = std::min(1.0f, std::sqrt(fx*fx + fy*fy));
+                state.h_entropy[i]  = 0.15f + 0.8f * r;
+
+                // Kontrast: Checker + Verlauf
+                const int  checker = ((x ^ y) & 1);
+                const float mix    = 0.3f + 0.7f * ((fx + (1.0f - fy)) * 0.5f);
+                state.h_contrast[i] = checker ? mix : (1.0f - mix);
+            }
+        }
+
+        LUCHS_LOG_HOST("[HM][FALLBACK] generated N=%zu tiles=%dx%d tilePx=%d", N, tx, ty, px);
+    }
+
     // ------------------------------- CUDA (Compute) -------------------------------
     static void computeCudaFrame(FrameContext& fctx, RendererState& state) {
         if constexpr (Settings::debugLogging) {
@@ -101,11 +137,11 @@ namespace {
             LUCHS_LOG_HOST("[PIPE] compute end");
         }
 
-        // Upload (PBO → Texture)
+        // Upload (PBO → Texture) – Zaunkönig-Ringdisziplin
         const auto t0 = Clock::now();
         if (!state.skipUploadThisFrame) {
             OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(), state.tex.id(), fctx.width, fctx.height);
-            if (state.pboFence[state.pboIndex]) { glDeleteSync(state.pboFence[state.pboIndex]); state.pboFence[state.pboIndex] = 0; }
+            if (state.pboFence[state.pboIndex]) { glDeleteSync(state.pboFence[state.pboIndex]); state.pboFence[state.pboIndex]=0; }
             state.pboFence[state.pboIndex] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
             if constexpr (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[ZK][UP] fence set pbo=%u ring=%d", state.currentPBO().id(), state.pboIndex);
@@ -128,6 +164,7 @@ namespace {
         glViewport(0, 0, fctx.width, fctx.height);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
+        glDisable(GL_STENCIL_TEST);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -139,6 +176,9 @@ namespace {
             const int overlayTilePx = std::max(1, (Settings::Kolibri::gridScreenConstant)
                                                   ? Settings::Kolibri::desiredTilePx
                                                   : fctx.tileSize);
+
+            // Fallback-Daten erzeugen, wenn leer → garantiertes Signal
+            ensureHeatmapHostData(state, fctx.width, fctx.height, overlayTilePx);
 
             if constexpr (Settings::performanceLogging) {
                 const int compPx = std::max(1, fctx.tileSize);
