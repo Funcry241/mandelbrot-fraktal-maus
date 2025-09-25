@@ -159,7 +159,7 @@ void renderCudaFrame(
     RendererState& state,
     cudaStream_t renderStream
 ){
-    (void)zoom;           // /WX: avoid unused in NVCC host pass; zoom handled upstream
+    // zoom wird unten verwendet (→ keine (void) Markierung).
     (void)newOffsetX;     // zoom/offset update handled upstream
     (void)newOffsetY;
     (void)shouldZoom;
@@ -221,17 +221,28 @@ void renderCudaFrame(
     const double sx = (double)state.pixelScale.x;
     const double sy = (double)state.pixelScale.y;
 
-    double step = std::max(std::abs(sx), std::abs(sy));
-    if (!(step > 0.0)) {
-        const double baseSpan = 3.5;
-        step = baseSpan / (std::max(1, width) * std::max(1.0f, zoom));
+    // --- Pixel-Schrittweite: immer mit 1/zoom skalieren --------------------
+    // Basis-Schrittweite bei zoom = 1.0:
+    // - wenn pixelScale gesetzt ist → dessen Betrag
+    // - sonst Fallback auf kBaseSpan/width (historischer Sichtbereich ~2.666...)
+    double baseStep = std::max(std::abs(sx), std::abs(sy));
+    if (!(baseStep > 0.0)) {
+        constexpr double kBaseSpan = 8.0 / 3.0; // 2.666666..., passt zu bisherigen Defaults
+        baseStep = kBaseSpan / std::max(1, width);
     }
-    const double stepX = std::copysign(step, (sx == 0.0 ? 1.0 : sx));
-    const double stepY = std::copysign(step, (sy == 0.0 ? -1.0 : sy));
+
+    const double invZ  = 1.0 / std::max(1.0, (double)zoom); // schützen gegen 0/kleine Werte
+    const double step  = baseStep * invZ;
+
+    // Orientierung/Handedness aus pixelScale übernehmen
+    const double stepX = std::copysign(step, ( sx == 0.0 ?  1.0 : sx));
+    const double stepY = std::copysign(step, ( sy == 0.0 ? -1.0 : sy));
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[CAPY][ARGS] cx=%.9f cy=%.9f stepX=%.11f stepY=%.11f it=%d w=%d h=%d",
                        cx, cy, stepX, stepY, maxIterations, width, height);
+        LUCHS_LOG_HOST("[CAPY][STEP] zoom=%.6f invZ=%.6f baseStep=%.10f",
+                       (double)zoom, invZ, baseStep);
     }
 
     cudaError_t rc = cudaEventRecord(s_evStart, renderStream);
