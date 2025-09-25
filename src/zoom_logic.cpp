@@ -27,6 +27,9 @@ constexpr float kBLEND_A       = 0.22f;  // Low-Pass fürs Offset
 constexpr float kALPHA_E = 1.0f; // Gewicht Entropy
 constexpr float kBETA_C  = 0.5f; // Gewicht Contrast
 
+// NEU: Minimaler „Signifikanz“-Score (Z-Skala). Unterhalb → Drift-Fallback.
+constexpr float kMIN_SCORE_SIGMA = 0.35f;
+
 inline float clampf(float x, float a, float b) { return (x < a) ? a : (x > b ? b : x); }
 
 inline bool normalize2D(float& x, float& y) {
@@ -78,7 +81,7 @@ float median_inplace(std::vector<float>& v) {
 float mad_from_center_inplace(std::vector<float>& v, float center) {
     for (auto& x : v) x = std::fabs(x - center);
     float mad = median_inplace(v);
-    return (mad > 1e-6f) ? mad : 1.0f;
+    return (mad > 1e-6f) ? mad : 1.0f; // Guard gegen degenerierte Verteilungen
 }
 
 // Tileindex → NDC-Zentrum (−1..+1)
@@ -199,8 +202,39 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
         if (s > bestS) { bestS = s; bestI = i; }
     }
 
-    if (bestI < 0) {
+    // NEU: Wenn Score kaum über Rauschen liegt (oder numerisch degeneriert) → Drift
+    if (bestI < 0 || !(eMAD > 1e-6f) || !(cMAD > 1e-6f) || bestS < kMIN_SCORE_SIGMA) {
         out.shouldZoom = Settings::ForceAlwaysZoom;
+        if (!out.shouldZoom) return out;
+
+        float dirx = g_dirInit ? g_prevDirX : 1.0f;
+        float diry = g_dirInit ? g_prevDirY : 0.0f;
+        if (insideCardioidOrBulb(currentOffset.x, currentOffset.y)) {
+            antiVoidDriftNDC(currentOffset.x, currentOffset.y, dirx, diry);
+        }
+        if (!normalize2D(dirx, diry)) { dirx = 1.0f; diry = 0.0f; }
+
+        rotateTowardsLimited(g_prevDirX, g_prevDirY, dirx, diry, kTURN_MAX_RAD);
+        dirx = g_prevDirX; diry = g_prevDirY;
+
+        const float invZ = 1.0f / std::max(1e-6f, zoom);
+        const float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
+        const float tx = previousOffset.x + dirx * (step * invZ);
+        const float ty = previousOffset.y + diry * (step * invZ);
+
+        out.shouldZoom = true;
+        out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + tx * kBLEND_A;
+        out.newOffsetY = previousOffset.y * (1.0f - kBLEND_A) + ty * kBLEND_A;
+
+        const float dx = out.newOffsetX - previousOffset.x;
+        const float dy = out.newOffsetY - previousOffset.y;
+        out.distance = std::sqrt(dx*dx + dy*dy);
+
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOM][DRIFT*] bestS=%.3f eMAD=%.3g cMAD=%.3g (under threshold) → drift",
+                           (double)bestS, (double)eMAD, (double)cMAD);
+        }
+        g_dirInit = true;
         return out;
     }
 
