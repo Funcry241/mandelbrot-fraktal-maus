@@ -51,11 +51,12 @@ namespace {
     static double g_ovlMs  = 0.0;
     static double g_totMs  = 0.0;
 
-    inline bool perfShouldLog([[maybe_unused]] int frameIdx) {
+    inline bool perfShouldLog(int frameIdx) {
         if constexpr (Settings::performanceLogging) {
             if (frameIdx <= PERF_WARMUP_FRAMES) return false;
             return (frameIdx % PERF_LOG_EVERY) == 0;
         } else {
+            (void)frameIdx;
             return false;
         }
     }
@@ -70,8 +71,7 @@ namespace {
     static void tickFrameTime() {
         static double last = 0.0;
         const double now = glfwGetTime();
-        [[maybe_unused]] const double dt = (last == 0.0) ? 0.0 : (now - last);
-        last = now;
+        last = now; // dt wird aktuell nicht genutzt
     }
 
     static void beginFrameLocal() {
@@ -98,7 +98,7 @@ namespace {
         CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
 
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[PIPE] compute end");
+            LUCHS_LOG_HOST("[PIPE] compute end]");
         }
 
         // Upload (PBO→Texture) – Zaunkönig-Ringdisziplin
@@ -123,8 +123,10 @@ namespace {
         // Texture auf den Bildschirm malen (FSQ)
         RendererPipeline::drawFullscreenQuad(state.tex.id());
 
-        // Heatmap Overlay (falls aktiv)
+        // Overlays timen (Heatmap + HUD)
         const auto tOv0 = Clock::now();
+
+        // Heatmap Overlay (falls aktiv)
         if (state.heatmapOverlayEnabled) {
             const int overlayTilePx = (Settings::Kolibri::gridScreenConstant)
                                       ? Settings::Kolibri::desiredTilePx
@@ -147,7 +149,15 @@ namespace {
                                         state.tex.id(), state);
         }
 
-        // HUD-Text via Warzenschwein-Overlay
+        // HUD-Text via Warzenschwein-Overlay (immer nach Heatmap, damit Text oben liegt)
+        if constexpr (Settings::warzenschweinOverlayEnabled) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            WarzenschweinOverlay::setText(state.warzenschweinText);
+            WarzenschweinOverlay::drawOverlay(fctx.zoom);
+        }
+
+        // Overlay-Timing beenden
         const auto tOv1 = Clock::now();
         g_ovlMs = std::chrono::duration_cast<msd>(tOv1 - tOv0).count();
         state.lastTimings.overlaysMs = g_ovlMs;
@@ -229,6 +239,11 @@ void execute(RendererState& state) {
         }
     }
 
+    // HUD-Text vorbereiten (Datenquelle für Warzenschwein) – VOR dem Draw
+    if constexpr (Settings::warzenschweinOverlayEnabled) {
+        state.warzenschweinText = HudText::build(g_ctx, state);
+    }
+
     // Compute (schreibt newOffset.{x,y})
     computeCudaFrame(g_ctx, state);
 
@@ -251,11 +266,6 @@ void execute(RendererState& state) {
             LUCHS_LOG_HOST("[ZOOM][APPLY] center=(%.9f,%.9f) zoom=%.6f gain=%.6f",
                            state.center.x, state.center.y, (double)state.zoom, (double)kZOOM_GAIN);
         }
-    }
-
-    // HUD-Text vorbereiten
-    if constexpr (Settings::warzenschweinOverlayEnabled) {
-        state.warzenschweinText = HudText::build(g_ctx, state);
     }
 
     // Host-Perf (gesamt)

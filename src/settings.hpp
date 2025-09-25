@@ -93,7 +93,7 @@ namespace Settings {
     // initial view (zoom + offset)
     // Default: 1.5 / (-0.5, 0.0)
     inline constexpr float initialZoom    = 1.5f;
-    inline constexpr float initialOffsetX = -0.5f;
+    inline constexpr float initialOffsetX = 0.0f;
     inline constexpr float initialOffsetY = 0.0f;
 
 // ============================== Iterations / Tiles ===========================
