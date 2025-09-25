@@ -134,6 +134,7 @@ add_executable(mandelbrot_otterdream
   src/fps_meter.cpp
   src/renderer_state_cuda.cpp
   src/renderer_state_gl.cpp    
+  src/heatmap_metrics.cu
 )
 
 # ---------------------- Compile-Options --------------------
