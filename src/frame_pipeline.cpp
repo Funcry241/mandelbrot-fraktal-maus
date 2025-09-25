@@ -107,13 +107,11 @@ namespace {
         for (int y = 0; y < ty; ++y) {
             for (int x = 0; x < tx; ++x) {
                 const size_t i = static_cast<size_t>(y) * tx + x;
-                // Entropie: radialer Verlauf 0..1
                 const float fx = (tx > 1) ? (float)x / (float)(tx - 1) : 0.0f;
                 const float fy = (ty > 1) ? (float)y / (float)(ty - 1) : 0.0f;
                 const float r  = std::min(1.0f, std::sqrt(fx*fx + fy*fy));
                 state.h_entropy[i]  = 0.15f + 0.8f * r;
 
-                // Kontrast: Checker + Verlauf
                 const int  checker = ((x ^ y) & 1);
                 const float mix    = 0.3f + 0.7f * ((fx + (1.0f - fy)) * 0.5f);
                 state.h_contrast[i] = checker ? mix : (1.0f - mix);
@@ -190,7 +188,6 @@ namespace {
                                overlayTilePx, ovTx, ovTy, compPx, compTx, compTy, fctx.width, fctx.height);
             }
 
-            // Sichtbarkeits-Diagnose
             if constexpr (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[HM] enabled=1 ent=%zu con=%zu tilePx=%d",
                                state.h_entropy.size(), state.h_contrast.size(), overlayTilePx);
@@ -300,6 +297,15 @@ void execute(RendererState& state) {
     // Optional Zoom evaluieren
     if (!CudaInterop::getPauseZoom()) {
         ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, kZOOM_GAIN);
+    }
+
+    // Falls (noch) keine Heatmap-Daten vorliegen, trotzdem sanft zoomen,
+    // damit sofort Bewegung sichtbar ist, bis die CUDA-Metriken fließen.
+    if (!CudaInterop::getPauseZoom() &&
+        (state.h_entropy.empty() || state.h_contrast.empty()))
+    {
+        g_ctx.shouldZoom = true;          // Zoom-Schritt anwenden
+        g_ctx.newOffset  = g_ctx.offset;  // im aktuellen Zentrum bleiben
     }
 
     // Apply zoom & offset to renderer state (single source of truth)
