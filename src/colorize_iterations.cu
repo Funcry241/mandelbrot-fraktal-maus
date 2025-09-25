@@ -1,11 +1,12 @@
-///// Otter: Iteration→PBO colorizer kernel – compact, branch-light; interior dark.
+///// Otter: Iteration→PBO colorizer + GPU heatmap metrics; compact, branch-light.
 ///// Schneefuchs: Uses Settings block geometry; stable HSV ramp with gentle gamma.
-///// Maus: One kernel, one launch; clamp + pack to RGBA; no legacy includes.
+///// Maus: One colorize kernel + one metrics kernel; clamp + pack to RGBA; minimal deps.
 ///// Datei: src/colorize_iterations.cu
 
 #include <cuda_runtime.h>
 #include <cstdint>
 #include <math.h>
+#include <vector>   // for metrics host export
 
 #include "settings.hpp"
 #include "colorize_iterations.cuh"
@@ -103,4 +104,146 @@ extern "C" void colorize_iterations_to_pbo(
     kColorizeIterationsToPBO<<<grid, block, 0, stream>>>(
         d_iterations, d_pboOut, width, height, maxIter
     );
+}
+
+// ============================================================================
+// GPU Heatmap Metrics (entropy/contrast) – one tile per block, 1 thread/block
+// ============================================================================
+
+__global__ void colorize_kernel_tile_metrics(const uint16_t* __restrict__ it,
+                                             int w, int h,
+                                             int tilePx, int tilesX,
+                                             float* __restrict__ entropy,
+                                             float* __restrict__ contrast)
+{
+    const int tx = blockIdx.x;
+    const int ty = blockIdx.y;
+    const int tilesY = gridDim.y;
+    if (tx >= tilesX || ty >= tilesY) return;
+
+    const int x0 = tx * tilePx;
+    const int y0 = ty * tilePx;
+    const int x1 = (x0 + tilePx > w) ? w : (x0 + tilePx);
+    const int y1 = (y0 + tilePx > h) ? h : (y0 + tilePx);
+
+    const int tileW = (x1 - x0 > 0) ? (x1 - x0) : 0;
+    const int tileH = (y1 - y0 > 0) ? (y1 - y0) : 0;
+    const int nPix  = tileW * tileH;
+    const int outIx = ty * tilesX + tx;
+
+    if (nPix <= 0) {
+        if (entropy)  entropy[outIx]  = 0.0f;
+        if (contrast) contrast[outIx] = 0.0f;
+        return;
+    }
+
+    // Contrast = stddev over the tile
+    double sum = 0.0, sum2 = 0.0;
+    for (int y = y0; y < y1; ++y) {
+        const uint16_t* row = it + (size_t)y * (size_t)w + x0;
+        for (int x = 0; x < tileW; ++x) {
+            const double v = (double)row[x];
+            sum  += v;
+            sum2 += v * v;
+        }
+    }
+    const double mean = sum / (double)nPix;
+    double var = sum2 / (double)nPix - mean * mean;
+    if (var < 0.0) var = 0.0;
+    const float stdev = (float)sqrt(var);
+    if (contrast) contrast[outIx] = stdev;
+
+    // Entropy via 32 fixed buckets (hash-based, iterations-agnostic)
+    constexpr int B = 32;
+    int hist[B];
+    #pragma unroll
+    for (int i = 0; i < B; ++i) hist[i] = 0;
+
+    for (int y = y0; y < y1; ++y) {
+        const uint16_t* row = it + (size_t)y * (size_t)w + x0;
+        for (int x = 0; x < tileW; ++x) {
+            const uint16_t v = row[x];
+            const int b = ((int)v ^ ((int)v >> 5)) & (B - 1);
+            ++hist[b];
+        }
+    }
+
+    float H = 0.0f;
+    const float invN  = 1.0f / (float)nPix;
+    constexpr float invLn2 = 1.0f / 0.6931471805599453f;
+    for (int i = 0; i < B; ++i) {
+        const float p = (float)hist[i] * invN;
+        if (p > 0.0f) H -= p * (logf(p) * invLn2);
+    }
+    if (entropy) entropy[outIx] = H;
+}
+
+// Static device buffers reused across frames
+static float* s_dEntropy  = nullptr;
+static float* s_dContrast = nullptr;
+static size_t s_tilesCap  = 0;
+
+static bool colorize_ensure_metric_buffers(size_t tiles) {
+    if (tiles <= s_tilesCap && s_dEntropy && s_dContrast) return true;
+
+    if (s_dEntropy)  cudaFree(s_dEntropy);
+    if (s_dContrast) cudaFree(s_dContrast);
+    s_dEntropy = s_dContrast = nullptr;
+    s_tilesCap = 0;
+
+    cudaError_t rc = cudaMalloc((void**)&s_dEntropy,  tiles * sizeof(float));
+    if (rc != cudaSuccess) return false;
+
+    rc = cudaMalloc((void**)&s_dContrast, tiles * sizeof(float));
+    if (rc != cudaSuccess) {
+        cudaFree(s_dEntropy); s_dEntropy = nullptr;
+        return false;
+    }
+
+    s_tilesCap = tiles;
+    return true;
+}
+
+// Public API: compute metrics on GPU and copy to host vectors
+bool colorize_compute_tile_metrics_to_host(
+    const uint16_t* d_iterations,
+    int width, int height, int tilePx,
+    cudaStream_t stream,
+    std::vector<float>& h_entropy,
+    std::vector<float>& h_contrast) noexcept
+{
+    if (!d_iterations || width <= 0 || height <= 0 || tilePx <= 0) return false;
+
+    const int px = (tilePx > 0) ? tilePx : 1;
+    const int tilesX = (width  + px - 1) / px;
+    const int tilesY = (height + px - 1) / px;
+    const size_t tiles = (size_t)tilesX * (size_t)tilesY;
+
+    if (!colorize_ensure_metric_buffers(tiles)) return false;
+
+    dim3 grid((unsigned)tilesX, (unsigned)tilesY, 1);
+    dim3 block(1, 1, 1);
+
+    colorize_kernel_tile_metrics<<<grid, block, 0, stream>>>(
+        d_iterations, width, height, px, tilesX, s_dEntropy, s_dContrast
+    );
+    if (cudaPeekAtLastError() != cudaSuccess) {
+        return false;
+    }
+
+    h_entropy.resize(tiles);
+    h_contrast.resize(tiles);
+
+    cudaError_t rc = cudaMemcpyAsync(h_entropy.data(),  s_dEntropy,  tiles*sizeof(float), cudaMemcpyDeviceToHost, stream);
+    if (rc == cudaSuccess)
+        rc = cudaMemcpyAsync(h_contrast.data(), s_dContrast, tiles*sizeof(float), cudaMemcpyDeviceToHost, stream);
+    if (rc != cudaSuccess) {
+        return false;
+    }
+
+    rc = cudaStreamSynchronize(stream);
+    if (rc != cudaSuccess) {
+        return false;
+    }
+    return true;
 }

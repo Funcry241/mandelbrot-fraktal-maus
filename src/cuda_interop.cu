@@ -14,6 +14,7 @@
 #include "bear_CudaPBOResource.hpp"
 #include "colorize_iterations.cuh"
 #include "capybara_frame_pipeline.cuh"
+#include "capybara_mapping.cuh"  // capy_pixel_steps_from_zoom_scale(...)
 
 #include <vector>
 #include <stdexcept>
@@ -98,7 +99,7 @@ __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
 {
     const int tx = blockIdx.x;
     const int ty = blockIdx.y;
-    const int tilesY = gridDim.y;                   // benutzt (Guard)
+    const int tilesY = gridDim.y; // Guard nutzt tilesY
     if (tx >= tilesX || ty >= tilesY) return;
 
     const int x0 = tx * tilePx;
@@ -151,8 +152,7 @@ __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
 
     float H = 0.0f;
     const float invN = 1.0f / (float)nPix;
-    // 1/ln(2)
-    constexpr float invLn2 = 1.0f / 0.6931471805599453f;
+    constexpr float invLn2 = 1.0f / 0.6931471805599453f; // 1/ln(2)
     for (int i = 0; i < B; ++i) {
         const float p = (float)hist[i] * invN;
         if (p > 0.0f) H -= p * (logf(p) * invLn2);
@@ -315,27 +315,15 @@ void renderCudaFrame(
     const double cx   = (double)offsetX;
     const double cy   = (double)offsetY;
 
-    // Quadratische Pixel erzwingen: gleiche Schrittweite in X/Y,
-    // Vorzeichen aus dem GL-PixelScale übernehmen (Y ist oft negativ).
+    // Schrittweiten zentral aus Mapping-Helper ableiten
     const double sx = (double)state.pixelScale.x;
     const double sy = (double)state.pixelScale.y;
-
-    // Schrittweite skaliert mit 1/zoom (robust bei 0/negativen Werten)
-    double baseStep = std::max(std::abs(sx), std::abs(sy));
-    if (!(baseStep > 0.0)) {
-        constexpr double kBaseSpan = 8.0 / 3.0;
-        baseStep = kBaseSpan / std::max(1, width);
-    }
-    const double invZ  = 1.0 / std::max(1.0, (double)zoom);
-    const double step  = baseStep * invZ;
-
-    const double stepX = std::copysign(step, ( sx == 0.0 ?  1.0 : sx));
-    const double stepY = std::copysign(step, ( sy == 0.0 ? -1.0 : sy));
+    double stepX = 0.0, stepY = 0.0;
+    capy_pixel_steps_from_zoom_scale(sx, sy, width, (double)zoom, stepX, stepY);
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[CAPY][ARGS] cx=%.9f cy=%.9f stepX=%.11f stepY=%.11f it=%d w=%d h=%d",
                        cx, cy, stepX, stepY, maxIterations, width, height);
-        LUCHS_LOG_HOST("[CAPY][STEP] zoom=%.6f invZ=%.6f baseStep=%.10f", (double)zoom, invZ, baseStep);
     }
 
     cudaError_t rc = cudaEventRecord(s_evStart, renderStream);

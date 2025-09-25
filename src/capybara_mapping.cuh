@@ -6,32 +6,62 @@
 #pragma once
 #include <math.h>
 #include <stdint.h>
+#include <vector_types.h>    // double2
 
-#include "capybara_math.cuh" // CapyHiLo/CapyHiLo2 + helpers
+#include "capybara_math.cuh" // CapyHiLo / CapyHiLo2 / capy_map_center_step(...)
 
 #if defined(__CUDACC__)
-#define CAPY_HD __host__ __device__ __forceinline__
-#define CAPY_D  __device__ __forceinline__
+  #define CAPY_HD __host__ __device__ __forceinline__
+  #define CAPY_D  __device__ __forceinline__
 #else
-#define CAPY_HD inline
-#define CAPY_D  inline
+  #define CAPY_HD inline
+  #define CAPY_D  inline
 #endif
 
-// ----------------------------- GID & pixel offsets ----------------------------
+// -----------------------------------------------------------------------------
+// Schrittweiten aus pixelScale + zoom ableiten (einheitliche Semantik).
+// Symmetrischer Fallback; Y standardmäßig nach unten orientiert (GL-typisch).
+// -----------------------------------------------------------------------------
+CAPY_HD void capy_pixel_steps_from_zoom_scale(double sx, double sy,
+                                              int width, double zoom,
+                                              double& stepX, double& stepY) noexcept
+{
+    // Basis: größte Achse aus pixelScale
+    double baseStep = fmax(fabs(sx), fabs(sy));
+    if (!(baseStep > 0.0)) {
+        // konservative Grundspanne (passt zum klassischen Mandelbrot-Sichtfeld)
+        // NB: width==0 wird oben abgefangen (Division durch 1)
+        constexpr double kBaseSpan = 8.0 / 3.0;
+        baseStep = kBaseSpan / (width > 0 ? (double)width : 1.0);
+    }
+
+    const double invZ = 1.0 / fmax(1.0, zoom);
+    const double step = baseStep * invZ;
+
+    // Vorzeichen aus pixelScale übernehmen; Y negativ falls sy==0 (GL-Raster nach unten)
+    stepX = copysign(step, (sx == 0.0 ?  1.0 : sx));
+    stepY = copysign(step, (sy == 0.0 ? -1.0 : sy));
+}
+
+// -----------------------------------------------------------------------------
+// GID & Pixel-Offsets (Bildmitte als Ursprung; Pixelmitte = +0.5)
+// -----------------------------------------------------------------------------
 CAPY_HD uint32_t capy_gid(int x, int y, int w)
 {
-    // Non-negative by construction (kernel guards ensure ranges).
     return (uint32_t)(y * w + x);
 }
 
-CAPY_HD void capy_pixel_offsets(int px, int py, int w, int h, double& offx, double& offy)
+CAPY_HD void capy_pixel_offsets(int px, int py, int w, int h,
+                                double& offx, double& offy)
 {
-    // Center-of-pixel convention: (+0.5) then subtract image center (w/2, h/2)
+    // Center-of-pixel: (+0.5) und dann Bildmitte (w/2,h/2) abziehen
     offx = (double(px) + 0.5) - 0.5 * double(w);
     offy = (double(py) + 0.5) - 0.5 * double(h);
 }
 
-// ----------------------------- Classic mapping (double) -----------------------
+// -----------------------------------------------------------------------------
+// Klassische Abbildung (double) — stabil bei moderaten Zooms
+// -----------------------------------------------------------------------------
 CAPY_HD double2 capy_map_pixel_double(double cx, double cy,
                                       double stepX, double stepY,
                                       int px, int py, int w, int h)
@@ -44,21 +74,22 @@ CAPY_HD double2 capy_map_pixel_double(double cx, double cy,
     return c;
 }
 
-// ----------------------------- Capybara mapping (Hi/Lo) -----------------------
+// -----------------------------------------------------------------------------
+// Capybara-Abbildung (Hi/Lo) — numerisch stabil bei tiefen Zooms
+// nutzt capy_map_center_step(cx,cy, stepX,stepY, offx,offy)
+// -----------------------------------------------------------------------------
 CAPY_HD CapyHiLo2 capy_map_pixel_hilo(double cx, double cy,
                                       double stepX, double stepY,
                                       int px, int py, int w, int h)
 {
     double offx, offy;
     capy_pixel_offsets(px, py, w, h, offx, offy);
-    // Uses frexp/ldexp split internally to keep step structure at deep zooms,
-    // and compensated addition for center + delta.
     return capy_map_center_step(cx, cy, stepX, stepY, offx, offy);
 }
 
-// ----------------------------- Bridging helper --------------------------------
-// Fills both classic and Hi/Lo coordinates so existing kernels can adopt incrementally.
-// If you only need one, call the specialized functions above.
+// -----------------------------------------------------------------------------
+// Bridging-Helper: befüllt gleichzeitig double2 und CapyHiLo2
+// -----------------------------------------------------------------------------
 CAPY_HD void capy_map_pixel(double cx, double cy,
                             double stepX, double stepY,
                             int px, int py, int w, int h,
@@ -68,17 +99,19 @@ CAPY_HD void capy_map_pixel(double cx, double cy,
     c_hilo   = capy_map_pixel_hilo  (cx, cy, stepX, stepY, px, py, w, h);
 }
 
-// ----------------------------- Optional device logs ---------------------------
-// Suggestion: call once per ~8k pixels or gated by gid%N==0 in your kernel.
+// -----------------------------------------------------------------------------
+// Optionale Device-Logs (ASCII-only, rate-limited). Keine Hard-Abhängigkeiten.
+// Benötigt CAPY_DEBUG_LOGGING, LUCHS_LOG_DEVICE(msg) und capy_should_log(...).
+// -----------------------------------------------------------------------------
 #if defined(__CUDA_ARCH__)
 CAPY_D void capy_log_map_init_if(uint32_t gid, int px, int py,
-                                 double2 cD, const CapyHiLo2& cHL, int earlyIters)
+                                 double2 cD, const CapyHiLo2& cHL,
+                                 int earlyIters)
 {
-#if CAPY_DEBUG_LOGGING
+#if defined(CAPY_DEBUG_LOGGING) && defined(LUCHS_LOG_DEVICE) && defined(capy_should_log) && defined(CAPY_LOG_RATE)
     if (!capy_should_log(gid, (uint32_t)CAPY_LOG_RATE)) return;
     char msg[256];
-    // One ASCII line, deterministic; keep %.17e for double print parity.
-    // Example:
+    // Eine deterministische, einzeilige ASCII-Zeile (keine Farben, keine UTF-8)
     // CAPY map gid=123 px=10 py=20 cD=(1.23e-12,4.56e-12) cHL.hi=(...) lo=(...) early=64
     snprintf(msg, sizeof(msg),
              "CAPY map gid=%u px=%d py=%d cD=(%.17e,%.17e) cHL.hi=(%.17e,%.17e) lo=(%.17e,%.17e) early=%d",
@@ -88,8 +121,13 @@ CAPY_D void capy_log_map_init_if(uint32_t gid, int px, int py,
              cHL.x.lo, cHL.y.lo,
              earlyIters);
     LUCHS_LOG_DEVICE(msg);
+#else
+    (void)gid; (void)px; (void)py; (void)cD; (void)cHL; (void)earlyIters;
 #endif
 }
 #else
 inline void capy_log_map_init_if(uint32_t, int, int, double2, const CapyHiLo2&, int) {}
 #endif
+
+#undef CAPY_HD
+#undef CAPY_D
