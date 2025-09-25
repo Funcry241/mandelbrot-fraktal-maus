@@ -21,14 +21,13 @@
 #include <cstring>
 #include <chrono>
 #include <cmath>
-#include <algorithm>   // std::max, std::abs
+#include <algorithm>
 
 #include <GL/glew.h>
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 
 namespace {
-    // ---- CUDA timing events (lazy) ---------------------------------------
     static cudaEvent_t s_evStart = nullptr;
     static cudaEvent_t s_evStop  = nullptr;
 
@@ -36,7 +35,7 @@ namespace {
         static bool done = false;
         if (done) return;
         done = true;
-        cudaError_t rc = cudaEventCreate(&s_evStart); // timing enabled
+        cudaError_t rc = cudaEventCreate(&s_evStart);
         if (rc != cudaSuccess) {
             LUCHS_LOG_HOST("[CUDA][ERR] eventCreate start rc=%d", (int)rc);
             LuchsLogger::flushDeviceLogToHost(0);
@@ -50,14 +49,11 @@ namespace {
         }
     }
 
-    // ---- PBO CUDA resources ----------------------------------------------
     static std::vector<CudaInterop::bear_CudaPBOResource> s_pboResources;
     static bool s_pboActive = false;
 
-    // ---- Global pause flag for zoom logic --------------------------------
     static bool s_pauseZoom = false;
 
-    // RAII-Guard: map beim Bau, unmap beim Zerstören
     struct MapGuard {
         CudaInterop::bear_CudaPBOResource* res = nullptr;
         void*   ptr   = nullptr;
@@ -70,7 +66,6 @@ namespace {
         }
     };
 
-    // Helpers for safe attribute read
     static int getAttrSafe(cudaDeviceAttr attr, int dev) {
         int v = 0;
         auto e = cudaDeviceGetAttribute(&v, attr, dev);
@@ -115,7 +110,7 @@ void registerAllPBOs(const unsigned int* pboIds, int count) {
 }
 
 void unregisterAllPBOs() noexcept {
-    s_pboResources.clear(); // dtors unmap+unregister
+    s_pboResources.clear();
     s_pboActive = false;
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PBO] unregistered all CUDA resources");
@@ -142,9 +137,9 @@ void logCudaDeviceContext(const char* tag) noexcept {
                    (tag?tag:"-"), rt, drv, dev, name, ccM, ccN, mp, smpb);
 }
 
-// ----------------------------------------------------------------------------------
-// Hauptpfad: Capybara render -> colorize to PBO (ohne Host-Sync; optional Perf-Sync)
-// ----------------------------------------------------------------------------------
+// ----------------------------------------------------------------------
+// Hauptpfad: render -> colorize to PBO
+// ----------------------------------------------------------------------
 void renderCudaFrame(
     Hermelin::CudaDeviceBuffer& d_iterations,
     int   width,
@@ -159,14 +154,10 @@ void renderCudaFrame(
     RendererState& state,
     cudaStream_t renderStream
 ){
-    // zoom wird unten verwendet (→ keine (void) Markierung).
-    (void)newOffsetX;     // zoom/offset update handled upstream
-    (void)newOffsetY;
-    (void)shouldZoom;
+    (void)newOffsetX; (void)newOffsetY; (void)shouldZoom;
 
     if (!s_pboActive) {
         LUCHS_LOG_HOST("[PBO][ERR] render called without registered PBOs");
-        // WICHTIG: Kein Device-Log-Flush hier (Logger evtl. noch nicht init)
         state.skipUploadThisFrame = true;
         return;
     }
@@ -177,9 +168,8 @@ void renderCudaFrame(
     }
 
     ensureEventsOnce();
-    (void)cudaGetLastError(); // clear sticky
+    (void)cudaGetLastError();
 
-    // ---- 1) Map current PBO slot ----------------------------------------
     const size_t needBytes = size_t(width) * size_t(height) * sizeof(uchar4);
     const int ix = (state.pboIndex >= 0 && state.pboIndex < (int)s_pboResources.size()) ? state.pboIndex : 0;
 
@@ -189,13 +179,12 @@ void renderCudaFrame(
 
     MapGuard map(&s_pboResources[ix]);
 
-    // deterministische Fehlerpfade: loggen + Frame degradieren, NICHT werfen
     if (!map.ptr) {
-        cudaError_t rcMap = cudaGetLastError(); // evtl. von Map
+        cudaError_t rcMap = cudaGetLastError();
         LUCHS_LOG_HOST("[PBO][MAP][ERR] null ptr ring=%d need=%zu rc=%d", ix, (size_t)needBytes, (int)rcMap);
         LuchsLogger::flushDeviceLogToHost(0);
         state.skipUploadThisFrame = true;
-        return; // Frame ohne Upload beenden
+        return;
     }
     if (map.bytes < needBytes) {
         LUCHS_LOG_HOST("[PBO][MAP][ERR] size mismatch ring=%d got=%zu need=%zu", ix, (size_t)map.bytes, (size_t)needBytes);
@@ -208,41 +197,29 @@ void renderCudaFrame(
         state.ringUse[state.pboIndex]++;
     }
 
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PBO][MAP] ok ring=%d ptr=%p bytes=%zu", ix, map.ptr, (size_t)map.bytes);
-    }
-
-    // ---- 2) Capybara render (iterations) --------------------------------
+    // ---- Capybara render (iterations) ----
     const double cx   = (double)offsetX;
     const double cy   = (double)offsetY;
 
-    // Quadratische Pixel erzwingen: gleiche Schrittweite in X/Y,
-    // Vorzeichen aus dem GL-PixelScale übernehmen (Y ist oft negativ).
     const double sx = (double)state.pixelScale.x;
     const double sy = (double)state.pixelScale.y;
 
-    // --- Pixel-Schrittweite: immer mit 1/zoom skalieren --------------------
-    // Basis-Schrittweite bei zoom = 1.0:
-    // - wenn pixelScale gesetzt ist → dessen Betrag
-    // - sonst Fallback auf kBaseSpan/width (historischer Sichtbereich ~2.666...)
+    // Schrittweite mit 1/zoom skalieren
     double baseStep = std::max(std::abs(sx), std::abs(sy));
     if (!(baseStep > 0.0)) {
-        constexpr double kBaseSpan = 8.0 / 3.0; // 2.666666..., passt zu bisherigen Defaults
+        constexpr double kBaseSpan = 8.0 / 3.0;
         baseStep = kBaseSpan / std::max(1, width);
     }
-
-    const double invZ  = 1.0 / std::max(1.0, (double)zoom); // schützen gegen 0/kleine Werte
+    const double invZ  = 1.0 / std::max(1.0, (double)zoom);
     const double step  = baseStep * invZ;
 
-    // Orientierung/Handedness aus pixelScale übernehmen
     const double stepX = std::copysign(step, ( sx == 0.0 ?  1.0 : sx));
     const double stepY = std::copysign(step, ( sy == 0.0 ? -1.0 : sy));
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[CAPY][ARGS] cx=%.9f cy=%.9f stepX=%.11f stepY=%.11f it=%d w=%d h=%d",
                        cx, cy, stepX, stepY, maxIterations, width, height);
-        LUCHS_LOG_HOST("[CAPY][STEP] zoom=%.6f invZ=%.6f baseStep=%.10f",
-                       (double)zoom, invZ, baseStep);
+        LUCHS_LOG_HOST("[CAPY][STEP] zoom=%.6f invZ=%.6f baseStep=%.10f", (double)zoom, invZ, baseStep);
     }
 
     cudaError_t rc = cudaEventRecord(s_evStart, renderStream);
@@ -255,10 +232,9 @@ void renderCudaFrame(
         stepX, stepY,
         maxIterations,
         renderStream,
-        state.evEcDone // optional event reuse
+        state.evEcDone
     );
 
-    // Launch-Fehler peek (numerisch loggen)
     rc = cudaPeekAtLastError();
     if (rc != cudaSuccess) throw_with_log("capy_render launch", rc);
 
@@ -270,7 +246,7 @@ void renderCudaFrame(
         if (rcSync != cudaSuccess) throw_with_log("capy_render sync", rcSync);
     }
 
-    // ---- 3) Colorize into mapped PBO ------------------------------------
+    // ---- Colorize into mapped PBO ----
     rc = cudaEventRecord(s_evStart, renderStream);
     if (rc != cudaSuccess) throw_with_log("eventRecord(start) before colorize", rc);
 
@@ -291,10 +267,9 @@ void renderCudaFrame(
         cudaError_t rcSync = cudaEventSynchronize(s_evStop);
         if (rcSync != cudaSuccess) throw_with_log("colorize sync", rcSync);
     }
-
-    // ---- 4) done; MapGuard dtor will unmap -------------------------------
 }
 
+// ABI-kompatibler Wrapper
 void renderCudaFrame(RendererState& state, const FrameContext& fctx, float& newOffsetX, float& newOffsetY) {
     float offx = fctx.offset.x;
     float offy = fctx.offset.y;
@@ -313,9 +288,39 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx, float& newO
     );
 }
 
-// --- ABI-Kompat: alter Name bleibt als Alias verfügbar -----------------
-void logCudaContext(const char* tag) noexcept {
-    logCudaDeviceContext(tag);
+void logCudaContext(const char* tag) noexcept { logCudaDeviceContext(tag); }
+
+// ----------------------------------------------------------------------
+// NEU: Iterationsbuffer -> Host spiegeln (für Heatmap-Build)
+// ----------------------------------------------------------------------
+bool downloadIterationsToHost(RendererState& state,
+                              int width, int height,
+                              std::vector<uint16_t>& host,
+                              cudaStream_t stream) noexcept
+{
+    if (width <= 0 || height <= 0) return false;
+    const size_t n = (size_t)width * (size_t)height;
+    const size_t bytes = n * sizeof(uint16_t);
+    host.resize(n);
+
+    const void* dptr = state.d_iterations.get();
+    if (!dptr) return false;
+
+    cudaError_t rc = cudaMemcpyAsync(host.data(), dptr, bytes, cudaMemcpyDeviceToHost, stream);
+    if (rc != cudaSuccess) {
+        LUCHS_LOG_HOST("[HM][ERR] memcpyAsync iter->host rc=%d", (int)rc);
+        LuchsLogger::flushDeviceLogToHost(0);
+        return false;
+    }
+    if (stream) {
+        rc = cudaStreamSynchronize(stream);
+        if (rc != cudaSuccess) {
+            LUCHS_LOG_HOST("[HM][ERR] streamSync after memcpy rc=%d", (int)rc);
+            LuchsLogger::flushDeviceLogToHost(0);
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace CudaInterop

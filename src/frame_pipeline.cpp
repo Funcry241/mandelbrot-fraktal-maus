@@ -7,10 +7,12 @@
 #include <chrono>
 #include <algorithm>
 #include <cstdio>     // snprintf for dynamic ring logging
+#include <vector>     // Heatmap host buffer
+#include <cmath>      // sqrt/log
 
 #include "renderer_resources.hpp"
 #include "renderer_pipeline.hpp"
-#include "cuda_interop.hpp"   // CudaInterop::renderCudaFrame(RendererState&, FrameContext&, float&, float&)
+#include "cuda_interop.hpp"   // CudaInterop::renderCudaFrame(...), downloadIterationsToHost(...)
 #include "frame_context.hpp"
 #include "frame_pipeline.hpp"
 #include "settings.hpp"
@@ -87,8 +89,8 @@ namespace {
         ++g_frame;
     }
 
-    // ------------------------------- Helpers ----------------------------------
-    // Erzwinge sichtbare Heatmap-Daten, falls CUDA (noch) nichts geliefert hat.
+    // ------------------------------- Heatmap Helpers --------------------------
+    // Fallback erzeugen (sichtbare Checker/Gradient), wenn (noch) keine Daten vorliegen.
     static void ensureHeatmapHostData(RendererState& state, int width, int height, int tilePx) {
         const int px = std::max(1, tilePx);
         const int tx = (width  + px - 1) / px;
@@ -103,7 +105,6 @@ namespace {
         if (needEnt) state.h_entropy.assign(N, 0.0f);
         if (needCon) state.h_contrast.assign(N, 0.0f);
 
-        // Fallback: weiche, sichtbare Gradienten-/Checker-Struktur
         for (int y = 0; y < ty; ++y) {
             for (int x = 0; x < tx; ++x) {
                 const size_t i = static_cast<size_t>(y) * tx + x;
@@ -119,6 +120,83 @@ namespace {
         }
 
         LUCHS_LOG_HOST("[HM][FALLBACK] generated N=%zu tiles=%dx%d tilePx=%d", N, tx, ty, px);
+    }
+
+    // Live-Heatmap aus aktuellem Iterationspuffer aufbauen (gesampelt).
+    // Gibt true zurück, wenn Werte erfolgreich aktualisiert wurden.
+    static bool updateHeatmapStats(RendererState& state,
+                                   const FrameContext& fctx,
+                                   int overlayTilePx)
+    {
+        static std::vector<uint16_t> hostIterations;
+        if (!CudaInterop::downloadIterationsToHost(state, fctx.width, fctx.height,
+                                                   hostIterations, state.renderStream)) {
+            return false;
+        }
+
+        const int W = fctx.width;
+        const int H = fctx.height;
+        const int tilesX = (W + overlayTilePx - 1) / overlayTilePx;
+        const int tilesY = (H + overlayTilePx - 1) / overlayTilePx;
+        const int tilesN = tilesX * tilesY;
+
+        state.h_entropy.assign(tilesN, 0.0f);
+        state.h_contrast.assign(tilesN, 0.0f);
+
+        const int step = std::max(1, overlayTilePx / 8);
+        constexpr int BINS = 16;
+
+        for (int ty = 0; ty < tilesY; ++ty) {
+            const int y0 = ty * overlayTilePx;
+            const int y1 = std::min(H, y0 + overlayTilePx);
+
+            for (int tx = 0; tx < tilesX; ++tx) {
+                const int x0 = tx * overlayTilePx;
+                const int x1 = std::min(W, x0 + overlayTilePx);
+
+                int hist[BINS] = {0};
+                double sum = 0.0, sum2 = 0.0;
+                int cnt = 0;
+
+                for (int y = y0; y < y1; y += step) {
+                    const int row = y * W;
+                    for (int x = x0; x < x1; x += step) {
+                        const uint16_t v = hostIterations[row + x];
+                        sum  += v;
+                        sum2 += double(v) * double(v);
+                        ++cnt;
+                        int b = (int)((uint64_t)v * BINS / (uint64_t)(fctx.maxIterations + 1));
+                        if (b >= BINS) b = BINS - 1;
+                        ++hist[b];
+                    }
+                }
+
+                const int idx = ty * tilesX + tx;
+                if (cnt > 0) {
+                    const double mean  = sum / cnt;
+                    const double var   = std::max(0.0, (sum2 / cnt) - mean * mean);
+                    const double stdev = std::sqrt(var);
+                    state.h_contrast[idx] = (float)std::clamp(stdev / std::max(1, fctx.maxIterations), 0.0, 1.0);
+
+                    double Hbits = 0.0;
+                    for (int b = 0; b < BINS; ++b) {
+                        if (hist[b] == 0) continue;
+                        const double p = (double)hist[b] / (double)cnt;
+                        Hbits -= p * (std::log(p) / std::log(2.0));
+                    }
+                    const double Hnorm = Hbits / std::log2((double)BINS);
+                    state.h_entropy[idx] = (float)std::clamp(Hnorm, 0.0, 1.0);
+                } else {
+                    state.h_contrast[idx] = 0.0f;
+                    state.h_entropy[idx]  = 0.0f;
+                }
+            }
+        }
+
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[HM] updated tiles=%dx%d step=%d", tilesX, tilesY, step);
+        }
+        return true;
     }
 
     // ------------------------------- CUDA (Compute) -------------------------------
@@ -175,8 +253,10 @@ namespace {
                                                   ? Settings::Kolibri::desiredTilePx
                                                   : fctx.tileSize);
 
-            // Fallback-Daten erzeugen, wenn leer → garantiertes Signal
-            ensureHeatmapHostData(state, fctx.width, fctx.height, overlayTilePx);
+            // Live-Werte berechnen; bei Fehler auf Fallback gehen.
+            if (!updateHeatmapStats(state, fctx, overlayTilePx)) {
+                ensureHeatmapHostData(state, fctx.width, fctx.height, overlayTilePx);
+            }
 
             if constexpr (Settings::performanceLogging) {
                 const int compPx = std::max(1, fctx.tileSize);
@@ -186,11 +266,6 @@ namespace {
                 const int compTy = (fctx.height + compPx - 1) / compPx;
                 LUCHS_LOG_HOST("[GRID] overlayPx=%d overlay=%dx%d computePx=%d compute=%dx%d res=%dx%d",
                                overlayTilePx, ovTx, ovTy, compPx, compTx, compTy, fctx.width, fctx.height);
-            }
-
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[HM] enabled=1 ent=%zu con=%zu tilePx=%d",
-                               state.h_entropy.size(), state.h_contrast.size(), overlayTilePx);
             }
 
             HeatmapOverlay::drawOverlay(state.h_entropy, state.h_contrast,

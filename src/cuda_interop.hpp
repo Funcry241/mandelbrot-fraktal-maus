@@ -5,7 +5,9 @@
 
 #pragma once
 
-#include <cuda_runtime_api.h>  // cudaStream_t
+#include <cuda_runtime_api.h>   // cudaStream_t
+#include <vector>               // std::vector (for host iteration download)
+#include <cstdint>              // std::uint16_t
 
 // Vorwärtsdeklarationen statt schwerer Includes
 namespace Hermelin { class CudaDeviceBuffer; }
@@ -50,5 +52,16 @@ void renderCudaFrame(
     float& newOffsetX,
     float& newOffsetY
 );
+
+// ---- Heatmap-Support --------------------------------------------------
+// Kopiert den aktuellen Device-Iterationspuffer in einen Host-Vektor.
+// Gibt true zurück, wenn die Daten erfolgreich (und vollständig) übertragen wurden.
+bool downloadIterationsToHost(
+    RendererState& state,
+    int width,
+    int height,
+    std::vector<std::uint16_t>& outHost,
+    cudaStream_t stream
+) noexcept;
 
 } // namespace CudaInterop
