@@ -127,7 +127,11 @@ void generateOverlayQuads(const std::string& t, int viewportW, int viewportH, fl
     const float boxW=float(maxW)*advX, boxH=float(lines.size())*advY;
 
     // Panel-Rand exakt bei UI_MARGIN
-    buildPanel(pOut, x0 - pad, y0 - pad, x0 + boxW + pad, y0 + boxH + pad);
+    // Maus: Unterer Innenabstand soll exakt dem oberen entsprechen.
+    //       Da die letzte Zeile keinen +2px-Zeilenabstand mehr braucht,
+    //       ziehen wir einmalig 2*scalePx am unteren Rand ab.
+    const float bottomFix = !lines.empty() ? 2.0f*scalePx : 0.0f;
+    buildPanel(pOut, x0 - pad, y0 - pad, x0 + boxW + pad, y0 + boxH - bottomFix + pad);
 
     // Glyphen
     const float r=1.0f,g=0.82f,b=0.32f;
