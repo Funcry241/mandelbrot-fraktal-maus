@@ -9,6 +9,7 @@
 #include "cuda_interop.hpp"     // CudaInterop::getPauseZoom()
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
+#include "capybara_mapping.cuh" // capy_pixel_steps_from_zoom_scale(...)
 
 #include <algorithm>
 #include <cmath>
@@ -19,7 +20,7 @@
 namespace {
 
 // ----------------------------- Tunables ---------------------------------
-constexpr float kSEED_STEP_NDC = 0.015f; // Basisschritt in NDC
+constexpr float kSEED_STEP_NDC = 0.015f; // Basisschritt in NDC (Anteil der Bild-Halbdimension)
 constexpr float kSTEP_MAX_NDC  = 0.35f;  // Sicherheitskappe
 constexpr float kTURN_MAX_RAD  = 0.18f;  // max. Richtungsänderung/Frame
 constexpr float kBLEND_A       = 0.22f;  // Low-Pass fürs Offset
@@ -84,7 +85,7 @@ float mad_from_center_inplace(std::vector<float>& v, float center) {
 // Tileindex → NDC-Zentrum (−1..+1)
 inline void tileIndexToNdcCenter(int tilesX, int tilesY, int idx, float& ndcX, float& ndcY) {
     const int tx = (tilesX > 0) ? (idx % tilesX) : 0;
-    const int ty = (tilesX > 0) ? (idx / tilesX) : 0; // ok, div by tilesX; tilesY nutzt nur Normierung
+    const int ty = (tilesX > 0) ? (idx / tilesX) : 0;
     const float cx = (static_cast<float>(tx) + 0.5f) / std::max(1, tilesX);
     const float cy = (static_cast<float>(ty) + 0.5f) / std::max(1, tilesY);
     ndcX = cx * 2.0f - 1.0f;
@@ -95,20 +96,6 @@ inline void tileIndexToNdcCenter(int tilesX, int tilesY, int idx, float& ndcX, f
 thread_local bool  g_dirInit  = false;
 thread_local float g_prevDirX = 1.0f;
 thread_local float g_prevDirY = 0.0f;
-
-// “Keine-Signal”-Detektor: Wenn Entropie *und* Kontrast quasi konstant sind
-inline bool is_flat_signal(const std::vector<float>& e,
-                           const std::vector<float>& c,
-                           int tiles) noexcept
-{
-    if (tiles <= 0) return true;
-    auto minmaxE = std::minmax_element(e.begin(), e.begin() + tiles);
-    auto minmaxC = std::minmax_element(c.begin(), c.begin() + tiles);
-    const float spanE = (*minmaxE.second) - (*minmaxE.first);
-    const float spanC = (*minmaxC.second) - (*minmaxC.first);
-    // Toleranz: Heatmap-Werte sind 0..1 normalisiert
-    return !(spanE > 1e-4f) && !(spanC > 1e-4f);
-}
 
 } // namespace
 
@@ -157,7 +144,7 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     const bool haveEntropy  = (total > 0) && (static_cast<int>(entropy.size())  >= total);
     const bool haveContrast = (total > 0) && (static_cast<int>(contrast.size()) >= total);
 
-    // Wenn Daten fehlen → deterministischer Drift
+    // Kein Signal → deterministischer Drift
     if (!haveEntropy || !haveContrast) {
         out.shouldZoom = Settings::ForceAlwaysZoom;
         if (!out.shouldZoom) return out;
@@ -173,56 +160,24 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
         rotateTowardsLimited(g_prevDirX, g_prevDirY, dirx, diry, kTURN_MAX_RAD);
         dirx = g_prevDirX; diry = g_prevDirY;
 
+        // provisorischer kleiner Schritt (wird in evaluateAndApply neu skaliert)
         const float invZ = 1.0f / std::max(1e-6f, zoom);
         const float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
-
         const float tx = previousOffset.x + dirx * (step * invZ);
         const float ty = previousOffset.y + diry * (step * invZ);
 
-        out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + tx * kBLEND_A;
-        out.newOffsetY = previousOffset.y * (1.0f - kBLEND_A) + ty * kBLEND_A;
+        out.newOffsetX = tx;
+        out.newOffsetY = ty;
         const float dx = out.newOffsetX - previousOffset.x;
         const float dy = out.newOffsetY - previousOffset.y;
         out.distance = std::sqrt(dx*dx + dy*dy);
+        out.shouldZoom = true;
 
         g_dirInit = true;
 
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ZOOM][DRIFT] invZ=%.6f stepNdc=%.4f dir=(%.3f,%.3f) d=%.6f",
                            (double)invZ, (double)step, (double)dirx, (double)diry, (double)out.distance);
-        }
-        return out;
-    }
-
-    // Wenn Entropy/Kontrast *vorhanden*, aber praktisch *konstant* → ebenfalls Drift
-    if (is_flat_signal(entropy, contrast, total)) {
-        out.shouldZoom = Settings::ForceAlwaysZoom;
-        if (!out.shouldZoom) return out;
-
-        float dirx = g_dirInit ? g_prevDirX : 1.0f;
-        float diry = g_dirInit ? g_prevDirY : 0.0f;
-        if (insideCardioidOrBulb(currentOffset.x, currentOffset.y)) {
-            antiVoidDriftNDC(currentOffset.x, currentOffset.y, dirx, diry);
-        }
-        if (!normalize2D(dirx, diry)) { dirx = 1.0f; diry = 0.0f; }
-        rotateTowardsLimited(g_prevDirX, g_prevDirY, dirx, diry, kTURN_MAX_RAD);
-        dirx = g_prevDirX; diry = g_prevDirY;
-
-        const float invZ = 1.0f / std::max(1e-6f, zoom);
-        const float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
-        const float tx = previousOffset.x + dirx * (step * invZ);
-        const float ty = previousOffset.y + diry * (step * invZ);
-
-        out.shouldZoom = true;
-        out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + tx * kBLEND_A;
-        out.newOffsetY = previousOffset.y * (1.0f - kBLEND_A) + ty * kBLEND_A;
-
-        const float dx = out.newOffsetX - previousOffset.x;
-        const float dy = out.newOffsetY - previousOffset.y;
-        out.distance = std::sqrt(dx*dx + dy*dy);
-
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOM][DRIFT-NOSIGNAL] d=%.6f", (double)out.distance);
         }
         return out;
     }
@@ -238,16 +193,12 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
 
     int   bestI = -1;
     float bestS = -1e30f;
-    float bestC = -1e30f; // Tie-Breaker: höherer Kontrast gewinnt
 
     for (int i = 0; i < total; ++i) {
         const float ze = (entropy[i]  - eMed) / eMAD;
         const float zc = (contrast[i] - cMed) / cMAD;
         const float s  = kALPHA_E * ze + kBETA_C * zc;
-
-        if (s > bestS + 1e-6f || (std::fabs(s - bestS) <= 1e-6f && contrast[i] > bestC)) {
-            bestS = s; bestI = i; bestC = contrast[i];
-        }
+        if (s > bestS) { bestS = s; bestI = i; }
     }
 
     if (bestI < 0) {
@@ -269,15 +220,15 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
 
     g_prevDirX = hx; g_prevDirY = hy; g_dirInit = true;
 
+    // provisorischer kleiner Schritt (wird in evaluateAndApply neu skaliert)
     const float invZ = 1.0f / std::max(1e-6f, zoom);
     const float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
-
     const float tx = previousOffset.x + hx * (step * invZ);
     const float ty = previousOffset.y + hy * (step * invZ);
 
     out.shouldZoom = true;
-    out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + tx * kBLEND_A;
-    out.newOffsetY = previousOffset.y * (1.0f - kBLEND_A) + ty * kBLEND_A;
+    out.newOffsetX = tx;
+    out.newOffsetY = ty;
 
     const float dx = out.newOffsetX - previousOffset.x;
     const float dy = out.newOffsetY - previousOffset.y;
@@ -316,8 +267,42 @@ void evaluateAndApply(::FrameContext& fctx,
         bus
     );
 
-    fctx.shouldZoom = zr.shouldZoom;
-    fctx.newOffset  = make_float2(zr.newOffsetX, zr.newOffsetY);
+    // --- NEU: Pan-Schritt in Weltkoordinaten neu skalieren (NDC → Welt) ---
+    if (zr.shouldZoom) {
+        // Richtung aus vorgeschlagenem Schritt gewinnen
+        float dirx = zr.newOffsetX - prev.x;
+        float diry = zr.newOffsetY - prev.y;
+        if (!normalize2D(dirx, diry)) { dirx = 1.0f; diry = 0.0f; }
+
+        // Aktuelle Schrittweiten (Pixel → Welt) ermitteln
+        double stepX = 0.0, stepY = 0.0;
+        capy_pixel_steps_from_zoom_scale(
+            (double)state.pixelScale.x,
+            (double)state.pixelScale.y,
+            fctx.width,
+            (double)fctx.zoom,
+            stepX, stepY
+        );
+
+        // Welt-Halbdimensionen des sichtbaren Fensters
+        const float halfW = 0.5f * (float)fctx.width  * (float)std::fabs(stepX);
+        const float halfH = 0.5f * (float)fctx.height * (float)std::fabs(stepY);
+
+        // NDC-Anteil anwenden (anisotrop)
+        const float stepNdc = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
+        const float tx = prev.x + dirx * (stepNdc * halfW);
+        const float ty = prev.y + diry * (stepNdc * halfH);
+
+        // sanftes Blending
+        fctx.shouldZoom = true;
+        fctx.newOffset  = make_float2(
+            prev.x * (1.0f - kBLEND_A) + tx * kBLEND_A,
+            prev.y * (1.0f - kBLEND_A) + ty * kBLEND_A
+        );
+    } else {
+        fctx.shouldZoom = false;
+        fctx.newOffset  = prev;
+    }
 
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[ZOOM][EVAL] tiles=%dx%d should=%d new=(%.9f,%.9f)",
