@@ -4,9 +4,9 @@
 ///// Datei: src/zoom_logic.cpp
 
 #include "zoom_logic.hpp"
-#include "frame_context.hpp"
-#include "renderer_state.hpp"
-#include "cuda_interop.hpp"
+#include "frame_context.hpp"    // definiert FrameContext (struct)
+#include "renderer_state.hpp"   // definiert RendererState (class)
+#include "cuda_interop.hpp"     // CudaInterop::getPauseZoom()
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 
@@ -23,6 +23,11 @@ constexpr float kSEED_STEP_NDC = 0.015f; // Basisschritt in NDC
 constexpr float kSTEP_MAX_NDC  = 0.35f;  // Sicherheitskappe
 constexpr float kTURN_MAX_RAD  = 0.18f;  // max. Richtungsänderung/Frame
 constexpr float kBLEND_A       = 0.22f;  // Low-Pass fürs Offset
+
+// Zusatz: Schritt-Anpassungen / Void-Guards
+constexpr float kSTEP_NEAR_SCALE_MIN = 0.50f; // mind. 50% Schritt, wenn Ziel nahe Zentrum liegt
+constexpr float kVOID_BRAKE          = 0.55f; // bremst, wenn Kandidat in das Innere führen würde
+constexpr float kWEAK_TARGET_BRAKE   = 0.40f; // bremst bei „schwacher“ Heatmap-Kachel
 
 constexpr float kALPHA_E = 1.0f; // Gewicht Entropy
 constexpr float kBETA_C  = 0.5f; // Gewicht Contrast
@@ -53,17 +58,29 @@ inline void rotateTowardsLimited(float& dx, float& dy, float tx, float ty, float
 inline bool insideCardioidOrBulb(double x, double y) noexcept {
     const double xm = x - 0.25;
     const double q  = xm*xm + y*y;
-    if (q*(q + xm) < 0.25*y*y) return true;
+    if (q*(q + xm) < 0.25*y*y) return true;     // Cardioid
     const double dx = x + 1.0;
-    return (dx*dx + y*y) < 0.0625;
+    return (dx*dx + y*y) < 0.0625;               // Periode-2-Bulb
 }
 
-// Drift aus der Cardioid-Mitte (-0.25, 0) radial nach außen
+// Richtungsableitung „weg vom Inneren“ (cardioid / bulb), sonst nach +x
 inline void antiVoidDriftNDC(float cx, float cy, float& outx, float& outy) {
-    float vx = cx + 0.25f;
-    float vy = cy;
-    if (!normalize2D(vx, vy)) { vx = 1.0f; vy = 0.0f; }
-    outx = vx; outy = vy;
+    // Vektor von der jeweiligen Bulb-Mitte nach außen
+    const bool inCard = insideCardioidOrBulb(cx, cy); // billiger Doppeltest, aber ok
+    if (inCard) {
+        // Näherungsweise: wähle die nähere Mitte
+        const float2 centerCard = make_float2(-0.25f, 0.0f);
+        const float2 centerBulb = make_float2(-1.0f,  0.0f);
+        const float dxC = cx - centerCard.x, dyC = cy - centerCard.y;
+        const float dxB = cx - centerBulb.x, dyB = cy - centerBulb.y;
+        const float d2C = dxC*dxC + dyC*dyC;
+        const float d2B = dxB*dxB + dyB*dyB;
+        if (d2C <= d2B) { outx = dxC; outy = dyC; }
+        else            { outx = dxB; outy = dyB; }
+    } else {
+        outx = 1.0f; outy = 0.0f;
+    }
+    if (!normalize2D(outx, outy)) { outx = 1.0f; outy = 0.0f; }
 }
 
 // Median/MAD (in-place)
@@ -146,7 +163,7 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     const bool haveEntropy  = (total > 0) && (static_cast<int>(entropy.size())  >= total);
     const bool haveContrast = (total > 0) && (static_cast<int>(contrast.size()) >= total);
 
-    // Kein Signal → deterministischer Drift
+    // Kein Signal → deterministischer Drift (mit Void-Guard)
     if (!haveEntropy || !haveContrast) {
         out.shouldZoom = Settings::ForceAlwaysZoom;
         if (!out.shouldZoom) return out;
@@ -155,7 +172,8 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
         float diry = g_dirInit ? g_prevDirY : 0.0f;
 
         if (insideCardioidOrBulb(currentOffset.x, currentOffset.y)) {
-            antiVoidDriftNDC(currentOffset.x, currentOffset.y, dirx, diry);
+            float ax, ay; antiVoidDriftNDC(currentOffset.x, currentOffset.y, ax, ay);
+            rotateTowardsLimited(dirx, diry, ax, ay, kTURN_MAX_RAD);
         }
         if (!normalize2D(dirx, diry)) { dirx = 1.0f; diry = 0.0f; }
 
@@ -163,19 +181,21 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
         dirx = g_prevDirX; diry = g_prevDirY;
 
         const float invZ = 1.0f / std::max(1e-6f, zoom);
-        const float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
+        float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
 
-        float tx = previousOffset.x + dirx * (step * invZ);
-        float ty = previousOffset.y + diry * (step * invZ);
-
-        // Schutz: nicht ins Innere driften
-        if (insideCardioidOrBulb(tx, ty)) {
-            tx = previousOffset.x - dirx * (step * invZ);
-            ty = previousOffset.y - diry * (step * invZ);
+        // Kandidat prüfen – nicht in die Hauptmenge treten
+        float candX = previousOffset.x + dirx * (step * invZ);
+        float candY = previousOffset.y + diry * (step * invZ);
+        if (insideCardioidOrBulb(candX, candY)) {
+            float ax, ay; antiVoidDriftNDC(candX, candY, ax, ay);
+            rotateTowardsLimited(dirx, diry, ax, ay, kTURN_MAX_RAD * 0.85f);
+            step *= kVOID_BRAKE;
+            candX = previousOffset.x + dirx * (step * invZ);
+            candY = previousOffset.y + diry * (step * invZ);
         }
 
-        out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + tx * kBLEND_A;
-        out.newOffsetY = previousOffset.y * (1.0f - kBLEND_A) + ty * kBLEND_A;
+        out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + candX * kBLEND_A;
+        out.newOffsetY = previousOffset.y * (1.0f - kBLEND_A) + candY * kBLEND_A;
         const float dx = out.newOffsetX - previousOffset.x;
         const float dy = out.newOffsetY - previousOffset.y;
         out.distance = std::sqrt(dx*dx + dy*dy);
@@ -204,7 +224,8 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     for (int i = 0; i < total; ++i) {
         const float ze = (entropy[i]  - eMed) / eMAD;
         const float zc = (contrast[i] - cMed) / cMAD;
-        const float s  = kALPHA_E * ze + kBETA_C * zc;
+        // nur positive Beiträge fördern (verhindert „ruhige“ Flächen)
+        const float s  = kALPHA_E * std::max(0.0f, ze) + kBETA_C * std::max(0.0f, zc);
         if (s > bestS) { bestS = s; bestI = i; }
     }
 
@@ -219,30 +240,56 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     float ndcTX = 0.0f, ndcTY = 0.0f;
     tileIndexToNdcCenter(tilesX, tilesY, bestI, ndcTX, ndcTY);
 
+    // Zielrichtung in NDC
     float tdx = ndcTX, tdy = ndcTY;
+    // Nähe zum Zentrum beeinflusst Schrittweite (zu nahe → kleiner Schritt)
+    const float tDist = std::sqrt(tdx*tdx + tdy*tdy); // 0..~1.41
+    float stepScale = std::max(kSTEP_NEAR_SCALE_MIN, tDist); // 0.5..1.41 (geclamped weiter unten)
 
     float hx = g_dirInit ? g_prevDirX : 1.0f;
     float hy = g_dirInit ? g_prevDirY : 0.0f;
     rotateTowardsLimited(hx, hy, tdx, tdy, kTURN_MAX_RAD);
 
+    // Void-Guard: schon am aktuellen Punkt innerhalb? → nach außen drehen
+    if (insideCardioidOrBulb(currentOffset.x, currentOffset.y)) {
+        float ax, ay; antiVoidDriftNDC(currentOffset.x, currentOffset.y, ax, ay);
+        rotateTowardsLimited(hx, hy, ax, ay, kTURN_MAX_RAD);
+    }
+
     g_prevDirX = hx; g_prevDirY = hy; g_dirInit = true;
 
     const float invZ = 1.0f / std::max(1e-6f, zoom);
-    const float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
+    float step = clampf(kSEED_STEP_NDC * stepScale, 0.0f, kSTEP_MAX_NDC);
 
-    float tx = previousOffset.x + hx * (step * invZ);
-    float ty = previousOffset.y + hy * (step * invZ);
+    // Kandidat berechnen
+    float candX = previousOffset.x + hx * (step * invZ);
+    float candY = previousOffset.y + hy * (step * invZ);
 
-    // Schutz: Ziel nicht ins Innere verlegen
-    if (insideCardioidOrBulb(tx, ty)) {
-        hx = -hx; hy = -hy;
-        tx = previousOffset.x + hx * (step * invZ);
-        ty = previousOffset.y + hy * (step * invZ);
+    // Wenn Kandidat in das Innere fällt → Richtung weg vom Inneren drehen + abbremsen
+    if (insideCardioidOrBulb(candX, candY)) {
+        float ax, ay; antiVoidDriftNDC(candX, candY, ax, ay);
+        rotateTowardsLimited(hx, hy, ax, ay, kTURN_MAX_RAD * 0.85f);
+        step *= kVOID_BRAKE;
+        candX = previousOffset.x + hx * (step * invZ);
+        candY = previousOffset.y + hy * (step * invZ);
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOM][GUARD] avoid-inner step*=%.2f", (double)kVOID_BRAKE);
+        }
+    }
+
+    // Schwacher Tile (unter Median beider Metriken) → etwas bremsen statt stumpf vorzupreschen
+    if (entropy[bestI] < eMed && contrast[bestI] < cMed) {
+        step *= kWEAK_TARGET_BRAKE;
+        candX = previousOffset.x + hx * (step * invZ);
+        candY = previousOffset.y + hy * (step * invZ);
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOM][WEAK] brake step*=%.2f (e<med && c<med)", (double)kWEAK_TARGET_BRAKE);
+        }
     }
 
     out.shouldZoom = true;
-    out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + tx * kBLEND_A;
-    out.newOffsetY = previousOffset.y * (1.0f - kBLEND_A) + ty * kBLEND_A;
+    out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + candX * kBLEND_A;
+    out.newOffsetY = previousOffset.y * (1.0f - kBLEND_A) + candY * kBLEND_A;
 
     const float dx = out.newOffsetX - previousOffset.x;
     const float dy = out.newOffsetY - previousOffset.y;
@@ -267,13 +314,8 @@ void evaluateAndApply(::FrameContext& fctx,
         return;
     }
 
-    // WICHTIG: gleiches Raster wie Heatmap benutzen!
-    const int overlayPx = (Settings::Kolibri::gridScreenConstant)
-                          ? Settings::Kolibri::desiredTilePx
-                          : fctx.tileSize;
-
-    const int tilesX = (fctx.width  + overlayPx - 1) / overlayPx;
-    const int tilesY = (fctx.height + overlayPx - 1) / overlayPx;
+    const int tilesX = (fctx.width  + fctx.tileSize - 1) / fctx.tileSize;
+    const int tilesY = (fctx.height + fctx.tileSize - 1) / fctx.tileSize;
 
     const float2 prev = fctx.offset;
 
