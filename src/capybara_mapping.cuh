@@ -30,27 +30,28 @@ CAPY_HD double capy_fma(double a, double b, double c) noexcept {
 
 // -----------------------------------------------------------------------------
 // Schrittweiten aus pixelScale + zoom ableiten (einheitliche Semantik).
-// Symmetrischer Fallback; Y standardmäßig nach unten orientiert (GL-typisch).
-// Hinweis: Double-Genauigkeit ist entscheidend für tiefe Zooms.
+// Korrektur: keine max()-Isotropisierung hier; jede Achse nutzt ihre Skala.
+// Y negativ (GL-Raster nach unten). PixelScale ist **zoomfrei**.
 // -----------------------------------------------------------------------------
 CAPY_HD void capy_pixel_steps_from_zoom_scale(double sx, double sy,
                                               int width, double zoom,
                                               double& stepX, double& stepY) noexcept
 {
-    // Basis: größte Achse aus pixelScale (robust gegen 0).
-    double baseStep = fmax(fabs(sx), fabs(sy));
-    if (!(baseStep > 0.0)) {
-        // konservative Grundspanne (passt zum klassischen Mandelbrot-Sichtfeld)
-        constexpr double kBaseSpan = 8.0 / 3.0;
-        baseStep = kBaseSpan / (width > 0 ? (double)width : 1.0);
+    const double invZoom = (zoom != 0.0) ? (1.0 / zoom) : 1.0;
+
+    // Normalpfad: direkte Achsen-Skalen, Zoom erst hier anwenden.
+    if (!(sx == 0.0 && sy == 0.0)) {
+        stepX = sx * invZoom;
+        stepY = -sy * invZoom; // GL-downward default
+        (void)width;           // API beibehalten; keine Warnung unter /WX
+        return;
     }
 
-    // Kein künstliches Clamping auf >=1 – Zoom darf beliebig groß/klein sein.
-    const double step = baseStep / (zoom != 0.0 ? zoom : 1.0);
-
-    // Vorzeichen aus pixelScale übernehmen; Y negativ falls sy==0 (GL-Raster nach unten)
-    stepX = copysign(step, (sx == 0.0 ?  1.0 : sx));
-    stepY = copysign(step, (sy == 0.0 ? -1.0 : sy));
+    // Fallback: konservative Grundspanne über Breite ableiten.
+    constexpr double kBaseSpan = 8.0 / 3.0;
+    const double baseStep = kBaseSpan / (width > 0 ? (double)width : 1.0);
+    stepX = baseStep * invZoom;
+    stepY = -baseStep * invZoom; // GL-downward default
 }
 
 // -----------------------------------------------------------------------------

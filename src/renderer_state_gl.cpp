@@ -18,12 +18,12 @@
 
 namespace {
 // ----- PixelScale (GL-Seite nutzt Reset/Resize) --------------------------------
+// Korrektur: PixelScale ist **zoomfrei** und **isotrop** (x==y). Das Seitenverhältnis
+// entsteht automatisch über width/height in den Pixel-Offsets. Kein ar-Scaling hier.
 inline void recomputePixelScale(RendererState& rs) noexcept {
-    const double invZoom = (rs.zoom != 0.0) ? (1.0 / rs.zoom) : 1.0;
-    const double ar      = (rs.height > 0) ? (double)rs.width / (double)rs.height : 1.0;
-    const double sy      = (rs.height > 0) ? (2.0 / (double)rs.height) * invZoom : 2.0 * invZoom;
+    const double sy = (rs.height > 0) ? (2.0 / static_cast<double>(rs.height)) : 2.0;
     rs.pixelScale.y = sy;
-    rs.pixelScale.x = sy * ar;
+    rs.pixelScale.x = sy; // isotrop; kein ar, kein 1/zoom
 }
 
 inline void clearPboFences(RendererState& rs) noexcept {
