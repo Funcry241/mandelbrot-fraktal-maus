@@ -30,12 +30,11 @@ CAPY_HD void capy_pixel_steps_from_zoom_scale(double sx, double sy,
     double baseStep = fmax(fabs(sx), fabs(sy));
     if (!(baseStep > 0.0)) {
         // konservative Grundspanne (passt zum klassischen Mandelbrot-Sichtfeld)
-        // NB: width==0 wird oben abgefangen (Division durch 1)
         constexpr double kBaseSpan = 8.0 / 3.0;
         baseStep = kBaseSpan / (width > 0 ? (double)width : 1.0);
     }
 
-    const double invZ = 1.0 / fmax(1.0, zoom);
+    const double invZ = 1.0 / fmax(1.0, zoom);   // robust gegen zoom<=1
     const double step = baseStep * invZ;
 
     // Vorzeichen aus pixelScale übernehmen; Y negativ falls sy==0 (GL-Raster nach unten)
@@ -46,13 +45,13 @@ CAPY_HD void capy_pixel_steps_from_zoom_scale(double sx, double sy,
 // -----------------------------------------------------------------------------
 // GID & Pixel-Offsets (Bildmitte als Ursprung; Pixelmitte = +0.5)
 // -----------------------------------------------------------------------------
-CAPY_HD uint32_t capy_gid(int x, int y, int w)
+CAPY_HD uint32_t capy_gid(int x, int y, int w) noexcept
 {
     return (uint32_t)(y * w + x);
 }
 
 CAPY_HD void capy_pixel_offsets(int px, int py, int w, int h,
-                                double& offx, double& offy)
+                                double& offx, double& offy) noexcept
 {
     // Center-of-pixel: (+0.5) und dann Bildmitte (w/2,h/2) abziehen
     offx = (double(px) + 0.5) - 0.5 * double(w);
@@ -64,7 +63,7 @@ CAPY_HD void capy_pixel_offsets(int px, int py, int w, int h,
 // -----------------------------------------------------------------------------
 CAPY_HD double2 capy_map_pixel_double(double cx, double cy,
                                       double stepX, double stepY,
-                                      int px, int py, int w, int h)
+                                      int px, int py, int w, int h) noexcept
 {
     double offx, offy;
     capy_pixel_offsets(px, py, w, h, offx, offy);
@@ -80,7 +79,7 @@ CAPY_HD double2 capy_map_pixel_double(double cx, double cy,
 // -----------------------------------------------------------------------------
 CAPY_HD CapyHiLo2 capy_map_pixel_hilo(double cx, double cy,
                                       double stepX, double stepY,
-                                      int px, int py, int w, int h)
+                                      int px, int py, int w, int h) noexcept
 {
     double offx, offy;
     capy_pixel_offsets(px, py, w, h, offx, offy);
@@ -93,7 +92,7 @@ CAPY_HD CapyHiLo2 capy_map_pixel_hilo(double cx, double cy,
 CAPY_HD void capy_map_pixel(double cx, double cy,
                             double stepX, double stepY,
                             int px, int py, int w, int h,
-                            double2& c_double, CapyHiLo2& c_hilo)
+                            double2& c_double, CapyHiLo2& c_hilo) noexcept
 {
     c_double = capy_map_pixel_double(cx, cy, stepX, stepY, px, py, w, h);
     c_hilo   = capy_map_pixel_hilo  (cx, cy, stepX, stepY, px, py, w, h);
