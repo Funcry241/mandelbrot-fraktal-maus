@@ -80,6 +80,7 @@ namespace {
         tickFrameTime();
         g_ctx.shouldZoom = false;
         g_ctx.newOffset  = g_ctx.offset;
+        g_ctx.newOffsetD = g_ctx.offsetD;  // NEU: Double-Spiegel mitführen
         ++g_frame;
     }
 
@@ -121,6 +122,7 @@ namespace {
                            fctx.tileSize, fctx.maxIterations, (double)fctx.zoom);
         }
 
+        // Hinweis: renderCudaFrame liest fctx + newOffset (float-Spiegel).
         CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
 
         if constexpr (Settings::debugLogging) {
@@ -235,12 +237,13 @@ void execute(RendererState& state) {
 
     beginFrameLocal();
 
+    // ---- Autoritative Double-Werte aus dem RendererState spiegeln ----
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
     g_ctx.maxIterations = state.maxIterations;
-    g_ctx.zoom          = static_cast<float>(state.zoom);
-    g_ctx.offset        = make_float2(static_cast<float>(state.center.x),
-                                      static_cast<float>(state.center.y));
+    g_ctx.zoomD         = state.zoom;                       // double Quelle der Wahrheit
+    g_ctx.offsetD       = { state.center.x, state.center.y };
+    g_ctx.syncFloatFromDouble();                            // float-Spiegel aktualisieren
 
     g_ctx.tileSize = chooseComputeTileSize(g_ctx.zoom);
 
@@ -279,15 +282,18 @@ void execute(RendererState& state) {
     {
         g_ctx.shouldZoom = true;
         g_ctx.newOffset  = g_ctx.offset;
+        g_ctx.newOffsetD = g_ctx.offsetD; // Double-Spiegel ebenfalls setzen
     }
 
     if (g_ctx.shouldZoom) {
-        state.center.x = g_ctx.newOffset.x;
-        state.center.y = g_ctx.newOffset.y;
+        // ---- Anwenden in double, dann float-Spiegel aktualisieren ----
+        state.center.x = g_ctx.newOffsetD.x;
+        state.center.y = g_ctx.newOffsetD.y;
         state.zoom     *= (double)kZOOM_GAIN;
 
-        g_ctx.offset   = g_ctx.newOffset;
-        g_ctx.zoom     = static_cast<float>(state.zoom);
+        g_ctx.offsetD  = g_ctx.newOffsetD;
+        g_ctx.zoomD    = state.zoom;
+        g_ctx.syncFloatFromDouble();
 
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[ZOOM][APPLY] center=(%.9f,%.9f) zoom=%.6f gain=%.6f",

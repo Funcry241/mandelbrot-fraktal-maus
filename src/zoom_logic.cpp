@@ -250,64 +250,95 @@ void evaluateAndApply(::FrameContext& fctx,
     if (CudaInterop::getPauseZoom()) {
         fctx.shouldZoom = false;
         fctx.newOffset  = fctx.offset;
+        fctx.newOffsetD = { (double)fctx.offset.x, (double)fctx.offset.y };
         return;
     }
 
-    const int tilesX = (fctx.width  + fctx.tileSize - 1) / fctx.tileSize;
-    const int tilesY = (fctx.height + fctx.tileSize - 1) / fctx.tileSize;
+    // --- Einheitliches Raster für Zielwahl: Heatmap-Overlay statt Compute-Grid ---
+    const int overlayTilePx = std::max(1,
+        (Settings::Kolibri::gridScreenConstant ? Settings::Kolibri::desiredTilePx : fctx.tileSize));
+    const int tilesX = (fctx.width  + overlayTilePx - 1) / overlayTilePx;
+    const int tilesY = (fctx.height + overlayTilePx - 1) / overlayTilePx;
 
-    const float2 prev = fctx.offset;
+    const float2 prevF = fctx.offset;
 
+    // Nur für Zielindex/Richtungs-Update verwenden; Schrittgröße ignorieren wir bewusst.
     ZoomResult zr = evaluateZoomTarget(
         state.h_entropy, state.h_contrast,
         tilesX, tilesY,
         fctx.width, fctx.height,
-        fctx.offset, fctx.zoom,
-        prev,
+        fctx.offset, fctx.zoom,   // float: nur für Logging/Heuristik
+        prevF,
         bus
     );
 
-    // --- NEU: Pan-Schritt in Weltkoordinaten neu skalieren (NDC → Welt) ---
     if (zr.shouldZoom) {
-        // Richtung aus vorgeschlagenem Schritt gewinnen
-        float dirx = zr.newOffsetX - prev.x;
-        float diry = zr.newOffsetY - prev.y;
+        // Richtung aus dem persistenten Gedächtnis (im selben TU sichtbar)
+        float dirx = g_prevDirX;
+        float diry = g_prevDirY;
         if (!normalize2D(dirx, diry)) { dirx = 1.0f; diry = 0.0f; }
 
-        // Aktuelle Schrittweiten (Pixel → Welt) ermitteln
+        // --- Double-präzises Mapping der Schrittweite (NDC → Welt) ---
+        // Aktuelle Schrittweiten (Pixel → Welt, double-präzise)
         double stepX = 0.0, stepY = 0.0;
         capy_pixel_steps_from_zoom_scale(
             (double)state.pixelScale.x,
             (double)state.pixelScale.y,
             fctx.width,
-            (double)fctx.zoom,
+            // Autoritativ in double, falls vorhanden; sonst state.zoom als double.
+            fctx.zoomD > 0.0 ? fctx.zoomD : (double)state.zoom,
             stepX, stepY
         );
 
-        // Welt-Halbdimensionen des sichtbaren Fensters
-        const float halfW = 0.5f * (float)fctx.width  * (float)std::fabs(stepX);
-        const float halfH = 0.5f * (float)fctx.height * (float)std::fabs(stepY);
+        // Welt-Halbdimensionen des sichtbaren Fensters (double)
+        const double halfW = 0.5 * (double)fctx.width  * std::fabs(stepX);
+        const double halfH = 0.5 * (double)fctx.height * std::fabs(stepY);
 
-        // NDC-Anteil anwenden (anisotrop)
-        const float stepNdc = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
-        const float tx = prev.x + dirx * (stepNdc * halfW);
-        const float ty = prev.y + diry * (stepNdc * halfH);
+        // NDC-Schrittfaktor (anisotrop anwenden)
+        const double stepNdc = (double)clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
 
-        // sanftes Blending
+        // Rohbewegung in Weltkoordinaten (double)
+        double moveX = (double)dirx * (stepNdc * halfW);
+        double moveY = (double)diry * (stepNdc * halfH);
+
+        // --- Guard: zu kleine Bewegung? -> mindestens 1 Pixel-Schritt snappen ---
+        const double minPixStep = std::min(std::fabs(stepX), std::fabs(stepY)); // 1 px
+        const double movLen = std::hypot(moveX, moveY);
+        if (movLen < 0.5 * minPixStep && movLen > 0.0) {
+            const double s = (0.5 * minPixStep) / movLen;
+            moveX *= s; moveY *= s;
+        } else if (!(movLen > 0.0)) {
+            // völliger Degenerationsfall
+            moveX = minPixStep * (dirx >= 0.0f ? 1.0 : -1.0);
+            moveY = 0.0;
+        }
+
+        // Basispunkt (double) nehmen – bevorzugt State (double-Quelle der Wahrheit)
+        const double baseX = state.center.x;
+        const double baseY = state.center.y;
+
+        // Ziel (double) + sanftes Blending
+        const double txD = baseX * (1.0 - (double)kBLEND_A) + (baseX + moveX) * (double)kBLEND_A;
+        const double tyD = baseY * (1.0 - (double)kBLEND_A) + (baseY + moveY) * (double)kBLEND_A;
+
         fctx.shouldZoom = true;
-        fctx.newOffset  = make_float2(
-            prev.x * (1.0f - kBLEND_A) + tx * kBLEND_A,
-            prev.y * (1.0f - kBLEND_A) + ty * kBLEND_A
-        );
+        fctx.newOffsetD = { txD, tyD };                    // autoritativ
+        fctx.newOffset  = make_float2((float)txD, (float)tyD); // Spiegel für Altpfade
+
+        if constexpr (Settings::debugLogging) {
+            const double ulpX = std::nextafter(baseX, baseX + 1.0) - baseX;
+            const double ulpY = std::nextafter(baseY, baseY + 1.0) - baseY;
+            LUCHS_LOG_HOST("[ZOOM][EVAL] tiles=%dx%d move=(%.3e,%.3e) minPx=%.3e ulp=(%.3e,%.3e) new=(%.9f,%.9f)",
+                           tilesX, tilesY, moveX, moveY, minPixStep, ulpX, ulpY, txD, tyD);
+        }
     } else {
         fctx.shouldZoom = false;
-        fctx.newOffset  = prev;
-    }
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ZOOM][EVAL] tiles=%dx%d should=%d new=(%.9f,%.9f)",
-                       tilesX, tilesY, zr.shouldZoom ? 1 : 0,
-                       (double)fctx.newOffset.x, (double)fctx.newOffset.y);
+        fctx.newOffset  = prevF;
+        fctx.newOffsetD = { (double)prevF.x, (double)prevF.y };
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[ZOOM][EVAL] tiles=%dx%d should=0 new=(%.9f,%.9f)",
+                           tilesX, tilesY, (double)fctx.newOffset.x, (double)fctx.newOffset.y);
+        }
     }
 }
 
