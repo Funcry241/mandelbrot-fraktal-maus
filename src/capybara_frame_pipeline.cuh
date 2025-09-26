@@ -44,8 +44,8 @@ static inline void capy_render(
     if (doneEvent != nullptr) {
         const cudaError_t er = cudaEventRecord(doneEvent, renderStream);
         if (er != cudaSuccess) {
-            LUCHS_LOG_HOST("[CAPY-FRAME][ERR] cudaEventRecord=%d %s",
-                           (int)er, cudaGetErrorString(er));
+            // Deterministic numeric code only (no cudaGetErrorString).
+            LUCHS_LOG_HOST("[CAPY-FRAME][ERR] cudaEventRecord rc=%d", (int)er);
         }
     }
 }
