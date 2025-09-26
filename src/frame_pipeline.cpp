@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstdio>     // snprintf for dynamic ring logging
 #include <cmath>      // sqrt
+#include <cuda_runtime.h>  // Maus: CUDA event timing for mandelbrot + metrics
 
 #include "renderer_resources.hpp"
 #include "renderer_pipeline.hpp"
@@ -122,8 +123,27 @@ namespace {
                            fctx.tileSize, fctx.maxIterations, (double)fctx.zoom);
         }
 
-        // NEU: Vereinheitlichter Render-Call (Convenience-Overload, Float-Spiegel)
-        CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
+        // NEU: CUDA-Event-Timing für den Renderpfad (Mandelbrot-Kernelzeit auf renderStream)
+        if constexpr (Settings::performanceLogging) {
+            cudaEvent_t evStart = nullptr, evStop = nullptr;
+            (void)cudaEventCreateWithFlags(&evStart, cudaEventDefault);
+            (void)cudaEventCreateWithFlags(&evStop,  cudaEventDefault);
+            (void)cudaEventRecord(evStart, state.renderStream);
+
+            // Vereinheitlichter Render-Call (Convenience-Overload, Float-Spiegel)
+            CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
+
+            (void)cudaEventRecord(evStop, state.renderStream);
+            (void)cudaEventSynchronize(evStop);
+            float ms = 0.0f;
+            (void)cudaEventElapsedTime(&ms, evStart, evStop);
+            g_mandMs = (double)ms;
+            (void)cudaEventDestroy(evStart);
+            (void)cudaEventDestroy(evStop);
+        } else {
+            // Ohne Performance-Logging: normaler Render-Call, g_mandMs bleibt unberührt
+            CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
+        }
 
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[PIPE] compute end");
@@ -166,8 +186,29 @@ namespace {
                                                   ? Settings::Kolibri::desiredTilePx
                                                   : fctx.tileSize);
 
-            // NEU: GPU-Metriken; bei Fehler auf Fallback
-            if (!CudaInterop::buildHeatmapMetrics(state, fctx.width, fctx.height, overlayTilePx, state.renderStream)) {
+            // NEU: GPU-Metriken mit CUDA-Event-Timing umschließen; bei Fehler auf Fallback
+            bool ok = false;
+            if constexpr (Settings::performanceLogging) {
+                cudaEvent_t evM0 = nullptr, evM1 = nullptr;
+                (void)cudaEventCreateWithFlags(&evM0, cudaEventDefault);
+                (void)cudaEventCreateWithFlags(&evM1, cudaEventDefault);
+                (void)cudaEventRecord(evM0, state.renderStream);
+
+                ok = CudaInterop::buildHeatmapMetrics(state, fctx.width, fctx.height, overlayTilePx, state.renderStream);
+
+                (void)cudaEventRecord(evM1, state.renderStream);
+                (void)cudaEventSynchronize(evM1);
+                float msMetrics = 0.0f;
+                (void)cudaEventElapsedTime(&msMetrics, evM0, evM1);
+                g_entMs = (double)msMetrics;  // Maus: ent+con zusammengefasst; g_conMs bleibt 0.0
+                g_conMs = 0.0;
+                (void)cudaEventDestroy(evM0);
+                (void)cudaEventDestroy(evM1);
+            } else {
+                ok = CudaInterop::buildHeatmapMetrics(state, fctx.width, fctx.height, overlayTilePx, state.renderStream);
+            }
+
+            if (!ok) {
                 ensureHeatmapHostData(state, fctx.width, fctx.height, overlayTilePx);
             }
 
