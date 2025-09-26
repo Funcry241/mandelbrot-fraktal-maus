@@ -32,10 +32,15 @@ out float vValue; uniform vec2 uScale,uOffset;
 void main(){ gl_Position=vec4(aPos*uScale+uOffset,0,1); vValue=aValue; }
 )GLSL";
 
+// Otter: leicht entsättigtes Gold + sanfte Gamma-Dämpfung für weniger „Badge“-Look.
 static const char* kFS = R"GLSL(#version 430 core
 in float vValue; out vec4 FragColor;
-vec3 map(float v){ float g=smoothstep(0,1,clamp(v,0,1));
-  return mix(vec3(0.08,0.08,0.10), vec3(1.0,0.82,0.32), g); }
+vec3 map(float v){
+  float g = clamp(v,0.0,1.0);
+  g = smoothstep(0.0,1.0,g);
+  g = pow(g, 1.08); // Maus: dezent dunkler im High-End
+  return mix(vec3(0.08,0.08,0.10), vec3(0.98,0.78,0.30), g);
+}
 void main(){ FragColor=vec4(map(vValue),1.0); } // Tiles opaque; panel provides alpha
 )GLSL";
 
@@ -164,12 +169,16 @@ void drawOverlay(const std::vector<float>& entropy,
     }
 
     // Pfau layout (Top-Right): same top margin as Warzenschwein
-    constexpr int contentHPx = 100;
-    const float aspect = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
+    // Schneefuchs: optisch leichter → etwas kleineres Content-Target.
+    constexpr int contentHPx = 92; // vorher 100
+    const float aspect  = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
     const int   contentWPx = std::max(1, int(std::round(contentHPx*aspect)));
 
-    // Heatmap-specific: narrower inner padding
-    const int padPx = HeatmapOverlay::snapToPixel(Pfau::UI_PADDING * 0.5f);
+    // Relatives UI-Scaling für Radius/Border/Alpha abhängig von Panelgröße.
+    const float sPanel = std::clamp(std::min(contentWPx,contentHPx)/160.0f, 0.60f, 1.0f);
+
+    // Mini-Panel: etwas mehr Innenluft für Gleichklang mit HUD.
+    const int padPx = HeatmapOverlay::snapToPixel(Pfau::UI_PADDING * 0.75f);
 
     const int panelW = contentWPx + padPx*2;
     const int panelH = contentHPx + padPx*2;
@@ -210,13 +219,17 @@ void drawOverlay(const std::vector<float>& entropy,
             (float)panelX1,(float)panelY1, base[0],base[1],base[2],
             (float)panelX0,(float)panelY1, base[0],base[1],base[2],
         };
+
+        const float panelAlpha = Pfau::PANEL_ALPHA * 0.86f;   // ≈0.72 bei 0.84 Basis
+        const float radiusPx   = Pfau::UI_RADIUS * (0.85f * sPanel);
+        const float borderPx   = Pfau::UI_BORDER * (0.35f * sPanel);
+
         glUseProgram(sPanelProg);
         if(uViewportPx>=0) glUniform2f(uViewportPx,(float)width,(float)height);
         if(uPanelRectPx>=0) glUniform4f(uPanelRectPx,(float)panelX0,(float)panelY0,(float)panelX1,(float)panelY1);
-        if(uRadiusPx>=0)    glUniform1f(uRadiusPx,Pfau::UI_RADIUS);
-        if(uAlpha>=0)       glUniform1f(uAlpha,Pfau::PANEL_ALPHA);
-        // thinnest rim: only 35% of global width
-        if(uBorderPx>=0)    glUniform1f(uBorderPx,Pfau::UI_BORDER * 0.35f);
+        if(uRadiusPx>=0)    glUniform1f(uRadiusPx,radiusPx);
+        if(uAlpha>=0)       glUniform1f(uAlpha,panelAlpha);
+        if(uBorderPx>=0)    glUniform1f(uBorderPx,borderPx);
 
         glBindVertexArray(sPanelVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sPanelVBO);
