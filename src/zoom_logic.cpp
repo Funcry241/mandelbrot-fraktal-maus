@@ -1,6 +1,6 @@
 ///// Otter: Silk-Lite auto-pan/zoom controller with robust drift fallback (no heatmap required).
 ///// Schneefuchs: Keine API-Drifts; deterministische Schrittweite; MSVC-/WX-fest.
-///// Maus: Sanfter Drift in NDC, Limitierung der Kurvenrate; Edge-Pull & 2nd-best Fallback.
+///// Maus: Sanfter Drift in NDC, Limitierung der Kurvenrate; ASCII-only.
 ///// Datei: src/zoom_logic.cpp
 
 #include "zoom_logic.hpp"
@@ -26,11 +26,6 @@ constexpr float kBLEND_A       = 0.22f;  // Low-Pass fürs Offset
 
 constexpr float kALPHA_E = 1.0f; // Gewicht Entropy
 constexpr float kBETA_C  = 0.5f; // Gewicht Contrast
-
-// Edge-Pull: ab ~0.78 NDC zieht eine weiche Feder zur Mitte
-constexpr float kEDGE_PULL_START = 0.78f;
-constexpr float kEDGE_PULL_FULL  = 0.98f;
-constexpr float kEDGE_PULL_GAIN  = 0.40f;
 
 inline float clampf(float x, float a, float b) { return (x < a) ? a : (x > b ? b : x); }
 
@@ -63,9 +58,12 @@ inline bool insideCardioidOrBulb(double x, double y) noexcept {
     return (dx*dx + y*y) < 0.0625;
 }
 
-// simpler Auswärts-Drift aus Bulbs
-inline void antiVoidDriftNDC(float /*cx*/, float /*cy*/, float& outx, float& outy) {
-    outx = 1.0f; outy = 0.0f; normalize2D(outx, outy);
+// Drift aus der Cardioid-Mitte (-0.25, 0) radial nach außen
+inline void antiVoidDriftNDC(float cx, float cy, float& outx, float& outy) {
+    float vx = cx + 0.25f;
+    float vy = cy;
+    if (!normalize2D(vx, vy)) { vx = 1.0f; vy = 0.0f; }
+    outx = vx; outy = vy;
 }
 
 // Median/MAD (in-place)
@@ -167,8 +165,14 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
         const float invZ = 1.0f / std::max(1e-6f, zoom);
         const float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
 
-        const float tx = previousOffset.x + dirx * (step * invZ);
-        const float ty = previousOffset.y + diry * (step * invZ);
+        float tx = previousOffset.x + dirx * (step * invZ);
+        float ty = previousOffset.y + diry * (step * invZ);
+
+        // Schutz: nicht ins Innere driften
+        if (insideCardioidOrBulb(tx, ty)) {
+            tx = previousOffset.x - dirx * (step * invZ);
+            ty = previousOffset.y - diry * (step * invZ);
+        }
 
         out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + tx * kBLEND_A;
         out.newOffsetY = previousOffset.y * (1.0f - kBLEND_A) + ty * kBLEND_A;
@@ -185,7 +189,7 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
         return out;
     }
 
-    // Robuste Bewertung via Median/MAD + Top-2 Kandidaten
+    // Robuste Bewertung via Median/MAD
     std::vector<float> e = entropy;
     std::vector<float> c = contrast;
 
@@ -194,15 +198,14 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     const float cMed = median_inplace(c);
     const float cMAD = mad_from_center_inplace(c, cMed);
 
-    int   bestI = -1, secondI = -1;
-    float bestS = -1e30f, secondS = -1e30f;
+    int   bestI = -1;
+    float bestS = -1e30f;
 
     for (int i = 0; i < total; ++i) {
         const float ze = (entropy[i]  - eMed) / eMAD;
         const float zc = (contrast[i] - cMed) / cMAD;
         const float s  = kALPHA_E * ze + kBETA_C * zc;
-        if (s > bestS) { secondS = bestS; secondI = bestI; bestS = s; bestI = i; }
-        else if (s > secondS) { secondS = s; secondI = i; }
+        if (s > bestS) { bestS = s; bestI = i; }
     }
 
     if (bestI < 0) {
@@ -210,28 +213,13 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
         return out;
     }
 
-    // Falls „bester“ Tile extrem dunkel/strukturlos ist → nimm #2
-    const bool bestIsVoid =
-        (entropy[bestI]  < std::max(0.02f, 0.25f * eMed)) &&
-        (contrast[bestI] < std::max(0.02f, 0.25f * cMed)) &&
-        (secondI >= 0);
-
-    const int pickI = bestIsVoid ? secondI : bestI;
-    out.bestIndex   = pickI;
+    out.bestIndex  = bestI;
     out.isNewTarget = true;
 
     float ndcTX = 0.0f, ndcTY = 0.0f;
-    tileIndexToNdcCenter(tilesX, tilesY, pickI, ndcTX, ndcTY);
+    tileIndexToNdcCenter(tilesX, tilesY, bestI, ndcTX, ndcTY);
 
-    // Edge-Pull: ziehe Richtung leicht zur Bildmitte, wenn Ziel nahe am Rand
-    const float edge = std::max(std::fabs(ndcTX), std::fabs(ndcTY));
-    float edgeBias = 0.0f;
-    if (edge > kEDGE_PULL_START) {
-        const float t = clampf((edge - kEDGE_PULL_START) / (kEDGE_PULL_FULL - kEDGE_PULL_START), 0.0f, 1.0f);
-        edgeBias = kEDGE_PULL_GAIN * t; // 0..kEDGE_PULL_GAIN
-    }
-    float tdx = ndcTX - edgeBias * ndcTX; // Anziehung zur Mitte
-    float tdy = ndcTY - edgeBias * ndcTY;
+    float tdx = ndcTX, tdy = ndcTY;
 
     float hx = g_dirInit ? g_prevDirX : 1.0f;
     float hy = g_dirInit ? g_prevDirY : 0.0f;
@@ -242,8 +230,15 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     const float invZ = 1.0f / std::max(1e-6f, zoom);
     const float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
 
-    const float tx = previousOffset.x + hx * (step * invZ);
-    const float ty = previousOffset.y + hy * (step * invZ);
+    float tx = previousOffset.x + hx * (step * invZ);
+    float ty = previousOffset.y + hy * (step * invZ);
+
+    // Schutz: Ziel nicht ins Innere verlegen
+    if (insideCardioidOrBulb(tx, ty)) {
+        hx = -hx; hy = -hy;
+        tx = previousOffset.x + hx * (step * invZ);
+        ty = previousOffset.y + hy * (step * invZ);
+    }
 
     out.shouldZoom = true;
     out.newOffsetX = previousOffset.x * (1.0f - kBLEND_A) + tx * kBLEND_A;
@@ -254,9 +249,8 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     out.distance = std::sqrt(dx*dx + dy*dy);
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ZOOM][TARGET] idx=%d%s bestS=%.3f edgeBias=%.2f ndc=(%.3f,%.3f) stepNdc=%.4f invZ=%.6f d=%.6f",
-                       pickI, bestIsVoid ? " (fallback#2)" : "", (double)(bestIsVoid ? secondS : bestS),
-                       (double)edgeBias, (double)ndcTX, (double)ndcTY, (double)step, (double)invZ, (double)out.distance);
+        LUCHS_LOG_HOST("[ZOOM][TARGET] idx=%d bestS=%.3f ndc=(%.3f,%.3f) stepNdc=%.4f invZ=%.6f d=%.6f",
+                       bestI, (double)bestS, (double)ndcTX, (double)ndcTY, (double)step, (double)invZ, (double)out.distance);
     }
     return out;
 }
@@ -273,8 +267,13 @@ void evaluateAndApply(::FrameContext& fctx,
         return;
     }
 
-    const int tilesX = (fctx.width  + fctx.tileSize - 1) / fctx.tileSize;
-    const int tilesY = (fctx.height + fctx.tileSize - 1) / fctx.tileSize;
+    // WICHTIG: gleiches Raster wie Heatmap benutzen!
+    const int overlayPx = (Settings::Kolibri::gridScreenConstant)
+                          ? Settings::Kolibri::desiredTilePx
+                          : fctx.tileSize;
+
+    const int tilesX = (fctx.width  + overlayPx - 1) / overlayPx;
+    const int tilesY = (fctx.height + overlayPx - 1) / overlayPx;
 
     const float2 prev = fctx.offset;
 
