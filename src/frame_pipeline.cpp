@@ -1,8 +1,3 @@
-///// Otter: Central frame pipeline; timing + PBO mapping logged in one fixed ASCII line.
-///// Schneefuchs: Headers/Sources in sync; no duplicate includes.
-///// Maus: Performance logging default ON; epoch-millis, stable field order.
-///// Datei: src/frame_pipeline.cpp
-
 #include "pch.hpp"
 #include <chrono>
 #include <algorithm>
