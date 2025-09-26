@@ -1,7 +1,6 @@
 ///// Otter: GPU heatmap metrics — compact kernel, hash-binned entropy, stddev contrast.
 ///// Schneefuchs: No GL; numeric rc logs; slab device buffers; deterministic behavior.
 ///// Maus: One kernel launch; immediate stream sync for same-frame use.
-///// Datei: src/heatmap_metrics.cu
 
 #include "pch.hpp"
 #include "heatmap_metrics.hpp"
@@ -17,13 +16,13 @@
 // -------------------------------- kernel --------------------------------
 __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
                                     int w, int h,
-                                    int tilePx, int tilesX,
+                                    int tilePx, int tilesX, int tilesY,
                                     float* __restrict__ entropy,
                                     float* __restrict__ contrast)
 {
     const int tx = blockIdx.x;
     const int ty = blockIdx.y;
-    if (tx >= tilesX || ty >= gridDim.y) return;
+    if (tx >= tilesX || ty >= tilesY) return;
 
     const int x0 = tx * tilePx;
     const int y0 = ty * tilePx;
@@ -41,21 +40,10 @@ __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
         return;
     }
 
-    // Std-Abweichung (Kontrast)
-    double sum = 0.0, sum2 = 0.0;
-    for (int y = y0; y < y1; ++y) {
-        const uint16_t* row = it + (size_t)y * (size_t)w + x0;
-        for (int x = 0; x < tileW; ++x) {
-            const double v = (double)row[x];
-            sum += v; sum2 += v * v;
-        }
-    }
-    const double mean = sum / (double)nPix;
-    double var = sum2 / (double)nPix - mean * mean;
-    if (var < 0.0) var = 0.0;
-    if (contrast) contrast[outIx] = (float)sqrt(var);
+    // Ein-Pass: Summe, Summe^2 und Hash-Histogramm
+    double sum = 0.0;
+    double sum2 = 0.0;
 
-    // Entropie (hash-binned, 32 Buckets)
     constexpr int B = 32;
     int hist[B];
     #pragma unroll
@@ -65,16 +53,27 @@ __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
         const uint16_t* row = it + (size_t)y * (size_t)w + x0;
         for (int x = 0; x < tileW; ++x) {
             const int v = (int)row[x];
+            sum  += (double)v;
+            sum2 += (double)v * (double)v;
+
             const int b = (v ^ (v >> 5)) & (B - 1);
             hist[b] += 1;
         }
     }
 
+    // Kontrast = Standardabweichung
+    const double invN = 1.0 / (double)nPix;
+    const double mean = sum * invN;
+    double var = sum2 * invN - mean * mean;
+    if (var < 0.0) var = 0.0;
+    if (contrast) contrast[outIx] = (float)sqrt(var);
+
+    // Entropie (hash-binned, 32 Buckets), log2
     float H = 0.0f;
-    const float invN = 1.0f / (float)nPix;
+    const float invNf  = 1.0f / (float)nPix;
     constexpr float invLn2 = 1.0f / 0.6931471805599453f;
     for (int i = 0; i < B; ++i) {
-        const float p = (float)hist[i] * invN;
+        const float p = (float)hist[i] * invNf;
         if (p > 0.0f) H -= p * (logf(p) * invLn2);
     }
     if (entropy) entropy[outIx] = H;
@@ -90,7 +89,7 @@ static bool ensureDeviceBuffers(size_t tiles) {
     s_tilesCap = 0;
 
     const size_t bytes = 2 * tiles * sizeof(float);
-    const auto rc = cudaMalloc((void**)&s_dMetrics, bytes);
+    const cudaError_t rc = cudaMalloc((void**)&s_dMetrics, bytes);
     if (rc != cudaSuccess) {
         LUCHS_LOG_HOST("[HM][ERR] cudaMalloc metrics tiles=%zu rc=%d", tiles, (int)rc);
         LuchsLogger::flushDeviceLogToHost(0);
@@ -108,6 +107,7 @@ bool buildGPU(RendererState& state,
               cudaStream_t stream) noexcept
 {
     if (width <= 0 || height <= 0 || tilePx <= 0) return false;
+    if (!state.d_iterations.get()) return false;
 
     const int px = std::max(1, tilePx);
     const int tilesX = (width  + px - 1) / px;
@@ -124,10 +124,10 @@ bool buildGPU(RendererState& state,
 
     kernel_tile_metrics<<<grid, block, 0, stream>>>(
         static_cast<const uint16_t*>(state.d_iterations.get()),
-        width, height, px, tilesX,
+        width, height, px, tilesX, tilesY,
         dEntropy, dContrast
     );
-    auto rc = cudaPeekAtLastError();
+    cudaError_t rc = cudaPeekAtLastError();
     if (rc != cudaSuccess) {
         LUCHS_LOG_HOST("[HM][ERR] kernel launch rc=%d", (int)rc);
         LuchsLogger::flushDeviceLogToHost(0);
