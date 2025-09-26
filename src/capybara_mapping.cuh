@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <vector_types.h>    // double2
+#include <cmath>             // std::fma on host
 
 #include "capybara_math.cuh" // CapyHiLo / CapyHiLo2 / capy_map_center_step(...)
 
@@ -18,15 +19,25 @@
   #define CAPY_D  inline
 #endif
 
+// Small wrapper to get FMA on host/device uniformly.
+CAPY_HD double capy_fma(double a, double b, double c) noexcept {
+#if defined(__CUDA_ARCH__)
+    return fma(a,b,c);
+#else
+    return std::fma(a,b,c);
+#endif
+}
+
 // -----------------------------------------------------------------------------
 // Schrittweiten aus pixelScale + zoom ableiten (einheitliche Semantik).
 // Symmetrischer Fallback; Y standardmäßig nach unten orientiert (GL-typisch).
+// Hinweis: Double-Genauigkeit ist entscheidend für tiefe Zooms.
 // -----------------------------------------------------------------------------
 CAPY_HD void capy_pixel_steps_from_zoom_scale(double sx, double sy,
                                               int width, double zoom,
                                               double& stepX, double& stepY) noexcept
 {
-    // Basis: größte Achse aus pixelScale
+    // Basis: größte Achse aus pixelScale (robust gegen 0).
     double baseStep = fmax(fabs(sx), fabs(sy));
     if (!(baseStep > 0.0)) {
         // konservative Grundspanne (passt zum klassischen Mandelbrot-Sichtfeld)
@@ -34,8 +45,8 @@ CAPY_HD void capy_pixel_steps_from_zoom_scale(double sx, double sy,
         baseStep = kBaseSpan / (width > 0 ? (double)width : 1.0);
     }
 
-    const double invZ = 1.0 / fmax(1.0, zoom);   // robust gegen zoom<=1
-    const double step = baseStep * invZ;
+    // Kein künstliches Clamping auf >=1 – Zoom darf beliebig groß/klein sein.
+    const double step = baseStep / (zoom != 0.0 ? zoom : 1.0);
 
     // Vorzeichen aus pixelScale übernehmen; Y negativ falls sy==0 (GL-Raster nach unten)
     stepX = copysign(step, (sx == 0.0 ?  1.0 : sx));
@@ -59,7 +70,8 @@ CAPY_HD void capy_pixel_offsets(int px, int py, int w, int h,
 }
 
 // -----------------------------------------------------------------------------
-// Klassische Abbildung (double) — stabil bei moderaten Zooms
+// Klassische Abbildung (double) — stabil bei moderaten Zooms.
+// Maus: FMA reduziert Rundungsfehler a*step + center, bleibt aber single-sum.
 // -----------------------------------------------------------------------------
 CAPY_HD double2 capy_map_pixel_double(double cx, double cy,
                                       double stepX, double stepY,
@@ -68,13 +80,13 @@ CAPY_HD double2 capy_map_pixel_double(double cx, double cy,
     double offx, offy;
     capy_pixel_offsets(px, py, w, h, offx, offy);
     double2 c;
-    c.x = cx + offx * stepX;
-    c.y = cy + offy * stepY;
+    c.x = capy_fma(offx, stepX, cx);
+    c.y = capy_fma(offy, stepY, cy);
     return c;
 }
 
 // -----------------------------------------------------------------------------
-// Capybara-Abbildung (Hi/Lo) — numerisch stabil bei tiefen Zooms
+// Capybara-Abbildung (Hi/Lo) — numerisch stabil bei tiefen Zooms.
 // nutzt capy_map_center_step(cx,cy, stepX,stepY, offx,offy)
 // -----------------------------------------------------------------------------
 CAPY_HD CapyHiLo2 capy_map_pixel_hilo(double cx, double cy,
