@@ -204,6 +204,7 @@ void renderCudaFrame(
     const double cx = (double)offsetX;
     const double cy = (double)offsetY;
 
+    // PixelScale ist jetzt zoomfrei & isotrop (x==y). Zoom wird hier in die Schrittweite eingebracht.
     const double sx = (double)state.pixelScale.x;
     const double sy = (double)state.pixelScale.y;
     double stepX = 0.0, stepY = 0.0;
@@ -365,6 +366,7 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx,
     const double cx = newOffsetX;
     const double cy = newOffsetY;
 
+    // PixelScale ist jetzt zoomfrei & isotrop (x==y). Zoom wird hier in die Schrittweite eingebracht.
     const double sx = (double)state.pixelScale.x;
     const double sy = (double)state.pixelScale.y;
     double stepX = 0.0, stepY = 0.0;
