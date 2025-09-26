@@ -46,7 +46,7 @@ static __device__ __forceinline__ float3 cosine_palette(float t, float3 a, float
 // ---------------------------- tunables (background) ---------------------------
 // Unterhalb dieses Bruchs (rel. Iteration) behandeln wir "Hintergrund".
 static __constant__ float kBG_SPLIT = 0.08f;   // 0..1 — Anteil der Iterationsspanne für „Low-Detail“
-static __constant__ float kBG_NOISE = 0.06f;   // max. Dither-Amplitude (nur im Hintergrundzweig)
+static __constant__ float kBG_NOISE = 0.03f;   // max. Dither-Amplitude (nur im Hintergrundzweig)
 static __constant__ float kBG_BLEND = 0.28f;   // Anteil der Cosine-Farbkomponente im Hintergrund
 
 // ------------------------------ palette mapping ------------------------------
