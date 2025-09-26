@@ -130,8 +130,10 @@ namespace {
             (void)cudaEventCreateWithFlags(&evStop,  cudaEventDefault);
             (void)cudaEventRecord(evStart, state.renderStream);
 
-            // Vereinheitlichter Render-Call (Convenience-Overload, Float-Spiegel)
-            CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
+            // *** WURZEL-FIX: Double-Offsets in den Render-Call geben (keine float-Quantisierung) ***
+            CudaInterop::renderCudaFrame(state, fctx,
+                                         g_ctx.newOffsetD.x,
+                                         g_ctx.newOffsetD.y);
 
             (void)cudaEventRecord(evStop, state.renderStream);
             (void)cudaEventSynchronize(evStop);
@@ -141,8 +143,10 @@ namespace {
             (void)cudaEventDestroy(evStart);
             (void)cudaEventDestroy(evStop);
         } else {
-            // Ohne Performance-Logging: normaler Render-Call, g_mandMs bleibt unberührt
-            CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
+            // Ohne Performance-Logging: normaler Render-Call
+            CudaInterop::renderCudaFrame(state, fctx,
+                                         g_ctx.newOffsetD.x,
+                                         g_ctx.newOffsetD.y);
         }
 
         if constexpr (Settings::debugLogging) {

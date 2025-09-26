@@ -28,6 +28,8 @@ void registerAllPBOs(const unsigned int* pboIds, int count);
 void unregisterAllPBOs() noexcept;
 
 // Render a frame (low-level variant for internal callers)
+// Hinweis: Dieser Pfad kann intern weiterhin float verwenden.
+// Für tiefe Zooms sollte der Convenience-Overload (double-Offsets) genutzt werden.
 void renderCudaFrame(
     Hermelin::CudaDeviceBuffer& d_iterations,
     int   width,
@@ -44,11 +46,12 @@ void renderCudaFrame(
 );
 
 // Convenience overload used by the main renderer loop
+// *** WURZEL-FIX: Offsets als double-Referenzen, damit keine Präzision verloren geht. ***
 void renderCudaFrame(
     RendererState& state,
     const FrameContext& fctx,
-    float& newOffsetX,
-    float& newOffsetY
+    double& newOffsetX,
+    double& newOffsetY
 );
 
 // GPU-Heatmap (Entropie/Kontrast) direkt in state.h_* schreiben

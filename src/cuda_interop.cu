@@ -298,6 +298,7 @@ bool buildHeatmapMetrics(RendererState& state,
     return HeatmapMetrics::buildGPU(state, width, height, tilePx, stream);
 }
 
+// ---- Convenience overload (float offsets) ------------------------------------
 void renderCudaFrame(RendererState& state, const FrameContext& fctx, float& newOffsetX, float& newOffsetY) {
     float offx = fctx.offset.x;
     float offy = fctx.offset.y;
@@ -308,6 +309,117 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx, float& newO
                     offx, offy, fctx.maxIterations,
                     newOffsetX, newOffsetY, shouldZoom,
                     state, state.renderStream);
+}
+
+// ---- Convenience overload (double offsets) — WURZEL-FIX ----------------------
+void renderCudaFrame(RendererState& state, const FrameContext& fctx,
+                     double& newOffsetX, double& newOffsetY)
+{
+    // Dieser Overload ist analog zum Low-Level-Pfad, führt aber die Offsets als double
+    // bis in den capy_render-Launch (keine float-Quantisierung bei tiefen Zooms).
+
+    if (!s_pboActive) {
+        LUCHS_LOG_HOST("[PBO][ERR] render(double) called without registered PBOs");
+        state.skipUploadThisFrame = true;
+        return;
+    }
+    const int width  = fctx.width;
+    const int height = fctx.height;
+    if (width <= 0 || height <= 0) {
+        LUCHS_LOG_HOST("[CUDA][ERR] invalid framebuffer dims %dx%d", width, height);
+        state.skipUploadThisFrame = true;
+        return;
+    }
+
+    (void)cudaGetLastError(); // clear sticky
+
+    // 1) map current PBO slot
+    const size_t needBytes = size_t(width) * size_t(height) * sizeof(uchar4);
+    const int ix = (state.pboIndex >= 0 && state.pboIndex < (int)s_pboResources.size()) ? state.pboIndex : 0;
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[PBO][MAP] try ring=%d need=%zu", ix, (size_t)needBytes);
+    }
+
+    MapGuard map(&s_pboResources[ix]);
+
+    if (!map.ptr) {
+        const auto rcMap = cudaGetLastError();
+        LUCHS_LOG_HOST("[PBO][MAP][ERR] null ptr ring=%d need=%zu rc=%d", ix, (size_t)needBytes, (int)rcMap);
+        LuchsLogger::flushDeviceLogToHost(0);
+        state.skipUploadThisFrame = true;
+        return;
+    }
+    if (map.bytes < needBytes) {
+        LUCHS_LOG_HOST("[PBO][MAP][ERR] size mismatch ring=%d got=%zu need=%zu", ix, (size_t)map.bytes, (size_t)needBytes);
+        LuchsLogger::flushDeviceLogToHost(0);
+        state.skipUploadThisFrame = true;
+        return;
+    }
+
+    if (state.pboIndex >= 0 && state.pboIndex < (int)s_pboResources.size()) {
+        state.ringUse[state.pboIndex]++;
+    }
+
+    // 2) capybara render (iterations) — *double* Offsets
+    const double cx = newOffsetX;
+    const double cy = newOffsetY;
+
+    const double sx = (double)state.pixelScale.x;
+    const double sy = (double)state.pixelScale.y;
+    double stepX = 0.0, stepY = 0.0;
+    capy_pixel_steps_from_zoom_scale(sx, sy, width, (double)fctx.zoom, stepX, stepY);
+
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[CAPY][ARGS][dbl] cx=%.12f cy=%.12f stepX=%.12e stepY=%.12e it=%d w=%d h=%d",
+                       cx, cy, stepX, stepY, fctx.maxIterations, width, height);
+    }
+
+    if constexpr (Settings::performanceLogging) {
+        ensureEventsOnce();
+        auto rc = cudaEventRecord(s_evStart, state.renderStream);
+        if (rc != cudaSuccess) throw_with_log("eventRecord(start) before capy_render[dbl]", rc);
+    }
+
+    capy_render(
+        static_cast<uint16_t*>(state.d_iterations.get()),
+        width, height, cx, cy, stepX, stepY,
+        fctx.maxIterations, state.renderStream, state.evEcDone
+    );
+
+    auto rc = cudaPeekAtLastError();
+    if (rc != cudaSuccess) throw_with_log("capy_render launch[dbl]", rc);
+
+    if constexpr (Settings::performanceLogging) {
+        rc = cudaEventRecord(s_evStop, state.renderStream);
+        if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after capy_render[dbl]", rc);
+        rc = cudaEventSynchronize(s_evStop);
+        if (rc != cudaSuccess) throw_with_log("capy_render sync[dbl]", rc);
+    }
+
+    // 3) colorize into mapped PBO
+    if constexpr (Settings::performanceLogging) {
+        rc = cudaEventRecord(s_evStart, state.renderStream);
+        if (rc != cudaSuccess) throw_with_log("eventRecord(start) before colorize[dbl]", rc);
+    }
+
+    colorize_iterations_to_pbo(
+        static_cast<const uint16_t*>(state.d_iterations.get()),
+        static_cast<uchar4*>(map.ptr),
+        width, height, fctx.maxIterations, state.renderStream
+    );
+
+    rc = cudaPeekAtLastError();
+    if (rc != cudaSuccess) throw_with_log("colorize launch[dbl]", rc);
+
+    if constexpr (Settings::performanceLogging) {
+        rc = cudaEventRecord(s_evStop, state.renderStream);
+        if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after colorize[dbl]", rc);
+        rc = cudaEventSynchronize(s_evStop);
+        if (rc != cudaSuccess) throw_with_log("colorize sync[dbl]", rc);
+    }
+
+    // Hinweis: newOffsetX/newOffsetY werden hier absichtlich nicht verändert.
 }
 
 void logCudaContext(const char* tag) noexcept { logCudaDeviceContext(tag); }
