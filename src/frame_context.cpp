@@ -9,25 +9,38 @@
 
 FrameContext::FrameContext()
 {
+    // Basis
     width         = 0;
     height        = 0;
     maxIterations = Settings::INITIAL_ITERATIONS;
     tileSize      = Settings::BASE_TILE_SIZE;
-    zoom          = Settings::initialZoom;
-    offset        = { 0.0f, 0.0f };
-    newOffset     = offset;
+
+    // Autoritative Double-Werte initialisieren …
+    zoomD         = static_cast<double>(Settings::initialZoom);
+    offsetD       = { 0.0, 0.0 };
+    newOffsetD    = offsetD;
     shouldZoom    = false;
+
+    // … und Float-Spiegel daraus ableiten.
+    syncFloatFromDouble();
 }
 
 void FrameContext::clear() noexcept {
     // Nur die Zoom-Entscheidung zurücksetzen; Pufferverwaltung ist im RendererState.
     shouldZoom = false;
-    newOffset  = offset;
+    newOffsetD = offsetD;     // Double ist Quelle der Wahrheit
+    syncFloatFromDouble();    // Float-Spiegel aktualisieren
 }
 
 void FrameContext::printDebug() const noexcept {
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[Frame] w=%d h=%d it=%d tile=%d zoom=%.6f off=(%.6f,%.6f)",
-            width, height, maxIterations, tileSize, zoom, offset.x, offset.y);
+    if constexpr (Settings::debugLogging) { // C4702: kompiliert nur rein, wenn aktiv
+        LUCHS_LOG_HOST(
+            "[Frame] w=%d h=%d it=%d tile=%d "
+            "zoomD=%.12e offD=(%.12e,%.12e) "
+            "zoom=%.6f off=(%.6f,%.6f)",
+            width, height, maxIterations, tileSize,
+            zoomD, offsetD.x, offsetD.y,
+            zoom,  offset.x,  offset.y
+        );
     }
 }

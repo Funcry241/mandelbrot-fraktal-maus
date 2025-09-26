@@ -11,7 +11,7 @@
 
 #include "renderer_resources.hpp"
 #include "renderer_pipeline.hpp"
-#include "cuda_interop.hpp"   // CudaInterop::renderCudaFrame(...), buildHeatmapMetrics(...)
+#include "cuda_interop.hpp"
 #include "frame_context.hpp"
 #include "frame_pipeline.hpp"
 #include "settings.hpp"
@@ -122,7 +122,7 @@ namespace {
                            fctx.tileSize, fctx.maxIterations, (double)fctx.zoom);
         }
 
-        // Hinweis: renderCudaFrame liest fctx + newOffset (float-Spiegel).
+        // NEU: Vereinheitlichter Render-Call (Convenience-Overload, Float-Spiegel)
         CudaInterop::renderCudaFrame(state, fctx, fctx.newOffset.x, fctx.newOffset.y);
 
         if constexpr (Settings::debugLogging) {

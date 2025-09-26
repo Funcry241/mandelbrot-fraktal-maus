@@ -47,15 +47,16 @@ struct FrameContext {
     // ----------------- Sync-Helfer (Header-only, noexcept) -----------------
     // Spiegelt die autoritativen Double-Felder in die Float-Spiegel (ohne Runden-Logik).
     inline void syncFloatFromDouble() noexcept {
-        zoom      = static_cast<float>(zoomD);
-        offset.x  = static_cast<float>(offsetD.x);
-        offset.y  = static_cast<float>(offsetD.y);
+        zoom        = static_cast<float>(zoomD);
+        offset.x    = static_cast<float>(offsetD.x);
+        offset.y    = static_cast<float>(offsetD.y);
         newOffset.x = static_cast<float>(newOffsetD.x);
         newOffset.y = static_cast<float>(newOffsetD.y);
     }
 
     // Spiegelt die Float-Spiegel (falls befüllt) zurück in die autoritativen Double-Felder.
     inline void syncDoubleFromFloat() noexcept {
+        zoom        = (zoom <= 0.0f) ? 1.0f : zoom; // kleine Robustheit
         zoomD       = static_cast<double>(zoom);
         offsetD.x   = static_cast<double>(offset.x);
         offsetD.y   = static_cast<double>(offset.y);
