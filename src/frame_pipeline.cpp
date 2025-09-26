@@ -21,6 +21,7 @@
 #include "hud_text.hpp"
 #include "zoom_logic.hpp"
 #include "common.hpp"
+#include "fps_meter.hpp"      // Maus: feeds FpsMeter once per frame
 
 #include <vector_types.h>
 #include <vector_functions.h>
@@ -297,6 +298,10 @@ void execute(RendererState& state) {
     const auto tFrame1 = Clock::now();
     g_totMs = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
     state.lastTimings.frameTotalMs = g_totMs;
+
+    // Maus: Füttere den FpsMeter einmal pro Frame,
+    //       damit der HUD-Klammerwert (max FPS, capped auf 60) != 0 ist.
+    FpsMeter::updateCoreMs(g_totMs);
 
     if (perfShouldLog(g_frame)) {
         const long long tEpoch = epochMillisNow();
