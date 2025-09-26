@@ -1,3 +1,9 @@
+///// Otter: HUD text builder – zoom, offset, FPS (with capped max), and tile stats.
+///// Schneefuchs: MAUS header; pch first; ASCII-only; safe snprintf append without NUL.
+///// Maus: Keep API stable; compute tiles robustly for tileSize<=0; small fixed buffer lines.
+///// Datei: src/hud_text.cpp
+
+#include "pch.hpp"
 #include "hud_text.hpp"
 #include <algorithm>
 #include <cstdio>
@@ -13,7 +19,8 @@ static inline void appendKV(std::string& buf, const char* label, const char* val
     char line[96];
     const int n = std::snprintf(line, sizeof(line), "%10s  %-18s\n", label, value);
     if (n > 0) {
-        const size_t toAppend = static_cast<size_t>(std::min(n, static_cast<int>(sizeof(line))));
+        // Append at most sizeof(line)-1 to avoid embedding the terminating NUL
+        const size_t toAppend = static_cast<size_t>(std::min(n, static_cast<int>(sizeof(line) - 1)));
         buf.append(line, toAppend);
     }
 }

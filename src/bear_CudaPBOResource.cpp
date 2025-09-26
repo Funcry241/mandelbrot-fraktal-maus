@@ -1,3 +1,8 @@
+///// Otter: Bear PBO resource with preserved GL binding, numeric CUDA codes, timed map/unmap, and safe move semantics.
+///// Schneefuchs: MAUS header compliant; ASCII logs; pch first; no printf/fprintf outside logger; stable public API.
+///// Maus: Register on construct, unregister on destroy; idempotent map; guard on size; restore GL binding deterministically.
+///// Datei: src/bear_CudaPBOResource.cpp
+
 #include "pch.hpp"
 #include "bear_CudaPBOResource.hpp"
 #include "luchs_log_host.hpp"
@@ -7,6 +12,7 @@
 #include <utility>           // std::exchange
 #include <GL/glew.h>
 #include <cuda_gl_interop.h> // CUDA-GL interop API
+#include <vector_types.h>    // uchar4
 
 namespace CudaInterop {
 

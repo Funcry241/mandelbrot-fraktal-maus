@@ -1,7 +1,8 @@
-///// Otter: Projekt 'Pfau' - identical UI params/alpha; anchor Top-Right; header cleaned.
-// ///// Schneefuchs: MAUS header (#62) strict; no GL includes in header; ASCII-only docs.
-// ///// Maus: Pfau final; keep function signatures unchanged so build stays stable until .cpp update.
-// ///// Datei: src/heatmap_overlay.hpp
+///// Otter: Projekt 'Pfau' – identical UI params/alpha; anchor Top-Right; header cleaned.
+///// Schneefuchs: MAUS header (#62) strict; no GL includes in header; ASCII-only docs.
+///// Maus: Pfau final; keep function signatures unchanged so build stays stable until .cpp update.
+///// Datei: src/heatmap_overlay.hpp
+
 #pragma once
 
 #include <vector>

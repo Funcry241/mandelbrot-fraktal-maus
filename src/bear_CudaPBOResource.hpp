@@ -1,3 +1,8 @@
+///// Otter: Public PBO/CUDA resource wrapper; clean API; no CUDA vector leakage in headers.
+///// Schneefuchs: MAUS header; stable ABI; forward-declare uchar4; include-lean; noexcept accessors.
+///// Maus: Map/unmap with logging in .cpp; guard overload; move-only; lifetime deterministic.
+///// Datei: src/bear_CudaPBOResource.hpp
+
 #pragma once
 #ifndef BEAR_CUDA_PBO_RESOURCE_HPP
 #define BEAR_CUDA_PBO_RESOURCE_HPP
@@ -5,6 +10,7 @@
 #include <cstddef>          // size_t
 #include <GL/glew.h>        // GLuint
 #include <cuda_gl_interop.h>
+
 // Avoid leaking CUDA vector types in public headers.
 struct uchar4; // forward-declare for pointer-only usage
 

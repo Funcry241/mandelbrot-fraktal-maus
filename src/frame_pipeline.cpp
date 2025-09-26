@@ -1,3 +1,8 @@
+///// Otter: Frame pipeline with double-authoritative zoom/offset, ring stats, GPU heatmap fallback, HUD & FPS feed.
+///// Schneefuchs: MAUS header compliant; ASCII logging only; no std::cout/printf; includes via pch first; stable API.
+///// Maus: Apply-zoom in double, float mirror via sync; tile alignment to 32; periodic performance & ring logs.
+///// Datei: src/frame_pipeline.cpp
+
 #include "pch.hpp"
 #include <chrono>
 #include <algorithm>
