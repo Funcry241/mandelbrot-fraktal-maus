@@ -1,5 +1,5 @@
 ///// Otter: Silk-Lite auto-pan/zoom controller (lokal, kantengetrieben, ohne Heatmap-Zwang).
-///// Schneefuchs: Sanfte Richtungswechsel via Lock+Cooldown+Hysterese + leichter EMA; keine API-Drifts.
+///// Schneefuchs: Sanfte Richtungswechsel via Lock+Cooldown+Hysterese + leichtem Blend; keine API-Drifts.
 ///@@@ Maus: Ziel = nächstgelegene valide Kachel; Richtung = lokaler Kontrastgradient; ASCII-only Logs.
 ///// Datei: src/zoom_logic.cpp
 
@@ -20,20 +20,34 @@
 namespace {
 
 // ----------------------------- Tunables ---------------------------------
-constexpr float kSEED_STEP_NDC = 0.015f; // Basis-Schritt (Anteil der Halbbreite/-höhe)
-constexpr float kSTEP_MAX_NDC  = 0.35f;  // Sicherheitskappe
-constexpr float kBLEND_A       = 0.22f;  // Low-Pass fürs Offset (sanft)
-constexpr int   kSEARCH_R      = 2;      // lokale Suche (±R Kacheln)
-constexpr float kTHR_MED_ADD_MAD = 0.5f; // thr = median + a * MAD
+// Basis-Schritt (Anteil der Halbbreite/-höhe) etwas kleiner, Kappe unverändert
+constexpr float kSEED_STEP_NDC = 0.012f;
+constexpr float kSTEP_MAX_NDC  = 0.35f;
+
+// Blend auf Weltzentrum vorsichtiger (weniger Nachschwingen)
+constexpr float kBLEND_A       = 0.16f;
+
+// lokale Suche (±R Kacheln)
+constexpr int   kSEARCH_R      = 2;
+
+// Kontrast-Schwelle straffer: thr = median + a * MAD
+constexpr float kTHR_MED_ADD_MAD = 0.90f;
 
 // Zielstabilisierung (klein & effektiv)
-constexpr int   kCOOLDOWN_FRAMES     = 12;    // min. Frames zwischen Retargets
-constexpr float kHYST_FACTOR         = 1.25f; // neuer Score muss 1.25× besser sein
-constexpr float kMUCH_BETTER_FACTOR  = 1.50f; // darf Cooldown brechen
-constexpr float kMIN_RETARGET_NDC    = 0.06f; // Mindestabstand Lock→Kandidat (NDC)
-constexpr float kLOCKBOX_IGNORE_NDC  = 0.10f; // nahe Kandidaten um Lock ignorieren
-constexpr float kMAX_TURN_DEG        = 35.0f; // max Richtungsänderung/Frame
-constexpr float kFLIP_HALVE_DEG      = 120.0f;// >120°: Schritt halbieren (sanfter Flip)
+constexpr int   kCOOLDOWN_FRAMES     = 24;    // straffer: min. Frames zwischen Retargets
+constexpr float kHYST_FACTOR         = 1.60f; // neuer Score muss 1.6× besser sein
+constexpr float kMUCH_BETTER_FACTOR  = 1.90f; // darf Cooldown sofort brechen
+constexpr float kMIN_RETARGET_NDC    = 0.10f; // Mindestabstand Lock→Kandidat (NDC)
+constexpr float kLOCKBOX_IGNORE_NDC  = 0.18f; // nahe Kandidaten um Lock ignorieren
+
+// Turn-Limiter deutlich straffer
+constexpr float kMAX_TURN_DEG        = 15.0f; // max Richtungsänderung/Frame
+constexpr float kFLIP_HALVE_DEG      = 90.0f; // starker Flip: Velocity stark dämpfen
+
+// Zusätzliche Bewegungskappe in Bildschirmpixeln (pro Frame)
+constexpr double kMAX_PX_MOVE_PER_FRAME = 6.0;
+
+// ------------------------------------------------------------------------
 
 inline float clampf(float x, float a, float b) { return (x < a) ? a : (x > b ? b : x); }
 inline bool normalize2D(float& x, float& y) {
@@ -192,7 +206,7 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& /*entropy*/,
     const bool farEnough  = distLock >= kMIN_RETARGET_NDC;
     const bool better     = bestS >= g_zlock.lockScore * kHYST_FACTOR;
     const bool muchBetter = bestS >= g_zlock.lockScore * kMUCH_BETTER_FACTOR;
-    const bool inLockBox  = distLock <= kLOCKBOX_IGNORE_NDC; // FIX: Lock-Box bezieht sich auf Abstand zum aktuellen Lock
+    const bool inLockBox  = distLock <= kLOCKBOX_IGNORE_NDC;
 
     if (g_zlock.init){
         if ((g_zlock.cooldown <= 0 && farEnough && better) || muchBetter){
@@ -202,7 +216,8 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& /*entropy*/,
                                    g_zlock.lockIndex,bestI,(double)distLock,(double)g_zlock.lockScore,(double)bestS);
                 }
                 g_zlock.lockIndex = bestI;
-                g_zlock.lockScore = bestS;
+                // Score nicht hart setzen → kleine Trägheit gegen Jitter
+                g_zlock.lockScore = 0.7f * g_zlock.lockScore + 0.3f * bestS;
                 g_zlock.lockNdcX  = bestNdcX;
                 g_zlock.lockNdcY  = bestNdcY;
                 g_zlock.cooldown  = kCOOLDOWN_FRAMES;
@@ -239,7 +254,7 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& /*entropy*/,
             lerpDirClamp(g_zlock.vx,g_zlock.vy,dirx,diry,t,ox,oy);
             dirx=ox; diry=oy;
         }
-        if (turn > kFLIP_HALVE_DEG){ g_zlock.vx *= 0.5f; g_zlock.vy *= 0.5f; } // sanfter Flip
+        if (turn > kFLIP_HALVE_DEG){ g_zlock.vx *= 0.3f; g_zlock.vy *= 0.3f; } // starker Flip → deutlich dämpfen
     }
     g_zlock.vx = 0.7f*g_zlock.vx + 0.3f*dirx;
     g_zlock.vy = 0.7f*g_zlock.vy + 0.3f*diry;
@@ -332,6 +347,14 @@ void evaluateAndApply(::FrameContext& fctx,
     const double movLen = std::hypot(moveX, moveY);
     if (movLen < 0.5 * minPixStep && movLen > 0.0) { const double s = (0.5 * minPixStep) / movLen; moveX *= s; moveY *= s; }
     else if (!(movLen > 0.0)) { moveX = minPixStep; moveY = 0.0; }
+
+    // *** Pixel-Move-Cap (zusätzlicher Beruhiger) ***
+    {
+        const double capX = kMAX_PX_MOVE_PER_FRAME * std::fabs(stepX);
+        const double capY = kMAX_PX_MOVE_PER_FRAME * std::fabs(stepY);
+        if (std::fabs(moveX) > capX) moveX = (moveX > 0 ? capX : -capX);
+        if (std::fabs(moveY) > capY) moveY = (moveY > 0 ? capY : -capY);
+    }
 
     // In-Set-Veto (Cardioid/Bulb) → ggf. Nachbar mit max edgeScore
     if (zr.bestIndex >= 0) {
