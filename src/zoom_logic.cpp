@@ -1,15 +1,15 @@
-///// Otter: Silk-Lite auto-pan/zoom controller with robust drift fallback (no heatmap required).
-///// Schneefuchs: Keine API-Drifts; deterministische Schrittweite; MSVC-/WX-fest.
-///// Maus: Sanfter Drift in NDC, Limitierung der Kurvenrate; ASCII-only.
 ///// Datei: src/zoom_logic.cpp
+// Otter: Silk-Lite auto-pan/zoom controller with robust drift fallback (no heatmap required).
+// Schneefuchs: Keine API-Drifts; deterministische Schrittweite; MSVC-/WX-fest.
+// Maus: Sanfter Drift in NDC, Limitierung der Kurvenrate; ASCII-only.
 
 #include "zoom_logic.hpp"
-#include "frame_context.hpp"    // definiert FrameContext (struct)
-#include "renderer_state.hpp"   // definiert RendererState (class)
-#include "cuda_interop.hpp"     // CudaInterop::getPauseZoom()
+#include "frame_context.hpp"
+#include "renderer_state.hpp"
+#include "cuda_interop.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
-#include "capybara_mapping.cuh" // capy_pixel_steps_from_zoom_scale(...)
+#include "capybara_mapping.cuh"
 
 #include <algorithm>
 #include <cmath>
@@ -26,11 +26,16 @@ constexpr float kTURN_MAX_RAD  = 0.18f;  // max. Richtungsänderung/Frame
 constexpr float kBLEND_A       = 0.22f;  // Low-Pass fürs Offset
 
 // Heatmap-Auswertung
-constexpr float kALPHA_E      = 1.0f;  // Gewicht Entropy
-constexpr float kBETA_C       = 0.5f;  // Gewicht Contrast
-constexpr float kGRAD_BOOST   = 0.60f; // Verstärkung lokaler Nachbarschaftsdifferenz
-constexpr float kEDGE_PENALTY = 0.25f; // Randkappung (NDC-Radius^2)
-constexpr float kACCEPT_MIN   = 0.35f; // Mindestscore – sonst Drift-Fallback
+constexpr float kALPHA_E      = 1.0f;   // Gewicht Entropy
+constexpr float kBETA_C       = 0.5f;   // Gewicht Contrast
+constexpr float kGRAD_BOOST   = 0.60f;  // Verstärkung lokaler Nachbarschaftsdifferenz
+constexpr float kEDGE_PENALTY = 0.25f;  // Randkappung (NDC-Radius^2)
+constexpr float kACCEPT_MIN   = 0.35f;  // Mindestscore – sonst Drift-Fallback
+
+// NEU: Robustheit bei „flacher Heatmap“
+constexpr float kMAD_EPS      = 1e-3f;  // darunter gilt MAD als „nahe 0“ (flach)
+constexpr float kZCLAMP       = 6.0f;   // Z-Score Clamp
+constexpr float kGRAD_CLAMP   = 6.0f;   // Clamp für lokalen Gradienten
 
 inline float clampf(float x, float a, float b) { return (x < a) ? a : (x > b ? b : x); }
 
@@ -165,7 +170,7 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
         dirx = g_prevDirX; diry = g_prevDirY;
 
         const float invZ = 1.0f / std::max(1e-6f, zoom);
-        const float step = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
+        const float step = clampf(kSEED_STEP_NDC * 0.6f, 0.0f, kSTEP_MAX_NDC); // etwas kleiner im Fallback
         out.newOffsetX = previousOffset.x + dirx * (step * invZ);
         out.newOffsetY = previousOffset.y + diry * (step * invZ);
 
@@ -192,6 +197,25 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     const float cMed = median_inplace(c);
     const float cMAD = mad_from_center_inplace(c, cMed);
 
+    // NEU: „flache Heatmap“ -> Drift-Fallback (wie kein Signal)
+    if (eMAD < kMAD_EPS && cMAD < kMAD_EPS) {
+        out.shouldZoom = Settings::ForceAlwaysZoom;
+        if (!out.shouldZoom) return out;
+        float dirx = g_dirInit ? g_prevDirX : 1.0f, diry = g_dirInit ? g_prevDirY : 0.0f;
+        if (insideCardioidOrBulb(currentOffset.x, currentOffset.y)) {
+            antiVoidDriftNDC(currentOffset.x, currentOffset.y, dirx, diry);
+        }
+        if (!normalize2D(dirx, diry)) { dirx = 1.0f; diry = 0.0f; }
+        rotateTowardsLimited(g_prevDirX, g_prevDirY, dirx, diry, kTURN_MAX_RAD);
+        const float invZ = 1.0f / std::max(1e-6f, zoom);
+        const float step = clampf(kSEED_STEP_NDC * 0.6f, 0.0f, kSTEP_MAX_NDC);
+        out.newOffsetX = previousOffset.x + g_prevDirX * (step * invZ);
+        out.newOffsetY = previousOffset.y + g_prevDirY * (step * invZ);
+        out.distance = std::hypot(out.newOffsetX - previousOffset.x, out.newOffsetY - previousOffset.y);
+        g_dirInit = true;
+        return out;
+    }
+
     int   bestI = -1;
     float bestS = -1e30f;
 
@@ -199,12 +223,12 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
         const int tx = (tilesX > 0) ? (i % tilesX) : 0;
         const int ty = (tilesX > 0) ? (i / tilesX) : 0;
 
-        // Z-Scores
-        const float ze = (entropy[i]  - eMed) / (eMAD > 0.0f ? eMAD : 1.0f);
-        const float zc = (contrast[i] - cMed) / (cMAD > 0.0f ? cMAD : 1.0f);
+        // Z-Scores (geklemmt)
+        const float ze = clampf((entropy[i]  - eMed) / (eMAD > kMAD_EPS ? eMAD : 1.0f), -kZCLAMP, kZCLAMP);
+        const float zc = clampf((contrast[i] - cMed) / (cMAD > kMAD_EPS ? cMAD : 1.0f), -kZCLAMP, kZCLAMP);
         float scoreZ   = kALPHA_E * ze + kBETA_C * zc;
 
-        // Lokale Nachbarschaft (normiert über MAD) → Gradientenbonus
+        // Lokale Nachbarschaft → Gradientenbonus (geklemmt)
         float sumDiff = 0.0f; int n = 0;
         const int nx4[4] = {tx-1, tx+1, tx,   tx};
         const int ny4[4] = {ty,   ty,   ty-1, ty+1};
@@ -212,12 +236,14 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
             const int nx = nx4[k], ny = ny4[k];
             if (nx < 0 || ny < 0 || nx >= tilesX || ny >= tilesY) continue;
             const int j = ny * tilesX + nx;
-            const float de = std::fabs(entropy[j]  - entropy[i])  / (eMAD > 0.0f ? eMAD : 1.0f);
-            const float dc = std::fabs(contrast[j] - contrast[i]) / (cMAD > 0.0f ? cMAD : 1.0f);
+            const float de = std::fabs(entropy[j]  - entropy[i])  / (eMAD > kMAD_EPS ? eMAD : 1.0f);
+            const float dc = std::fabs(contrast[j] - contrast[i]) / (cMAD > kMAD_EPS ? cMAD : 1.0f);
             sumDiff += 0.5f * (de + dc);
             ++n;
         }
-        const float localGrad = (n > 0) ? (sumDiff / (float)n) : 0.0f;
+        float localGrad = (n > 0) ? (sumDiff / (float)n) : 0.0f;
+        localGrad = clampf(localGrad, 0.0f, kGRAD_CLAMP);
+
         scoreZ *= (1.0f + kGRAD_BOOST * localGrad);
 
         // Randkappung in NDC
@@ -244,26 +270,30 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     float ndcTX = 0.0f, ndcTY = 0.0f;
     tileIndexToNdcCenter(tilesX, tilesY, bestI, ndcTX, ndcTY);
 
-    // Richtungsglättung gegen vorherige Drift
-    float hx = g_dirInit ? g_prevDirX : 1.0f;
-    float hy = g_dirInit ? g_prevDirY : 0.0f;
-    rotateTowardsLimited(hx, hy, ndcTX, ndcTY, kTURN_MAX_RAD);
-    g_prevDirX = hx; g_prevDirY = hy; g_dirInit = true;
+    // Richtungsglättung gegen vorherige Drift (ADAPTIV: mehr Drehung, wenn nötig)
+    float desiredX = ndcTX, desiredY = ndcTY; normalize2D(desiredX, desiredY);
+    float curX = g_dirInit ? g_prevDirX : 1.0f, curY = g_dirInit ? g_prevDirY : 0.0f;
+    const float dot = clampf(curX*desiredX + curY*desiredY, -1.0f, 1.0f);
+    const float ang = std::acos(dot);
+    const float maxTurn = clampf(kTURN_MAX_RAD * (1.0f + 2.5f * (ang / 3.14159265f)), kTURN_MAX_RAD, 0.6f);
+    rotateTowardsLimited(curX, curY, desiredX, desiredY, maxTurn);
+    g_prevDirX = curX; g_prevDirY = curY; g_dirInit = true;
 
     const float invZ = 1.0f / std::max(1e-6f, zoom);
     const float baseStep = clampf(kSEED_STEP_NDC, 0.0f, kSTEP_MAX_NDC);
 
     out.shouldZoom = true;
-    out.newOffsetX = previousOffset.x + hx * (baseStep * invZ);
-    out.newOffsetY = previousOffset.y + hy * (baseStep * invZ);
+    out.newOffsetX = previousOffset.x + curX * (baseStep * invZ);
+    out.newOffsetY = previousOffset.y + curY * (baseStep * invZ);
 
     const float dx = out.newOffsetX - previousOffset.x;
     const float dy = out.newOffsetY - previousOffset.y;
     out.distance = std::sqrt(dx*dx + dy*dy);
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ZOOM][TARGET] idx=%d score=%.3f ndc=(%.3f,%.3f) stepNdc=%.4f invZ=%.6f d=%.6f",
-                       bestI, (double)bestS, (double)ndcTX, (double)ndcTY, (double)baseStep, (double)invZ, (double)out.distance);
+        LUCHS_LOG_HOST("[ZOOM][TARGET] idx=%d score=%.3f ndc=(%.3f,%.3f) turn=%.3f stepNdc=%.4f invZ=%.6f d=%.6f",
+                       bestI, (double)bestS, (double)ndcTX, (double)ndcTY, (double)maxTurn,
+                       (double)baseStep, (double)invZ, (double)out.distance);
     }
     return out;
 }
@@ -293,7 +323,7 @@ void evaluateAndApply(::FrameContext& fctx,
         state.h_entropy, state.h_contrast,
         tilesX, tilesY,
         fctx.width, fctx.height,
-        fctx.offset, fctx.zoom,   // float: nur für Logging/Heuristik
+        fctx.offset, fctx.zoom,
         prevF,
         bus
     );
@@ -307,7 +337,13 @@ void evaluateAndApply(::FrameContext& fctx,
         float ndcTX = 0.0f, ndcTY = 0.0f;
         if (zr.bestIndex >= 0) {
             tileIndexToNdcCenter(tilesX, tilesY, zr.bestIndex, ndcTX, ndcTY);
-            rotateTowardsLimited(dirx, diry, ndcTX, ndcTY, kTURN_MAX_RAD);
+            // adaptives Neuausrichten, identisch zur Auswahl
+            float desiredX = ndcTX, desiredY = ndcTY; normalize2D(desiredX, desiredY);
+            const float dot = clampf(dirx*desiredX + diry*desiredY, -1.0f, 1.0f);
+            const float ang = std::acos(dot);
+            const float maxTurn = clampf(kTURN_MAX_RAD * (1.0f + 2.5f * (ang / 3.14159265f)),
+                                         kTURN_MAX_RAD, 0.6f);
+            rotateTowardsLimited(dirx, diry, desiredX, desiredY, maxTurn);
             g_prevDirX = dirx; g_prevDirY = diry; g_dirInit = true;
         }
 

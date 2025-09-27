@@ -1,6 +1,7 @@
-///// Otter: GPU heatmap metrics — compact kernel, hash-binned entropy, stddev contrast.
-///// Schneefuchs: No GL; numeric rc logs; slab device buffers; deterministic behavior.
-///// Maus: One kernel launch; immediate stream sync for same-frame use.
+///// Datei: src/heatmap_metrics.cu
+// Otter: GPU heatmap metrics — compact kernel, hash-binned entropy, stddev contrast.
+// Schneefuchs: No GL; numeric rc logs; slab device buffers; deterministic behavior.
+// Maus: One kernel launch; immediate stream sync for same-frame use.
 
 #include "pch.hpp"
 #include "heatmap_metrics.hpp"
