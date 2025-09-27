@@ -135,6 +135,7 @@ add_executable(mandelbrot_otterdream
   src/renderer_state_cuda.cpp
   src/renderer_state_gl.cpp    
   src/heatmap_metrics.cu
+  src/edge_detector.cu
 )
 
 # ---------------------- Compile-Options --------------------

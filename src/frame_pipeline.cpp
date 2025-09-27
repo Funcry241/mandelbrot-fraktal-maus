@@ -1,7 +1,7 @@
 ///// Otter: Frame pipeline with double-authoritative zoom/offset, ring stats, GPU heatmap fallback, HUD & FPS feed.
 ///// Schneefuchs: MAUS header compliant; ASCII logging only; no std::cout/printf; includes via pch first; stable API.
 ///// Maus: Apply-zoom in double, float mirror via sync; tile alignment to 32; periodic performance & ring logs.
-///// Datei: src/frame_pipeline.cpp
+// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
 #include <chrono>
@@ -10,6 +10,7 @@
 #include <cmath>      // sqrt
 #include <cuda_runtime.h>  // Maus: CUDA event timing for mandelbrot + metrics
 
+#include "capybara_mapping.cuh" // capy_pixel_steps_from_zoom_scale(...)
 #include "renderer_resources.hpp"
 #include "renderer_pipeline.hpp"
 #include "cuda_interop.hpp"
@@ -23,6 +24,7 @@
 #include "zoom_logic.hpp"
 #include "common.hpp"
 #include "fps_meter.hpp"      // Maus: feeds FpsMeter once per frame
+#include "edge_detector.cuh"  // Otter: simple screen-space edge target
 
 #include <vector_types.h>
 #include <vector_functions.h>
@@ -318,7 +320,52 @@ void execute(RendererState& state) {
 
     computeCudaFrame(g_ctx, state);
 
-    if (!CudaInterop::getPauseZoom()) {
+    // ---------- Edge-based Ziel (sichtbarer Bereich) vor der Zoom-Logik ----------
+    bool appliedEdgeTarget = false;
+    {
+        EdgeDetector::Result er{};
+        const int SX = 8, SY = 8;                     // 8×8 Proben im Sichtbereich
+        const int R  = std::max(1, g_ctx.tileSize / 4); // Quer-Radius für Gradienten
+
+        bool edgeOk = EdgeDetector::findStrongestEdge(
+            state, g_ctx.width, g_ctx.height, SX, SY, R, state.renderStream, er
+        );
+
+        if (edgeOk) {
+            // Pixel → Welt (double)
+            double stepX = 0.0, stepY = 0.0;
+            capy_pixel_steps_from_zoom_scale(
+                (double)state.pixelScale.x,
+                (double)state.pixelScale.y,
+                g_ctx.width,
+                (double)g_ctx.zoomD,
+                stepX, stepY
+            );
+
+            const double cx = (double)state.center.x;
+            const double cy = (double)state.center.y;
+
+            const double dx_px = ((double)er.bestPx - 0.5 * (double)g_ctx.width);
+            const double dy_px = ((double)er.bestPy - 0.5 * (double)g_ctx.height);
+            const double wx    = cx + dx_px * stepX;
+            const double wy    = cy + dy_px * stepY;
+
+            const double blend = 0.25; // sanft hinbewegen
+            g_ctx.shouldZoom  = true;
+            g_ctx.newOffsetD.x = cx * (1.0 - blend) + wx * blend;
+            g_ctx.newOffsetD.y = cy * (1.0 - blend) + wy * blend;
+            g_ctx.newOffset    = make_float2((float)g_ctx.newOffsetD.x, (float)g_ctx.newOffsetD.y);
+            appliedEdgeTarget  = true;
+
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[EDGE] best=(%d,%d) grad=%.3f step=(%.3e,%.3e) world=(%.9f,%.9f) blend=%.2f",
+                               er.bestPx, er.bestPy, er.grad, stepX, stepY, wx, wy, blend);
+            }
+        }
+    }
+
+    // Falls keine verlässliche Kante: normale Zoom-Logik
+    if (!appliedEdgeTarget && !CudaInterop::getPauseZoom()) {
         ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, kZOOM_GAIN);
     }
 
