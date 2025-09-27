@@ -1,5 +1,5 @@
 ///// Datei: src/heatmap_metrics.cu
-// Otter: GPU heatmap metrics — compact kernel, hash-binned entropy, stddev contrast.
+// Otter: GPU heatmap metrics — boundary score + stddev contrast (compact).
 // Schneefuchs: No GL; numeric rc logs; slab device buffers; deterministic behavior.
 // Maus: One kernel launch; immediate stream sync for same-frame use.
 
@@ -15,11 +15,13 @@
 #include <algorithm>
 
 // -------------------------------- kernel --------------------------------
+// Channel 0: boundary score = pEsc * (1 - pEsc)
+// Channel 1: contrast      = stddev(iterations)
 __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
                                     int w, int h,
                                     int tilePx, int tilesX, int tilesY,
-                                    float* __restrict__ entropy,
-                                    float* __restrict__ contrast)
+                                    float* __restrict__ boundaryOut,
+                                    float* __restrict__ contrastOut)
 {
     const int tx = blockIdx.x;
     const int ty = blockIdx.y;
@@ -36,52 +38,63 @@ __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
     const int outIx = ty * tilesX + tx;
 
     if (nPix <= 0) {
-        if (entropy)  entropy[outIx]  = 0.0f;
-        if (contrast) contrast[outIx] = 0.0f;
+        if (boundaryOut) boundaryOut[outIx] = 0.0f;
+        if (contrastOut) contrastOut[outIx] = 0.0f;
         return;
     }
 
-    // Ein-Pass: Summe, Summe^2 und Hash-Histogramm
+    // Ein Pass: Summe, Summe^2, Escape-Zähler
     double sum = 0.0;
     double sum2 = 0.0;
+    int    countEsc = 0; // it < maxIter  → muss hostseitig vorab so interpretiert werden
 
-    constexpr int B = 32;
-    int hist[B];
-    #pragma unroll
-    for (int i = 0; i < B; ++i) hist[i] = 0;
-
+    // Hinweis:
+    // Wir kennen maxIter hier nicht getrennt; die Iterationspuffer enthalten
+    // nach dem Render die tatsächliche Zählung. Konvention:
+    //  - "escaped" ≈ kleinere Werte (typischerweise < maxIter)
+    //  - "in set"  ≈ Werte nahe/maxIter (Kernel-seitig bekannt)
+    //
+    // Für den Boundary-Score benötigen wir nur das Mischungsverhältnis.
+    // Wir nutzen eine pragmatische Schwelle relativ zum lokalen Mittel,
+    // vermeiden aber Abhängigkeit von maxIter im Kernel. Das ist deterministisch
+    // und robust genug für die Kachel-Entscheidung.
+    //
+    // Vorgehen in zwei Schritten:
+    //  (1) ersten Durchlauf: sum/sum2 + grobe Mittelwertschätzung
     for (int y = y0; y < y1; ++y) {
         const uint16_t* row = it + (size_t)y * (size_t)w + x0;
         for (int x = 0; x < tileW; ++x) {
-            const int v = (int)row[x];
-            sum  += (double)v;
-            sum2 += (double)v * (double)v;
+            const double v = (double)row[x];
+            sum  += v;
+            sum2 += v * v;
+        }
+    }
+    const double invN = 1.0 / (double)nPix;
+    const double mean = sum * invN;
 
-            const int b = (v ^ (v >> 5)) & (B - 1);
-            hist[b] += 1;
+    //  (2) zweiter Durchlauf: Escape-Anteil grob per Mittelwertschwelle
+    //      (praktisch: escaped-Pixel haben signifikant niedrigere it)
+    for (int y = y0; y < y1; ++y) {
+        const uint16_t* row = it + (size_t)y * (size_t)w + x0;
+        for (int x = 0; x < tileW; ++x) {
+            if ((double)row[x] < mean) countEsc++;
         }
     }
 
     // Kontrast = Standardabweichung
-    const double invN = 1.0 / (double)nPix;
-    const double mean = sum * invN;
     double var = sum2 * invN - mean * mean;
     if (var < 0.0) var = 0.0;
-    if (contrast) contrast[outIx] = (float)sqrt(var);
 
-    // Entropie (hash-binned, 32 Buckets), log2
-    float H = 0.0f;
-    const float invNf  = 1.0f / (float)nPix;
-    constexpr float invLn2 = 1.0f / 0.6931471805599453f;
-    for (int i = 0; i < B; ++i) {
-        const float p = (float)hist[i] * invNf;
-        if (p > 0.0f) H -= p * (logf(p) * invLn2);
-    }
-    if (entropy) entropy[outIx] = H;
+    // Boundary-Score
+    const float pEsc = (float)countEsc * (float)invN;
+    const float boundary = pEsc * (1.0f - pEsc);
+
+    if (boundaryOut) boundaryOut[outIx] = boundary;
+    if (contrastOut) contrastOut[outIx] = (float)sqrt(var);
 }
 
-// --------------- device slab buffer for entropy+contrast ----------------
-static float* s_dMetrics = nullptr;   // layout: [tiles] entropy | [tiles] contrast
+// --------------- device slab buffer for boundary+contrast ----------------
+static float* s_dMetrics = nullptr;   // layout: [tiles] boundary | [tiles] contrast
 static size_t s_tilesCap = 0;
 
 static bool ensureDeviceBuffers(size_t tiles) {
@@ -117,8 +130,8 @@ bool buildGPU(RendererState& state,
 
     if (!ensureDeviceBuffers(tiles)) return false;
 
-    float* dEntropy  = s_dMetrics;
-    float* dContrast = s_dMetrics + tiles;
+    float* dBoundary = s_dMetrics;           // Channel 0
+    float* dContrast = s_dMetrics + tiles;   // Channel 1
 
     dim3 grid((unsigned)tilesX, (unsigned)tilesY, 1);
     dim3 block(1, 1, 1);
@@ -126,7 +139,7 @@ bool buildGPU(RendererState& state,
     kernel_tile_metrics<<<grid, block, 0, stream>>>(
         static_cast<const uint16_t*>(state.d_iterations.get()),
         width, height, px, tilesX, tilesY,
-        dEntropy, dContrast
+        dBoundary, dContrast
     );
     cudaError_t rc = cudaPeekAtLastError();
     if (rc != cudaSuccess) {
@@ -135,10 +148,10 @@ bool buildGPU(RendererState& state,
         return false;
     }
 
-    state.h_entropy.resize(tiles);
+    state.h_entropy.resize(tiles);   // reuse slot: now 'boundary'
     state.h_contrast.resize(tiles);
 
-    rc = cudaMemcpyAsync(state.h_entropy.data(),  dEntropy,  tiles * sizeof(float),
+    rc = cudaMemcpyAsync(state.h_entropy.data(),  dBoundary, tiles * sizeof(float),
                          cudaMemcpyDeviceToHost, stream);
     if (rc == cudaSuccess)
         rc = cudaMemcpyAsync(state.h_contrast.data(), dContrast, tiles * sizeof(float),
