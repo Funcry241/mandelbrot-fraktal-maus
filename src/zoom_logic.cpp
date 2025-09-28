@@ -22,7 +22,7 @@ constexpr float  kSeedStepNDC=0.012f, kStepMaxNDC=0.28f, kBlendA=0.14f;
 constexpr int    kSearchR=2, kCooldownFrames=10, kRetargetStreak=4;
 constexpr float  kHyst=1.35f, kMuch=1.70f, kMinRetarget=0.08f, kLockBox=0.20f;
 constexpr float  kMaxTurnDeg=12.0f, kThrMedAddMAD=0.50f;
-constexpr double kMaxPixStep=0.20;      // px/Frame (hart)
+constexpr double kMaxPixStep=0.01;      // px/Frame (hart)
 constexpr double kMoveEMA=0.30;         // 2. Tiefpass auf Bewegung
 
 inline float  clampf(float x,float a,float b){return x<a?a:(x>b?b:x);}
