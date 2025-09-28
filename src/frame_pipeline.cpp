@@ -1,7 +1,7 @@
 ///// Otter: Frame pipeline with double-authoritative zoom/offset, ring stats, GPU heatmap fallback, HUD & FPS feed.
 ///// Schneefuchs: MAUS header compliant; ASCII logging only; no std::cout/printf; includes via pch first; stable API.
 ///// Maus: Apply-zoom in double, float mirror via sync; tile alignment to 32; periodic performance & ring logs.
-// Datei: src/frame_pipeline.cpp
+///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
 #include <chrono>
@@ -35,6 +35,7 @@ static FrameContext         g_ctx;
 static ZoomLogic::ZoomState g_zoomState;
 static int                  g_frame = 0;
 
+// Hinweis: Der Zoom-Gain wird unten per Kandidaten-Gate angewendet.
 static constexpr float kZOOM_GAIN = 1.006f;
 
 namespace {
@@ -330,21 +331,28 @@ void execute(RendererState& state) {
         g_ctx.shouldZoom = true;
         g_ctx.newOffset  = g_ctx.offset;
         g_ctx.newOffsetD = g_ctx.offsetD; // Double-Spiegel ebenfalls setzen
+        // In diesem Pfad gab es sicher keinen Kandidaten
+        g_zoomState.hadCandidate = false;
     }
 
     if (g_ctx.shouldZoom) {
         // ---- Anwenden in double, dann float-Spiegel aktualisieren ----
         state.center.x = g_ctx.newOffsetD.x;
         state.center.y = g_ctx.newOffsetD.y;
-        state.zoom     *= (double)kZOOM_GAIN;
+
+        // *** Kandidaten-Gate: Zoom nur erhöhen, wenn evaluateAndApply einen Kandidaten fand ***
+        if (g_zoomState.hadCandidate) {
+            state.zoom *= (double)kZOOM_GAIN;
+        }
 
         g_ctx.offsetD  = g_ctx.newOffsetD;
         g_ctx.zoomD    = state.zoom;
         g_ctx.syncFloatFromDouble();
 
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOM][APPLY] center=(%.9f,%.9f) zoom=%.6f gain=%.6f",
-                           state.center.x, state.center.y, (double)state.zoom, (double)kZOOM_GAIN);
+            LUCHS_LOG_HOST("[ZOOM][APPLY] center=(%.9f,%.9f) zoom=%.6f gain=%s",
+                           state.center.x, state.center.y, (double)state.zoom,
+                           g_zoomState.hadCandidate ? "ON" : "OFF");
         }
     }
 

@@ -16,7 +16,11 @@ class  RendererState;    // definiert in renderer_state.hpp (class)
 namespace ZoomLogic {
 
 // Kleiner, trivially-constructible Zustand (by-value in RendererState erlaubt)
-struct ZoomState {};
+struct ZoomState {
+    // Wird pro Frame von evaluateAndApply gesetzt:
+    // true = es gab einen echten Kandidaten (bestIndex >= 0)
+    bool hadCandidate = false;
+};
 
 // Ergebnis der Zielauswahl (ohne float2, um C4324 sicher zu vermeiden)
 struct ZoomResult {

@@ -1,7 +1,7 @@
 ///// Otter: auto-pan/zoom (lokal, kantengetrieben).
 ///// Schneefuchs: Anti-Flip, Move-EMA, harte Pixelkappung, Hysterese+Streak.
-///@@@ Maus: Ziel = nächste valide Kachel; Richtung = lokaler Kontrastgradient.
-// Datei: src/zoom_logic.cpp
+///// Maus: Ziel = nächste valide Kachel; Richtung = lokaler Kontrastgradient.
+///// Datei: src/zoom_logic.cpp
 
 #include "zoom_logic.hpp"
 #include "frame_context.hpp"
@@ -160,16 +160,20 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
     return out;
 }
 
-void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState&/*bus*/, float/*gain*/) noexcept
+void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& bus, float/*gain*/) noexcept
 {
     beginFrame();
-    if(CudaInterop::getPauseZoom()){ fctx.shouldZoom=false; fctx.newOffset=fctx.offset; fctx.newOffsetD={(double)fctx.offset.x,(double)fctx.offset.y}; return; }
+    if(CudaInterop::getPauseZoom()){ fctx.shouldZoom=false; fctx.newOffset=fctx.offset; fctx.newOffsetD={(double)fctx.offset.x,(double)fctx.offset.y}; bus.hadCandidate=false; return; }
 
     const int tilePx=std::max(1,(Settings::Kolibri::gridScreenConstant?Settings::Kolibri::desiredTilePx:fctx.tileSize));
     const int tilesX=(fctx.width+tilePx-1)/tilePx, tilesY=(fctx.height+tilePx-1)/tilePx;
 
     const float2 prevF=fctx.offset;
     ZoomResult zr=evaluateZoomTarget(state.h_entropy,state.h_contrast,tilesX,tilesY,fctx.width,fctx.height,fctx.offset,fctx.zoom,prevF,*(ZoomState*)nullptr);
+
+    // Kandidaten-Flag setzen (für die Pipeline, um Zoom-Gain zu gaten)
+    bus.hadCandidate = (zr.bestIndex >= 0);
+
     if(!zr.shouldZoom){ fctx.shouldZoom=false; fctx.newOffset=prevF; fctx.newOffsetD={(double)prevF.x,(double)prevF.y}; return; }
 
     // NDC->Welt
@@ -221,7 +225,7 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState&/*
     fctx.shouldZoom=true; fctx.newOffsetD={txD,tyD}; fctx.newOffset=make_float2((float)txD,(float)tyD);
 
     if constexpr (Settings::debugLogging)
-        LUCHS_LOG_HOST("[ZOOM][APPLY] new=(%.9f,%.9f)", txD, tyD);
+        LUCHS_LOG_HOST("[ZOOM][APPLY] new=(%.9f,%.9f) hadCandidate=%d", txD, tyD, (int)bus.hadCandidate);
 }
 
 } // namespace ZoomLogic
