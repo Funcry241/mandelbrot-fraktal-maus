@@ -17,13 +17,13 @@
 
 namespace {
 
-// ---- Tunables (kompakt) ----
+// ---- Tunables (entschärft) ----
 constexpr float  kSeedStepNDC=0.012f, kStepMaxNDC=0.28f, kBlendA=0.14f;
-constexpr int    kSearchR=2, kCooldownFrames=10, kRetargetStreak=4;
-constexpr float  kHyst=1.35f, kMuch=1.70f, kMinRetarget=0.08f, kLockBox=0.20f;
+constexpr int    kSearchR=2, kCooldownFrames=10, kRetargetStreak=2;
+constexpr float  kHyst=1.15f, kMuch=1.30f, kMinRetarget=0.08f, kLockBox=0.20f;
 constexpr float  kMaxTurnDeg=12.0f, kThrMedAddMAD=0.50f;
-constexpr double kMaxPixStep=0.01;      // px/Frame (hart)
-constexpr double kMoveEMA=0.30;         // 2. Tiefpass auf Bewegung
+constexpr double kMaxPixStep=0.01;
+constexpr double kMoveEMA=0.30;
 
 inline float  clampf(float x,float a,float b){return x<a?a:(x>b?b:x);}
 inline bool   norm2(float& x,float& y){float n=x*x+y*y; if(!(n>0))return false; float inv=1/std::sqrt(n); x*=inv; y*=inv; return true;}
@@ -76,9 +76,15 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
 {
     ZoomResult out{};
     const int total=(tilesX>0&&tilesY>0)?tilesX*tilesY:0;
-    if(total<=0 || (int)contrast.size()<total){ out.shouldZoom=Settings::ForceAlwaysZoom; return out; }
+    if(total<=0 || (int)contrast.size()<total){
+        if constexpr (Settings::debugLogging)
+            LUCHS_LOG_HOST("[ZOOM][WARN] contrast invalid/empty, fallback drift");
+        out.shouldZoom=Settings::ForceAlwaysZoom;
+        return out;
+    }
 
-    std::vector<float> tmp=contrast; float med=median_inplace(tmp), mad=mad_from_center_inplace(tmp,med);
+    std::vector<float> tmp=contrast;
+    float med=median_inplace(tmp), mad=mad_from_center_inplace(tmp,med);
     const float thr = med + kThrMedAddMAD*mad;
 
     // Kandidat um Bildmitte
@@ -89,11 +95,20 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
         float s=edgeScoreAt(contrast,x,y,tilesX,tilesY); if(!(s>thr)) continue;
         float nx,ny; ndcCenter(tilesX,tilesY,idxAt(x,y,tilesX),nx,ny); float d2=nx*nx+ny*ny;
         if(d2<bestD2-1e-6f || (std::fabs(d2-bestD2)<=1e-6f && s>bestS)){ bestI=idxAt(x,y,tilesX); bestS=s; bestD2=d2; bnx=nx; bny=ny; }
+        if constexpr (Settings::debugLogging)
+            LUCHS_LOG_HOST("[ZOOM][CAND] i=%d s=%.3f thr=%.3f nx=%.2f ny=%.2f", idxAt(x,y,tilesX), s, thr, nx, ny);
     }
 
     // Initialisierung / kein Kandidat
-    if(!g.init && bestI>=0){ g.init=true; g.lock=bestI; g.score=bestS; g.nx=bnx; g.ny=bny; g.vx=bnx; g.vy=bny; g.cooldown=kCooldownFrames; g.lastCand=bestI; g.streak=1; }
+    if(!g.init && bestI>=0){
+        g.init=true; g.lock=bestI; g.score=bestS; g.nx=bnx; g.ny=bny; g.vx=bnx; g.vy=bny;
+        g.cooldown=kCooldownFrames; g.lastCand=bestI; g.streak=1;
+        if constexpr (Settings::debugLogging)
+            LUCHS_LOG_HOST("[ZOOM][LOCK][INIT] i=%d score=%.3f", g.lock, g.score);
+    }
     if(bestI<0){
+        if constexpr (Settings::debugLogging)
+            LUCHS_LOG_HOST("[ZOOM][FALLBACK] no candidate, drift forward");
         float dx=g.nx, dy=g.ny; norm2(dx,dy);
         float invZ=1.f/std::max(1e-6f,zoom), step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
         out.shouldZoom=true; out.newOffsetX=prev.x+dx*(step*invZ); out.newOffsetY=prev.y+dy*(step*invZ); out.distance=step*invZ; return out;
@@ -105,6 +120,8 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
     bool far = dist>=kMinRetarget, better=bestS>=g.score*kHyst, much=bestS>=g.score*kMuch, inBox=dist<=kLockBox;
     if(g.init && ((g.cooldown<=0 && far && better && g.streak>=kRetargetStreak && !inBox) || (much && far))){
         g.lock=bestI; g.score=bestS; g.nx=bnx; g.ny=bny; g.cooldown=kCooldownFrames;
+        if constexpr (Settings::debugLogging)
+            LUCHS_LOG_HOST("[ZOOM][LOCK][RETARGET] i=%d score=%.3f streak=%d", g.lock, g.score, g.streak);
     }
 
     // Richtung = lokaler Gradientenstoß (4-Nachbarn)
@@ -119,10 +136,10 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
     }
     float dirx=(std::fabs(gx)+std::fabs(gy)>0)?gx:g.nx, diry=(std::fabs(gx)+std::fabs(gy)>0)?gy:g.ny; norm2(dirx,diry);
 
-    // ---- Anti-Flip + strenger Turn-Clamp ----
+    // ---- Anti-Flip + Turn-Clamp ----
     if(std::fabs(g.vx)+std::fabs(g.vy)>0.f){
         const float pdot = g.vx*dirx + g.vy*diry;
-        if(pdot < 0.0f){ dirx=g.vx; diry=g.vy; norm2(dirx,diry); }           // echte Umkehr verbieten
+        if(pdot < 0.0f){ dirx=g.vx; diry=g.vy; norm2(dirx,diry); }
         const float turn=angleDeg(g.vx,g.vy,dirx,diry);
         if(turn>1e-3f){
             const float t=clampf(kMaxTurnDeg/turn,0.f,1.f);
@@ -130,13 +147,16 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
             dirx=ox; diry=oy;
         }
     }
-    // Richtungs-EMA
     g.vx = 0.85f*g.vx + 0.15f*dirx; g.vy = 0.85f*g.vy + 0.15f*diry; norm2(g.vx,g.vy);
     dirx=g.vx; diry=g.vy;
 
     float invZ=1.f/std::max(1e-6f,zoom), step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
     out.shouldZoom=true; out.bestIndex=g.lock; out.isNewTarget=true;
     out.newOffsetX=prev.x+dirx*(step*invZ); out.newOffsetY=prev.y+diry*(step*invZ); out.distance=step*invZ;
+
+    if constexpr (Settings::debugLogging)
+        LUCHS_LOG_HOST("[ZOOM][TARGET] lock=%d dir=(%.2f,%.2f) step=%.4f", g.lock, dirx, diry, step*invZ);
+
     return out;
 }
 
@@ -164,7 +184,7 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState&/*
     const double stepNdc=(double)clampf(kSeedStepNDC,0.0f,kStepMaxNDC);
     double moveX=dx*(stepNdc*halfW), moveY=dy*(stepNdc*halfH);
 
-    // ---- Move-EMA (2. Tiefpass auf die Bewegung) ----
+    // ---- Move-EMA ----
     {
         static double mx=0.0, my=0.0;
         mx=(1.0-kMoveEMA)*mx + kMoveEMA*moveX;
@@ -177,7 +197,7 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState&/*
     const double len=std::hypot(moveX,moveY);
     if(len<0.5*minPix && len>0.0){ const double s=(0.5*minPix)/len; moveX*=s; moveY*=s; }
 
-    // In-Set-Veto: bremsen (statt springen)
+    // In-Set-Veto
     if(zr.bestIndex>=0){
         float nx=0,ny=0; ndcCenter(tilesX,tilesY,zr.bestIndex,nx,ny);
         const double px=(double)nx*0.5*(double)fctx.width, py=(double)ny*0.5*(double)fctx.height;
@@ -199,6 +219,9 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState&/*
     const double tyD = baseY*(1.0-kBlendA) + (baseY+moveY)*kBlendA;
 
     fctx.shouldZoom=true; fctx.newOffsetD={txD,tyD}; fctx.newOffset=make_float2((float)txD,(float)tyD);
+
+    if constexpr (Settings::debugLogging)
+        LUCHS_LOG_HOST("[ZOOM][APPLY] new=(%.9f,%.9f)", txD, tyD);
 }
 
 } // namespace ZoomLogic
