@@ -24,7 +24,6 @@
 #include "zoom_logic.hpp"
 #include "common.hpp"
 #include "fps_meter.hpp"      // Maus: feeds FpsMeter once per frame
-#include "edge_detector.cuh"  // Otter: simple screen-space edge target
 
 #include <vector_types.h>
 #include <vector_functions.h>
@@ -132,7 +131,7 @@ namespace {
             (void)cudaEventCreateWithFlags(&evStop,  cudaEventDefault);
             (void)cudaEventRecord(evStart, state.renderStream);
 
-            // *** WURZEL-FIX: Double-Offsets in den Render-Call geben (keine float-Quantisierung) ***
+            // *** Double-Offsets in den Render-Call geben (keine float-Quantisierung) ***
             CudaInterop::renderCudaFrame(state, fctx,
                                          g_ctx.newOffsetD.x,
                                          g_ctx.newOffsetD.y);
@@ -188,11 +187,9 @@ namespace {
 
         // Heatmap Overlay (falls aktiv)
         if (state.heatmapOverlayEnabled) {
-            const int overlayTilePx = std::max(1, (Settings::Kolibri::gridScreenConstant)
-                                                  ? Settings::Kolibri::desiredTilePx
-                                                  : fctx.tileSize);
+            const int overlayTilePx = std::max(1,
+                (Settings::Kolibri::gridScreenConstant ? Settings::Kolibri::desiredTilePx : fctx.tileSize));
 
-            // NEU: GPU-Metriken mit CUDA-Event-Timing umschließen; bei Fehler auf Fallback
             bool ok = false;
             if constexpr (Settings::performanceLogging) {
                 cudaEvent_t evM0 = nullptr, evM1 = nullptr;
@@ -318,57 +315,15 @@ void execute(RendererState& state) {
         state.warzenschweinText = HudText::build(g_ctx, state);
     }
 
+    // Render (CUDA)
     computeCudaFrame(g_ctx, state);
 
-    // ---------- Edge-based Ziel (sichtbarer Bereich) vor der Zoom-Logik ----------
-    bool appliedEdgeTarget = false;
-    {
-        EdgeDetector::Result er{};
-        const int SX = 8, SY = 8;                     // 8×8 Proben im Sichtbereich
-        const int R  = std::max(1, g_ctx.tileSize / 4); // Quer-Radius für Gradienten
-
-        bool edgeOk = EdgeDetector::findStrongestEdge(
-            state, g_ctx.width, g_ctx.height, SX, SY, R, state.renderStream, er
-        );
-
-        if (edgeOk) {
-            // Pixel → Welt (double)
-            double stepX = 0.0, stepY = 0.0;
-            capy_pixel_steps_from_zoom_scale(
-                (double)state.pixelScale.x,
-                (double)state.pixelScale.y,
-                g_ctx.width,
-                (double)g_ctx.zoomD,
-                stepX, stepY
-            );
-
-            const double cx = (double)state.center.x;
-            const double cy = (double)state.center.y;
-
-            const double dx_px = ((double)er.bestPx - 0.5 * (double)g_ctx.width);
-            const double dy_px = ((double)er.bestPy - 0.5 * (double)g_ctx.height);
-            const double wx    = cx + dx_px * stepX;
-            const double wy    = cy + dy_px * stepY;
-
-            const double blend = 0.25; // sanft hinbewegen
-            g_ctx.shouldZoom  = true;
-            g_ctx.newOffsetD.x = cx * (1.0 - blend) + wx * blend;
-            g_ctx.newOffsetD.y = cy * (1.0 - blend) + wy * blend;
-            g_ctx.newOffset    = make_float2((float)g_ctx.newOffsetD.x, (float)g_ctx.newOffsetD.y);
-            appliedEdgeTarget  = true;
-
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[EDGE] best=(%d,%d) grad=%.3f step=(%.3e,%.3e) world=(%.9f,%.9f) blend=%.2f",
-                               er.bestPx, er.bestPy, er.grad, stepX, stepY, wx, wy, blend);
-            }
-        }
-    }
-
-    // Falls keine verlässliche Kante: normale Zoom-Logik
-    if (!appliedEdgeTarget && !CudaInterop::getPauseZoom()) {
+    // ---------- EINZIGE Stelle, die Offset/Zoom bestimmt ----------
+    if (!CudaInterop::getPauseZoom()) {
         ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, kZOOM_GAIN);
     }
 
+    // Fallback: wenn (noch) keine Metriken vorhanden sind, dennoch ein shouldZoom liefern
     if (!CudaInterop::getPauseZoom() &&
         (state.h_entropy.empty() || state.h_contrast.empty()))
     {
@@ -397,8 +352,7 @@ void execute(RendererState& state) {
     g_totMs = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
     state.lastTimings.frameTotalMs = g_totMs;
 
-    // Maus: Füttere den FpsMeter einmal pro Frame,
-    //       damit der HUD-Klammerwert (max FPS, capped auf 60) != 0 ist.
+    // HUD: FPS Meter füttern
     FpsMeter::updateCoreMs(g_totMs);
 
     if (perfShouldLog(g_frame)) {
