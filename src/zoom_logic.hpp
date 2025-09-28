@@ -17,8 +17,7 @@ namespace ZoomLogic {
 
 // Kleiner, trivially-constructible Zustand (by-value in RendererState erlaubt)
 struct ZoomState {
-    // Wird pro Frame von evaluateAndApply gesetzt:
-    // true = es gab einen echten Kandidaten (bestIndex >= 0)
+    // NEU: Merker, ob in dieser Frame ein valider Ziel-Kandidat vorhanden war.
     bool hadCandidate = false;
 };
 

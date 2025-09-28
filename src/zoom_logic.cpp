@@ -163,18 +163,30 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
 void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& bus, float/*gain*/) noexcept
 {
     beginFrame();
-    if(CudaInterop::getPauseZoom()){ fctx.shouldZoom=false; fctx.newOffset=fctx.offset; fctx.newOffsetD={(double)fctx.offset.x,(double)fctx.offset.y}; bus.hadCandidate=false; return; }
+    // Default: kein Kandidat gemeldet, bis eval was findet
+    bus.hadCandidate = false;
+
+    if(CudaInterop::getPauseZoom()){
+        fctx.shouldZoom=false;
+        fctx.newOffset=fctx.offset;
+        fctx.newOffsetD={(double)fctx.offset.x,(double)fctx.offset.y};
+        return;
+    }
 
     const int tilePx=std::max(1,(Settings::Kolibri::gridScreenConstant?Settings::Kolibri::desiredTilePx:fctx.tileSize));
     const int tilesX=(fctx.width+tilePx-1)/tilePx, tilesY=(fctx.height+tilePx-1)/tilePx;
 
     const float2 prevF=fctx.offset;
     ZoomResult zr=evaluateZoomTarget(state.h_entropy,state.h_contrast,tilesX,tilesY,fctx.width,fctx.height,fctx.offset,fctx.zoom,prevF,*(ZoomState*)nullptr);
+    if(!zr.shouldZoom){
+        fctx.shouldZoom=false;
+        fctx.newOffset=prevF;
+        fctx.newOffsetD={(double)prevF.x,(double)prevF.y};
+        return;
+    }
 
-    // Kandidaten-Flag setzen (für die Pipeline, um Zoom-Gain zu gaten)
+    // Kandidaten-Marker setzen: nur wenn wirklich ein bestIndex existiert
     bus.hadCandidate = (zr.bestIndex >= 0);
-
-    if(!zr.shouldZoom){ fctx.shouldZoom=false; fctx.newOffset=prevF; fctx.newOffsetD={(double)prevF.x,(double)prevF.y}; return; }
 
     // NDC->Welt
     double stepX=0, stepY=0;
@@ -188,20 +200,12 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
     const double stepNdc=(double)clampf(kSeedStepNDC,0.0f,kStepMaxNDC);
     double moveX=dx*(stepNdc*halfW), moveY=dy*(stepNdc*halfH);
 
-    // ---- Move-EMA ----
-    {
-        static double mx=0.0, my=0.0;
-        mx=(1.0-kMoveEMA)*mx + kMoveEMA*moveX;
-        my=(1.0-kMoveEMA)*my + kMoveEMA*moveY;
-        moveX=mx; moveY=my;
-    }
-
     // min. 0.5 Pixel
     const double minPix=std::min(std::fabs(stepX),std::fabs(stepY));
     const double len=std::hypot(moveX,moveY);
     if(len<0.5*minPix && len>0.0){ const double s=(0.5*minPix)/len; moveX*=s; moveY*=s; }
 
-    // In-Set-Veto
+    // In-Set-Veto: bremsen (statt springen)
     if(zr.bestIndex>=0){
         float nx=0,ny=0; ndcCenter(tilesX,tilesY,zr.bestIndex,nx,ny);
         const double px=(double)nx*0.5*(double)fctx.width, py=(double)ny*0.5*(double)fctx.height;
@@ -209,23 +213,11 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
         if(insideCardioidOrBulb(wx,wy)){ moveX*=0.6; moveY*=0.6; }
     }
 
-    // ---- harte Pixelkappung ----
-    {
-        const double pixLen = std::hypot(moveX/std::max(1e-16,std::fabs(stepX)),
-                                         moveY/std::max(1e-16,std::fabs(stepY)));
-        if(pixLen>kMaxPixStep && pixLen>0.0){
-            const double s=kMaxPixStep/pixLen; moveX*=s; moveY*=s;
-        }
-    }
-
     const double baseX=(double)state.center.x, baseY=(double)state.center.y;
     const double txD = baseX*(1.0-kBlendA) + (baseX+moveX)*kBlendA;
     const double tyD = baseY*(1.0-kBlendA) + (baseY+moveY)*kBlendA;
 
     fctx.shouldZoom=true; fctx.newOffsetD={txD,tyD}; fctx.newOffset=make_float2((float)txD,(float)tyD);
-
-    if constexpr (Settings::debugLogging)
-        LUCHS_LOG_HOST("[ZOOM][APPLY] new=(%.9f,%.9f) hadCandidate=%d", txD, tyD, (int)bus.hadCandidate);
 }
 
 } // namespace ZoomLogic
