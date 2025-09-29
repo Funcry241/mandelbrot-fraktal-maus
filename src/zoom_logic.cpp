@@ -235,7 +235,7 @@ void update(FrameContext& frameCtx, RendererState& rs)
 
 // ---------------------------------------------------------------------------
 // Legacy/Kompatibilität: erwarteter Entry aus frame_pipeline.cpp
-// Signatur lt. Header: void evaluateAndApply(FrameContext&, RendererState&, ZoomState&, float) noexcept
+// Signatur laut Header (zoom_logic.hpp): noexcept
 // ---------------------------------------------------------------------------
 void evaluateAndApply(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/, float dtOverride) noexcept
 {
