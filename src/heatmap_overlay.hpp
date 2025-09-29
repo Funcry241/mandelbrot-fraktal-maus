@@ -38,10 +38,10 @@ void toggle(RendererState& ctx);
 // Release all GL resources created by the overlay (idempotent)
 void cleanup();
 
-// Draw the mini heatmap (Pfau material: half-transparent panel with same
-// margin/padding/radius as Warzenschwein). Expects one value per tile in
-// 'entropy' and 'contrast' (size tilesX*tilesY). width/height = framebuffer,
-// tileSize = tile size in pixels. textureId is optional (0 allowed).
+// Draw the mini heatmap (Pfau material: panel + texture-driven heatmap with
+// FS glow/alpha). Expects one value per tile in 'entropy' and 'contrast'
+// (size tilesX*tilesY). width/height = framebuffer, tileSize = tile size in
+// pixels. textureId is optional (0 allowed).
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width, int height,
