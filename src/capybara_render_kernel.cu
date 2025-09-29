@@ -1,7 +1,7 @@
 ///// Otter: Mandelbrot render kernel using Capybara early Hi/Lo + classic continuation (fills d_iterations). Adds exact cardioid/2-bulb skip and Hi/Lo gating for shallow zooms.
-///** Schneefuchs: API unverändert; ASCII-Logs; optionale CUDA-Event-Zeitmessung bei Settings::performanceLogging; keine neuen Dateien.
-///** Maus: Zero information loss – Innenpunkte = maxIter; Hi/Lo nur bei feinem Pixelstep; Host/Device sauber getrennt.
-///** Datei: src/capybara_render_kernel.cu
+///// Schneefuchs: API unverändert; ASCII-Logs; optionale CUDA-Event-Zeitmessung bei Settings::performanceLogging; keine neuen Dateien.
+///// Maus: Zero information loss – Innenpunkte = maxIter; Hi/Lo nur bei feinem Pixelstep; Host/Device sauber getrennt.
+///// Datei: src/capybara_render_kernel.cu
 
 #include "pch.hpp"
 
@@ -85,7 +85,7 @@ void mandelbrotKernel_capybara(
 
     // 2) Hi/Lo gating: for coarse pixel steps use classic double escape-time (identical result)
     const double ax = fabs(stepX);
-    const double ay = fabs(stepY);
+       const double ay = fabs(stepY);
     const double m  = (ax > ay ? ax : ay);
     if (m > kStepThresh) {
         double zx = 0.0, zy = 0.0;
@@ -104,6 +104,10 @@ void mandelbrotKernel_capybara(
     // 3) Deep zoom path: Capybara early Hi/Lo + classic continuation
     const int iters = capy_compute_iters_from_zero(cx, cy, stepX, stepY, px, py, w, h, maxIter);
     d_it[idx] = clamp_u16_from_int(iters);
+
+    // single-line PTX "no-op": self-move on a dummy register (ptxas-safe across PTX versions)
+    unsigned __ptx_dummy = 0u;
+    asm volatile ("mov.u32 %0, %0;" : "+r"(__ptx_dummy));
 }
 
 // ------------------------------- host wrapper ---------------------------------
