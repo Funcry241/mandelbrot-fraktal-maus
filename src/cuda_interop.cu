@@ -65,9 +65,13 @@ struct MapGuard {
     explicit MapGuard(CudaInterop::bear_CudaPBOResource* r) : res(r) {
         if (res) ptr = res->mapAndLog(bytes);
     }
-    ~MapGuard() {
+    ~MapGuard() noexcept {
         if (res) res->unmapAndLog();
     }
+    MapGuard(const MapGuard&) = delete;
+    MapGuard& operator=(const MapGuard&) = delete;
+    MapGuard(MapGuard&&) = delete;
+    MapGuard& operator=(MapGuard&&) = delete;
 };
 
 static int getAttrSafe(cudaDeviceAttr attr, int dev) {
@@ -235,6 +239,9 @@ void renderCudaFrame(
         if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after capy_render", rc);
         rc = cudaEventSynchronize(s_evStop);
         if (rc != cudaSuccess) throw_with_log("capy_render sync", rc);
+        float ms = 0.0f;
+        (void)cudaEventElapsedTime(&ms, s_evStart, s_evStop);
+        LUCHS_LOG_HOST("[CAPY][time] capy_render=%.3f ms (w=%d h=%d it=%d)", (double)ms, width, height, maxIterations);
     }
 
     // 3) colorize into mapped PBO
@@ -257,6 +264,9 @@ void renderCudaFrame(
         if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after colorize", rc);
         rc = cudaEventSynchronize(s_evStop);
         if (rc != cudaSuccess) throw_with_log("colorize sync", rc);
+        float ms = 0.0f;
+        (void)cudaEventElapsedTime(&ms, s_evStart, s_evStop);
+        LUCHS_LOG_HOST("[CAPY][time] colorize=%.3f ms (w=%d h=%d)", (double)ms, width, height);
     }
 }
 
@@ -397,6 +407,9 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx,
         if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after capy_render[dbl]", rc);
         rc = cudaEventSynchronize(s_evStop);
         if (rc != cudaSuccess) throw_with_log("capy_render sync[dbl]", rc);
+        float ms = 0.0f;
+        (void)cudaEventElapsedTime(&ms, s_evStart, s_evStop);
+        LUCHS_LOG_HOST("[CAPY][time] capy_render[dbl]=%.3f ms (w=%d h=%d it=%d)", (double)ms, width, height, fctx.maxIterations);
     }
 
     // 3) colorize into mapped PBO
@@ -419,6 +432,9 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx,
         if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after colorize[dbl]", rc);
         rc = cudaEventSynchronize(s_evStop);
         if (rc != cudaSuccess) throw_with_log("colorize sync[dbl]", rc);
+        float ms = 0.0f;
+        (void)cudaEventElapsedTime(&ms, s_evStart, s_evStop);
+        LUCHS_LOG_HOST("[CAPY][time] colorize[dbl]=%.3f ms (w=%d h=%d)", (double)ms, width, height);
     }
 
     // Hinweis: newOffsetX/newOffsetY werden hier absichtlich nicht verändert.
