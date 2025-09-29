@@ -32,8 +32,12 @@ constexpr float  kMaxTurnDeg     = 35.0f;  // snappier
 constexpr float  kThrMedAddMAD0  = 0.50f;  // Basis-Schwell
 constexpr float  kThrMedMin      = 0.15f;  // Untergrenze bei Starvation
 
-constexpr double kTurnBoostDeg   = 55.0;   // ab diesem Winkel einmaliger Boost
-constexpr double kTurnBoostMul   = 1.35;   // Schrittbeschleuniger
+// Turn-Boost: sensibler und kräftiger, beschleunigt Korrektur quer zur Blickrichtung
+constexpr double kTurnBoostDeg   = 40.0;   // vorher 55.0
+constexpr double kTurnBoostMul   = 1.55;   // vorher 1.35
+
+// Black-Guard: verstärke die tangentiale Ablenkung leicht
+constexpr double kBlackGuardMul  = 1.18;   // >1.0 = schneller seitliches Ausweichen
 
 // --- Starvation-Relief ---
 constexpr int    kStarveRelaxStart = 12;   // ab N Frames ohne Kandidat lockern
@@ -79,7 +83,7 @@ struct ZLock{
     bool  init=false;
     int   lock=-1,lastCand=-1,streak=0,cooldown=0;
     float score=0, nx=1, ny=0, vx=1, vy=0;
-    int   starve=0; // NEU: Frames ohne Kandidat
+    int   starve=0; // Frames ohne Kandidat
 };
 static ZLock g;
 
@@ -88,7 +92,7 @@ static double g_lastTurnDeg = 0.0;
 
 inline void beginFrame(){
     if(g.cooldown>0)--g.cooldown;
-    // weniger Dämpfung, damit Richtungswechsel schneller „durchkommen“
+    // weniger Dämpfung, damit Richtungswechsel schneller durchkommen
     g.vx*=0.97f; g.vy*=0.97f;
 }
 
@@ -110,7 +114,7 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
     if(total<=0 || (int)contrast.size()<total){
         if constexpr (Settings::debugLogging)
             LUCHS_LOG_HOST("[ZOOM][WARN] contrast invalid/empty, drift");
-        out.shouldZoom=true; // NEU: nie stoppen
+        out.shouldZoom=true; // nie stoppen
         // sanfter Drift in letzte bekannte Richtung
         float dx=g.nx, dy=g.ny; norm2(dx,dy);
         const float invZ=1.f/std::max(1e-6f,zoom);
@@ -194,8 +198,10 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
         g_lastTurnDeg = 0.0;
     }
 
-    // Schnellere Richtungs-EMA (snappier)
-    g.vx = 0.75f*g.vx + 0.25f*dirx; g.vy = 0.75f*g.vy + 0.25f*diry; norm2(g.vx,g.vy);
+    // Schnellere Richtungs-EMA (snappier) – aggressiver für schnellere Korrekturen
+    g.vx = 0.70f*g.vx + 0.30f*dirx; 
+    g.vy = 0.70f*g.vy + 0.30f*diry; 
+    norm2(g.vx,g.vy);
     dirx=g.vx; diry=g.vy;
 
     const float invZ=1.f/std::max(1e-6f,zoom);
@@ -211,7 +217,7 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
     beginFrame();
     bus.hadCandidate = false;
 
-    // NIE stoppen wegen Pause-Logik: nur bei echter Pause
+    // Nur bei echter Pause stoppen
     if (CudaInterop::getPauseZoom()) {
         fctx.shouldZoom = false;
         fctx.newOffset  = fctx.offset;
@@ -232,8 +238,7 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
         prevF, *(ZoomState*)nullptr
     );
 
-    // NEU: selbst wenn zr.shouldZoom false wäre (kommt de facto nicht mehr vor),
-    // fällt die Apply-Phase auf Drift zurück. => Kein „Stoppen“.
+    // Fallback: Drift statt stehen bleiben (sollte kaum auftreten)
     if (!zr.shouldZoom) {
         float dx = g.vx, dy = g.vy;
         if(!norm2(dx,dy)){ dx=1.f; dy=0.f; }
@@ -287,12 +292,12 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
         const double wx = (double)state.center.x + px * stepX;
         const double wy = (double)state.center.y + py * stepY;
         if (insideCardioidOrBulb(wx, wy)) {
-            // Tangential drehen (90°), Vorzeichen anhand aktueller Richtung
+            // Tangential drehen (90°), Vorzeichen anhand aktueller Richtung, mit Verstärkung
             const double tx = -dy, ty = dx; // 90° CCW in NDC-Raum
             double tn = std::hypot(tx,ty);
             if(tn>0.0){
-                moveX = (tx/tn) * (stepNdc * halfW);
-                moveY = (ty/tn) * (stepNdc * halfH);
+                moveX = (tx/tn) * (stepNdc * halfW) * kBlackGuardMul;
+                moveY = (ty/tn) * (stepNdc * halfH) * kBlackGuardMul;
             }
         }
     }
