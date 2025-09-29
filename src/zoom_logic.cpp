@@ -195,75 +195,100 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
     beginFrame();
     bus.hadCandidate = false;
 
-    if(CudaInterop::getPauseZoom()){
-        fctx.shouldZoom=false;
-        fctx.newOffset=fctx.offset;
-        fctx.newOffsetD={(double)fctx.offset.x,(double)fctx.offset.y};
+    if (CudaInterop::getPauseZoom()) {
+        fctx.shouldZoom = false;
+        fctx.newOffset  = fctx.offset;
+        fctx.newOffsetD = { (double)fctx.offset.x, (double)fctx.offset.y };
         return;
     }
 
-    const int tilePx=std::max(1,(Settings::Kolibri::gridScreenConstant?Settings::Kolibri::desiredTilePx:fctx.tileSize));
-    const int tilesX=(fctx.width+tilePx-1)/tilePx, tilesY=(fctx.height+tilePx-1)/tilePx;
+    const int tilePx = std::max(1, (Settings::Kolibri::gridScreenConstant ? Settings::Kolibri::desiredTilePx : fctx.tileSize));
+    const int tilesX = (fctx.width  + tilePx - 1) / tilePx;
+    const int tilesY = (fctx.height + tilePx - 1) / tilePx;
 
-    const float2 prevF=fctx.offset;
-    ZoomResult zr=evaluateZoomTarget(state.h_entropy,state.h_contrast,tilesX,tilesY,
-                                     fctx.width,fctx.height,fctx.offset,fctx.zoom,prevF,*(ZoomState*)nullptr);
-    if(!zr.shouldZoom){
-        fctx.shouldZoom=false;
-        fctx.newOffset=prevF;
-        fctx.newOffsetD={(double)prevF.x,(double)prevF.y};
+    const float2 prevF = fctx.offset;
+    ZoomResult zr = evaluateZoomTarget(
+        state.h_entropy, state.h_contrast,
+        tilesX, tilesY,
+        fctx.width, fctx.height,
+        fctx.offset, fctx.zoom,
+        prevF, *(ZoomState*)nullptr
+    );
+
+    if (!zr.shouldZoom) {
+        fctx.shouldZoom = false;
+        fctx.newOffset  = prevF;
+        fctx.newOffsetD = { (double)prevF.x, (double)prevF.y };
         return;
     }
 
     bus.hadCandidate = (zr.bestIndex >= 0);
 
-    // NDC->Welt
-    double stepX=0, stepY=0;
-    capy_pixel_steps_from_zoom_scale((double)state.pixelScale.x,(double)state.pixelScale.y,
-                                     fctx.width, (fctx.zoomD>0.0?fctx.zoomD:(double)state.zoom),
-                                     stepX,stepY);
+    // NDC -> Welt
+    double stepX = 0, stepY = 0;
+    capy_pixel_steps_from_zoom_scale(
+        (double)state.pixelScale.x, (double)state.pixelScale.y,
+        fctx.width, (fctx.zoomD > 0.0 ? fctx.zoomD : (double)state.zoom),
+        stepX, stepY
+    );
 
-    double dx=(double)(zr.newOffsetX-prevF.x), dy=(double)(zr.newOffsetY-prevF.y);
-    { const double n2=dx*dx+dy*dy; if(!(n2>0.0)){ dx=1.0; dy=0.0; } else { const double inv=1.0/std::sqrt(n2); dx*=inv; dy*=inv; } }
+    double dx = (double)(zr.newOffsetX - prevF.x);
+    double dy = (double)(zr.newOffsetY - prevF.y);
+    {
+        const double n2 = dx*dx + dy*dy;
+        if (!(n2 > 0.0)) { dx = 1.0; dy = 0.0; }
+        else { const double inv = 1.0 / std::sqrt(n2); dx *= inv; dy *= inv; }
+    }
 
-    const double halfW=0.5*(double)fctx.width*std::fabs(stepX), halfH=0.5*(double)fctx.height*std::fabs(stepY);
-    double stepNdc=(double)clampf(kSeedStepNDC,0.0f,kStepMaxNDC);
+    const double halfW = 0.5 * (double)fctx.width  * std::fabs(stepX);
+    const double halfH = 0.5 * (double)fctx.height * std::fabs(stepY);
+
+    double stepNdc = (double)clampf(kSeedStepNDC, 0.0f, kStepMaxNDC);
 
     // Adaptiver Turn-Boost: bei großen Drehungen kurz kräftiger treten
-    if(g_lastTurnDeg > kTurnBoostDeg) {
+    if (g_lastTurnDeg > kTurnBoostDeg) {
         // *** FIX: expliziter Typ, vermeidet MSVC-Ambiguität (float vs. double) ***
         stepNdc = std::min<double>(stepNdc * kTurnBoostMul, static_cast<double>(kStepMaxNDC));
     }
 
-    double moveX=dx*(stepNdc*halfW), moveY=dy*(stepNdc*halfH);
+    double moveX = dx * (stepNdc * halfW);
+    double moveY = dy * (stepNdc * halfH);
 
     // min. 0.5 Pixel
-    const double minPix=std::min(std::fabs(stepX),std::fabs(stepY));
-    const double len=std::hypot(moveX,moveY);
-    if(len<0.5*minPix && len>0.0){ const double s=(0.5*minPix)/len; moveX*=s; moveY*=s; }
+    const double minPix = std::min(std::fabs(stepX), std::fabs(stepY));
+    const double len    = std::hypot(moveX, moveY);
+    if (len < 0.5 * minPix && len > 0.0) {
+        const double s = (0.5 * minPix) / len;
+        moveX *= s; moveY *= s;
+    }
 
     // In-Set-Veto: bremsen
-    if(zr.bestIndex>=0){
-        float nx=0,ny=0; ndcCenter(tilesX,tilesY,zr.bestIndex,nx,ny);
-        const double px=(double)nx*0.5*(double)fctx.width, py=(double)ny*0.5*(double)fctx.height;
-        const double wx=(double)state.center.x + px*stepX, wy=(double)state.center.y + py*stepY;
-        if(insideCardioidOrBulb(wx,wy)){ moveX*=0.6; moveY*=0.6; }
+    if (zr.bestIndex >= 0) {
+        float nx = 0, ny = 0;
+        ndcCenter(tilesX, tilesY, zr.bestIndex, nx, ny);
+        const double px = (double)nx * 0.5 * (double)fctx.width;
+        const double py = (double)ny * 0.5 * (double)fctx.height;
+        const double wx = (double)state.center.x + px * stepX;
+        const double wy = (double)state.center.y + py * stepY;
+        if (insideCardioidOrBulb(wx, wy)) { moveX *= 0.6; moveY *= 0.6; }
     }
 
     // Blend: bei großen Drehungen etwas weniger filtern
-    const double blend = (g_lastTurnDeg > 45.0 ? kBlendABase*0.65 : kBlendABase);
+    const double blend = (g_lastTurnDeg > 45.0 ? kBlendABase * 0.65 : kBlendABase);
 
-    const double baseX=(double)state.center.x, baseY=(double)state.center.y;
-    const double txD = baseX*(1.0-blend) + (baseX+moveX)*blend;
-    const double tyD = baseY*(1.0-blend) + (baseY+moveY)*blend;
+    const double baseX = (double)state.center.x;
+    const double baseY = (double)state.center.y;
+    const double txD   = baseX * (1.0 - blend) + (baseX + moveX) * blend;
+    const double tyD   = baseY * (1.0 - blend) + (baseY + moveY) * blend;
 
-    fctx.shouldZoom=true;
-    fctx.newOffsetD={txD,tyD};
-    fctx.newOffset=make_float2((float)txD,(float)tyD);
+    fctx.shouldZoom = true;
+    fctx.newOffsetD = { txD, tyD };
+    fctx.newOffset  = make_float2((float)txD, (float)tyD);
 
-    if constexpr (Settings::debugLogging)
+    if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[ZOOM][APPLY] turn=%.1f blend=%.3f move=(%.3e,%.3e) new=(%.9f,%.9f)",
                        g_lastTurnDeg, blend, moveX, moveY, txD, tyD);
+    }
 }
 
 } // namespace ZoomLogic
