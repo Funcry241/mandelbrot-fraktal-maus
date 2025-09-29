@@ -1,5 +1,5 @@
 ///// Otter: auto-pan/zoom (lokal, kantengetrieben).
-///// Schneefuchs: Anti-Flip, adaptiver Turn-Boost, schnellere EMA, reduziertes Blend bei großen Drehungen.
+///// Schneefuchs: No-Stop Drift, adaptiver Turn-Boost, schnellere EMA, Black-Guard (tangential), Starvation-Relief.
 ///@@@ Maus: Ziel = nächste valide Kachel; Richtung = lokaler Kontrastgradient.
 // Datei: src/zoom_logic.cpp
 
@@ -18,21 +18,26 @@
 namespace {
 
 // ---- Tunables (responsiver) ----
-constexpr float  kSeedStepNDC   = 0.012f;
-constexpr float  kStepMaxNDC    = 0.28f;
-constexpr float  kBlendABase    = 0.14f;  // Grund-Blend
-constexpr int    kSearchR       = 2;
-constexpr int    kCooldownFrames= 8;      // etwas kürzer
-constexpr int    kRetargetStreak= 2;
-constexpr float  kHyst          = 1.15f;
-constexpr float  kMuch          = 1.30f;
-constexpr float  kMinRetarget   = 0.08f;
-constexpr float  kLockBox       = 0.15f;  // kleiner, aggressiver
-constexpr float  kMaxTurnDeg    = 35.0f;  // deutlich höher = snappier
-constexpr float  kThrMedAddMAD  = 0.50f;
+constexpr float  kSeedStepNDC    = 0.012f;
+constexpr float  kStepMaxNDC     = 0.28f;
+constexpr float  kBlendABase     = 0.14f;  // Grund-Blend
+constexpr int    kSearchR        = 2;
+constexpr int    kCooldownFrames = 8;      // etwas kürzer
+constexpr int    kRetargetStreak = 2;
+constexpr float  kHyst           = 1.15f;
+constexpr float  kMuch           = 1.30f;
+constexpr float  kMinRetarget    = 0.08f;
+constexpr float  kLockBox        = 0.15f;  // kleiner, aggressiver
+constexpr float  kMaxTurnDeg     = 35.0f;  // snappier
+constexpr float  kThrMedAddMAD0  = 0.50f;  // Basis-Schwell
+constexpr float  kThrMedMin      = 0.15f;  // Untergrenze bei Starvation
 
-constexpr double kTurnBoostDeg  = 55.0;   // ab diesem Winkel einmaliger Boost …
-constexpr double kTurnBoostMul  = 1.35;   // … um den Schritt zu beschleunigen
+constexpr double kTurnBoostDeg   = 55.0;   // ab diesem Winkel einmaliger Boost
+constexpr double kTurnBoostMul   = 1.35;   // Schrittbeschleuniger
+
+// --- Starvation-Relief ---
+constexpr int    kStarveRelaxStart = 12;   // ab N Frames ohne Kandidat lockern
+constexpr float  kStarveRelaxStep  = 0.08f;// MAD-Faktor-Reduktion pro 4 starved Frames
 
 inline float  clampf(float x,float a,float b){return x<a?a:(x>b?b:x);}
 inline bool   norm2(float& x,float& y){float n=x*x+y*y; if(!(n>0))return false; float inv=1/std::sqrt(n); x*=inv; y*=inv; return true;}
@@ -62,6 +67,8 @@ inline float angleDeg(float ax,float ay,float bx,float by){
     float c=(ax*bx+ay*by)/(std::sqrt(a2)*std::sqrt(b2)); c=clampf(c,-1.f,1.f);
     return std::acos(c)*57.29577951308232f;
 }
+
+// Mandelbrot-Inside-Gate
 inline bool insideCardioidOrBulb(double x,double y) noexcept{
     const double xm=x-0.25, q=xm*xm+y*y; if(q*(q+xm)<0.25*y*y) return true;
     const double dx=x+1.0; return (dx*dx+y*y)<0.0625;
@@ -72,6 +79,7 @@ struct ZLock{
     bool  init=false;
     int   lock=-1,lastCand=-1,streak=0,cooldown=0;
     float score=0, nx=1, ny=0, vx=1, vy=0;
+    int   starve=0; // NEU: Frames ohne Kandidat
 };
 static ZLock g;
 
@@ -101,14 +109,26 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
     const int total=(tilesX>0&&tilesY>0)?tilesX*tilesY:0;
     if(total<=0 || (int)contrast.size()<total){
         if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[ZOOM][WARN] contrast invalid/empty, fallback drift");
-        out.shouldZoom=Settings::ForceAlwaysZoom;
+            LUCHS_LOG_HOST("[ZOOM][WARN] contrast invalid/empty, drift");
+        out.shouldZoom=true; // NEU: nie stoppen
+        // sanfter Drift in letzte bekannte Richtung
+        float dx=g.nx, dy=g.ny; norm2(dx,dy);
+        const float invZ=1.f/std::max(1e-6f,zoom);
+        const float step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
+        out.newOffsetX=prev.x+dx*(step*invZ); out.newOffsetY=prev.y+dy*(step*invZ); out.distance=step*invZ;
         return out;
     }
 
+    // --- Starvation-Relief: adaptiver Schwellenfaktor ---
     std::vector<float> tmp=contrast;
-    float med=median_inplace(tmp), mad=mad_from_center_inplace(tmp,med);
-    const float thr = med + kThrMedAddMAD*mad;
+    const float med=median_inplace(tmp), mad=mad_from_center_inplace(tmp,med);
+    float thrMAD = kThrMedAddMAD0;
+    if(g.starve >= kStarveRelaxStart){
+        // ab Start linear lockern (alle 4 Frames)
+        const int extra = (g.starve - kStarveRelaxStart) / 4;
+        thrMAD = std::max(kThrMedMin, kThrMedAddMAD0 - extra * kStarveRelaxStep);
+    }
+    const float thr = med + thrMAD * mad;
 
     // Kandidat um Bildmitte
     const int cx=tilesX/2, cy=tilesY/2;
@@ -118,33 +138,31 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
         float s=edgeScoreAt(contrast,x,y,tilesX,tilesY); if(!(s>thr)) continue;
         float nx,ny; ndcCenter(tilesX,tilesY,idxAt(x,y,tilesX),nx,ny); float d2=nx*nx+ny*ny;
         if(d2<bestD2-1e-6f || (std::fabs(d2-bestD2)<=1e-6f && s>bestS)){ bestI=idxAt(x,y,tilesX); bestS=s; bestD2=d2; bnx=nx; bny=ny; }
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[ZOOM][CAND] i=%d s=%.3f thr=%.3f nx=%.2f ny=%.2f", idxAt(x,y,tilesX), s, thr, nx, ny);
     }
 
-    // Initialisierung / kein Kandidat
-    if(!g.init && bestI>=0){
+    if(bestI<0){
+        // kein Kandidat -> No-Stop Drift + Starvation hochzählen
+        g.starve = std::min(1000, g.starve+1);
+        float dx=g.nx, dy=g.ny; norm2(dx,dy);
+        const float invZ=1.f/std::max(1e-6f,zoom);
+        const float step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
+        out.shouldZoom=true; out.newOffsetX=prev.x+dx*(step*invZ); out.newOffsetY=prev.y+dy*(step*invZ); out.distance=step*invZ;
+        return out;
+    } else {
+        g.starve = 0; // Reset
+    }
+
+    // Initialisierung / Retarget-Logik
+    if(!g.init){
         g.init=true; g.lock=bestI; g.score=bestS; g.nx=bnx; g.ny=bny; g.vx=bnx; g.vy=bny;
         g.cooldown=kCooldownFrames; g.lastCand=bestI; g.streak=1;
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[ZOOM][LOCK][INIT] i=%d score=%.3f", g.lock, g.score);
-    }
-    if(bestI<0){
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[ZOOM][FALLBACK] no candidate, drift forward");
-        float dx=g.nx, dy=g.ny; norm2(dx,dy);
-        float invZ=1.f/std::max(1e-6f,zoom), step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
-        out.shouldZoom=true; out.newOffsetX=prev.x+dx*(step*invZ); out.newOffsetY=prev.y+dy*(step*invZ); out.distance=step*invZ; return out;
     }
 
-    // Streak/Hysterese/Cooldown/LockBox
     g.streak = (bestI==g.lastCand)? (g.streak+1) : 1; g.lastCand=bestI;
-    float dnx=bnx-g.nx, dny=bny-g.ny; float dist=std::sqrt(dnx*dnx+dny*dny);
-    bool far = dist>=kMinRetarget, better=bestS>=g.score*kHyst, much=bestS>=g.score*kMuch, inBox=dist<=kLockBox;
-    if(g.init && ((g.cooldown<=0 && far && better && g.streak>=kRetargetStreak && !inBox) || (much && far))){
+    const float dnx=bnx-g.nx, dny=bny-g.ny; const float dist=std::sqrt(dnx*dnx+dny*dny);
+    const bool far = dist>=kMinRetarget, better=bestS>=g.score*kHyst, much=bestS>=g.score*kMuch, inBox=dist<=kLockBox;
+    if((g.cooldown<=0 && far && better && g.streak>=kRetargetStreak && !inBox) || (much && far)){
         g.lock=bestI; g.score=bestS; g.nx=bnx; g.ny=bny; g.cooldown=kCooldownFrames;
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[ZOOM][LOCK][RETARGET] i=%d score=%.3f streak=%d", g.lock, g.score, g.streak);
     }
 
     // Richtung = lokaler Gradientenstoß (4-Nachbarn)
@@ -154,7 +172,7 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
     float gx=0,gy=0; const int dx4[4]={-1,1,0,0}, dy4[4]={0,0,-1,1};
     for(int k=0;k<4;++k){
         int xn=bx+dx4[k], yn=by+dy4[k]; if(xn<0||yn<0||xn>=tilesX||yn>=tilesY) continue;
-        float w=contrast[(size_t)idxAt(xn,yn,tilesX)]-contrast[(size_t)g.lock];
+        const float w=contrast[(size_t)idxAt(xn,yn,tilesX)]-contrast[(size_t)g.lock];
         float nx,ny; std::tie(nx,ny)=ndcOf(xn,yn); float vx=nx-cxN, vy=ny-cyN; if(norm2(vx,vy)){ gx+=w*vx; gy+=w*vy; }
     }
     float dirx=(std::fabs(gx)+std::fabs(gy)>0)?gx:g.nx, diry=(std::fabs(gx)+std::fabs(gy)>0)?gy:g.ny; norm2(dirx,diry);
@@ -162,7 +180,6 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
     // ---- Anti-Flip + großzügiger Turn-Clamp ----
     if(std::fabs(g.vx)+std::fabs(g.vy)>0.f){
         const float pdot = g.vx*dirx + g.vy*diry;
-        // Keine harte Umkehr mehr, nur abfedern
         if(pdot < 0.0f){ dirx = 0.6f*dirx + 0.4f*g.vx; diry = 0.6f*diry + 0.4f*g.vy; norm2(dirx,diry); }
         const float turn=angleDeg(g.vx,g.vy,dirx,diry);
         g_lastTurnDeg = turn; // für Apply-Phase
@@ -179,13 +196,10 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
     g.vx = 0.75f*g.vx + 0.25f*dirx; g.vy = 0.75f*g.vy + 0.25f*diry; norm2(g.vx,g.vy);
     dirx=g.vx; diry=g.vy;
 
-    float invZ=1.f/std::max(1e-6f,zoom), step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
+    const float invZ=1.f/std::max(1e-6f,zoom);
+    const float step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
     out.shouldZoom=true; out.bestIndex=g.lock; out.isNewTarget=true;
     out.newOffsetX=prev.x+dirx*(step*invZ); out.newOffsetY=prev.y+diry*(step*invZ); out.distance=step*invZ;
-
-    if constexpr (Settings::debugLogging)
-        LUCHS_LOG_HOST("[ZOOM][TARGET] lock=%d dir=(%.2f,%.2f) step=%.4f turn=%.1f",
-                       g.lock, dirx, diry, step*invZ, g_lastTurnDeg);
 
     return out;
 }
@@ -195,6 +209,7 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
     beginFrame();
     bus.hadCandidate = false;
 
+    // NIE stoppen wegen Pause-Logik: nur bei echter Pause
     if (CudaInterop::getPauseZoom()) {
         fctx.shouldZoom = false;
         fctx.newOffset  = fctx.offset;
@@ -215,10 +230,16 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
         prevF, *(ZoomState*)nullptr
     );
 
+    // NEU: selbst wenn zr.shouldZoom false wäre (kommt de facto nicht mehr vor),
+    // fällt die Apply-Phase auf Drift zurück. => Kein „Stoppen“.
     if (!zr.shouldZoom) {
-        fctx.shouldZoom = false;
-        fctx.newOffset  = prevF;
-        fctx.newOffsetD = { (double)prevF.x, (double)prevF.y };
+        float dx = g.vx, dy = g.vy;
+        if(!norm2(dx,dy)){ dx=1.f; dy=0.f; }
+        const float invZ=1.f/std::max(1e-6f,fctx.zoom);
+        const float step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
+        fctx.shouldZoom = true;
+        fctx.newOffset  = make_float2(prevF.x + dx*(step*invZ), prevF.y + dy*(step*invZ));
+        fctx.newOffsetD = { (double)fctx.newOffset.x, (double)fctx.newOffset.y };
         return;
     }
 
@@ -232,6 +253,7 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
         stepX, stepY
     );
 
+    // Richtung der NDC-Verschiebung
     double dx = (double)(zr.newOffsetX - prevF.x);
     double dy = (double)(zr.newOffsetY - prevF.y);
     {
@@ -243,26 +265,18 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
     const double halfW = 0.5 * (double)fctx.width  * std::fabs(stepX);
     const double halfH = 0.5 * (double)fctx.height * std::fabs(stepY);
 
+    // Basis-Schritt
     double stepNdc = (double)clampf(kSeedStepNDC, 0.0f, kStepMaxNDC);
 
-    // Adaptiver Turn-Boost: bei großen Drehungen kurz kräftiger treten
+    // Turn-Boost: MSVC-sicher (float vs double)
     if (g_lastTurnDeg > kTurnBoostDeg) {
-        // *** FIX: expliziter Typ, vermeidet MSVC-Ambiguität (float vs. double) ***
         stepNdc = std::min<double>(stepNdc * kTurnBoostMul, static_cast<double>(kStepMaxNDC));
     }
 
     double moveX = dx * (stepNdc * halfW);
     double moveY = dy * (stepNdc * halfH);
 
-    // min. 0.5 Pixel
-    const double minPix = std::min(std::fabs(stepX), std::fabs(stepY));
-    const double len    = std::hypot(moveX, moveY);
-    if (len < 0.5 * minPix && len > 0.0) {
-        const double s = (0.5 * minPix) / len;
-        moveX *= s; moveY *= s;
-    }
-
-    // In-Set-Veto: bremsen
+    // --- Black-Guard: tangential ablenken statt reinfallen ---
     if (zr.bestIndex >= 0) {
         float nx = 0, ny = 0;
         ndcCenter(tilesX, tilesY, zr.bestIndex, nx, ny);
@@ -270,10 +284,23 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
         const double py = (double)ny * 0.5 * (double)fctx.height;
         const double wx = (double)state.center.x + px * stepX;
         const double wy = (double)state.center.y + py * stepY;
-        if (insideCardioidOrBulb(wx, wy)) { moveX *= 0.6; moveY *= 0.6; }
+        if (insideCardioidOrBulb(wx, wy)) {
+            // Tangential drehen (90°), Vorzeichen anhand aktueller Richtung
+            const double tx = -dy, ty = dx; // 90° CCW in NDC-Raum
+            double tn = std::hypot(tx,ty); if(tn>0.0){ moveX = (tx/tn) * (stepNdc * halfW);
+                                                      moveY = (ty/tn) * (stepNdc * halfH); }
+        }
     }
 
-    // Blend: bei großen Drehungen etwas weniger filtern
+    // min. 0.5 Pixel für kontinuierliche Bewegung
+    const double minPix = std::min(std::fabs(stepX), std::fabs(stepY));
+    const double len    = std::hypot(moveX, moveY);
+    if (len < 0.5 * minPix && len > 0.0) {
+        const double s = (0.5 * minPix) / len;
+        moveX *= s; moveY *= s;
+    }
+
+    // Blend: bei großen Drehungen etwas weniger filtern (direkter)
     const double blend = (g_lastTurnDeg > 45.0 ? kBlendABase * 0.65 : kBlendABase);
 
     const double baseX = (double)state.center.x;
@@ -286,8 +313,8 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
     fctx.newOffset  = make_float2((float)txD, (float)tyD);
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ZOOM][APPLY] turn=%.1f blend=%.3f move=(%.3e,%.3e) new=(%.9f,%.9f)",
-                       g_lastTurnDeg, blend, moveX, moveY, txD, tyD);
+        LUCHS_LOG_HOST("[ZOOM][APPLY] turn=%.1f starve=%d stepNdc=%.4f move=(%.3e,%.3e) new=(%.9f,%.9f)",
+                       g_lastTurnDeg, g.starve, stepNdc, moveX, moveY, txD, tyD);
     }
 }
 
