@@ -1,70 +1,47 @@
-///// Otter: Klar sichtbare Kapsel; keine schweren Includes im Header (nur gezielt vector_types.h).
-///// Schneefuchs: float2 via <vector_types.h>; gezielte C4324-Unterdrückung; noexcept wo sinnvoll.
-///// Maus: ASCII-only; Header/Source synchron; keine impliziten GL-Includes.
+///// Otter: FrameContext V3 — feste Typen Vec2f/Vec2d (keine anonymen Structs) -> Zuweisungen kompiliert.
+///// Schneefuchs: /WX-kompatibel, ASCII-only; keine GL/CUDA-Includes im Header.
+///// Maus: Backcompat-Felder (newOffset) wieder da; Double ist Quelle der Wahrheit. ***/
 ///// Datei: src/frame_context.hpp
 
 #pragma once
-#include <vector_types.h> // float2/double2 (__align__ → kann C4324 auslösen, daher pragma im .hpp)
 
-#if defined(_MSC_VER)
-  #pragma warning(push)
-  #pragma warning(disable : 4324) // structure was padded due to alignment specifier
-#endif
+#include <vector>
 
-// Ein Frame-Schnappschuss der *Parameter* (GPU/Host-Puffer liegen im RendererState).
-// Maus: Ab tiefen Zoomstufen (≈1e8) brauchen wir höhere Präzision im Mapping.
-//       Daher führen wir *autoritative* Double-Felder ein und spiegeln nach float.
+// Kleine Vektor-Typen (ASCII, ohne Operator-Overloads)
+struct Vec2f { float  x = 0.0f; float  y = 0.0f; };
+struct Vec2d { double x = 0.0;  double y = 0.0;  };
+
 struct FrameContext {
-    // Zielauflösung (Pixel)
+    // Geometrie / Render-Parameter
     int   width         = 0;
     int   height        = 0;
-
-    // Iterations- und Tiling-Parameter
     int   maxIterations = 0;
     int   tileSize      = 0;
 
-    // ---- Autoritative Präzision (Double) – von Zoom-Logik & Mapping verwendet ----
-    double  zoomD       = 1.0;            // primärer Zoom (double, Quelle der Wahrheit)
-    double2 offsetD     = {0.0, 0.0};     // Bildzentrum (double)
-    bool    shouldZoom  = false;          // Ergebnis der Zielsuche
-    double2 newOffsetD  = {0.0, 0.0};     // neues Zielzentrum (double)
+    // Float-Spiegel (wird aus Double synchronisiert)
+    float zoom          = 0.0f;
+    Vec2f offset        = {};
+    Vec2f newOffset     = {};   // Backcompat: wird aus newOffsetD gespiegelt
 
-    // ---- Legacy/Convenience (Float) – für bestehende Pfade, die float erwarten ----
-    // Hinweis: Diese Felder werden aus den Double-Werten gespiegelt.
-    float   zoom        = 1.0f;
-    float2  offset      = {0.0f, 0.0f};
-    float2  newOffset   = {0.0f, 0.0f};
+    // Autoritative Double-Werte (Quelle der Wahrheit)
+    double zoomD        = 0.0;
+    Vec2d  offsetD      = {};
+    Vec2d  newOffsetD   = {};
 
-    // Konstruktor initialisiert aus Settings (Definition in .cpp)
+    bool   shouldZoom   = false;
+
+    // Zeitdelta fuer Normierung (Sekunden)
+    float deltaSeconds  = 0.0f;
+
+    // Heatmap-Statistiken (Groesse == tilesX*tilesY)
+    std::vector<float> entropy;
+    std::vector<float> contrast;
+
+    // API
     FrameContext();
-
-    // Debug-Ausgaben
+    void clear() noexcept;
     void printDebug() const noexcept;
 
-    // Zurücksetzen von Zoom-Entscheidungen (z. B. nach Resize)
-    void clear() noexcept;
-
-    // ----------------- Sync-Helfer (Header-only, noexcept) -----------------
-    // Spiegelt die autoritativen Double-Felder in die Float-Spiegel (ohne Runden-Logik).
-    inline void syncFloatFromDouble() noexcept {
-        zoom        = static_cast<float>(zoomD);
-        offset.x    = static_cast<float>(offsetD.x);
-        offset.y    = static_cast<float>(offsetD.y);
-        newOffset.x = static_cast<float>(newOffsetD.x);
-        newOffset.y = static_cast<float>(newOffsetD.y);
-    }
-
-    // Spiegelt die Float-Spiegel (falls befüllt) zurück in die autoritativen Double-Felder.
-    inline void syncDoubleFromFloat() noexcept {
-        zoom        = (zoom <= 0.0f) ? 1.0f : zoom; // kleine Robustheit
-        zoomD       = static_cast<double>(zoom);
-        offsetD.x   = static_cast<double>(offset.x);
-        offsetD.y   = static_cast<double>(offset.y);
-        newOffsetD.x= static_cast<double>(newOffset.x);
-        newOffsetD.y= static_cast<double>(newOffset.y);
-    }
+    // Spiegelt zoomD/offsetD/newOffsetD -> zoom/offset/newOffset
+    void syncFloatFromDouble() noexcept;
 };
-
-#if defined(_MSC_VER)
-  #pragma warning(pop)
-#endif

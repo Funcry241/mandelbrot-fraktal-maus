@@ -1,331 +1,252 @@
-///// Otter: auto-pan/zoom (lokal, kantengetrieben).
-///// Schneefuchs: No-Stop Drift, adaptiver Turn-Boost, schnellere EMA, Black-Guard (tangential), Starvation-Relief.
-///@@@ Maus: Ziel = nächste valide Kachel; Richtung = lokaler Kontrastgradient.
-// Datei: src/zoom_logic.cpp
+///// Otter: Flow-Zoom V6 (Stats-Single-Path) — Interest-Guard + Softmax + Strafe-Kill + Heading-Lock + EMA.
+///// Schneefuchs: MSVC-safe (std::max<double>), robuste Checks, klare Logs; keine Alternativpfade.
+///// Maus: „wie im Fluss“ – zentrierte Zielwahl über Top-K-Schwerpunkt; kein Seitwärtswobble beim Zoomen.
+///// Datei: src/zoom_logic.cpp
+
+#pragma warning(push)
+#pragma warning(disable: 4100)
 
 #include "zoom_logic.hpp"
 #include "frame_context.hpp"
 #include "renderer_state.hpp"
-#include "cuda_interop.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
-#include "capybara_mapping.cuh"
 
+#include <vector>
 #include <algorithm>
 #include <cmath>
-#include <vector>
+#include <cstdint>
+#include <limits>
+#include <utility>
 
-namespace {
-
-// ---- Tunables (responsiver) ----
-constexpr float  kSeedStepNDC    = 0.012f;
-constexpr float  kStepMaxNDC     = 0.28f;
-constexpr float  kBlendABase     = 0.14f;  // Grund-Blend
-constexpr int    kSearchR        = 2;
-constexpr int    kCooldownFrames = 8;      // etwas kürzer
-constexpr int    kRetargetStreak = 2;
-constexpr float  kHyst           = 1.15f;
-constexpr float  kMuch           = 1.30f;
-constexpr float  kMinRetarget    = 0.08f;
-constexpr float  kLockBox        = 0.15f;  // kleiner, aggressiver
-constexpr float  kMaxTurnDeg     = 35.0f;  // snappier
-constexpr float  kThrMedAddMAD0  = 0.50f;  // Basis-Schwell
-constexpr float  kThrMedMin      = 0.15f;  // Untergrenze bei Starvation
-
-// Turn-Boost: sensibler und kräftiger, beschleunigt Korrektur quer zur Blickrichtung
-constexpr double kTurnBoostDeg   = 40.0;   // vorher 55.0
-constexpr double kTurnBoostMul   = 1.55;   // vorher 1.35
-
-// Black-Guard: verstärke die tangentiale Ablenkung leicht
-constexpr double kBlackGuardMul  = 1.18;   // >1.0 = schneller seitliches Ausweichen
-
-// --- Starvation-Relief ---
-constexpr int    kStarveRelaxStart = 12;   // ab N Frames ohne Kandidat lockern
-constexpr float  kStarveRelaxStep  = 0.08f;// MAD-Faktor-Reduktion pro 4 starved Frames
-
-inline float  clampf(float x,float a,float b){return x<a?a:(x>b?b:x);}
-inline bool   norm2(float& x,float& y){float n=x*x+y*y; if(!(n>0))return false; float inv=1/std::sqrt(n); x*=inv; y*=inv; return true;}
-
-float median_inplace(std::vector<float>& v){
-    if(v.empty()) return 0.f; size_t m=v.size()/2;
-    std::nth_element(v.begin(),v.begin()+m,v.end()); float med=v[m];
-    if(!(v.size()&1)){ std::nth_element(v.begin(),v.begin()+m-1,v.begin()+m); med=0.5f*(med+v[m-1]); }
-    return med;
-}
-float mad_from_center_inplace(std::vector<float>& v,float c){ for(auto& x:v) x=std::fabs(x-c); float mad=median_inplace(v); return (mad>1e-6f)?mad:1.f; }
-
-inline int   idxAt(int x,int y,int sx){ return y*sx+x; }
-inline void  ndcCenter(int sx,int sy,int idx,float& nx,float& ny){
-    int tx=(sx>0)?idx%sx:0, ty=(sx>0)?idx/sx:0;
-    float cx=(tx+0.5f)/std::max(1,sx), cy=(ty+0.5f)/std::max(1,sy);
-    nx=cx*2.f-1.f; ny=cy*2.f-1.f;
-}
-inline float edgeScoreAt(const std::vector<float>& c,int x,int y,int sx,int sy){
-    int i=idxAt(x,y,sx); float lc=c[(size_t)i], acc=0.f; int n=0;
-    const int dx[4]={-1,1,0,0}, dy[4]={0,0,-1,1};
-    for(int k=0;k<4;++k){ int xn=x+dx[k], yn=y+dy[k]; if(xn<0||yn<0||xn>=sx||yn>=sy) continue; acc+=std::fabs(c[(size_t)idxAt(xn,yn,sx)]-lc); ++n; }
-    return lc + 0.75f*((n>0)?acc/n:0.f);
-}
-inline float angleDeg(float ax,float ay,float bx,float by){
-    float a2=ax*ax+ay*ay, b2=bx*bx+by*by; if(!(a2>0.f)||!(b2>0.f)) return 0.f;
-    float c=(ax*bx+ay*by)/(std::sqrt(a2)*std::sqrt(b2)); c=clampf(c,-1.f,1.f);
-    return std::acos(c)*57.29577951308232f;
-}
-
-// Mandelbrot-Inside-Gate
-inline bool insideCardioidOrBulb(double x,double y) noexcept{
-    const double xm=x-0.25, q=xm*xm+y*y; if(q*(q+xm)<0.25*y*y) return true;
-    const double dx=x+1.0; return (dx*dx+y*y)<0.0625;
-}
-
-// ---- Minimaler Zustand ----
-struct ZLock{
-    bool  init=false;
-    int   lock=-1,lastCand=-1,streak=0,cooldown=0;
-    float score=0, nx=1, ny=0, vx=1, vy=0;
-    int   starve=0; // Frames ohne Kandidat
-};
-static ZLock g;
-
-// für adaptive Apply-Phase
-static double g_lastTurnDeg = 0.0;
-
-inline void beginFrame(){
-    if(g.cooldown>0)--g.cooldown;
-    // weniger Dämpfung, damit Richtungswechsel schneller durchkommen
-    g.vx*=0.97f; g.vy*=0.97f;
-}
-
-} // anon
+#define RS_OFFSET_X(ctx) ((ctx).center.x)
+#define RS_OFFSET_Y(ctx) ((ctx).center.y)
+#define RS_ZOOM(ctx)     ((ctx).zoom)
 
 namespace ZoomLogic {
 
-ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
-                              const std::vector<float>& contrast,
-                              int tilesX,int tilesY,
-                              int/*w*/,int/*h*/,
-                              float2/*cur*/, float zoom,
-                              float2 prev, ZoomState&/*unused*/) noexcept
-{
-    ZoomResult out{};
-    g_lastTurnDeg = 0.0; // default
+// ============================== Tunables ====================================
+namespace Flow {
+    inline constexpr int   kFlatGuardFrames   = 12;
+    inline constexpr float kFlatRelThreshold  = 0.02f;
+    inline constexpr float kSoftmaxBeta       = 7.5f;
+    inline constexpr float kLogEps            = -8.5f;   // sparsify (log-space)
+    inline constexpr int   kTopK              = 6;
 
-    const int total=(tilesX>0&&tilesY>0)?tilesX*tilesY:0;
-    if(total<=0 || (int)contrast.size()<total){
-        if constexpr (Settings::debugLogging)
-            LUCHS_LOG_HOST("[ZOOM][WARN] contrast invalid/empty, drift");
-        out.shouldZoom=true; // nie stoppen
-        // sanfter Drift in letzte bekannte Richtung
-        float dx=g.nx, dy=g.ny; norm2(dx,dy);
-        const float invZ=1.f/std::max(1e-6f,zoom);
-        const float step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
-        out.newOffsetX=prev.x+dx*(step*invZ); out.newOffsetY=prev.y+dy*(step*invZ); out.distance=step*invZ;
-        return out;
-    }
+    inline constexpr float kEmaPanAlpha       = 0.30f;
+    inline constexpr float kEmaZoomAlpha      = 0.25f;
 
-    // --- Starvation-Relief: adaptiver Schwellenfaktor ---
-    std::vector<float> tmp=contrast;
-    const float med=median_inplace(tmp), mad=mad_from_center_inplace(tmp,med);
-    float thrMAD = kThrMedAddMAD0;
-    if(g.starve >= kStarveRelaxStart){
-        // ab Start linear lockern (alle 4 Frames)
-        const int extra = (g.starve - kStarveRelaxStart) / 4;
-        thrMAD = std::max(kThrMedMin, kThrMedAddMAD0 - extra * kStarveRelaxStep);
-    }
-    const float thr = med + thrMAD * mad;
+    inline constexpr float kBaseZoomVel       = 0.018f;  // log-Skala
+    inline constexpr float kBasePanVelNDC     = 0.045f;  // NDC/Frame
 
-    // Kandidat um Bildmitte
-    const int cx=tilesX/2, cy=tilesY/2;
-    int bestI=-1; float bestS=-1e30f, bestD2=1e30f, bnx=0,bny=0;
-    for(int dy=-kSearchR; dy<=kSearchR; ++dy) for(int dx=-kSearchR; dx<=kSearchR; ++dx){
-        int x=cx+dx, y=cy+dy; if(x<0||y<0||x>=tilesX||y>=tilesY) continue;
-        float s=edgeScoreAt(contrast,x,y,tilesX,tilesY); if(!(s>thr)) continue;
-        float nx,ny; ndcCenter(tilesX,tilesY,idxAt(x,y,tilesX),nx,ny); float d2=nx*nx+ny*ny;
-        if(d2<bestD2-1e-6f || (std::fabs(d2-bestD2)<=1e-6f && s>bestS)){ bestI=idxAt(x,y,tilesX); bestS=s; bestD2=d2; bnx=nx; bny=ny; }
-    }
+    inline constexpr float kStrafeK           = 60.0f;
+    inline constexpr float kZoomRateLockMin   = 0.004f;
 
-    if(bestI<0){
-        // kein Kandidat -> No-Stop Drift + Starvation hochzählen
-        g.starve = std::min(1000, g.starve+1);
-        float dx=g.nx, dy=g.ny; norm2(dx,dy);
-        const float invZ=1.f/std::max(1e-6f,zoom);
-        const float step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
-        out.shouldZoom=true; out.newOffsetX=prev.x+dx*(step*invZ); out.newOffsetY=prev.y+dy*(step*invZ); out.distance=step*invZ;
-        return out;
-    } else {
-        g.starve = 0; // Reset
-    }
-
-    // Initialisierung / Retarget-Logik
-    if(!g.init){
-        g.init=true; g.lock=bestI; g.score=bestS; g.nx=bnx; g.ny=bny; g.vx=bnx; g.vy=bny;
-        g.cooldown=kCooldownFrames; g.lastCand=bestI; g.streak=1;
-    }
-
-    g.streak = (bestI==g.lastCand)? (g.streak+1) : 1; g.lastCand=bestI;
-    const float dnx=bnx-g.nx, dny=bny-g.ny; const float dist=std::sqrt(dnx*dnx+dny*dny);
-    const bool far = dist>=kMinRetarget, better=bestS>=g.score*kHyst, much=bestS>=g.score*kMuch, inBox=dist<=kLockBox;
-    if((g.cooldown<=0 && far && better && g.streak>=kRetargetStreak && !inBox) || (much && far)){
-        g.lock=bestI; g.score=bestS; g.nx=bnx; g.ny=bny; g.cooldown=kCooldownFrames;
-    }
-
-    // Richtung = lokaler Gradientenstoß (4-Nachbarn)
-    const int bx=g.lock%tilesX, by=g.lock/tilesX;
-    auto ndcOf=[&](int X,int Y){ float nx,ny; ndcCenter(tilesX,tilesY,idxAt(X,Y,tilesX),nx,ny); return std::pair<float,float>{nx,ny}; };
-    const auto center = ndcOf(bx,by);
-    float cxN = center.first, cyN = center.second;
-    float gx=0,gy=0; const int dx4[4]={-1,1,0,0}, dy4[4]={0,0,-1,1};
-    for(int k=0;k<4;++k){
-        int xn=bx+dx4[k], yn=by+dy4[k]; if(xn<0||yn<0||xn>=tilesX||yn>=tilesY) continue;
-        const float w=contrast[(size_t)idxAt(xn,yn,tilesX)]-contrast[(size_t)g.lock];
-        const auto nb = ndcOf(xn,yn); float nx=nb.first, ny=nb.second;
-        float vx=nx-cxN, vy=ny-cyN; if(norm2(vx,vy)){ gx+=w*vx; gy+=w*vy; }
-    }
-    float dirx=(std::fabs(gx)+std::fabs(gy)>0)?gx:g.nx, diry=(std::fabs(gx)+std::fabs(gy)>0)?gy:g.ny; norm2(dirx,diry);
-
-    // ---- Anti-Flip + großzügiger Turn-Clamp ----
-    if(std::fabs(g.vx)+std::fabs(g.vy)>0.f){
-        const float pdot = g.vx*dirx + g.vy*diry;
-        if(pdot < 0.0f){ dirx = 0.6f*dirx + 0.4f*g.vx; diry = 0.6f*diry + 0.4f*g.vy; norm2(dirx,diry); }
-        const float turn=angleDeg(g.vx,g.vy,dirx,diry);
-        g_lastTurnDeg = turn; // für Apply-Phase
-        if(turn>1e-3f){
-            const float t=clampf(kMaxTurnDeg/turn,0.f,1.f);
-            float ox=(1.f-t)*g.vx + t*dirx, oy=(1.f-t)*g.vy + t*diry; norm2(ox,oy);
-            dirx=ox; diry=oy;
-        }
-    } else {
-        g_lastTurnDeg = 0.0;
-    }
-
-    // Schnellere Richtungs-EMA (snappier) – aggressiver für schnellere Korrekturen
-    g.vx = 0.70f*g.vx + 0.30f*dirx; 
-    g.vy = 0.70f*g.vy + 0.30f*diry; 
-    norm2(g.vx,g.vy);
-    dirx=g.vx; diry=g.vy;
-
-    const float invZ=1.f/std::max(1e-6f,zoom);
-    const float step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
-    out.shouldZoom=true; out.bestIndex=g.lock; out.isNewTarget=true;
-    out.newOffsetX=prev.x+dirx*(step*invZ); out.newOffsetY=prev.y+diry*(step*invZ); out.distance=step*invZ;
-
-    return out;
+    inline constexpr int   kHeadingLockFrames = 36;      // ≈0.6s @60fps
+    inline constexpr float kYawDegPerFrame    = 3.0f;
+    inline constexpr float kPanDeadbandNDC    = 0.002f;
 }
 
-void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& bus, float/*gain*/) noexcept
-{
-    beginFrame();
-    bus.hadCandidate = false;
+// =============================== State ======================================
+struct FlowState {
+    float prevLogZoom = 0.0f;
 
-    // Nur bei echter Pause stoppen
-    if (CudaInterop::getPauseZoom()) {
-        fctx.shouldZoom = false;
-        fctx.newOffset  = fctx.offset;
-        fctx.newOffsetD = { (double)fctx.offset.x, (double)fctx.offset.y };
-        return;
+    int   flatRun     = 0;
+    int   lockFrames  = 0;
+    float lastHeading = 0.0f;
+
+    float emaPanX     = 0.0f;
+    float emaPanY     = 0.0f;
+    float emaZoom     = 0.0f;
+
+    uint64_t frameIdx = 0;
+};
+static FlowState g;
+
+// ============================== Helpers =====================================
+static inline float clampf(float v, float a, float b){ return std::max(a, std::min(v, b)); }
+static inline float radians(float deg){ return deg * 3.14159265358979323846f / 180.0f; }
+static inline float atan2safe(float y, float x){ return std::atan2(y, x); }
+static inline float wrap_pi(float a){ while(a>3.14159265f) a-=6.28318531f; while(a<-3.14159265f) a+=6.28318531f; return a; }
+
+static std::pair<int,float> argmax2(const std::vector<float>& s){
+    int bi=-1; float bv=-std::numeric_limits<float>::infinity();
+    int si=-1; float sv=-std::numeric_limits<float>::infinity();
+    for(size_t i=0;i<s.size();++i){
+        float v=s[i];
+        if(v>bv){ si=bi; sv=bv; bi=(int)i; bv=v; }
+        else if(v>sv){ si=(int)i; sv=v; }
     }
-
-    const int tilePx = std::max(1, (Settings::Kolibri::gridScreenConstant ? Settings::Kolibri::desiredTilePx : fctx.tileSize));
-    const int tilesX = (fctx.width  + tilePx - 1) / tilePx;
-    const int tilesY = (fctx.height + tilePx - 1) / tilePx;
-
-    const float2 prevF = fctx.offset;
-    ZoomResult zr = evaluateZoomTarget(
-        state.h_entropy, state.h_contrast,
-        tilesX, tilesY,
-        fctx.width, fctx.height,
-        fctx.offset, fctx.zoom,
-        prevF, *(ZoomState*)nullptr
-    );
-
-    // Fallback: Drift statt stehen bleiben (sollte kaum auftreten)
-    if (!zr.shouldZoom) {
-        float dx = g.vx, dy = g.vy;
-        if(!norm2(dx,dy)){ dx=1.f; dy=0.f; }
-        const float invZ=1.f/std::max(1e-6f,fctx.zoom);
-        const float step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
-        fctx.shouldZoom = true;
-        fctx.newOffset  = make_float2(prevF.x + dx*(step*invZ), prevF.y + dy*(step*invZ));
-        fctx.newOffsetD = { (double)fctx.newOffset.x, (double)fctx.newOffset.y };
-        return;
-    }
-
-    bus.hadCandidate = (zr.bestIndex >= 0);
-
-    // NDC -> Welt
-    double stepX = 0, stepY = 0;
-    capy_pixel_steps_from_zoom_scale(
-        (double)state.pixelScale.x, (double)state.pixelScale.y,
-        fctx.width, (fctx.zoomD > 0.0 ? fctx.zoomD : (double)state.zoom),
-        stepX, stepY
-    );
-
-    // Richtung der NDC-Verschiebung
-    double dx = (double)(zr.newOffsetX - prevF.x);
-    double dy = (double)(zr.newOffsetY - prevF.y);
-    {
-        const double n2 = dx*dx + dy*dy;
-        if (!(n2 > 0.0)) { dx = 1.0; dy = 0.0; }
-        else { const double inv = 1.0 / std::sqrt(n2); dx *= inv; dy *= inv; }
-    }
-
-    const double halfW = 0.5 * (double)fctx.width  * std::fabs(stepX);
-    const double halfH = 0.5 * (double)fctx.height * std::fabs(stepY);
-
-    // Basis-Schritt
-    double stepNdc = (double)clampf(kSeedStepNDC, 0.0f, kStepMaxNDC);
-
-    // Turn-Boost: MSVC-sicher (float vs double)
-    if (g_lastTurnDeg > kTurnBoostDeg) {
-        stepNdc = std::min<double>(stepNdc * kTurnBoostMul, static_cast<double>(kStepMaxNDC));
-    }
-
-    double moveX = dx * (stepNdc * halfW);
-    double moveY = dy * (stepNdc * halfH);
-
-    // --- Black-Guard: tangential ablenken statt reinfallen ---
-    if (zr.bestIndex >= 0) {
-        float nx = 0, ny = 0;
-        ndcCenter(tilesX, tilesY, zr.bestIndex, nx, ny);
-        const double px = (double)nx * 0.5 * (double)fctx.width;
-        const double py = (double)ny * 0.5 * (double)fctx.height;
-        const double wx = (double)state.center.x + px * stepX;
-        const double wy = (double)state.center.y + py * stepY;
-        if (insideCardioidOrBulb(wx, wy)) {
-            // Tangential drehen (90°), Vorzeichen anhand aktueller Richtung, mit Verstärkung
-            const double tx = -dy, ty = dx; // 90° CCW in NDC-Raum
-            double tn = std::hypot(tx,ty);
-            if(tn>0.0){
-                moveX = (tx/tn) * (stepNdc * halfW) * kBlackGuardMul;
-                moveY = (ty/tn) * (stepNdc * halfH) * kBlackGuardMul;
-            }
+    return {bi, sv};
+}
+static void sort_topk(const std::vector<float>& s, int k, std::vector<int>& outIdx){
+    outIdx.clear(); outIdx.reserve((size_t)k);
+    outIdx.push_back(-1);
+    auto [bi,_sv] = argmax2(s);
+    int si=-1;
+    if(bi>=0){
+        float sv=-std::numeric_limits<float>::infinity();
+        for(size_t i=0;i<s.size();++i){
+            if((int)i==bi) continue;
+            float v=s[i]; if(v>sv){ sv=v; si=(int)i; }
         }
     }
+    if(bi>=0) outIdx[0]=bi;
+    if(si>=0) outIdx.push_back(si);
+    for(size_t i=0;i<s.size();++i){
+        if((int)i==bi || (int)i==si) continue;
+        outIdx.push_back((int)i);
+    }
+    std::partial_sort(outIdx.begin(), outIdx.begin()+std::min<int>(k,(int)outIdx.size()), outIdx.end(),
+                      [&](int a,int b){ return s[(size_t)a] > s[(size_t)b]; });
+    if((int)outIdx.size()>k) outIdx.resize((size_t)k);
+}
+static inline void indexToXY(int idx,int tilesX,int& x,int& y){ x = (idx % tilesX); y = (idx / tilesX); }
+static inline void tileCenterNDC(int tx,int ty,int tilesX,int tilesY,float& nx,float& ny){
+    const float cx=(float(tx)+0.5f)/float(tilesX), cy=(float(ty)+0.5f)/float(tilesY);
+    nx = cx*2.0f - 1.0f;
+    ny = 1.0f     - cy*2.0f;
+}
 
-    // min. 0.5 Pixel für kontinuierliche Bewegung
-    const double minPix = std::min(std::fabs(stepX), std::fabs(stepY));
-    const double len    = std::hypot(moveX, moveY);
-    if (len < 0.5 * minPix && len > 0.0) {
-        const double s = (0.5 * minPix) / len;
-        moveX *= s; moveY *= s;
+// ================================ Core ======================================
+void update(FrameContext& frameCtx, RendererState& rs)
+{
+    g.frameIdx++;
+
+    // Geometrie & Tiles
+    const int width    = frameCtx.width;
+    const int height   = frameCtx.height;
+    const int tileSize = frameCtx.tileSize;
+    if(width<=0 || height<=0 || tileSize<=0) return;
+
+    const int tilesX = (width  + tileSize - 1) / tileSize;
+    const int tilesY = (height + tileSize - 1) / tileSize;
+    const int nTiles = tilesX * tilesY;
+
+    // Preconditions: Metrikpuffer müssen passen (kein Alternativpfad)
+    if((int)frameCtx.entropy.size()  < nTiles ||
+       (int)frameCtx.contrast.size() < nTiles){
+        if constexpr(Settings::debugLogging){
+            LUCHS_LOG_HOST("[Zoom/Flow] ERROR stats size mismatch: need=%d e=%zu c=%zu",
+                           nTiles, frameCtx.entropy.size(), frameCtx.contrast.size());
+        }
+        return;
     }
 
-    // Blend: bei großen Drehungen etwas weniger filtern (direkter)
-    const double blend = (g_lastTurnDeg > 45.0 ? kBlendABase * 0.65 : kBlendABase);
-
-    const double baseX = (double)state.center.x;
-    const double baseY = (double)state.center.y;
-    const double txD   = baseX * (1.0 - blend) + (baseX + moveX) * blend;
-    const double tyD   = baseY * (1.0 - blend) + (baseY + moveY) * blend;
-
-    fctx.shouldZoom = true;
-    fctx.newOffsetD = { txD, tyD };
-    fctx.newOffset  = make_float2((float)txD, (float)tyD);
-
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ZOOM][APPLY] turn=%.1f starve=%d stepNdc=%.4f move=(%.3e,%.3e) new=(%.9f,%.9f)",
-                       g_lastTurnDeg, g.starve, stepNdc, moveX, moveY, txD, tyD);
+    // 1) Score + Max
+    std::vector<float> score; score.resize((size_t)nTiles);
+    float maxV = 1e-9f;
+    for(int i=0;i<nTiles;++i){
+        float v = frameCtx.entropy[(size_t)i] + frameCtx.contrast[(size_t)i];
+        score[(size_t)i]=v; if(v>maxV) maxV=v;
     }
+    const float bestV = *std::max_element(score.begin(), score.end());
+    const bool  isFlat = (bestV < Flow::kFlatRelThreshold * maxV) || (bestV <= 0.0f);
+    if(isFlat) g.flatRun++; else g.flatRun=0;
+
+    // 2) Top-K Softmax-Schwerpunkt
+    std::vector<int> top; sort_topk(score, Flow::kTopK, top);
+
+    if(g.flatRun >= Flow::kFlatGuardFrames && (int)top.size()>=2){
+        std::swap(top[0], top[1]);                 // „zweitbestes“ Ziel erzwingen
+        g.lockFrames = Flow::kHeadingLockFrames;   // Kurs nach Retarget sanft begrenzen
+        if constexpr(Settings::debugLogging){
+            LUCHS_LOG_HOST("[Zoom/Flow] retarget second best after flat=%d", g.flatRun);
+        }
+        g.flatRun = 0;
+    }
+
+    float accX=0.0f, accY=0.0f, accW=0.0f;
+    const float maxTop = (top.empty()? 0.0f : score[(size_t)top[0]]);
+    const float logEps = Flow::kLogEps;            // sparsify im Log-Raum
+    for(size_t i=0;i<top.size();++i){
+        const int idx = top[i];
+        float w = score[(size_t)idx];
+        float z = (w - maxTop) + logEps;           // -> stärkerer Fokus auf Bestes
+        float sw = std::exp(Flow::kSoftmaxBeta * z);
+        int tx,ty; indexToXY(idx, tilesX, tx, ty);
+        float nx,ny; tileCenterNDC(tx,ty,tilesX,tilesY,nx,ny);
+        accX += sw * nx; accY += sw * ny; accW += sw;
+    }
+
+    float tgtX = 0.0f, tgtY = 0.0f;
+    if(accW > 0.0f){ tgtX = accX/accW; tgtY = accY/accW; }
+
+    // 3) Richtung (NDC) normalisieren
+    float panX = tgtX, panY = tgtY;
+    const float panLen = std::sqrt(panX*panX + panY*panY);
+    if(panLen > 1e-6f){ panX/=panLen; panY/=panLen; }
+
+    // 4) Strafe-Kill (Seitwärtsdämpfung bei starkem Zoom)
+    const double zoomForLog = std::max<double>(1e-12, static_cast<double>(RS_ZOOM(rs)));
+    const float  logZoom    = static_cast<float>(std::log(zoomForLog));
+    const float  dLogZoom   = logZoom - g.prevLogZoom;
+    g.prevLogZoom           = logZoom;
+
+    float strafeFactor = 1.0f - Flow::kStrafeK * std::fabs(dLogZoom);
+    if(std::fabs(dLogZoom) >= Flow::kZoomRateLockMin) strafeFactor = clampf(strafeFactor, 0.0f, 0.1f);
+    else                                              strafeFactor = clampf(strafeFactor, 0.0f, 1.0f);
+
+    // 5) Pan-Speed (inhaltsgewichtet) + Deadband
+    const float contentW = clampf(maxV>0.0f ? (bestV/maxV) : 0.0f, 0.15f, 1.0f);
+    float panSpeed = Flow::kBasePanVelNDC * (0.25f + 0.75f * contentW);
+    panSpeed *= strafeFactor;
+
+    if(panLen < Flow::kPanDeadbandNDC){ panX=0.0f; panY=0.0f; panSpeed=0.0f; }
+
+    // 6) Heading-Lock (sanfter Kurs nach Retarget)
+    if(g.lockFrames > 0){
+        float curHeading = atan2safe(panY, panX);
+        float delta      = wrap_pi(curHeading - g.lastHeading);
+        const float maxDelta = radians(Flow::kYawDegPerFrame);
+        if(std::fabs(delta) > maxDelta){
+            const float sign = (delta>0.0f? 1.0f : -1.0f);
+            curHeading = g.lastHeading + sign * maxDelta;
+            panX = std::cos(curHeading);
+            panY = std::sin(curHeading);
+        }
+        g.lastHeading = curHeading;
+        g.lockFrames--;
+    } else {
+        g.lastHeading = atan2safe(panY, panX);
+    }
+
+    // 7) EMA-Glättung
+    g.emaPanX = (1.0f - Flow::kEmaPanAlpha) * g.emaPanX + Flow::kEmaPanAlpha * (panX * panSpeed);
+    g.emaPanY = (1.0f - Flow::kEmaPanAlpha) * g.emaPanY + Flow::kEmaPanAlpha * (panY * panSpeed);
+
+    const float zoomVel = Flow::kBaseZoomVel * contentW;
+    g.emaZoom  = (1.0f - Flow::kEmaZoomAlpha) * g.emaZoom + Flow::kEmaZoomAlpha * zoomVel;
+
+    // 8) Zeitnormierung
+    const float dt = (frameCtx.deltaSeconds > 0.0f ? frameCtx.deltaSeconds : 1.0f/60.0f);
+
+    // 9) Anwenden
+    RS_OFFSET_X(rs) += g.emaPanX * dt;
+    RS_OFFSET_Y(rs) += g.emaPanY * dt;
+    RS_ZOOM(rs)     *= std::exp(g.emaZoom * dt);
+
+    if constexpr(Settings::performanceLogging){
+        LUCHS_LOG_HOST("[Zoom/Flow] f=%llu flat=%d best=%.4f max=%.4f dlog=%.5f strafe=%.3f pan=(%.4f,%.4f) pspd=%.4f zoom=%.6f",
+                       (unsigned long long)g.frameIdx, g.flatRun, bestV, maxV, dLogZoom, strafeFactor,
+                       g.emaPanX, g.emaPanY, panSpeed, RS_ZOOM(rs));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Legacy/Kompatibilität: erwarteter Entry aus frame_pipeline.cpp
+// Signatur lt. Header: void evaluateAndApply(FrameContext&, RendererState&, ZoomState&, float) noexcept
+// ---------------------------------------------------------------------------
+void evaluateAndApply(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/, float dtOverride) noexcept
+{
+    const float savedDt = frameCtx.deltaSeconds;
+    if (dtOverride > 0.0f) frameCtx.deltaSeconds = dtOverride;
+
+    update(frameCtx, rs);
+
+    frameCtx.deltaSeconds = savedDt;
 }
 
 } // namespace ZoomLogic
+
+#pragma warning(pop)
