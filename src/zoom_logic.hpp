@@ -17,7 +17,9 @@ namespace ZoomLogic {
 
 // Kleiner, trivially-constructible Zustand (by-value in RendererState erlaubt)
 struct ZoomState {
-    bool hadCandidate = false; // optionaler Marker für Pipeline
+    // Wird von evaluateAndApply gesetzt: true, wenn in diesem Frame ein valider
+    // Zielkandidat (Tile) gefunden wurde. Die Pipeline nutzt das als Gate für den Zoom.
+    bool hadCandidate = false;
 };
 
 // Ergebnis der Zielauswahl (ohne float2, um C4324 sicher zu vermeiden)

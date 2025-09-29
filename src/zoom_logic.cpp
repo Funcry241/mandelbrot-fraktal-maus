@@ -168,12 +168,14 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
     // Richtung = lokaler Gradientenstoß (4-Nachbarn)
     const int bx=g.lock%tilesX, by=g.lock/tilesX;
     auto ndcOf=[&](int X,int Y){ float nx,ny; ndcCenter(tilesX,tilesY,idxAt(X,Y,tilesX),nx,ny); return std::pair<float,float>{nx,ny}; };
-    float cxN,cyN; std::tie(cxN,cyN)=ndcOf(bx,by);
+    const auto center = ndcOf(bx,by);
+    float cxN = center.first, cyN = center.second;
     float gx=0,gy=0; const int dx4[4]={-1,1,0,0}, dy4[4]={0,0,-1,1};
     for(int k=0;k<4;++k){
         int xn=bx+dx4[k], yn=by+dy4[k]; if(xn<0||yn<0||xn>=tilesX||yn>=tilesY) continue;
         const float w=contrast[(size_t)idxAt(xn,yn,tilesX)]-contrast[(size_t)g.lock];
-        float nx,ny; std::tie(nx,ny)=ndcOf(xn,yn); float vx=nx-cxN, vy=ny-cyN; if(norm2(vx,vy)){ gx+=w*vx; gy+=w*vy; }
+        const auto nb = ndcOf(xn,yn); float nx=nb.first, ny=nb.second;
+        float vx=nx-cxN, vy=ny-cyN; if(norm2(vx,vy)){ gx+=w*vx; gy+=w*vy; }
     }
     float dirx=(std::fabs(gx)+std::fabs(gy)>0)?gx:g.nx, diry=(std::fabs(gx)+std::fabs(gy)>0)?gy:g.ny; norm2(dirx,diry);
 
@@ -287,8 +289,11 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
         if (insideCardioidOrBulb(wx, wy)) {
             // Tangential drehen (90°), Vorzeichen anhand aktueller Richtung
             const double tx = -dy, ty = dx; // 90° CCW in NDC-Raum
-            double tn = std::hypot(tx,ty); if(tn>0.0){ moveX = (tx/tn) * (stepNdc * halfW);
-                                                      moveY = (ty/tn) * (stepNdc * halfH); }
+            double tn = std::hypot(tx,ty);
+            if(tn>0.0){
+                moveX = (tx/tn) * (stepNdc * halfW);
+                moveY = (ty/tn) * (stepNdc * halfH);
+            }
         }
     }
 

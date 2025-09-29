@@ -324,15 +324,11 @@ void execute(RendererState& state) {
         ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, kZOOM_GAIN);
     }
 
-    // Fallback: wenn (noch) keine Metriken vorhanden sind, dennoch ein shouldZoom liefern
+    // **Fix**: Bei fehlenden Metriken NICHT Offset/Drift überschreiben, nur Gain gate’n.
     if (!CudaInterop::getPauseZoom() &&
         (state.h_entropy.empty() || state.h_contrast.empty()))
     {
-        g_ctx.shouldZoom = true;
-        g_ctx.newOffset  = g_ctx.offset;
-        g_ctx.newOffsetD = g_ctx.offsetD; // Double-Spiegel ebenfalls setzen
-        // In diesem Pfad gab es sicher keinen Kandidaten
-        g_zoomState.hadCandidate = false;
+        g_zoomState.hadCandidate = false; // Zoom-Gain OFF, Bewegung bleibt erhalten
     }
 
     if (g_ctx.shouldZoom) {
