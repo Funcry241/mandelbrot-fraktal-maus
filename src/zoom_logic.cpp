@@ -1,7 +1,7 @@
 ///// Otter: auto-pan/zoom (lokal, kantengetrieben).
-///// Schneefuchs: Anti-Flip, Move-EMA, harte Pixelkappung, Hysterese+Streak.
-///// Maus: Ziel = nächste valide Kachel; Richtung = lokaler Kontrastgradient.
-///// Datei: src/zoom_logic.cpp
+///// Schneefuchs: Anti-Flip, adaptiver Turn-Boost, schnellere EMA, reduziertes Blend bei großen Drehungen.
+///@@@ Maus: Ziel = nächste valide Kachel; Richtung = lokaler Kontrastgradient.
+// Datei: src/zoom_logic.cpp
 
 #include "zoom_logic.hpp"
 #include "frame_context.hpp"
@@ -17,13 +17,22 @@
 
 namespace {
 
-// ---- Tunables (entschärft) ----
-constexpr float  kSeedStepNDC=0.012f, kStepMaxNDC=0.28f, kBlendA=0.14f;
-constexpr int    kSearchR=2, kCooldownFrames=10, kRetargetStreak=2;
-constexpr float  kHyst=1.15f, kMuch=1.30f, kMinRetarget=0.08f, kLockBox=0.20f;
-constexpr float  kMaxTurnDeg=12.0f, kThrMedAddMAD=0.50f;
-constexpr double kMaxPixStep=0.01;
-constexpr double kMoveEMA=0.30;
+// ---- Tunables (responsiver) ----
+constexpr float  kSeedStepNDC   = 0.012f;
+constexpr float  kStepMaxNDC    = 0.28f;
+constexpr float  kBlendABase    = 0.14f;  // Grund-Blend
+constexpr int    kSearchR       = 2;
+constexpr int    kCooldownFrames= 8;      // etwas kürzer
+constexpr int    kRetargetStreak= 2;
+constexpr float  kHyst          = 1.15f;
+constexpr float  kMuch          = 1.30f;
+constexpr float  kMinRetarget   = 0.08f;
+constexpr float  kLockBox       = 0.15f;  // kleiner, aggressiver
+constexpr float  kMaxTurnDeg    = 35.0f;  // deutlich höher = snappier
+constexpr float  kThrMedAddMAD  = 0.50f;
+
+constexpr double kTurnBoostDeg  = 55.0;   // ab diesem Winkel einmaliger Boost …
+constexpr double kTurnBoostMul  = 1.35;   // … um den Schritt zu beschleunigen
 
 inline float  clampf(float x,float a,float b){return x<a?a:(x>b?b:x);}
 inline bool   norm2(float& x,float& y){float n=x*x+y*y; if(!(n>0))return false; float inv=1/std::sqrt(n); x*=inv; y*=inv; return true;}
@@ -59,9 +68,21 @@ inline bool insideCardioidOrBulb(double x,double y) noexcept{
 }
 
 // ---- Minimaler Zustand ----
-struct ZLock{ bool init=false; int lock=-1,lastCand=-1,streak=0,cooldown=0; float score=0, nx=1, ny=0, vx=1, vy=0; };
+struct ZLock{
+    bool  init=false;
+    int   lock=-1,lastCand=-1,streak=0,cooldown=0;
+    float score=0, nx=1, ny=0, vx=1, vy=0;
+};
 static ZLock g;
-inline void beginFrame(){ if(g.cooldown>0)--g.cooldown; g.vx*=0.92f; g.vy*=0.92f; }
+
+// für adaptive Apply-Phase
+static double g_lastTurnDeg = 0.0;
+
+inline void beginFrame(){
+    if(g.cooldown>0)--g.cooldown;
+    // weniger Dämpfung, damit Richtungswechsel schneller „durchkommen“
+    g.vx*=0.97f; g.vy*=0.97f;
+}
 
 } // anon
 
@@ -75,6 +96,8 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
                               float2 prev, ZoomState&/*unused*/) noexcept
 {
     ZoomResult out{};
+    g_lastTurnDeg = 0.0; // default
+
     const int total=(tilesX>0&&tilesY>0)?tilesX*tilesY:0;
     if(total<=0 || (int)contrast.size()<total){
         if constexpr (Settings::debugLogging)
@@ -136,18 +159,24 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
     }
     float dirx=(std::fabs(gx)+std::fabs(gy)>0)?gx:g.nx, diry=(std::fabs(gx)+std::fabs(gy)>0)?gy:g.ny; norm2(dirx,diry);
 
-    // ---- Anti-Flip + Turn-Clamp ----
+    // ---- Anti-Flip + großzügiger Turn-Clamp ----
     if(std::fabs(g.vx)+std::fabs(g.vy)>0.f){
         const float pdot = g.vx*dirx + g.vy*diry;
-        if(pdot < 0.0f){ dirx=g.vx; diry=g.vy; norm2(dirx,diry); }
+        // Keine harte Umkehr mehr, nur abfedern
+        if(pdot < 0.0f){ dirx = 0.6f*dirx + 0.4f*g.vx; diry = 0.6f*diry + 0.4f*g.vy; norm2(dirx,diry); }
         const float turn=angleDeg(g.vx,g.vy,dirx,diry);
+        g_lastTurnDeg = turn; // für Apply-Phase
         if(turn>1e-3f){
             const float t=clampf(kMaxTurnDeg/turn,0.f,1.f);
             float ox=(1.f-t)*g.vx + t*dirx, oy=(1.f-t)*g.vy + t*diry; norm2(ox,oy);
             dirx=ox; diry=oy;
         }
+    } else {
+        g_lastTurnDeg = 0.0;
     }
-    g.vx = 0.85f*g.vx + 0.15f*dirx; g.vy = 0.85f*g.vy + 0.15f*diry; norm2(g.vx,g.vy);
+
+    // Schnellere Richtungs-EMA (snappier)
+    g.vx = 0.75f*g.vx + 0.25f*dirx; g.vy = 0.75f*g.vy + 0.25f*diry; norm2(g.vx,g.vy);
     dirx=g.vx; diry=g.vy;
 
     float invZ=1.f/std::max(1e-6f,zoom), step=clampf(kSeedStepNDC,0.f,kStepMaxNDC);
@@ -155,7 +184,8 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
     out.newOffsetX=prev.x+dirx*(step*invZ); out.newOffsetY=prev.y+diry*(step*invZ); out.distance=step*invZ;
 
     if constexpr (Settings::debugLogging)
-        LUCHS_LOG_HOST("[ZOOM][TARGET] lock=%d dir=(%.2f,%.2f) step=%.4f", g.lock, dirx, diry, step*invZ);
+        LUCHS_LOG_HOST("[ZOOM][TARGET] lock=%d dir=(%.2f,%.2f) step=%.4f turn=%.1f",
+                       g.lock, dirx, diry, step*invZ, g_lastTurnDeg);
 
     return out;
 }
@@ -163,7 +193,6 @@ ZoomResult evaluateZoomTarget(const std::vector<float>&/*entropy*/,
 void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& bus, float/*gain*/) noexcept
 {
     beginFrame();
-    // Default: kein Kandidat gemeldet, bis eval was findet
     bus.hadCandidate = false;
 
     if(CudaInterop::getPauseZoom()){
@@ -177,7 +206,8 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
     const int tilesX=(fctx.width+tilePx-1)/tilePx, tilesY=(fctx.height+tilePx-1)/tilePx;
 
     const float2 prevF=fctx.offset;
-    ZoomResult zr=evaluateZoomTarget(state.h_entropy,state.h_contrast,tilesX,tilesY,fctx.width,fctx.height,fctx.offset,fctx.zoom,prevF,*(ZoomState*)nullptr);
+    ZoomResult zr=evaluateZoomTarget(state.h_entropy,state.h_contrast,tilesX,tilesY,
+                                     fctx.width,fctx.height,fctx.offset,fctx.zoom,prevF,*(ZoomState*)nullptr);
     if(!zr.shouldZoom){
         fctx.shouldZoom=false;
         fctx.newOffset=prevF;
@@ -185,19 +215,26 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
         return;
     }
 
-    // Kandidaten-Marker setzen: nur wenn wirklich ein bestIndex existiert
     bus.hadCandidate = (zr.bestIndex >= 0);
 
     // NDC->Welt
     double stepX=0, stepY=0;
     capy_pixel_steps_from_zoom_scale((double)state.pixelScale.x,(double)state.pixelScale.y,
-                                     fctx.width, fctx.zoomD>0.0?fctx.zoomD:(double)state.zoom, stepX,stepY);
+                                     fctx.width, (fctx.zoomD>0.0?fctx.zoomD:(double)state.zoom),
+                                     stepX,stepY);
 
     double dx=(double)(zr.newOffsetX-prevF.x), dy=(double)(zr.newOffsetY-prevF.y);
     { const double n2=dx*dx+dy*dy; if(!(n2>0.0)){ dx=1.0; dy=0.0; } else { const double inv=1.0/std::sqrt(n2); dx*=inv; dy*=inv; } }
 
     const double halfW=0.5*(double)fctx.width*std::fabs(stepX), halfH=0.5*(double)fctx.height*std::fabs(stepY);
-    const double stepNdc=(double)clampf(kSeedStepNDC,0.0f,kStepMaxNDC);
+    double stepNdc=(double)clampf(kSeedStepNDC,0.0f,kStepMaxNDC);
+
+    // Adaptiver Turn-Boost: bei großen Drehungen kurz kräftiger treten
+    if(g_lastTurnDeg > kTurnBoostDeg) {
+        // *** FIX: expliziter Typ, vermeidet MSVC-Ambiguität (float vs. double) ***
+        stepNdc = std::min<double>(stepNdc * kTurnBoostMul, static_cast<double>(kStepMaxNDC));
+    }
+
     double moveX=dx*(stepNdc*halfW), moveY=dy*(stepNdc*halfH);
 
     // min. 0.5 Pixel
@@ -205,7 +242,7 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
     const double len=std::hypot(moveX,moveY);
     if(len<0.5*minPix && len>0.0){ const double s=(0.5*minPix)/len; moveX*=s; moveY*=s; }
 
-    // In-Set-Veto: bremsen (statt springen)
+    // In-Set-Veto: bremsen
     if(zr.bestIndex>=0){
         float nx=0,ny=0; ndcCenter(tilesX,tilesY,zr.bestIndex,nx,ny);
         const double px=(double)nx*0.5*(double)fctx.width, py=(double)ny*0.5*(double)fctx.height;
@@ -213,11 +250,20 @@ void evaluateAndApply(::FrameContext& fctx, ::RendererState& state, ZoomState& b
         if(insideCardioidOrBulb(wx,wy)){ moveX*=0.6; moveY*=0.6; }
     }
 
-    const double baseX=(double)state.center.x, baseY=(double)state.center.y;
-    const double txD = baseX*(1.0-kBlendA) + (baseX+moveX)*kBlendA;
-    const double tyD = baseY*(1.0-kBlendA) + (baseY+moveY)*kBlendA;
+    // Blend: bei großen Drehungen etwas weniger filtern
+    const double blend = (g_lastTurnDeg > 45.0 ? kBlendABase*0.65 : kBlendABase);
 
-    fctx.shouldZoom=true; fctx.newOffsetD={txD,tyD}; fctx.newOffset=make_float2((float)txD,(float)tyD);
+    const double baseX=(double)state.center.x, baseY=(double)state.center.y;
+    const double txD = baseX*(1.0-blend) + (baseX+moveX)*blend;
+    const double tyD = baseY*(1.0-blend) + (baseY+moveY)*blend;
+
+    fctx.shouldZoom=true;
+    fctx.newOffsetD={txD,tyD};
+    fctx.newOffset=make_float2((float)txD,(float)tyD);
+
+    if constexpr (Settings::debugLogging)
+        LUCHS_LOG_HOST("[ZOOM][APPLY] turn=%.1f blend=%.3f move=(%.3e,%.3e) new=(%.9f,%.9f)",
+                       g_lastTurnDeg, blend, moveX, moveY, txD, tyD);
 }
 
 } // namespace ZoomLogic

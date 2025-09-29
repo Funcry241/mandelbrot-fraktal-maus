@@ -1,7 +1,7 @@
 ///// Otter: Public API for Silk-Lite auto-pan/zoom with robust drift fallback.
 ///// Schneefuchs: Header bleibt schlank; Forward-Decls statt schwerer Includes; /WX-fest.
 ///// Maus: Keine float2-Felder in Public-API-Strukturen (vermeidet MSVC C4324); ASCII-only.
-///// Datei: src/zoom_logic.hpp
+// Datei: src/zoom_logic.hpp
 
 #pragma once
 
@@ -17,8 +17,7 @@ namespace ZoomLogic {
 
 // Kleiner, trivially-constructible Zustand (by-value in RendererState erlaubt)
 struct ZoomState {
-    // NEU: Merker, ob in dieser Frame ein valider Ziel-Kandidat vorhanden war.
-    bool hadCandidate = false;
+    bool hadCandidate = false; // optionaler Marker für Pipeline
 };
 
 // Ergebnis der Zielauswahl (ohne float2, um C4324 sicher zu vermeiden)
