@@ -49,17 +49,17 @@ namespace Flow {
 
 // =============================== State ======================================
 struct FlowState {
-    float prevLogZoom = 0.0f;
+    float     prevLogZoom = 0.0f;
 
-    int   flatRun     = 0;
-    int   lockFrames  = 0;
-    float lastHeading = 0.0f;
+    int       flatRun     = 0;
+    int       lockFrames  = 0;
+    float     lastHeading = 0.0f;
 
-    float emaPanX     = 0.0f;
-    float emaPanY     = 0.0f;
-    float emaZoom     = 0.0f;
+    float     emaPanX     = 0.0f;
+    float     emaPanY     = 0.0f;
+    float     emaZoom     = 0.0f;
 
-    uint64_t frameIdx = 0;
+    uint64_t  frameIdx    = 0;
 };
 static FlowState g;
 
@@ -79,6 +79,7 @@ static std::pair<int,float> argmax2(const std::vector<float>& s){
     }
     return {bi, sv};
 }
+
 static void sort_topk(const std::vector<float>& s, int k, std::vector<int>& outIdx){
     outIdx.clear(); outIdx.reserve((size_t)k);
     outIdx.push_back(-1);
@@ -101,6 +102,7 @@ static void sort_topk(const std::vector<float>& s, int k, std::vector<int>& outI
                       [&](int a,int b){ return s[(size_t)a] > s[(size_t)b]; });
     if((int)outIdx.size()>k) outIdx.resize((size_t)k);
 }
+
 static inline void indexToXY(int idx,int tilesX,int& x,int& y){ x = (idx % tilesX); y = (idx / tilesX); }
 static inline void tileCenterNDC(int tx,int ty,int tilesX,int tilesY,float& nx,float& ny){
     const float cx=(float(tx)+0.5f)/float(tilesX), cy=(float(ty)+0.5f)/float(tilesY);
@@ -108,8 +110,98 @@ static inline void tileCenterNDC(int tx,int ty,int tilesX,int tilesY,float& nx,f
     ny = 1.0f     - cy*2.0f;
 }
 
+// ============================ Public Helpers =================================
+float computeEntropyContrast(const std::vector<float>& entropy,
+                             int width, int height, int tileSize) noexcept
+{
+    if(width<=0 || height<=0 || tileSize<=0) return 0.0f;
+    const int tilesX = (width  + tileSize - 1) / tileSize;
+    const int tilesY = (height + tileSize - 1) / tileSize;
+    const int n      = tilesX * tilesY;
+    if((int)entropy.size() < n) return 0.0f;
+
+    double acc = 0.0;
+    int    cnt = 0;
+    auto at = [&](int x,int y)->float{ return entropy[(size_t)(y*tilesX + x)]; };
+
+    for(int y=0;y<tilesY;++y){
+        for(int x=0;x<tilesX;++x){
+            const float c = at(x,y);
+            if(x+1<tilesX){ acc += std::fabs(c - at(x+1,y)); ++cnt; }
+            if(y+1<tilesY){ acc += std::fabs(c - at(x,y+1)); ++cnt; }
+        }
+    }
+    if(cnt==0) return 0.0f;
+    return static_cast<float>(acc / (double)cnt);
+}
+
+ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
+                              const std::vector<float>& contrast,
+                              int tilesX, int tilesY,
+                              int width, int height,
+                              float2 currentOffset, float zoom,
+                              float2 previousOffset,
+                              ZoomState& state) noexcept
+{
+    ZoomResult zr{};
+    const int nTiles = tilesX * tilesY;
+    if(nTiles<=0 || (int)entropy.size()<nTiles || (int)contrast.size()<nTiles){
+        state.hadCandidate = false;
+        zr.shouldZoom = false;
+        zr.bestIndex  = -1;
+        zr.newOffsetX = currentOffset.x;
+        zr.newOffsetY = currentOffset.y;
+        return zr;
+    }
+
+    // Score = Entropy + Contrast
+    std::vector<float> score; score.resize((size_t)nTiles);
+    float maxV = 1e-9f;
+    for(int i=0;i<nTiles;++i){
+        float v = entropy[(size_t)i] + contrast[(size_t)i];
+        score[(size_t)i]=v; if(v>maxV) maxV=v;
+    }
+    const float bestV = *std::max_element(score.begin(), score.end());
+    state.hadCandidate = (bestV > 0.0f);
+
+    // Top-K Softmax-Schwerpunkt (wie Flow-Pfad, ohne Zeitbezug)
+    std::vector<int> top; sort_topk(score, Flow::kTopK, top);
+    float accX=0.0f, accY=0.0f, accW=0.0f;
+    const float maxTop = (top.empty()? 0.0f : score[(size_t)top[0]]);
+    for(size_t i=0;i<top.size();++i){
+        const int idx = top[i];
+        float w = score[(size_t)idx];
+        float z = (w - maxTop) + Flow::kLogEps;
+        float sw = std::exp(Flow::kSoftmaxBeta * z);
+        int tx,ty; indexToXY(idx, tilesX, tx, ty);
+        float nx,ny; tileCenterNDC(tx,ty,tilesX,tilesY,nx,ny);
+        accX += sw * nx; accY += sw * ny; accW += sw;
+    }
+
+    float dirX=0.0f, dirY=0.0f;
+    if(accW > 0.0f){ dirX = accX/accW; dirY = accY/accW; }
+    const float len = std::sqrt(dirX*dirX + dirY*dirY);
+    if(len>1e-6f){ dirX/=len; dirY/=len; }
+
+    // Schrittgröße heuristisch von Zoom abhängig (log-Skala, kein Δt hier)
+    const double zlog = std::log(std::max<double>(1e-12, (double)zoom));
+    const float  step = Flow::kBasePanVelNDC * (0.25f + 0.75f) * (1.0f); // konservativ
+
+    zr.newOffsetX = currentOffset.x + dirX * step;
+    zr.newOffsetY = currentOffset.y + dirY * step;
+    zr.distance   = std::sqrt((zr.newOffsetX - previousOffset.x)*(zr.newOffsetX - previousOffset.x) +
+                              (zr.newOffsetY - previousOffset.y)*(zr.newOffsetY - previousOffset.y));
+    zr.minDistance= 0.02f;
+    zr.bestIndex  = top.empty()? -1 : top[0];
+    zr.isNewTarget= false; // Ohne Historie des besten Index hier neutral lassen
+    zr.shouldZoom = state.hadCandidate;
+
+    (void)width; (void)height; (void)zlog; // aktuell ungenutzt, API-kompatibel
+    return zr;
+}
+
 // ================================ Core ======================================
-void update(FrameContext& frameCtx, RendererState& rs)
+static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
 {
     g.frameIdx++;
 
@@ -117,7 +209,7 @@ void update(FrameContext& frameCtx, RendererState& rs)
     const int width    = frameCtx.width;
     const int height   = frameCtx.height;
     const int tileSize = frameCtx.tileSize;
-    if(width<=0 || height<=0 || tileSize<=0) return;
+    if(width<=0 || height<=0 || tileSize<=0){ zs.hadCandidate=false; return; }
 
     const int tilesX = (width  + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
@@ -126,6 +218,7 @@ void update(FrameContext& frameCtx, RendererState& rs)
     // Preconditions: Metrikpuffer müssen passen (kein Alternativpfad)
     if((int)frameCtx.entropy.size()  < nTiles ||
        (int)frameCtx.contrast.size() < nTiles){
+        zs.hadCandidate = false;
         if constexpr(Settings::debugLogging){
             LUCHS_LOG_HOST("[Zoom/Flow] ERROR stats size mismatch: need=%d e=%zu c=%zu",
                            nTiles, frameCtx.entropy.size(), frameCtx.contrast.size());
@@ -143,6 +236,7 @@ void update(FrameContext& frameCtx, RendererState& rs)
     const float bestV = *std::max_element(score.begin(), score.end());
     const bool  isFlat = (bestV < Flow::kFlatRelThreshold * maxV) || (bestV <= 0.0f);
     if(isFlat) g.flatRun++; else g.flatRun=0;
+    zs.hadCandidate = (bestV > 0.0f);
 
     // 2) Top-K Softmax-Schwerpunkt
     std::vector<int> top; sort_topk(score, Flow::kTopK, top);
@@ -236,13 +330,14 @@ void update(FrameContext& frameCtx, RendererState& rs)
 // ---------------------------------------------------------------------------
 // Legacy/Kompatibilität: erwarteter Entry aus frame_pipeline.cpp
 // Signatur laut Header (zoom_logic.hpp): noexcept
+// dtOverrideSeconds > 0.0 überschreibt frameCtx.deltaSeconds für genau einen Aufruf.
 // ---------------------------------------------------------------------------
-void evaluateAndApply(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/, float dtOverride) noexcept
+void evaluateAndApply(FrameContext& frameCtx, RendererState& rs, ZoomState& zs, float dtOverrideSeconds) noexcept
 {
     const float savedDt = frameCtx.deltaSeconds;
-    if (dtOverride > 0.0f) frameCtx.deltaSeconds = dtOverride;
+    if (dtOverrideSeconds > 0.0f) frameCtx.deltaSeconds = dtOverrideSeconds;
 
-    update(frameCtx, rs);
+    update(frameCtx, rs, zs);
 
     frameCtx.deltaSeconds = savedDt;
 }
