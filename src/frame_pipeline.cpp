@@ -5,7 +5,6 @@
 
 #include "pch.hpp"
 #include <chrono>
-#include <algorithm>
 #include <cstdio>     // snprintf for dynamic ring logging
 #include <cmath>      // sqrt
 #include <cuda_runtime.h>  // Maus: CUDA event timing for mandelbrot + metrics

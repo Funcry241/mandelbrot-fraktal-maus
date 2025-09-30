@@ -1,7 +1,7 @@
 ///// Otter: OpenGL PBO interop; map/unmap + pointer retrieval logged deterministically.
 ///// Schneefuchs: No GL forward-decls; numeric CUDA rc codes; perf events only when enabled.
 ///// Maus: Single Capybara path; pause toggle centrally; heatmap metrics delegated.
-///// Datei: src/cuda_interop.cu
+// Datei: src/cuda_interop.cu
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
