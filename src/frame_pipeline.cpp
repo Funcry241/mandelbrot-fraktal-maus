@@ -326,6 +326,21 @@ void execute(RendererState& state) {
     // Render (CUDA)
     computeCudaFrame(g_ctx, state);
 
+    // --- FLOW metrics for zoom (compute grid) ---
+    {
+        const int flowPx = std::max(1, g_ctx.tileSize);
+        bool okFlow = CudaInterop::buildHeatmapMetrics(state, g_ctx.width, g_ctx.height, flowPx, state.renderStream);
+        if (!okFlow) {
+            // Fallback erzeugen in passender Größe, damit Zoom-Logik nicht hungert
+            ensureHeatmapHostData(state, g_ctx.width, g_ctx.height, flowPx);
+        }
+        if constexpr (Settings::performanceLogging) {
+            const int fTx = (g_ctx.width  + flowPx - 1) / flowPx;
+            const int fTy = (g_ctx.height + flowPx - 1) / flowPx;
+            LUCHS_LOG_HOST("[FLOW] stats tiles=%dx%d tilePx=%d ok=%d", fTx, fTy, flowPx, okFlow ? 1 : 0);
+        }
+    }
+
     // ---------- EINZIGE Stelle, die Offset/Zoom bestimmt ----------
     if (!CudaInterop::getPauseZoom()) {
         ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, kZOOM_GAIN);
