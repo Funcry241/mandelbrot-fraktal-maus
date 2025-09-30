@@ -1,7 +1,7 @@
 ///// Datei: src/heatmap_metrics.cu
-// Otter: GPU heatmap metrics — boundary score + stddev contrast (compact).
-// Schneefuchs: No GL; numeric rc logs; slab device buffers; deterministic behavior.
-// Maus: One kernel launch; immediate stream sync for same-frame use.
+///// Otter: GPU heatmap metrics — boundary score + stddev contrast (compact).
+///// Schneefuchs: No GL; numeric rc logs; slab device buffers; deterministic behavior.
+///// Maus: One kernel launch; immediate stream sync for same-frame use.
 
 #include "pch.hpp"
 #include "heatmap_metrics.hpp"
@@ -46,9 +46,21 @@ __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
     // Ein Pass: Summe, Summe^2, Escape-Zähler
     double sum = 0.0;
     double sum2 = 0.0;
-    int    countEsc = 0; // it < mean ~ "escaped"
+    int    countEsc = 0; // it < maxIter  → muss hostseitig vorab so interpretiert werden
 
-    // (1) ersten Durchlauf: sum/sum2 + Mittelwert
+    // Hinweis:
+    // Wir kennen maxIter hier nicht getrennt; die Iterationspuffer enthalten
+    // nach dem Render die tatsächliche Zählung. Konvention:
+    //  - "escaped" ≈ kleinere Werte (typischerweise < maxIter)
+    //  - "in set"  ≈ Werte nahe/maxIter (Kernel-seitig bekannt)
+    //
+    // Für den Boundary-Score benötigen wir nur das Mischungsverhältnis.
+    // Wir nutzen eine pragmatische Schwelle relativ zum lokalen Mittel,
+    // vermeiden aber Abhängigkeit von maxIter im Kernel. Das ist deterministisch
+    // und robust genug für die Kachel-Entscheidung.
+    //
+    // Vorgehen in zwei Schritten:
+    //  (1) ersten Durchlauf: sum/sum2 + grobe Mittelwertschätzung
     for (int y = y0; y < y1; ++y) {
         const uint16_t* row = it + (size_t)y * (size_t)w + x0;
         for (int x = 0; x < tileW; ++x) {
@@ -60,7 +72,8 @@ __global__ void kernel_tile_metrics(const uint16_t* __restrict__ it,
     const double invN = 1.0 / (double)nPix;
     const double mean = sum * invN;
 
-    // (2) zweiter Durchlauf: Escape-Anteil grob per Mittelwertschwelle
+    //  (2) zweiter Durchlauf: Escape-Anteil grob per Mittelwertschwelle
+    //      (praktisch: escaped-Pixel haben signifikant niedrigere it)
     for (int y = y0; y < y1; ++y) {
         const uint16_t* row = it + (size_t)y * (size_t)w + x0;
         for (int x = 0; x < tileW; ++x) {

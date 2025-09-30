@@ -16,8 +16,6 @@
 #include "capybara_frame_pipeline.cuh"
 #include "capybara_mapping.cuh"    // capy_pixel_steps_from_zoom_scale(...)
 #include "heatmap_metrics.hpp"     // HeatmapMetrics::buildGPU
-// *** ZENTRALER FIX: keine Zoom-Logik mehr hier ***
-// #include "zoom_logic.hpp"      // <— entfernt
 
 #include <vector>
 #include <stdexcept>

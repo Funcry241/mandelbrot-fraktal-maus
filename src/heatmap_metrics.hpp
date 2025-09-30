@@ -1,17 +1,18 @@
-///// Otter: GPU heatmap metrics (entropy/contrast) — one public entry point.
-///// Schneefuchs: Minimal includes; ASCII-only logs; no GL; stable signature.
-///// Maus: Slab-allocated device buffers; single-kernel path; noexcept API.
 ///// Datei: src/heatmap_metrics.hpp
+///// Otter: Thin header for GPU heatmap metrics.
+///// Schneefuchs: Stable API; no heavy includes; ASCII-only.
+///// Maus: Single entry point; stream-aware.
 
 #pragma once
-#include <cuda_runtime_api.h>  // cudaStream_t
 
+// Forward decls to keep header light
+struct CUstream_st; using cudaStream_t = CUstream_st*;
 class RendererState;
 
 namespace HeatmapMetrics {
 
-/// Compute entropy/contrast per tile on the GPU and mirror to state.h_*.
-/// Returns false on error (logged via Luchs).
+// Builds GPU metrics (boundary + contrast) into RendererState::h_entropy / h_contrast.
+// Returns true on success. Synchronous on the given stream.
 bool buildGPU(RendererState& state,
               int width, int height, int tilePx,
               cudaStream_t stream) noexcept;
