@@ -168,8 +168,7 @@ void renderCudaFrame(
     // Silencing unreferenced-out-params (API bleibt stabil)
     (void)newOffsetX;
     (void)newOffsetY;
-    (void)shouldZoom;
-
+    (void)shouldZoom;      
     if (!s_pboActive) {
         LUCHS_LOG_HOST("[PBO][ERR] render called without registered PBOs");
         state.skipUploadThisFrame = true;
