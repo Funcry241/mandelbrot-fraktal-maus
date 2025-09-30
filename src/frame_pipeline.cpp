@@ -5,6 +5,7 @@
 
 #include "pch.hpp"
 #include <chrono>
+#include <algorithm>
 #include <cstdio>     // snprintf for dynamic ring logging
 #include <cmath>      // sqrt
 #include <cuda_runtime.h>  // Maus: CUDA event timing for mandelbrot + metrics
@@ -169,6 +170,10 @@ namespace {
                 LUCHS_LOG_HOST("[ZK][UP] skip upload pbo=%u ring=%d", state.currentPBO().id(), state.pboIndex);
             }
         }
+
+        // 🔁 Saubere Ring-Disziplin: immer weiterschalten
+        state.advancePboRing();
+
         const auto tUploadEnd = Clock::now();
         g_texMs = std::chrono::duration_cast<msd>(tUploadEnd - t0).count();
 
@@ -212,6 +217,9 @@ namespace {
             }
 
             if (!ok) {
+                ensureHeatmapHostData(state, fctx.width, fctx.height, overlayTilePx);
+            } else if (state.h_entropy.empty() || state.h_contrast.empty()) {
+                // GPU hat gerechnet, Host-Vektoren aber leer -> einfache Host-Fallback-Daten erzeugen
                 ensureHeatmapHostData(state, fctx.width, fctx.height, overlayTilePx);
             }
 

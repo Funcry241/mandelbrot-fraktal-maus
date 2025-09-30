@@ -1,7 +1,7 @@
 ///// Otter: OpenGL PBO interop; map/unmap + pointer retrieval logged deterministically.
 ///// Schneefuchs: No GL forward-decls; numeric CUDA rc codes; perf events only when enabled.
 ///// Maus: Single Capybara path; pause toggle centrally; heatmap metrics delegated.
-// Datei: src/cuda_interop.cu
+///// Datei: src/cuda_interop.cu
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
@@ -16,7 +16,8 @@
 #include "capybara_frame_pipeline.cuh"
 #include "capybara_mapping.cuh"    // capy_pixel_steps_from_zoom_scale(...)
 #include "heatmap_metrics.hpp"     // HeatmapMetrics::buildGPU
-#include "zoom_logic.hpp"          // Flow evaluateAndApply(...)
+// *** ZENTRALER FIX: keine Zoom-Logik mehr hier ***
+// #include "zoom_logic.hpp"      // <— entfernt
 
 #include <vector>
 #include <stdexcept>
@@ -58,8 +59,7 @@ static bool s_pboActive = false;
 // ---- Global pause flag for zoom logic --------------------------------
 static bool s_pauseZoom = false;
 
-// Kleiner, persistenter Bus für die Zoom-Logik
-static ZoomLogic::ZoomState s_zoomBus;
+// *** ZENTRALER FIX: kein s_zoomBus hier mehr ***
 
 // RAII-Guard: map on ctor, unmap on dtor
 struct MapGuard {
@@ -165,6 +165,10 @@ void renderCudaFrame(
     RendererState& state,
     cudaStream_t renderStream
 ){
+    // Silencing unreferenced-out-params (API bleibt stabil)
+    (void)newOffsetX;
+    (void)newOffsetY;
+    (void)shouldZoom;      
     if (!s_pboActive) {
         LUCHS_LOG_HOST("[PBO][ERR] render called without registered PBOs");
         state.skipUploadThisFrame = true;
@@ -207,9 +211,8 @@ void renderCudaFrame(
     }
 
     // 2) capybara render (iterations)
-    // Wenn Upstream ein neues Ziel vorgibt, sofort darauf rendern.
-    const double cx = shouldZoom ? (double)newOffsetX : (double)offsetX;
-    const double cy = shouldZoom ? (double)newOffsetY : (double)offsetY;
+    const double cx = (double)offsetX;
+    const double cy = (double)offsetY;
 
     // PixelScale ist zoomfrei & isotrop (x==y); Zoom fließt in die Schrittweite.
     const double sx = (double)state.pixelScale.x;
@@ -325,15 +328,11 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx, float& newO
                     state, state.renderStream);
 }
 
-// ---- Convenience overload (double offsets) — Flow aktiv, hohe Präzision ------
+// ---- Convenience overload (double offsets) — hohe Präzision, KEINE Zoom-Logik ----
 void renderCudaFrame(RendererState& state, const FrameContext& fctx,
                      double& newOffsetX, double& newOffsetY)
 {
-    // Flow-Update: aktualisiert state.center/zoom. Bei Pause bleibt alles stehen.
-    if (!s_pauseZoom) {
-        // dtOverride <= 0 -> benutze fctx.deltaSeconds
-        ZoomLogic::evaluateAndApply(const_cast<FrameContext&>(fctx), state, s_zoomBus, 0.0f);
-    }
+    (void)s_pauseZoom; // Flag wird nur zentral in FramePipeline beachtet
 
     if (!s_pboActive) {
         LUCHS_LOG_HOST("[PBO][ERR] render(double) called without registered PBOs");
@@ -378,7 +377,7 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx,
         state.ringUse[state.pboIndex]++;
     }
 
-    // 2) capybara render (iterations) — *double* Offsets aus aktuellem RendererState
+    // 2) capybara render (iterations) — *double* Offsets aus RendererState
     const double cx = (double)state.center.x;
     const double cy = (double)state.center.y;
 
@@ -443,7 +442,7 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx,
         LUCHS_LOG_HOST("[CAPY][time] colorize[dbl]=%.3f ms (w=%d h=%d)", (double)ms, width, height);
     }
 
-    // Für Aufrufer zurückspiegeln (z.B. UI/Telemetry)
+    // Für Aufrufer/Telemetry zurückspiegeln
     newOffsetX = cx;
     newOffsetY = cy;
 }
