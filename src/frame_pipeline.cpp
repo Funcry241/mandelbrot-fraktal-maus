@@ -331,20 +331,17 @@ void execute(RendererState& state) {
         ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, kZOOM_GAIN);
     }
 
-    // **Fix**: Bei fehlenden Metriken NICHT Offset/Drift überschreiben, nur Gain gate’n.
-    if (!CudaInterop::getPauseZoom() &&
-        (state.h_entropy.empty() || state.h_contrast.empty()))
-    {
-        g_zoomState.hadCandidate = false; // Zoom-Gain OFF, Bewegung bleibt erhalten
-    }
+    // **Fix v2**: Gain nur gate’n, wenn Host-Metriken *vorliegen* und kein Kandidat da ist.
+    const bool haveHostMetrics = !state.h_entropy.empty() && !state.h_contrast.empty();
+    const bool allowGain = !CudaInterop::getPauseZoom() && (g_zoomState.hadCandidate || !haveHostMetrics);
 
     if (g_ctx.shouldZoom) {
         // ---- Anwenden in double, dann float-Spiegel aktualisieren ----
         state.center.x = g_ctx.newOffsetD.x;
         state.center.y = g_ctx.newOffsetD.y;
 
-        // *** Kandidaten-Gate: Zoom nur erhöhen, wenn evaluateAndApply einen Kandidaten fand ***
-        if (g_zoomState.hadCandidate) {
+        // *** Gain nur anwenden, wenn erlaubt (s.o.) ***
+        if (allowGain) {
             state.zoom *= (double)kZOOM_GAIN;
         }
 
@@ -353,9 +350,10 @@ void execute(RendererState& state) {
         g_ctx.syncFloatFromDouble();
 
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZOOM][APPLY] center=(%.9f,%.9f) zoom=%.6f gain=%s",
+            LUCHS_LOG_HOST("[ZOOM][APPLY] center=(%.9f,%.9f) zoom=%.6f gain=%s (hostMetrics=%d cand=%d)",
                            state.center.x, state.center.y, (double)state.zoom,
-                           g_zoomState.hadCandidate ? "ON" : "OFF");
+                           allowGain ? "ON" : "OFF",
+                           haveHostMetrics ? 1 : 0, g_zoomState.hadCandidate ? 1 : 0);
         }
     }
 
