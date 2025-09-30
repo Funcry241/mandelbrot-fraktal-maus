@@ -30,7 +30,7 @@ namespace Settings {
     // debugLogging
     // Targeted debug/diagnostic output (host/device).
     // Range: {false, true} | Default: true
-    inline constexpr bool debugLogging  = false;
+    inline constexpr bool debugLogging  = true;
 
     // performanceLogging
     // Condensed [PERF] logs along the frame pipeline.
