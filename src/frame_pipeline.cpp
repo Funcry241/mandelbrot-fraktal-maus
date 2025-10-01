@@ -67,9 +67,19 @@ namespace {
     }
 
     static void beginFrameLocal() {
+        static double s_prevNow = 0.0;
+        const double now = glfwGetTime();
+        double dt = (s_prevNow > 0.0) ? (now - s_prevNow) : (1.0 / 60.0);
+        s_prevNow = now;
+
+        // clamp dt (gegen Hänger/Breakpoints)
+        if (dt < 1.0/300.0) dt = 1.0/300.0;
+        if (dt > 1.0/15.0)  dt = 1.0/15.0;
+
+        g_ctx.deltaSeconds = static_cast<float>(dt);
+
         if constexpr (Settings::debugLogging) {
-            const double now = glfwGetTime();
-            LUCHS_LOG_HOST("[PIPE] beginFrame: time=%.4f, totalFrames=%d", now, g_frame);
+            LUCHS_LOG_HOST("[PIPE] beginFrame: time=%.4f, dt=%.5f, totalFrames=%d", now, dt, g_frame);
         }
         ++g_frame;
     }
