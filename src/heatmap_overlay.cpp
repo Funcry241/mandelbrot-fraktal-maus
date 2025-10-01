@@ -87,7 +87,7 @@ uniform float uAlphaBase;     // base alpha (scales Pfau alpha)
 vec3 mapGold(float v){
   float g = clamp(v,0.0,1.0);
   g = smoothstep(0.0,1.0,g);
-  g = pow(g, 0.96); // leicht heller (sanftes Gamma < 1)
+  g = pow(g, 0.94); // etwas heller (sanftes Gamma < 1, stärker als 0.96)
   return mix(vec3(0.08,0.08,0.10), vec3(0.98,0.78,0.30), g);
 }
 
@@ -112,8 +112,8 @@ void main(){
     }
   }
 
-  // alpha from blurred value; softer bring-up to avoid badge look
-  float a = smoothstep(0.12, 0.85, v) * uAlphaBase;
+  // alpha from blurred value; bring-up etwas früher und kräftiger
+  float a = smoothstep(0.10, 0.80, v) * uAlphaBase;
 
   vec3 col = mapGold(v);
   FragColor = vec4(col, a);
@@ -180,7 +180,7 @@ void cleanup(){
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
                  int width, int height, int tileSize,
-                 [[maybe_unused]] GLuint textureId,
+                 [[maybe_unused]] unsigned int textureId, // <— wichtig: unsigned int
                  RendererState& ctx)
 {
     if(!ctx.heatmapOverlayEnabled || width<=0||height<=0||tileSize<=0) return;
@@ -320,7 +320,7 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uHViewportPx>=0)    glUniform2f(uHViewportPx,(float)width,(float)height);
         if(uHContentRectPx>=0) glUniform4f(uHContentRectPx,(float)contentX0,(float)contentY0,(float)contentX1,(float)contentY1);
         if(uHGridSize>=0)      glUniform2i(uHGridSize, tilesX, tilesY);
-        if(uHAlphaBase>=0)     glUniform1f(uHAlphaBase, Pfau::PANEL_ALPHA * 0.92f);
+        if(uHAlphaBase>=0)     glUniform1f(uHAlphaBase, Pfau::PANEL_ALPHA * 0.98f); // etwas stärkeres Grund-Alpha
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, sHeatTex);

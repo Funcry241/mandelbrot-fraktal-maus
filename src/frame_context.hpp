@@ -39,7 +39,8 @@ struct FrameContext {
     // Zeitdelta fuer Normierung (Sekunden)
     float deltaSeconds  = 0.0f;
 
-    // Heatmap-Statistiken (Groesse == tilesX*tilesY basierend auf statsTileSize, bzw. tileSize bei Fallback)
+    // Heatmap-Statistiken (Groesse == tilesX*tilesY basierend auf statsTileSize,
+    // bzw. tileSize bei Fallback)
     std::vector<float> entropy;
     std::vector<float> contrast;
 

@@ -218,8 +218,8 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     const int height = frameCtx.height;
     if (width <= 0 || height <= 0) { zs.hadCandidate = false; return; }
 
-    // Analyse-Raster bevorzugen (Decoupling), sonst Fallback auf Compute-Raster.
-    const int statsPx  = frameCtx.tileSize;
+    // Analyse-Raster (entkoppelt): statsTileSize bevorzugen, sonst Fallback auf Compute-Raster.
+    const int statsPx  = (frameCtx.statsTileSize > 0 ? frameCtx.statsTileSize : frameCtx.tileSize);
     if (statsPx <= 0) { zs.hadCandidate = false; return; }
 
     const int tilesX = (width  + statsPx - 1) / statsPx;
