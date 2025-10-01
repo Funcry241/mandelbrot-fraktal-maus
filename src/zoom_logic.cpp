@@ -36,7 +36,7 @@ namespace Flow {
     inline constexpr float kEmaPanAlpha       = 0.30f;
     inline constexpr float kEmaZoomAlpha      = 0.25f;
 
-    inline constexpr float kBaseZoomVel       = 0.18f;   // log-Skala
+    inline constexpr float kBaseZoomVel       = 0.18f;   // log-Skala (deutlich schneller)
     inline constexpr float kBasePanVelNDC     = 0.045f;  // NDC/Frame
 
     inline constexpr float kStrafeK           = 60.0f;
@@ -60,6 +60,7 @@ struct FlowState {
     float     emaZoom     = 0.0f;
 
     uint64_t  frameIdx    = 0;
+    int       prevCand    = -1;   // Edge-Trigger Telemetry
 };
 static FlowState g;
 
@@ -73,7 +74,7 @@ static std::pair<int,float> argmax2(const std::vector<float>& s){
     int bi=-1; float bv=-std::numeric_limits<float>::infinity();
     int si=-1; float sv=-std::numeric_limits<float>::infinity();
     for(size_t i=0;i<s.size();++i){
-        float v=s[i];
+        const float v=s[i];
         if(v>bv){ si=bi; sv=bv; bi=(int)i; bv=v; }
         else if(v>sv){ si=(int)i; sv=v; }
     }
@@ -83,13 +84,14 @@ static std::pair<int,float> argmax2(const std::vector<float>& s){
 static void sort_topk(const std::vector<float>& s, int k, std::vector<int>& outIdx){
     outIdx.clear(); outIdx.reserve((size_t)k);
     outIdx.push_back(-1);
+
     auto [bi,_sv] = argmax2(s);
     int si=-1;
     if(bi>=0){
         float sv=-std::numeric_limits<float>::infinity();
         for(size_t i=0;i<s.size();++i){
             if((int)i==bi) continue;
-            float v=s[i]; if(v>sv){ sv=v; si=(int)i; }
+            const float v=s[i]; if(v>sv){ sv=v; si=(int)i; }
         }
     }
     if(bi>=0) outIdx[0]=bi;
@@ -98,7 +100,8 @@ static void sort_topk(const std::vector<float>& s, int k, std::vector<int>& outI
         if((int)i==bi || (int)i==si) continue;
         outIdx.push_back((int)i);
     }
-    std::partial_sort(outIdx.begin(), outIdx.begin()+std::min<int>(k,(int)outIdx.size()), outIdx.end(),
+    const int want = std::min<int>(k, (int)outIdx.size());
+    std::partial_sort(outIdx.begin(), outIdx.begin()+want, outIdx.end(),
                       [&](int a,int b){ return s[(size_t)a] > s[(size_t)b]; });
     if((int)outIdx.size()>k) outIdx.resize((size_t)k);
 }
@@ -125,7 +128,7 @@ float computeEntropyContrast(const std::vector<float>& entropy,
     auto at = [&](int x,int y)->float{ return entropy[(size_t)(y*tilesX + x)]; };
 
     for(int y=0;y<tilesY;++y){
-        for(int x=0;x<tilesX;++x){ // FIX: x < tilesX (nicht tilesY)
+        for(int x=0;x<tilesX;++x){
             const float c = at(x,y);
             if(x+1<tilesX){ acc += std::fabs(c - at(x+1,y)); ++cnt; }
             if(y+1<tilesY){ acc += std::fabs(c - at(x,y+1)); ++cnt; }
@@ -162,25 +165,27 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
         return zr;
     }
 
-    // Score = Entropy + Contrast
-    std::vector<float> score; score.resize((size_t)nTiles);
+    // Score = Entropy + Contrast (statischer Scratch vermeidet Re-Allokation)
+    static std::vector<float> score;
+    score.resize((size_t)nTiles);
+
     float maxV = 1e-9f;
     for(int i=0;i<nTiles;++i){
-        float v = entropy[(size_t)i] + contrast[(size_t)i];
+        const float v = entropy[(size_t)i] + contrast[(size_t)i];
         score[(size_t)i]=v; if(v>maxV) maxV=v;
     }
-    const float bestV = *std::max_element(score.begin(), score.end());
+    const float bestV = maxV;
     state.hadCandidate = (bestV > 0.0f);
 
-    // Top-K Softmax-Schwerpunkt (wie Flow-Pfad, ohne Zeitbezug)
+    // Top-K Softmax-Schwerpunkt
     std::vector<int> top; sort_topk(score, Flow::kTopK, top);
     float accX=0.0f, accY=0.0f, accW=0.0f;
     const float maxTop = (top.empty()? 0.0f : score[(size_t)top[0]]);
     for(size_t i=0;i<top.size();++i){
         const int idx = top[i];
-        float w = score[(size_t)idx];
-        float z = (w - maxTop) + Flow::kLogEps;
-        float sw = std::exp(Flow::kSoftmaxBeta * z);
+        const float w = score[(size_t)idx];
+        const float z = (w - maxTop) + Flow::kLogEps;
+        const float sw = std::exp(Flow::kSoftmaxBeta * z);
         int tx,ty; indexToXY(idx, tilesX, tx, ty);
         float nx,ny; tileCenterNDC(tx,ty,tilesX,tilesY,nx,ny);
         accX += sw * nx; accY += sw * ny; accW += sw;
@@ -191,9 +196,9 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     const float len = std::sqrt(dirX*dirX + dirY*dirY);
     if(len>1e-6f){ dirX/=len; dirY/=len; }
 
-    // Schrittgröße heuristisch von Zoom abhängig (log-Skala, kein Δt hier)
-    const double zlog = std::log(std::max<double>(1e-12, (double)zoom));
-    const float  step = Flow::kBasePanVelNDC * (0.25f + 0.75f) * (1.0f); // konservativ
+    // Schrittgröße heuristisch (keine Δt-Normierung hier)
+    (void)width; (void)height;
+    const float step = Flow::kBasePanVelNDC * 1.0f;
 
     zr.newOffsetX = currentOffset.x + dirX * step;
     zr.newOffsetY = currentOffset.y + dirY * step;
@@ -201,10 +206,8 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
                               (zr.newOffsetY - previousOffset.y)*(zr.newOffsetY - previousOffset.y));
     zr.minDistance= 0.02f;
     zr.bestIndex  = top.empty()? -1 : top[0];
-    zr.isNewTarget= false; // Ohne Historie des besten Index hier neutral lassen
+    zr.isNewTarget= false;
     zr.shouldZoom = state.hadCandidate;
-
-    (void)width; (void)height; (void)zlog; // aktuell ungenutzt, API-kompatibel
     return zr;
 }
 
@@ -218,7 +221,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     const int height = frameCtx.height;
     if (width <= 0 || height <= 0) { zs.hadCandidate = false; return; }
 
-    // Analyse-Raster (entkoppelt): statsTileSize bevorzugen, sonst Fallback auf Compute-Raster.
+    // Analyse-Raster (entkoppelt): statsTileSize bevorzugen, sonst Fallback.
     const int statsPx  = (frameCtx.statsTileSize > 0 ? frameCtx.statsTileSize : frameCtx.tileSize);
     if (statsPx <= 0) { zs.hadCandidate = false; return; }
 
@@ -226,7 +229,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     const int tilesY = (height + statsPx - 1) / statsPx;
     const int nTiles = tilesX * tilesY;
 
-    // Puffergrößen müssen zum Stats-Raster passen.
+    // Puffergrößen prüfen.
     if ((int)frameCtx.entropy.size()  < nTiles ||
         (int)frameCtx.contrast.size() < nTiles) {
         zs.hadCandidate = false;
@@ -237,14 +240,16 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
         return;
     }
 
-    // 1) Score + Max
-    std::vector<float> score; score.resize((size_t)nTiles);
+    // 1) Score + Max (statischer Scratch)
+    static std::vector<float> score;
+    score.resize((size_t)nTiles);
+
     float maxV = 1e-9f;
-    for (int i = 0; i < nTiles; ++i) {
-        float v = frameCtx.entropy[(size_t)i] + frameCtx.contrast[(size_t)i];
-        score[(size_t)i] = v; if (v > maxV) maxV = v;
+    for (int i = 0; i < nTiles; ++i){
+        const float v = frameCtx.entropy[(size_t)i] + frameCtx.contrast[(size_t)i];
+        score[(size_t)i]=v; if(v>maxV) maxV=v;
     }
-    const float bestV = *std::max_element(score.begin(), score.end());
+    const float bestV = maxV;
     const bool  isFlat = (bestV < Flow::kFlatRelThreshold * maxV) || (bestV <= 0.0f);
     if (isFlat) g.flatRun++; else g.flatRun = 0;
     zs.hadCandidate = (bestV > 0.0f);
@@ -252,23 +257,22 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     // 2) Top-K Softmax-Schwerpunkt
     std::vector<int> top; sort_topk(score, Flow::kTopK, top);
 
-    if (g.flatRun >= Flow::kFlatGuardFrames && (int)top.size() >= 2) {
-        std::swap(top[0], top[1]);                 // „zweitbestes“ Ziel erzwingen
-        g.lockFrames = Flow::kHeadingLockFrames;   // Kurs nach Retarget sanft begrenzen
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[Zoom/Flow] retarget second best after flat=%d", g.flatRun);
+    if (g.flatRun >= Flow::kFlatGuardFrames && (int)top.size()>=2){
+        std::swap(top[0], top[1]);
+        g.lockFrames = Flow::kHeadingLockFrames;
+        if constexpr (Settings::performanceLogging) {
+            LUCHS_LOG_HOST("[FlowRETARGET] flat=%d statsPx=%d", g.flatRun, statsPx);
         }
         g.flatRun = 0;
     }
 
     float accX=0.0f, accY=0.0f, accW=0.0f;
     const float maxTop = (top.empty()? 0.0f : score[(size_t)top[0]]);
-    const float logEps = Flow::kLogEps;            // sparsify im Log-Raum
     for (size_t i = 0; i < top.size(); ++i) {
         const int idx = top[i];
-        float w = score[(size_t)idx];
-        float z = (w - maxTop) + logEps;           // -> stärkerer Fokus auf Bestes
-        float sw = std::exp(Flow::kSoftmaxBeta * z);
+        const float w = score[(size_t)idx];
+        const float z = (w - maxTop) + Flow::kLogEps;
+        const float sw = std::exp(Flow::kSoftmaxBeta * z);
         int tx,ty; indexToXY(idx, tilesX, tx, ty);
         float nx,ny; tileCenterNDC(tx,ty,tilesX,tilesY,nx,ny);
         accX += sw * nx; accY += sw * ny; accW += sw;
@@ -331,16 +335,21 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     RS_OFFSET_Y(rs) += g.emaPanY * dt;
     RS_ZOOM(rs)     *= std::exp(g.emaZoom * dt);
 
-    // ---- Flow Telemetry (Einzeiler) ----
-    if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST(
-            "[FlowTL] f=%llu statsPx=%d n=%d best=%.4f max=%.4f cand=%d pan=(%.4f,%.4f) zoom=%.6f",
-            (unsigned long long)g.frameIdx, statsPx, nTiles, bestV, maxV,
-            zs.hadCandidate ? 1 : 0, g.emaPanX, g.emaPanY, RS_ZOOM(rs)
-        );
-    }
-
-    if constexpr(Settings::performanceLogging){
+    // ---- Schlanke Telemetrie (ohne neues Makro) ----
+    if constexpr (Settings::performanceLogging) {
+        // Periodischer Einzeiler (gedrosselt auf jede 16. Frame)
+        if ((g.frameIdx & 0xF) == 0) {
+            LUCHS_LOG_HOST("[FlowTL] f=%llu statsPx=%d n=%d best=%.4f max=%.4f cand=%d pan=(%.4f,%.4f) zoom=%.6f",
+                           (unsigned long long)g.frameIdx, statsPx, nTiles, bestV, maxV,
+                           zs.hadCandidate ? 1 : 0, g.emaPanX, g.emaPanY, RS_ZOOM(rs));
+        }
+        // Edge-Trigger bei Kandidatenwechsel
+        const int cand = zs.hadCandidate ? 1 : 0;
+        if (g.prevCand != cand) {
+            LUCHS_LOG_HOST("[FlowCAND] cand=%d statsPx=%d", cand, statsPx);
+            g.prevCand = cand;
+        }
+        // Ausführlicher Perf-Log (bestehend)
         LUCHS_LOG_HOST("[Zoom/Flow] f=%llu flat=%d best=%.4f max=%.4f dlog=%.5f strafe=%.3f pan=(%.4f,%.4f) pspd=%.4f zoom=%.6f statsPx=%d",
                        (unsigned long long)g.frameIdx, g.flatRun, bestV, maxV, dLogZoom, strafeFactor,
                        g.emaPanX, g.emaPanY, panSpeed, RS_ZOOM(rs), statsPx);
