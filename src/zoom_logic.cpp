@@ -1,7 +1,7 @@
-///// Otter: Flow-Zoom V6 (Stats-Single-Path) — Interest-Guard + Softmax + Strafe-Kill + Heading-Lock + EMA.
-///// Schneefuchs: MSVC-safe (std::max<double>), robuste Checks, klare Logs; keine Alternativpfade.
-///// Maus: „wie im Fluss“ – zentrierte Zielwahl über Top-K-Schwerpunkt; kein Seitwärtswobble beim Zoomen.
-///// Datei: src/zoom_logic.cpp
+///// Otter: Flow-Zoom V6 — smooth, hitch-free; no retarget swaps, soft strafe; clamped dt.
+///// Schneefuchs: MSVC-safe, lean logs; no new macros.
+///// Maus: “im Fluss” – keine Mikrostops; sanfte Richtung, sauberes EMA.
+/*** Datei: src/zoom_logic.cpp ***/
 
 #pragma warning(push)
 #pragma warning(disable: 4100)
@@ -27,24 +27,25 @@ namespace ZoomLogic {
 
 // ============================== Tunables ====================================
 namespace Flow {
-    inline constexpr int   kFlatGuardFrames   = 12;
-    inline constexpr float kFlatRelThreshold  = 0.02f;
-    inline constexpr float kSoftmaxBeta       = 7.5f;
-    inline constexpr float kLogEps            = -8.5f;   // sparsify (log-space)
-    inline constexpr int   kTopK              = 6;
+    inline constexpr int   kFlatGuardFrames     = 12;
+    inline constexpr float kFlatRelThreshold    = 0.02f;
+    inline constexpr float kSoftmaxBeta         = 7.5f;
+    inline constexpr float kLogEps              = -8.5f;   // sparsify (log-space)
+    inline constexpr int   kTopK                = 6;
 
-    inline constexpr float kEmaPanAlpha       = 0.30f;
-    inline constexpr float kEmaZoomAlpha      = 0.25f;
+    inline constexpr float kEmaPanAlpha         = 0.30f;
+    inline constexpr float kEmaZoomAlpha        = 0.25f;
 
-    inline constexpr float kBaseZoomVel       = 0.38f;   // log-Skala (deutlich schneller)
-    inline constexpr float kBasePanVelNDC     = 0.045f;  // NDC/Frame
+    inline constexpr float kBaseZoomVel         = 0.18f;   // log-scale
+    inline constexpr float kBasePanVelNDC       = 0.045f;  // NDC/frame
 
-    inline constexpr float kStrafeK           = 60.0f;
-    inline constexpr float kZoomRateLockMin   = 0.004f;
+    // Neue (weichere) Strafe-Charakteristik
+    inline constexpr float kStrafeKSoft         = 30.0f;   // aggressiveness in 1/(1+k*|dlog|)
+    inline constexpr float kStrafeMin           = 0.35f;   // niemals komplett abwürgen
 
-    inline constexpr int   kHeadingLockFrames = 36;      // ≈0.6s @60fps
-    inline constexpr float kYawDegPerFrame    = 3.0f;
-    inline constexpr float kPanDeadbandNDC    = 0.002f;
+    inline constexpr int   kHeadingLockFrames   = 36;      // ≈0.6s @60fps
+    inline constexpr float kYawDegPerFrame      = 3.0f;
+    inline constexpr float kPanDeadbandNDC      = 0.0008f; // kleiner → keine “Anhalter”
 }
 
 // =============================== State ======================================
@@ -60,7 +61,7 @@ struct FlowState {
     float     emaZoom     = 0.0f;
 
     uint64_t  frameIdx    = 0;
-    int       prevCand    = -1;   // Edge-Trigger Telemetry
+    int       prevCand    = -1;
 };
 static FlowState g;
 
@@ -78,7 +79,7 @@ static std::pair<int,float> argmax2(const std::vector<float>& s){
         if(v>bv){ si=bi; sv=bv; bi=(int)i; bv=v; }
         else if(v>sv){ si=(int)i; sv=v; }
     }
-    return {bi, sv}; // (bestIndex, secondBestValue)
+    return {bi, sv};
 }
 
 static void sort_topk(const std::vector<float>& s, int k, std::vector<int>& outIdx){
@@ -165,20 +166,17 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
         return zr;
     }
 
-    // Score = Entropy + Contrast (statischer Scratch vermeidet Re-Allokation)
     static std::vector<float> score;
     score.resize((size_t)nTiles);
 
+    float maxV = 1e-9f;
     for(int i=0;i<nTiles;++i){
-        score[(size_t)i] = entropy[(size_t)i] + contrast[(size_t)i];
+        const float v = entropy[(size_t)i] + contrast[(size_t)i];
+        score[(size_t)i]=v; if(v>maxV) maxV=v;
     }
-
-    // Best & Zweitbest
-    const auto [bestIdx, secondBestVal] = argmax2(score);
-    const float bestV = (bestIdx >= 0) ? score[(size_t)bestIdx] : 0.0f;
+    const float bestV = maxV;
     state.hadCandidate = (bestV > 0.0f);
 
-    // Top-K Softmax-Schwerpunkt
     std::vector<int> top; sort_topk(score, Flow::kTopK, top);
     float accX=0.0f, accY=0.0f, accW=0.0f;
     const float maxTop = (top.empty()? 0.0f : score[(size_t)top[0]]);
@@ -197,8 +195,7 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     const float len = std::sqrt(dirX*dirX + dirY*dirY);
     if(len>1e-6f){ dirX/=len; dirY/=len; }
 
-    // Schrittgröße heuristisch (keine Δt-Normierung hier)
-    (void)width; (void)height; (void)zoom; (void)secondBestVal;
+    (void)width; (void)height;
     const float step = Flow::kBasePanVelNDC;
 
     zr.newOffsetX = currentOffset.x + dirX * step;
@@ -217,12 +214,10 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
 {
     g.frameIdx++;
 
-    // Geometrie
     const int width  = frameCtx.width;
     const int height = frameCtx.height;
     if (width <= 0 || height <= 0) { zs.hadCandidate = false; return; }
 
-    // Analyse-Raster (entkoppelt): statsTileSize bevorzugen, sonst Fallback.
     const int statsPx  = (frameCtx.statsTileSize > 0 ? frameCtx.statsTileSize : frameCtx.tileSize);
     if (statsPx <= 0) { zs.hadCandidate = false; return; }
 
@@ -230,7 +225,6 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     const int tilesY = (height + statsPx - 1) / statsPx;
     const int nTiles = tilesX * tilesY;
 
-    // Puffergrößen prüfen.
     if ((int)frameCtx.entropy.size()  < nTiles ||
         (int)frameCtx.contrast.size() < nTiles) {
         zs.hadCandidate = false;
@@ -241,35 +235,25 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
         return;
     }
 
-    // 1) Score + Best/Zweitbest (statischer Scratch)
     static std::vector<float> score;
     score.resize((size_t)nTiles);
 
+    float maxV = 1e-9f;
     for (int i = 0; i < nTiles; ++i){
-        score[(size_t)i] = frameCtx.entropy[(size_t)i] + frameCtx.contrast[(size_t)i];
+        const float v = frameCtx.entropy[(size_t)i] + frameCtx.contrast[(size_t)i];
+        score[(size_t)i]=v; if(v>maxV) maxV=v;
     }
-
-    const auto [bestIdx, secondBestVal] = argmax2(score);
-    const float bestV = (bestIdx >= 0) ? score[(size_t)bestIdx] : 0.0f;
-    const float secV  = std::isfinite(secondBestVal) ? secondBestVal : 0.0f;
-    const float advantage = bestV - secV;
-    const float relAdv    = (bestV > 0.0f) ? (advantage / bestV) : 0.0f;
-
-    const bool  isFlat = (bestV <= 0.0f) || (relAdv < Flow::kFlatRelThreshold);
+    const float bestV = maxV;
+    const bool  isFlat = (bestV < Flow::kFlatRelThreshold * maxV) || (bestV <= 0.0f);
     if (isFlat) g.flatRun++; else g.flatRun = 0;
     zs.hadCandidate = (bestV > 0.0f);
 
-    // 2) Top-K Softmax-Schwerpunkt
-    std::vector<int> top; sort_topk(score, Flow::kTopK, top);
+    // *** HITCH-FIX: Retargeting vollständig deaktivieren ***
+    // (Wir behalten flatRun nur fuer Telemetrie.)
+    // if (g.flatRun >= Flow::kFlatGuardFrames && (int)top.size()>=2) { ... }  // entfernt
 
-    if (g.flatRun >= Flow::kFlatGuardFrames && (int)top.size()>=2){
-        std::swap(top[0], top[1]);
-        g.lockFrames = Flow::kHeadingLockFrames;
-        if constexpr (Settings::performanceLogging) {
-            LUCHS_LOG_HOST("[FlowRETARGET] flat=%d statsPx=%d", g.flatRun, statsPx);
-        }
-        g.flatRun = 0;
-    }
+    // Schwerpunkt aus Top-K
+    std::vector<int> top; sort_topk(score, Flow::kTopK, top);
 
     float accX=0.0f, accY=0.0f, accW=0.0f;
     const float maxTop = (top.empty()? 0.0f : score[(size_t)top[0]]);
@@ -286,28 +270,27 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     float tgtX = 0.0f, tgtY = 0.0f;
     if (accW > 0.0f) { tgtX = accX/accW; tgtY = accY/accW; }
 
-    // 3) Richtung (NDC) normalisieren
     float panX = tgtX, panY = tgtY;
     const float panLen = std::sqrt(panX*panX + panY*panY);
     if (panLen > 1e-6f) { panX/=panLen; panY/=panLen; }
 
-    // 4) Strafe-Kill (Seitwärtsdämpfung bei starkem Zoom)
+    // Weiche Strafe (keine Abwürge-Plateaus)
     const double zoomForLog = std::max<double>(1e-12, static_cast<double>(RS_ZOOM(rs)));
     const float  logZoom    = static_cast<float>(std::log(zoomForLog));
     const float  dLogZoom   = logZoom - g.prevLogZoom;
     g.prevLogZoom           = logZoom;
 
-    float strafeFactor = 1.0f - Flow::kStrafeK * std::fabs(dLogZoom);
-    if (std::fabs(dLogZoom) >= Flow::kZoomRateLockMin) strafeFactor = clampf(strafeFactor, 0.0f, 0.1f);
-    else                                               strafeFactor = clampf(strafeFactor, 0.0f, 1.0f);
+    float strafeFactor = 1.0f / (1.0f + Flow::kStrafeKSoft * std::fabs(dLogZoom));
+    strafeFactor = clampf(strafeFactor, Flow::kStrafeMin, 1.0f);
 
-    // 5) Pan-Speed (inhaltsgewichtet via relAdv) + Deadband
-    float panSpeed = Flow::kBasePanVelNDC * (0.25f + 0.75f * clampf(relAdv, 0.15f, 1.0f));
+    // Inhaltsgewicht + Deadband
+    const float contentW = clampf(maxV>0.0f ? (bestV/maxV) : 0.0f, 0.15f, 1.0f);
+    float panSpeed = Flow::kBasePanVelNDC * (0.25f + 0.75f * contentW);
     panSpeed *= strafeFactor;
 
     if (panLen < Flow::kPanDeadbandNDC) { panX=0.0f; panY=0.0f; panSpeed=0.0f; }
 
-    // 6) Heading-Lock (sanfter Kurs nach Retarget)
+    // Heading-Lock
     if (g.lockFrames > 0){
         float curHeading = atan2safe(panY, panX);
         float delta      = wrap_pi(curHeading - g.lastHeading);
@@ -324,44 +307,37 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
         g.lastHeading = atan2safe(panY, panX);
     }
 
-    // 7) EMA-Glättung
+    // EMA-Glättung
     g.emaPanX = (1.0f - Flow::kEmaPanAlpha) * g.emaPanX + Flow::kEmaPanAlpha * (panX * panSpeed);
     g.emaPanY = (1.0f - Flow::kEmaPanAlpha) * g.emaPanY + Flow::kEmaPanAlpha * (panY * panSpeed);
 
-    const float zoomVel = Flow::kBaseZoomVel * clampf(relAdv, 0.15f, 1.0f);
+    const float zoomVel = Flow::kBaseZoomVel * contentW;
     g.emaZoom  = (1.0f - Flow::kEmaZoomAlpha) * g.emaZoom + Flow::kEmaZoomAlpha * zoomVel;
 
-    // 8) Zeitnormierung
-    const float dt = (frameCtx.deltaSeconds > 0.0f ? frameCtx.deltaSeconds : 1.0f/60.0f);
+    // Zeitnormierung (clamp gegen Jitter)
+    const float dtRaw = (frameCtx.deltaSeconds > 0.0f ? frameCtx.deltaSeconds : 1.0f/60.0f);
+    const float dt    = clampf(dtRaw, 1.0f/200.0f, 1.0f/30.0f);
 
-    // 9) Anwenden
+    // Anwenden
     RS_OFFSET_X(rs) += g.emaPanX * dt;
     RS_OFFSET_Y(rs) += g.emaPanY * dt;
     RS_ZOOM(rs)     *= std::exp(g.emaZoom * dt);
 
-    // ---- Schlanke Telemetrie (ohne neues Makro) ----
+    // Schlanke Telemetrie (kein neues Makro)
     if constexpr (Settings::performanceLogging) {
-        // Periodischer Einzeiler (gedrosselt auf jede 16. Frame)
         if ((g.frameIdx & 0xF) == 0) {
             LUCHS_LOG_HOST("[FlowTL] f=%llu statsPx=%d n=%d best=%.4f max=%.4f cand=%d pan=(%.4f,%.4f) zoom=%.6f",
-                           (unsigned long long)g.frameIdx, statsPx, nTiles, bestV, bestV,
+                           (unsigned long long)g.frameIdx, statsPx, nTiles, bestV, maxV,
                            zs.hadCandidate ? 1 : 0, g.emaPanX, g.emaPanY, RS_ZOOM(rs));
         }
-        // Edge-Trigger bei Kandidatenwechsel
         const int cand = zs.hadCandidate ? 1 : 0;
         if (g.prevCand != cand) {
             LUCHS_LOG_HOST("[FlowCAND] cand=%d statsPx=%d", cand, statsPx);
             g.prevCand = cand;
         }
-        // Ausführlicher Perf-Log (bestehend)
-        LUCHS_LOG_HOST("[Zoom/Flow] f=%llu flat=%d best=%.4f sec=%.4f relAdv=%.4f dlog=%.5f strafe=%.3f pan=(%.4f,%.4f) pspd=%.4f zoom=%.6f statsPx=%d",
-                       (unsigned long long)g.frameIdx, g.flatRun, bestV, secV, relAdv, dLogZoom, strafeFactor,
-                       g.emaPanX, g.emaPanY, panSpeed, RS_ZOOM(rs), statsPx);
     }
 }
 
-// ---------------------------------------------------------------------------
-// Legacy/Kompatibilität: erwarteter Entry aus frame_pipeline.cpp
 // ---------------------------------------------------------------------------
 void evaluateAndApply(FrameContext& frameCtx, RendererState& rs, ZoomState& zs, float dtOverrideSeconds) noexcept
 {
@@ -374,5 +350,4 @@ void evaluateAndApply(FrameContext& frameCtx, RendererState& rs, ZoomState& zs, 
 }
 
 } // namespace ZoomLogic
-
 #pragma warning(pop)
