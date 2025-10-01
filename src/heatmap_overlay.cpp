@@ -87,7 +87,7 @@ uniform float uAlphaBase;     // base alpha (scales Pfau alpha)
 vec3 mapGold(float v){
   float g = clamp(v,0.0,1.0);
   g = smoothstep(0.0,1.0,g);
-  g = pow(g, 1.08); // dezent dunkler im High-End
+  g = pow(g, 0.96); // leicht heller (sanftes Gamma < 1)
   return mix(vec3(0.08,0.08,0.10), vec3(0.98,0.78,0.30), g);
 }
 

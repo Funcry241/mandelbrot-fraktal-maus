@@ -16,7 +16,13 @@ struct FrameContext {
     int   width         = 0;
     int   height        = 0;
     int   maxIterations = 0;
+
+    // Compute-Tiling (Kernel-Raster)
     int   tileSize      = 0;
+
+    // Analysis-Tiling (Metrik-/Heatmap-Raster) — entkoppelt vom Compute-Raster.
+    // 0 => Fallback auf tileSize (gekoppelt).
+    int   statsTileSize = 0;
 
     // Float-Spiegel (wird aus Double synchronisiert)
     float zoom          = 0.0f;
@@ -33,7 +39,7 @@ struct FrameContext {
     // Zeitdelta fuer Normierung (Sekunden)
     float deltaSeconds  = 0.0f;
 
-    // Heatmap-Statistiken (Groesse == tilesX*tilesY)
+    // Heatmap-Statistiken (Groesse == tilesX*tilesY basierend auf statsTileSize, bzw. tileSize bei Fallback)
     std::vector<float> entropy;
     std::vector<float> contrast;
 

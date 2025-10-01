@@ -46,10 +46,10 @@ void FrameContext::syncFloatFromDouble() noexcept {
 void FrameContext::printDebug() const noexcept {
     if constexpr (Settings::debugLogging) { // C4702: wird nur einkompiliert, wenn aktiv
         LUCHS_LOG_HOST(
-            "[Frame] w=%d h=%d it=%d tile=%d "
+            "[Frame] w=%d h=%d it=%d tile=%d stats=%d "
             "zoomD=%.12e offD=(%.12e,%.12e) newOffD=(%.12e,%.12e) "
             "zoom=%.6f off=(%.6f,%.6f) newOff=(%.6f,%.6f) dt=%.6f e=%zu c=%zu",
-            width, height, maxIterations, tileSize,
+            width, height, maxIterations, tileSize, statsTileSize,
             zoomD, offsetD.x, offsetD.y, newOffsetD.x, newOffsetD.y,
             zoom,  offset.x,  offset.y,  newOffset.x,  newOffset.y,
             deltaSeconds, entropy.size(), contrast.size()
