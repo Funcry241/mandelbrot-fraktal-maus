@@ -30,20 +30,19 @@ namespace Flow {
     inline constexpr int   kFlatGuardFrames   = 12;
     inline constexpr float kFlatRelThreshold  = 0.02f;
     inline constexpr float kSoftmaxBeta       = 7.5f;
-    inline constexpr float kLogEps            = -8.5f;
+    inline constexpr float kLogEps            = -8.5f;   // sparsify (log-space)
     inline constexpr int   kTopK              = 6;
 
     inline constexpr float kEmaPanAlpha       = 0.30f;
     inline constexpr float kEmaZoomAlpha      = 0.25f;
 
-    // *** pro Sekunde *** (vorher pro Frame)
-    inline constexpr float kBaseZoomVel       = 1.08f;  // log/s   (0.018 * 60)
-    inline constexpr float kBasePanVelNDC     = 2.70f;  // NDC/s   (0.045 * 60)
+    inline constexpr float kBaseZoomVel       = 0.018f;  // log-Skala
+    inline constexpr float kBasePanVelNDC     = 0.045f;  // NDC/Frame
 
     inline constexpr float kStrafeK           = 60.0f;
     inline constexpr float kZoomRateLockMin   = 0.004f;
 
-    inline constexpr int   kHeadingLockFrames = 36;
+    inline constexpr int   kHeadingLockFrames = 36;      // ≈0.6s @60fps
     inline constexpr float kYawDegPerFrame    = 3.0f;
     inline constexpr float kPanDeadbandNDC    = 0.002f;
 }
