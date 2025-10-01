@@ -36,7 +36,7 @@ namespace Flow {
     inline constexpr float kEmaPanAlpha       = 0.30f;
     inline constexpr float kEmaZoomAlpha      = 0.25f;
 
-    inline constexpr float kBaseZoomVel       = 0.018f;  // log-Skala
+    inline constexpr float kBaseZoomVel       = 0.18f;   // log-Skala
     inline constexpr float kBasePanVelNDC     = 0.045f;  // NDC/Frame
 
     inline constexpr float kStrafeK           = 60.0f;
