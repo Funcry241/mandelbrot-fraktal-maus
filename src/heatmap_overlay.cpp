@@ -32,6 +32,11 @@ static GLint  uHViewportPx=-1, uHContentRectPx=-1, uHGridSize=-1, uHGridTex=-1, 
 
 static int    sTexW=0, sTexH=0;
 
+// Exposure control (stabilized normalization)
+static float  sExposureEMA = 0.0f;            // tracks a smoothed per-frame maximum
+static constexpr float kExposureDecay = 0.92f; // EMA decay (0.90..0.95 recommended)
+static constexpr float kValueFloor    = 0.03f; // minimal floor added before shader mapping
+
 // -----------------------------------------------------------------------------
 // Shaders
 // -----------------------------------------------------------------------------
@@ -87,7 +92,7 @@ uniform float uAlphaBase;     // base alpha (scales Pfau alpha)
 vec3 mapGold(float v){
   float g = clamp(v,0.0,1.0);
   g = smoothstep(0.0,1.0,g);
-  g = pow(g, 0.94); // etwas heller (sanftes Gamma < 1, stärker als 0.96)
+  g = pow(g, 0.90); // etwas heller (stärkerer Lift als 0.94)
   return mix(vec3(0.08,0.08,0.10), vec3(0.98,0.78,0.30), g);
 }
 
@@ -112,8 +117,8 @@ void main(){
     }
   }
 
-  // alpha from blurred value; bring-up etwas früher und kräftiger
-  float a = smoothstep(0.10, 0.80, v) * uAlphaBase;
+  // alpha from blurred value; bring-up früher und kräftiger
+  float a = smoothstep(0.05, 0.65, v) * uAlphaBase;
 
   vec3 col = mapGold(v);
   FragColor = vec4(col, a);
@@ -175,6 +180,7 @@ void cleanup(){
     uHViewportPx=uHContentRectPx=uHGridSize=uHGridTex=uHAlphaBase=-1;
 
     sTexW=sTexH=0;
+    sExposureEMA = 0.0f;
 }
 
 void drawOverlay(const std::vector<float>& entropy,
@@ -221,14 +227,24 @@ void drawOverlay(const std::vector<float>& entropy,
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     }
 
-    // --- Build/Update tiles texture (normalized 0..1) ---
-    float maxVal = 1e-6f;
-    for(int i=0;i<nTiles;++i) maxVal = std::max(maxVal, entropy[i]+contrast[i]);
+    // --- Build/Update tiles texture with stabilized exposure ---
+    float currentMax = 1e-6f;
+    for(int i=0;i<nTiles;++i){
+        const float v = entropy[(size_t)i] + contrast[(size_t)i];
+        if (v > currentMax) currentMax = v;
+    }
+
+    // Initialize/Update EMA: keep from decreasing too fast (decay) but allow rise immediately
+    if (sExposureEMA <= 0.0f) sExposureEMA = currentMax;
+    else                      sExposureEMA = std::max(kExposureDecay * sExposureEMA, currentMax);
+
+    const float normMax = std::max(1e-6f, sExposureEMA);
 
     std::vector<float> grid; grid.resize(size_t(nTiles));
     for(int i=0;i<nTiles;++i){
-        float v = (entropy[i] + contrast[i]) / maxVal;
-        grid[size_t(i)] = std::clamp(v, 0.0f, 1.0f);
+        float v = (entropy[(size_t)i] + contrast[(size_t)i]) / normMax;
+        v = std::clamp(v + kValueFloor, 0.0f, 1.0f); // bring-up floor (pre-smoothstep)
+        grid[(size_t)i] = v;
     }
 
     glBindTexture(GL_TEXTURE_2D, sHeatTex);
@@ -320,7 +336,10 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uHViewportPx>=0)    glUniform2f(uHViewportPx,(float)width,(float)height);
         if(uHContentRectPx>=0) glUniform4f(uHContentRectPx,(float)contentX0,(float)contentY0,(float)contentX1,(float)contentY1);
         if(uHGridSize>=0)      glUniform2i(uHGridSize, tilesX, tilesY);
-        if(uHAlphaBase>=0)     glUniform1f(uHAlphaBase, Pfau::PANEL_ALPHA * 0.98f); // etwas stärkeres Grund-Alpha
+
+        float alphaBase = Pfau::PANEL_ALPHA * 1.10f; // etwas höheres Grund-Alpha
+        if (alphaBase > 1.0f) alphaBase = 1.0f;
+        if(uHAlphaBase>=0)     glUniform1f(uHAlphaBase, alphaBase);
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, sHeatTex);
@@ -347,9 +366,9 @@ void drawOverlay(const std::vector<float>& entropy,
     glUseProgram((GLuint)prevProg);
 
     if constexpr(Settings::debugLogging){
-        LUCHS_LOG_HOST("[UI/Pfau][HM] ok TR grid=%dx%d zoom=%.6f c=(%.9f,%.9f) panel=[%d,%d..%d,%d] content=[%d,%d..%d,%d]",
+        LUCHS_LOG_HOST("[UI/Pfau][HM] ok TR grid=%dx%d zoom=%.6f c=(%.9f,%.9f) panel=[%d,%d..%d,%d] content=[%d,%d..%d,%d] expEMA=%.6f",
                        tilesX,tilesY,RS_ZOOM(ctx),RS_OFFSET_X(ctx),RS_OFFSET_Y(ctx),
-                       panelX0,panelY0,panelX1,panelY1, contentX0,contentY0,contentX1,contentY1);
+                       panelX0,panelY0,panelX1,panelY1, contentX0,contentY0,contentX1,contentY1, sExposureEMA);
         GLenum err=glGetError(); if(err!=GL_NO_ERROR) LUCHS_LOG_HOST("[UI/Pfau][HM-GL] err=0x%04X",err);
     }
 }

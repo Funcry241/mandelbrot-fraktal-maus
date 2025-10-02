@@ -1,7 +1,7 @@
 ///// Otter: Flow-Zoom V6 — smooth, hitch-free; no retarget swaps, soft strafe; clamped dt.
 ///// Schneefuchs: MSVC-safe, lean logs; no new macros.
 ///// Maus: “im Fluss” – keine Mikrostops; sanfte Richtung, sauberes EMA.
-/*** Datei: src/zoom_logic.cpp ***/
+///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
 #pragma warning(disable: 4100)
@@ -29,8 +29,10 @@ namespace ZoomLogic {
 namespace Flow {
     inline constexpr int   kFlatGuardFrames     = 12;
     inline constexpr float kFlatRelThreshold    = 0.02f;
-    inline constexpr float kSoftmaxBeta         = 7.5f;
-    inline constexpr float kLogEps              = -8.5f;   // sparsify (log-space)
+
+    // etwas entschärft für stabilere Schwerpunkte
+    inline constexpr float kSoftmaxBeta         = 6.3f;
+    inline constexpr float kLogEps              = -7.3f;   // sparsify (log-space)
     inline constexpr int   kTopK                = 6;
 
     inline constexpr float kEmaPanAlpha         = 0.30f;
@@ -39,13 +41,17 @@ namespace Flow {
     inline constexpr float kBaseZoomVel         = 0.18f;   // log-scale
     inline constexpr float kBasePanVelNDC       = 0.045f;  // NDC/frame
 
-    // Neue (weichere) Strafe-Charakteristik
+    // Weiche (nicht binäre) Strafe-Charakteristik
     inline constexpr float kStrafeKSoft         = 30.0f;   // aggressiveness in 1/(1+k*|dlog|)
     inline constexpr float kStrafeMin           = 0.35f;   // niemals komplett abwürgen
 
     inline constexpr int   kHeadingLockFrames   = 36;      // ≈0.6s @60fps
-    inline constexpr float kYawDegPerFrame      = 3.0f;
-    inline constexpr float kPanDeadbandNDC      = 0.0008f; // kleiner → keine “Anhalter”
+    inline constexpr float kYawDegPerFrame      = 3.0f;    // max Rotationsrate unter Lock
+    inline constexpr float kHeadingTriggerDeg   = 7.0f;    // ab diesem Sprung Lock aktivieren
+
+    // Größere Deadband gegen Mikrowobble + Distanzskalierung
+    inline constexpr float kPanDeadbandNDC      = 0.0040f;
+    inline constexpr float kPanScaleNDC         = 0.0800f; // Obergrenze für smoothstep-Skalierung
 }
 
 // =============================== State ======================================
@@ -70,6 +76,11 @@ static inline float clampf(float v, float a, float b){ return std::max(a, std::m
 static inline float radians(float deg){ return deg * 3.14159265358979323846f / 180.0f; }
 static inline float atan2safe(float y, float x){ return std::atan2(y, x); }
 static inline float wrap_pi(float a){ while(a>3.14159265f) a-=6.28318531f; while(a<-3.14159265f) a+=6.28318531f; return a; }
+static inline float smoothstepf(float a, float b, float x){
+    if (b <= a) return 0.0f;
+    const float t = clampf((x - a) / (b - a), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
 
 static std::pair<int,float> argmax2(const std::vector<float>& s){
     int bi=-1; float bv=-std::numeric_limits<float>::infinity();
@@ -195,13 +206,12 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
     const float len = std::sqrt(dirX*dirX + dirY*dirY);
     if(len>1e-6f){ dirX/=len; dirY/=len; }
 
-    (void)width; (void)height;
+    (void)width; (void)height; (void)zoom; (void)previousOffset;
     const float step = Flow::kBasePanVelNDC;
 
     zr.newOffsetX = currentOffset.x + dirX * step;
     zr.newOffsetY = currentOffset.y + dirY * step;
-    zr.distance   = std::sqrt((zr.newOffsetX - previousOffset.x)*(zr.newOffsetX - previousOffset.x) +
-                              (zr.newOffsetY - previousOffset.y)*(zr.newOffsetY - previousOffset.y));
+    zr.distance   = step;
     zr.minDistance= 0.02f;
     zr.bestIndex  = top.empty()? -1 : top[0];
     zr.isNewTarget= false;
@@ -244,15 +254,14 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
         score[(size_t)i]=v; if(v>maxV) maxV=v;
     }
     const float bestV = maxV;
-    const bool  isFlat = (bestV < Flow::kFlatRelThreshold * maxV) || (bestV <= 0.0f);
+    const bool  isFlat = (bestV <= 0.0f) || (bestV < Flow::kFlatRelThreshold * maxV); // effektiv nur <=0.0f
     if (isFlat) g.flatRun++; else g.flatRun = 0;
     zs.hadCandidate = (bestV > 0.0f);
 
     // *** HITCH-FIX: Retargeting vollständig deaktivieren ***
     // (Wir behalten flatRun nur fuer Telemetrie.)
-    // if (g.flatRun >= Flow::kFlatGuardFrames && (int)top.size()>=2) { ... }  // entfernt
 
-    // Schwerpunkt aus Top-K
+    // Schwerpunkt aus Top-K via Softmax
     std::vector<int> top; sort_topk(score, Flow::kTopK, top);
 
     float accX=0.0f, accY=0.0f, accW=0.0f;
@@ -270,9 +279,13 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     float tgtX = 0.0f, tgtY = 0.0f;
     if (accW > 0.0f) { tgtX = accX/accW; tgtY = accY/accW; }
 
-    float panX = tgtX, panY = tgtY;
-    const float panLen = std::sqrt(panX*panX + panY*panY);
-    if (panLen > 1e-6f) { panX/=panLen; panY/=panLen; }
+    // Distanz-gekoppelte Pan-Berechnung
+    float panDirX = 0.0f, panDirY = 0.0f;
+    float panLen  = std::sqrt(tgtX*tgtX + tgtY*tgtY);
+    if (panLen > 1e-6f) {
+        panDirX = tgtX / panLen;
+        panDirY = tgtY / panLen;
+    }
 
     // Weiche Strafe (keine Abwürge-Plateaus)
     const double zoomForLog = std::max<double>(1e-12, static_cast<double>(RS_ZOOM(rs)));
@@ -283,33 +296,50 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     float strafeFactor = 1.0f / (1.0f + Flow::kStrafeKSoft * std::fabs(dLogZoom));
     strafeFactor = clampf(strafeFactor, Flow::kStrafeMin, 1.0f);
 
-    // Inhaltsgewicht + Deadband
-    const float contentW = clampf(maxV>0.0f ? (bestV/maxV) : 0.0f, 0.15f, 1.0f);
+    // Inhaltsgewicht (derzeit ~1.0, belassen) + Distanz-Skalierung via smoothstep
+    const float contentW = 1.0f;
     float panSpeed = Flow::kBasePanVelNDC * (0.25f + 0.75f * contentW);
     panSpeed *= strafeFactor;
 
-    if (panLen < Flow::kPanDeadbandNDC) { panX=0.0f; panY=0.0f; panSpeed=0.0f; }
+    // Deadband + weiche Skalierung abhängig von der Zielentfernung
+    float panScale = 0.0f;
+    if (panLen > Flow::kPanDeadbandNDC) {
+        panScale = smoothstepf(Flow::kPanDeadbandNDC, Flow::kPanScaleNDC, panLen);
+    } else {
+        panDirX = 0.0f; panDirY = 0.0f; // Richtung ignorieren innerhalb Deadband
+    }
 
-    // Heading-Lock
-    if (g.lockFrames > 0){
-        float curHeading = atan2safe(panY, panX);
+    // Heading-Lock: bei großen Richtungswechseln aktivieren
+    if (panLen > 1e-6f) {
+        const float rawHeading = atan2safe(panDirY, panDirX);
+        const float delta      = wrap_pi(rawHeading - g.lastHeading);
+        if (g.lockFrames == 0 && std::fabs(delta) > radians(Flow::kHeadingTriggerDeg)) {
+            g.lockFrames = Flow::kHeadingLockFrames;
+        }
+    }
+
+    // Heading-Lock anwenden (max Rotationsrate)
+    float outDirX = panDirX, outDirY = panDirY;
+    if (g.lockFrames > 0 && (panLen > 1e-6f)) {
+        float curHeading = atan2safe(panDirY, panDirX);
         float delta      = wrap_pi(curHeading - g.lastHeading);
         const float maxDelta = radians(Flow::kYawDegPerFrame);
         if (std::fabs(delta) > maxDelta){
             const float sign = (delta>0.0f? 1.0f : -1.0f);
             curHeading = g.lastHeading + sign * maxDelta;
-            panX = std::cos(curHeading);
-            panY = std::sin(curHeading);
+            outDirX = std::cos(curHeading);
+            outDirY = std::sin(curHeading);
         }
-        g.lastHeading = curHeading;
+        g.lastHeading = atan2safe(outDirY, outDirX);
         g.lockFrames--;
-    } else {
-        g.lastHeading = atan2safe(panY, panX);
+    } else if (panLen > 1e-6f) {
+        g.lastHeading = atan2safe(panDirY, panDirX);
     }
 
-    // EMA-Glättung
-    g.emaPanX = (1.0f - Flow::kEmaPanAlpha) * g.emaPanX + Flow::kEmaPanAlpha * (panX * panSpeed);
-    g.emaPanY = (1.0f - Flow::kEmaPanAlpha) * g.emaPanY + Flow::kEmaPanAlpha * (panY * panSpeed);
+    // EMA-Glättung (mit Distanz-Skalierung)
+    const float effPan = panSpeed * panScale;
+    g.emaPanX = (1.0f - Flow::kEmaPanAlpha) * g.emaPanX + Flow::kEmaPanAlpha * (outDirX * effPan);
+    g.emaPanY = (1.0f - Flow::kEmaPanAlpha) * g.emaPanY + Flow::kEmaPanAlpha * (outDirY * effPan);
 
     const float zoomVel = Flow::kBaseZoomVel * contentW;
     g.emaZoom  = (1.0f - Flow::kEmaZoomAlpha) * g.emaZoom + Flow::kEmaZoomAlpha * zoomVel;
