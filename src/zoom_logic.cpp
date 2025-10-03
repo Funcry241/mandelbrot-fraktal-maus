@@ -1,7 +1,7 @@
-///// Otter: Flow-Zoom V6 — smooth, hitch-free; no retarget swaps, soft strafe; clamped dt.
-///// Schneefuchs: MSVC-safe, lean logs; no new macros.
-///// Maus: “im Fluss” – keine Mikrostops; sanfte Richtung, sauberes EMA.
-///// Datei: src/zoom_logic.cpp
+///// Otter: Flow-Zoom V6 — orbit-killer (tangential damp), heading-lock, dir-anchor; no retarget swaps.
+///** Schneefuchs: MSVC /WX clean; remove unused code; ASCII logs only; API unchanged.
+///** Maus: sanft, kreisfest; dt-clamp; EMA-Bewegung ohne Mikrowobble.
+///** Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
 #pragma warning(disable: 4100)
@@ -17,7 +17,6 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <utility>
 
 #define RS_OFFSET_X(ctx) ((ctx).center.x)
 #define RS_OFFSET_Y(ctx) ((ctx).center.y)
@@ -30,7 +29,7 @@ namespace Flow {
     inline constexpr int   kFlatGuardFrames     = 12;
     inline constexpr float kFlatRelThreshold    = 0.02f;
 
-    // etwas entschärft für stabilere Schwerpunkte
+    // Sanftere Top-K-Gewichtung (stabilere Schwerpunkte)
     inline constexpr float kSoftmaxBeta         = 6.3f;
     inline constexpr float kLogEps              = -7.3f;   // sparsify (log-space)
     inline constexpr int   kTopK                = 6;
@@ -52,6 +51,13 @@ namespace Flow {
     // Größere Deadband gegen Mikrowobble + Distanzskalierung
     inline constexpr float kPanDeadbandNDC      = 0.0040f;
     inline constexpr float kPanScaleNDC         = 0.0800f; // Obergrenze für smoothstep-Skalierung
+
+    // Richtungs-Anker gegen Kreisdrehen
+    inline constexpr float kDirEmaAlpha        = 0.22f;   // 0..1 — wie klebrig der Zielvektor ist
+    inline constexpr float kDirStick           = 0.65f;   // 0..1 — Mischung Anker vs. frische Richtung
+
+    // Sanfte Dämpfung der tangentialen Komponente (Orbit-Killer)
+    inline constexpr float kTangentialDamp     = 0.50f;   // 0..1 — 0 = aus, 1 = volle Projektion
 }
 
 // =============================== State ======================================
@@ -65,6 +71,10 @@ struct FlowState {
     float     emaPanX     = 0.0f;
     float     emaPanY     = 0.0f;
     float     emaZoom     = 0.0f;
+
+    // Richtungsanker (NDC)
+    float     anchX       = 0.0f;
+    float     anchY       = 0.0f;
 
     uint64_t  frameIdx    = 0;
     int       prevCand    = -1;
@@ -82,31 +92,18 @@ static inline float smoothstepf(float a, float b, float x){
     return t * t * (3.0f - 2.0f * t);
 }
 
-static std::pair<int,float> argmax2(const std::vector<float>& s){
+// sort indices by top-k values without allocating weights repeatedly
+static void sort_topk(const std::vector<float>& s, int k, std::vector<int>& outIdx){
+    outIdx.clear(); outIdx.reserve(s.size());
+    // seed with {best, second-best} in O(n), then partial_sort
     int bi=-1; float bv=-std::numeric_limits<float>::infinity();
     int si=-1; float sv=-std::numeric_limits<float>::infinity();
     for(size_t i=0;i<s.size();++i){
         const float v=s[i];
         if(v>bv){ si=bi; sv=bv; bi=(int)i; bv=v; }
-        else if(v>sv){ si=(int)i; sv=v; }
+        else if(v>sv && (int)i!=bi){ si=(int)i; sv=v; }
     }
-    return {bi, sv};
-}
-
-static void sort_topk(const std::vector<float>& s, int k, std::vector<int>& outIdx){
-    outIdx.clear(); outIdx.reserve((size_t)k);
-    outIdx.push_back(-1);
-
-    auto [bi,_sv] = argmax2(s);
-    int si=-1;
-    if(bi>=0){
-        float sv=-std::numeric_limits<float>::infinity();
-        for(size_t i=0;i<s.size();++i){
-            if((int)i==bi) continue;
-            const float v=s[i]; if(v>sv){ sv=v; si=(int)i; }
-        }
-    }
-    if(bi>=0) outIdx[0]=bi;
+    if(bi>=0) outIdx.push_back(bi);
     if(si>=0) outIdx.push_back(si);
     for(size_t i=0;i<s.size();++i){
         if((int)i==bi || (int)i==si) continue;
@@ -118,53 +115,31 @@ static void sort_topk(const std::vector<float>& s, int k, std::vector<int>& outI
     if((int)outIdx.size()>k) outIdx.resize((size_t)k);
 }
 
-static inline void indexToXY(int idx,int tilesX,int& x,int& y){ x = (idx % tilesX); y = (idx / tilesX); }
-static inline void tileCenterNDC(int tx,int ty,int tilesX,int tilesY,float& nx,float& ny){
-    const float cx=(float(tx)+0.5f)/float(tilesX), cy=(float(ty)+0.5f)/float(tilesY);
-    nx = cx*2.0f - 1.0f;
-    ny = 1.0f     - cy*2.0f;
+// map tile index to (tx,ty)
+static inline void indexToXY(int idx, int tilesX, int& tx, int& ty){
+    tx = (idx % tilesX);
+    ty = (idx / tilesX);
 }
 
-// ============================ Public Helpers =================================
-float computeEntropyContrast(const std::vector<float>& entropy,
-                             int width, int height, int tileSize) noexcept
-{
-    if(width<=0 || height<=0 || tileSize<=0) return 0.0f;
-    const int tilesX = (width  + tileSize - 1) / tileSize;
-    const int tilesY = (height + tileSize - 1) / tileSize;
-    const int n      = tilesX * tilesY;
-    if((int)entropy.size() < n) return 0.0f;
-
-    double acc = 0.0;
-    int    cnt = 0;
-    auto at = [&](int x,int y)->float{ return entropy[(size_t)(y*tilesX + x)]; };
-
-    for(int y=0;y<tilesY;++y){
-        for(int x=0;x<tilesX;++x){
-            const float c = at(x,y);
-            if(x+1<tilesX){ acc += std::fabs(c - at(x+1,y)); ++cnt; }
-            if(y+1<tilesY){ acc += std::fabs(c - at(x,y+1)); ++cnt; }
-        }
-    }
-    if(cnt==0) return 0.0f;
-
-    if constexpr (Settings::debugLogging) {
-        const int expected = (tilesX - 1) * tilesY + (tilesY - 1) * tilesX; // 2XY - X - Y
-        if (cnt != expected) {
-            LUCHS_LOG_HOST("[Zoom/Entropy] neighbor-pairs mismatch: cnt=%d expected=%d tiles=%dx%d",
-                           cnt, expected, tilesX, tilesY);
-        }
-    }
-    return static_cast<float>(acc / (double)cnt);
+// center of a tile in NDC (-1..+1)
+static inline void tileCenterNDC(int tx, int ty, int tilesX, int tilesY, float& nx, float& ny){
+    const float x0 = (tx + 0.5f) / (float)tilesX;
+    const float y0 = (ty + 0.5f) / (float)tilesY;
+    nx = 2.0f*x0 - 1.0f;
+    ny = 2.0f*y0 - 1.0f;
 }
 
-ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
-                              const std::vector<float>& contrast,
-                              int tilesX, int tilesY,
-                              int width, int height,
-                              float2 currentOffset, float zoom,
-                              float2 previousOffset,
-                              ZoomState& state) noexcept
+// ===========================================================================
+// Öffentliche Kern-API (Score → Zielrichtung → Glättung → Anwenden)
+// ===========================================================================
+
+ZoomResult evaluateTarget(const std::vector<float>& entropy,
+                          const std::vector<float>& contrast,
+                          int tilesX, int tilesY,
+                          int /*width*/, int /*height*/,
+                          float2 currentOffset, float /*zoom*/,
+                          float2 /*previousOffset*/,
+                          ZoomState& state) noexcept
 {
     ZoomResult zr{};
     const int nTiles = tilesX * tilesY;
@@ -203,19 +178,12 @@ ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
 
     float dirX=0.0f, dirY=0.0f;
     if(accW > 0.0f){ dirX = accX/accW; dirY = accY/accW; }
-    const float len = std::sqrt(dirX*dirX + dirY*dirY);
-    if(len>1e-6f){ dirX/=len; dirY/=len; }
 
-    (void)width; (void)height; (void)zoom; (void)previousOffset;
-    const float step = Flow::kBasePanVelNDC;
-
-    zr.newOffsetX = currentOffset.x + dirX * step;
-    zr.newOffsetY = currentOffset.y + dirY * step;
-    zr.distance   = step;
-    zr.minDistance= 0.02f;
-    zr.bestIndex  = top.empty()? -1 : top[0];
-    zr.isNewTarget= false;
-    zr.shouldZoom = state.hadCandidate;
+    zr.bestIndex  = (top.empty()? -1 : top[0]);
+    zr.shouldZoom = (bestV > 0.0f);
+    // Nur Richtung melden; Offset-Anwendung erfolgt in evaluateAndApply()
+    zr.newOffsetX = currentOffset.x;
+    zr.newOffsetY = currentOffset.y;
     return zr;
 }
 
@@ -235,8 +203,8 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     const int tilesY = (height + statsPx - 1) / statsPx;
     const int nTiles = tilesX * tilesY;
 
-    if ((int)frameCtx.entropy.size()  < nTiles ||
-        (int)frameCtx.contrast.size() < nTiles) {
+    // Sicherheitsnetz: genügend Stats?
+    if ((int)frameCtx.entropy.size() < nTiles || (int)frameCtx.contrast.size() < nTiles) {
         zs.hadCandidate = false;
         if constexpr (Settings::debugLogging) {
             LUCHS_LOG_HOST("[Zoom/Flow] ERROR stats size mismatch: need=%d e=%zu c=%zu statsPx=%d",
@@ -254,12 +222,12 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
         score[(size_t)i]=v; if(v>maxV) maxV=v;
     }
     const float bestV = maxV;
-    const bool  isFlat = (bestV <= 0.0f) || (bestV < Flow::kFlatRelThreshold * maxV); // effektiv nur <=0.0f
+    const bool  isFlat = (bestV <= 0.0f) || (bestV < Flow::kFlatRelThreshold * maxV);
     if (isFlat) g.flatRun++; else g.flatRun = 0;
     zs.hadCandidate = (bestV > 0.0f);
 
     // *** HITCH-FIX: Retargeting vollständig deaktivieren ***
-    // (Wir behalten flatRun nur fuer Telemetrie.)
+    // (flatRun bleibt nur fuer Telemetrie.)
 
     // Schwerpunkt aus Top-K via Softmax
     std::vector<int> top; sort_topk(score, Flow::kTopK, top);
@@ -285,6 +253,25 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     if (panLen > 1e-6f) {
         panDirX = tgtX / panLen;
         panDirY = tgtY / panLen;
+    }
+
+    // Richtungsanker: glättet die Zielrichtung ueber mehrere Frames (stoppt Kreisdrehen)
+    if (panLen > 1e-6f) {
+        const float ax = panDirX;
+        const float ay = panDirY;
+        const float a  = Flow::kDirEmaAlpha;
+        g.anchX = (1.0f - a) * g.anchX + a * ax;
+        g.anchY = (1.0f - a) * g.anchY + a * ay;
+        const float al = std::sqrt(g.anchX*g.anchX + g.anchY*g.anchY);
+        if (al > 1e-6f) {
+            float dirAX = g.anchX / al;
+            float dirAY = g.anchY / al;
+            // Mischung aus frischer Richtung und Anker
+            float mixX = (1.0f - Flow::kDirStick) * panDirX + Flow::kDirStick * dirAX;
+            float mixY = (1.0f - Flow::kDirStick) * panDirY + Flow::kDirStick * dirAY;
+            const float ml = std::sqrt(mixX*mixX + mixY*mixY);
+            if (ml > 1e-6f) { panDirX = mixX / ml; panDirY = mixY / ml; }
+        }
     }
 
     // Weiche Strafe (keine Abwürge-Plateaus)
@@ -318,10 +305,22 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
         }
     }
 
-    // Heading-Lock anwenden (max Rotationsrate)
+    // Orbit-Dämpfung: tangentiale Komponente relativ zur Ausgaberichtung reduzieren
     float outDirX = panDirX, outDirY = panDirY;
+    if (panLen > 1e-6f) {
+        const float px = -outDirY; // Perp zu outDir
+        const float py =  outDirX;
+        const float tang = g.emaPanX * px + g.emaPanY * py;
+        const float corr = -Flow::kTangentialDamp * tang;
+        outDirX += corr * px;
+        outDirY += corr * py;
+        const float ol = std::sqrt(outDirX*outDirX + outDirY*outDirY);
+        if (ol > 1e-6f) { outDirX /= ol; outDirY /= ol; }
+    }
+
+    // Heading-Lock anwenden (max Rotationsrate)
     if (g.lockFrames > 0 && (panLen > 1e-6f)) {
-        float curHeading = atan2safe(panDirY, panDirX);
+        float curHeading = atan2safe(outDirY, outDirX);
         float delta      = wrap_pi(curHeading - g.lastHeading);
         const float maxDelta = radians(Flow::kYawDegPerFrame);
         if (std::fabs(delta) > maxDelta){
@@ -353,12 +352,12 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     RS_OFFSET_Y(rs) += g.emaPanY * dt;
     RS_ZOOM(rs)     *= std::exp(g.emaZoom * dt);
 
-    // Schlanke Telemetrie (kein neues Makro)
+    // Schlanke Telemetrie (ASCII only)
     if constexpr (Settings::performanceLogging) {
         if ((g.frameIdx & 0xF) == 0) {
-            LUCHS_LOG_HOST("[FlowTL] f=%llu statsPx=%d n=%d best=%.4f max=%.4f cand=%d pan=(%.4f,%.4f) zoom=%.6f",
-                           (unsigned long long)g.frameIdx, statsPx, nTiles, bestV, maxV,
-                           zs.hadCandidate ? 1 : 0, g.emaPanX, g.emaPanY, RS_ZOOM(rs));
+            LUCHS_LOG_HOST("[FlowTL] f=%llu statsPx=%d n=%d best=%.4f pan=(%.4f,%.4f) zoom=%.6f",
+                           (unsigned long long)g.frameIdx, statsPx, nTiles, bestV,
+                           g.emaPanX, g.emaPanY, RS_ZOOM(rs));
         }
         const int cand = zs.hadCandidate ? 1 : 0;
         if (g.prevCand != cand) {
