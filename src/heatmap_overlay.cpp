@@ -1,5 +1,5 @@
-///// Otter: GPU Heatmap overlay (fragment shader glow/alpha) + Z0 sticker marker (argmax).
-///// Schneefuchs: Coordinates harmonized with Eule; header/source kept in sync; no extra programs.
+///// Otter: GPU Heatmap overlay (fragment shader alpha) + Z0 sticker (argmax), no blur.
+/// /// Schneefuchs: Coordinates harmonized with Eule; header/source kept in sync; no extra programs.
 ///// Maus: One-line ASCII logs; no behavioral change to zoom/pan; marker lives inside Heat FS.
 ///// Datei: src/heatmap_overlay.cpp
 
@@ -27,7 +27,7 @@ namespace HeatmapOverlay {
 static GLuint sPanelVAO=0, sPanelVBO=0, sPanelProg=0;     // Panel (rounded, alpha)
 static GLint  uViewportPx=-1, uPanelRectPx=-1, uRadiusPx=-1, uAlpha=-1, uBorderPx=-1;
 
-static GLuint sHeatVAO=0, sHeatVBO=0, sHeatProg=0, sHeatTex=0; // Heat (texture + FS blur/alpha)
+static GLuint sHeatVAO=0, sHeatVBO=0, sHeatProg=0, sHeatTex=0; // Heat (texture + alpha + sticker)
 static GLint  uHViewportPx=-1, uHContentRectPx=-1, uHGridSize=-1, uHGridTex=-1, uHAlphaBase=-1;
 // Z0 sticker uniforms inside Heat FS
 static GLint  uHMarkEnable=-1, uHMarkCenterPx=-1, uHMarkRadiusPx=-1, uHMarkAlpha=-1;
@@ -75,9 +75,8 @@ void main(){
 }
 )GLSL";
 
-// Heat pass: draw only the content rect; fragment shader samples a tiles texture,
-// applies a small Gaussian blur (3x3), maps to gold, emits alpha by value,
-// and (Z0) overlays a soft ring + crosshair marker at argmax tile center.
+// Heat pass: draw only the content rect; fragment shader samples the tiles texture
+// (NO BLUR), maps to gold, emits alpha by value, and overlays a Z0 sticker.
 static const char* kHeatVS = R"GLSL(#version 430 core
 layout(location=0) in vec2 aPosPx;
 uniform vec2 uViewportPx; out vec2 vPx;
@@ -88,7 +87,7 @@ void main(){ vPx=aPosPx; gl_Position=vec4(toNdc(aPosPx,uViewportPx),0,1); }
 static const char* kHeatFS = R"GLSL(#version 430 core
 in vec2 vPx; out vec4 FragColor;
 uniform vec4 uContentRectPx;  // [x0,y0,x1,y1] inner area (no padding)
-uniform ivec2 uGridSize;      // tilesX, tilesY
+uniform ivec2 uGridSize;      // tilesX, tilesY (kept for compatibility)
 uniform sampler2D uGrid;      // GL_R16F or GL_R32F, normalized to 0..1
 uniform float uAlphaBase;     // base alpha (scales Pfau alpha)
 // Z0 marker uniforms
@@ -113,19 +112,10 @@ void main(){
     FragColor = vec4(0.0); return;
   }
 
-  vec2 texel = 1.0 / vec2(uGridSize);
-  float k[3] = float[3](0.27901, 0.44198, 0.27901); // sigma≈1 (separable 3x3)
+  // --- NO BLUR: single texture fetch ---
+  float v = texture(uGrid, uv).r;
 
-  float v = 0.0;
-  for(int j=-1;j<=1;++j){
-    for(int i=-1;i<=1;++i){
-      vec2 o = vec2(i,j) * texel;
-      float w = k[i+1]*k[j+1];
-      v += w * texture(uGrid, uv + o).r;
-    }
-  }
-
-  // alpha from blurred value
+  // alpha from value
   float a = smoothstep(0.05, 0.65, v) * uAlphaBase;
   vec4 base = vec4(mapGold(v), a);
 
@@ -354,7 +344,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
     }
 
-    // --- Heat pass (content rect quad; FS does blur+alpha + Z0 sticker) ---
+    // --- Heat pass (content rect quad; FS does value mapping + Z0 sticker) ---
     {
         const float quad[12]={
             (float)contentX0,(float)contentY0,
