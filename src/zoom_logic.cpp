@@ -1,10 +1,10 @@
-///// Otter: Zoom V8 — Proportional Navigation (PN): kein Kreisen, erst zentrieren, dann zoomen.
-///*** Schneefuchs: MSVC /WX clean; ASCII-Logs; API unverändert; deterministisches dt-Clamp.
-///*** Maus: ruhig & zielstrebig: Winner-Lock + Cone-Hysterese + PN-Dämpfung der Blickwinkel-Rate.
+///// Otter: Zoom V9.1 — PN + Alpha-Beta mit erweiterter Perf-Telemetrie (eine Zeile, selten, ASCII, stabil).
+///// Schneefuchs: MSVC /WX clean; keine ungenutzten Symbole; deterministisches dt-Clamp; API unverändert.
+///// Maus: „erst zentrieren, dann zoomen“ — Winner-Tile → (nx,ny) filtern → PN-Pan; Telemetrie zeigt alles Wichtige.
 ///*** Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
-#pragma warning(disable: 4100) // unreferenced formal parameter (API beibehalten)
+#pragma warning(disable: 4100) // API-Parameter evtl. ungenutzt
 
 #include "zoom_logic.hpp"
 #include "frame_context.hpp"
@@ -25,74 +25,86 @@
 namespace ZoomLogic {
 
 // ============================== Tunables ====================================
-// Strategie: Winner-Take-All + Lock, Pan via Proportional Navigation (PN),
-// Zoomen gated über Center-Cone mit Hysterese.
+// Strategie:
+//   1) Winner-Take-All misst pro Frame (nx, ny) des besten Tiles.
+//   2) Alpha-Beta-Filter (CV-Modell) glättet Position & leitet eine sanfte Zielgeschwindigkeit ab.
+//   3) Pan via Proportional Navigation (PN) killt Tangentialanteile (Orbit).
+//   4) Zoom zweistufig: „Far-Approach“ (kleines Grund-Zoom), „Near-Center“ (Cone-Gate mit Hysterese).
 namespace Tuned {
-    // Target-Lock (Winner-Take-All + Hysterese)
-    inline constexpr int   kStickFrames        = 48;     // ~0.8s @60fps Mindesthaltezeit
-    inline constexpr float kScoreMargin        = 1.12f;  // neuer Kandidat muss 12% besser sein
+    // Alpha-Beta-Filter (constant-velocity)
+    inline constexpr float kAlpha            = 0.35f;  // 0..1  (Positions-Korrektur)
+    inline constexpr float kBeta             = 0.12f;  // 0..1  (Geschwindigkeits-Korrektur)
 
-    // Center-Cone (NDC)
-    inline constexpr float kConeEnter          = 0.12f;  // Zoomen EIN wenn |nx|,|ny| < 0.12
-    inline constexpr float kConeExit           = 0.18f;  // Zoomen AUS wenn > 0.18
+    // Mess-Gate (zu große Sprünge nur gedämpft übernehmen)
+    inline constexpr float kJumpSoft         = 0.40f;  // NDC, ab hier Alpha weich herunterskalieren
+    inline constexpr float kJumpHard         = 0.90f;  // NDC, oberhalb stark dämpfen (Outlier)
 
-    // PN-Pan-Regler
-    inline constexpr float kKp                 = 2.00f;  // Positionsfehler → Wunschgeschwindigkeit [NDC/s]
-    inline constexpr float kKn                 = 1.00f;  // Dämpfung auf LOS-Winkelrate (tangentiale Komponente)
-    inline constexpr float kPanVelLerp         = 0.25f;  // EMA auf Pan-Geschwindigkeit
-    inline constexpr float kPanVelMax          = 0.80f;  // Deckel [NDC/s]
-    inline constexpr float kPanDeadband        = 0.004f; // Ruheband gegen Mikrowobble
+    // PN-Pan (kein Kreisen)
+    inline constexpr float kKp               = 1.60f;  // radial:  v_r = -Kp * e
+    inline constexpr float kKn               = 1.00f;  // tangential: v_t = -Kn * (dtheta/dt)*r*n_perp
+    inline constexpr float kPanVelLerp       = 0.30f;  // EMA auf Pan-Geschwindigkeit
+    inline constexpr float kPanVelMax        = 0.50f;  // Deckel [NDC/s]
+    inline constexpr float kPanDeadband      = 0.004f; // Ruheband gegen Mikrowobble
 
-    // Zoom (logarithmische Geschwindigkeit)
-    inline constexpr float kZoomGain           = 0.55f;  // log-zoom / s bei r→0
-    inline constexpr float kZoomVelLerp        = 0.25f;  // EMA auf log-zoom-Rate
+    // Zoom (logarithmische Rate, d.h. zoom *= exp(rate*dt))
+    // Phase 1 (weit weg): sanftes Grundzoom, um schneller „ins Geschehen“ zu kommen.
+    inline constexpr float kZoomFarMin       = 0.15f;  // log-zoom/s, wenn r >= kConeEnter
+    // Phase 2 (nahe Zentrum): Cone-Gate mit Hysterese + quadratische Annäherungsformel
+    inline constexpr float kConeEnter        = 0.16f;  // Zoomen EIN, wenn |nx|,|ny| <= 0.16
+    inline constexpr float kConeExit         = 0.22f;  // Zoomen AUS, wenn > 0.22
+    inline constexpr float kZoomNearGain     = 0.55f;  // log-zoom/s bei r→0
+    inline constexpr float kZoomVelLerp      = 0.25f;  // EMA auf log-zoom-Rate
 
     // Sicheres dt
-    inline constexpr float kDtMin              = 1.0f/200.0f;
-    inline constexpr float kDtMax              = 1.0f/30.0f;
+    inline constexpr float kDtMin            = 1.0f/200.0f;
+    inline constexpr float kDtMax            = 1.0f/30.0f;
 
     // Telemetrie
-    inline constexpr int   kPerfEveryN         = 16;
+    inline constexpr int   kPerfEveryN       = 16;
 }
 
 // =============================== State ======================================
 struct State {
-    // Target lock
-    int      lockIdx     = -1;
-    float    lockScore   = 0.0f;
-    int      stickLeft   = 0;
+    // Gefiltertes Ziel (NDC) und Ableitungen
+    bool     filtInit   = false;
+    float    tx         = 0.0f;  // gefilterte Zielposition x (NDC)
+    float    ty         = 0.0f;  // gefilterte Zielposition y (NDC)
+    float    tvx        = 0.0f;  // gefilterte Zielgeschw. x (NDC/s)
+    float    tvy        = 0.0f;  // gefilterte Zielgeschw. y (NDC/s)
 
-    // Pan / Zoom velocities (geglättet)
-    float    panVX       = 0.0f;  // [NDC/s]
-    float    panVY       = 0.0f;  // [NDC/s]
-    float    zoomV       = 0.0f;  // [log-zoom/s]
-
-    // LOS-Winkel (für PN)
-    float    prevTheta   = 0.0f;
+    // LOS-Winkel für PN
     bool     prevThetaInit = false;
+    float    prevTheta     = 0.0f;
+
+    // Ausgabe-Geschwindigkeiten (geglättet)
+    float    panVX      = 0.0f;  // [NDC/s]
+    float    panVY      = 0.0f;  // [NDC/s]
+    float    zoomV      = 0.0f;  // [log-zoom/s]
 
     // Zoom-Gate Status
-    bool     canZoom     = false;
+    bool     canZoom    = false;
 
     // Telemetrie
-    uint64_t frameIdx    = 0;
-    int      prevCand    = -1;
+    uint64_t frameIdx   = 0;
+    int      prevCand   = -1;
 };
 static State g;
 
 // ============================== Helpers =====================================
 static inline float clampf(float v, float a, float b) { return v < a ? a : (v > b ? b : v); }
 static inline float absf  (float v) { return v < 0.0f ? -v : v; }
+static inline float hypotf(float x, float y) { return std::sqrt(x*x + y*y); }
+static inline float rad2deg(float r){ return r * 57.29577951308232f; }
 
 static inline void indexToXY(int idx, int tilesX, int& tx, int& ty) {
     tx = (idx % tilesX);
     ty = (idx / tilesX);
 }
 static inline void tileCenterNDC(int tx, int ty, int tilesX, int tilesY, float& nx, float& ny) {
-    const float x0 = (static_cast<float>(tx) + 0.5f) / static_cast<float>(tilesX);
-    const float y0 = (static_cast<float>(ty) + 0.5f) / static_cast<float>(tilesY);
-    nx = 2.0f * x0 - 1.0f;
-    ny = 2.0f * y0 - 1.0f;
+    const float fx = (static_cast<float>(tx) + 0.5f) / static_cast<float>(tilesX);
+    const float fy = (static_cast<float>(ty) + 0.5f) / static_cast<float>(tilesY);
+    nx = 2.0f * fx - 1.0f;
+    ny = 2.0f * fy - 1.0f;
 }
 
 // ===========================================================================
@@ -151,13 +163,13 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     if (static_cast<int>(frameCtx.entropy.size()) < n || static_cast<int>(frameCtx.contrast.size()) < n) {
         zs.hadCandidate = false;
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ZoomV8] ERROR stats size mismatch: need=%d e=%zu c=%zu statsPx=%d",
+            LUCHS_LOG_HOST("[ZoomV9] ERROR stats size mismatch: need=%d e=%zu c=%zu statsPx=%d",
                            n, frameCtx.entropy.size(), frameCtx.contrast.size(), statsPx);
         }
         return;
     }
 
-    // --------- Winner-Take-All + Hysterese Lock ----------
+    // --------- Winner-Take-All Messung ----------
     int   bestIdx = -1;
     float bestVal = -std::numeric_limits<float>::infinity();
     for (int i = 0; i < n; ++i) {
@@ -166,62 +178,74 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     }
     zs.hadCandidate = (bestIdx >= 0 && bestVal > 0.0f);
 
-    if (!zs.hadCandidate) {
-        // Kein Ziel: Lock lösen, sanft ausrollen (Pan/Zoom → 0)
-        g.lockIdx     = -1;
-        g.lockScore   = 0.0f;
-        g.stickLeft   = 0;
-    } else {
-        if (g.lockIdx < 0) {
-            g.lockIdx   = bestIdx;
-            g.lockScore = bestVal;
-            g.stickLeft = Tuned::kStickFrames;
-            g.prevThetaInit = false; // LOS neu initialisieren
-            if constexpr (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[ZoomV8] lock idx=%d score=%.3f", g.lockIdx, g.lockScore);
-            }
-        } else {
-            if (bestIdx != g.lockIdx) {
-                const bool marginBeat = (bestVal > Tuned::kScoreMargin * g.lockScore);
-                if (marginBeat || g.stickLeft <= 0) {
-                    g.lockIdx   = bestIdx;
-                    g.lockScore = bestVal;
-                    g.stickLeft = Tuned::kStickFrames;
-                    g.prevThetaInit = false;
-                    if constexpr (Settings::performanceLogging) {
-                        LUCHS_LOG_HOST("[ZoomV8] relock idx=%d score=%.3f", g.lockIdx, g.lockScore);
-                    }
-                } // sonst Lock halten
-            } else {
-                g.lockScore = bestVal; // Score mitziehen
-            }
-        }
-    }
-    if (g.stickLeft > 0) g.stickLeft--;
-
-    // --------- Zielposition (NDC) des gelockten Tiles ----------
-    float tgtNX = 0.0f, tgtNY = 0.0f;
-    if (g.lockIdx >= 0) {
-        int tx, ty; indexToXY(g.lockIdx, tilesX, tx, ty);
-        tileCenterNDC(tx, ty, tilesX, tilesY, tgtNX, tgtNY);
+    float measNX = 0.0f, measNY = 0.0f;
+    if (zs.hadCandidate) {
+        int tx, ty; indexToXY(bestIdx, tilesX, tx, ty);
+        tileCenterNDC(tx, ty, tilesX, tilesY, measNX, measNY);
     }
 
     // --------- Zeitnormierung ----------
     const float dtRaw = (frameCtx.deltaSeconds > 0.0f ? frameCtx.deltaSeconds : 1.0f/60.0f);
     const float dt    = clampf(dtRaw, Tuned::kDtMin, Tuned::kDtMax);
 
-    // --------- PN-Pan: v = -Kp*e - Kn*dot(theta)*r*n_perp ----------
-    const float ex = tgtNX, ey = tgtNY;
-    const float r  = std::sqrt(ex*ex + ey*ey);
-    float vX = 0.0f, vY = 0.0f;
+    // --------- Alpha-Beta-Filter (auf Messung in NDC) ----------
+    if (!g.filtInit) {
+        if (zs.hadCandidate) {
+            g.tx = measNX; g.ty = measNY; g.tvx = 0.0f; g.tvy = 0.0f;
+            g.filtInit = true;
+            g.prevThetaInit = false;
+        }
+    } else {
+        // Prädiktion
+        const float px = g.tx + g.tvx * dt;
+        const float py = g.ty + g.tvy * dt;
 
-    if (r > 1e-5f) {
-        const float theta = std::atan2(ey, ex);
+        float zx = px, zy = py; // Standard: keine Messung → einfach vorhersagen
+        if (zs.hadCandidate) {
+            // Sprungdämpfung: sehr große Messsprünge nur abgeschwächt einmischen
+            const float jump = hypotf(measNX - px, measNY - py);
+            float a = Tuned::kAlpha;
+            if (jump > Tuned::kJumpSoft) {
+                // weich auf 10..30% des ursprünglichen Alpha dämpfen
+                const float t = clampf((jump - Tuned::kJumpSoft) / (Tuned::kJumpHard - Tuned::kJumpSoft), 0.0f, 1.0f);
+                const float scale = 0.3f - 0.2f * t; // 0.3 → 0.1
+                a *= scale;
+            }
+            const float b = Tuned::kBeta;
+
+            // Korrektur
+            const float rx = measNX - px;
+            const float ry = measNY - py;
+            zx = px + a * rx;
+            zy = py + a * ry;
+            const float dvx = (b * rx) / dt;
+            const float dvy = (b * ry) / dt;
+
+            g.tvx += dvx;
+            g.tvy += dvy;
+        }
+        g.tx = clampf(zx, -1.2f, +1.2f); // etwas größer als Sichtfeld (sanfte Ränder)
+        g.ty = clampf(zy, -1.2f, +1.2f);
+    }
+
+    // --------- PN-Pan: v = -Kp*e - Kn*dot(theta)*r*n_perp ----------
+    float ex = g.tx;
+    float ey = g.ty;
+    const float r  = hypotf(ex, ey);
+
+    // Debug-/Perf-Variablen für Logging
+    float theta = 0.0f;
+    float losRate = 0.0f;      // [rad/s]
+    float vX = 0.0f, vY = 0.0f;
+    float vMagPre = 0.0f;
+    int   vCapHit = 0;
+
+    if (g.filtInit && r > 1e-5f) {
+        theta = std::atan2(ey, ex);
         float dtheta = 0.0f;
         if (!g.prevThetaInit) {
             g.prevTheta = theta;
             g.prevThetaInit = true;
-            dtheta = 0.0f;
         } else {
             dtheta = theta - g.prevTheta;
             // wrap to (-pi, pi]
@@ -229,13 +253,13 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
             while (dtheta <= -3.14159265f) dtheta += 6.28318531f;
             g.prevTheta = theta;
         }
-        const float losRate = dtheta / dt;     // [rad/s]
-        const float nx = -ey / r;              // n_perp.x
-        const float ny =  ex / r;              // n_perp.y
+        losRate = dtheta / dt;               // [rad/s]
+        const float nx = -ey / r;            // n_perp.x
+        const float ny =  ex / r;            // n_perp.y
 
-        const float vPX = -Tuned::kKp * ex;                // radial (Proportional)
+        const float vPX = -Tuned::kKp * ex;                 // radial
         const float vPY = -Tuned::kKp * ey;
-        const float vTX = -Tuned::kKn * losRate * r * nx;  // tangentiale Dämpfung
+        const float vTX = -Tuned::kKn * losRate * r * nx;   // tangentiale Dämpfung
         const float vTY = -Tuned::kKn * losRate * r * ny;
 
         vX = vPX + vTX;
@@ -245,35 +269,37 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
         if (r <= Tuned::kPanDeadband) { vX = 0.0f; vY = 0.0f; }
 
         // Clamp & EMA
-        const float vMag = std::sqrt(vX*vX + vY*vY);
-        if (vMag > Tuned::kPanVelMax) {
-            const float s = Tuned::kPanVelMax / (vMag + 1e-9f);
+        vMagPre = hypotf(vX, vY);
+        if (vMagPre > Tuned::kPanVelMax) { vCapHit = 1; }
+        if (vMagPre > Tuned::kPanVelMax) {
+            const float s = Tuned::kPanVelMax / (vMagPre + 1e-9f);
             vX *= s; vY *= s;
         }
-
         g.panVX = (1.0f - Tuned::kPanVelLerp) * g.panVX + Tuned::kPanVelLerp * vX;
         g.panVY = (1.0f - Tuned::kPanVelLerp) * g.panVY + Tuned::kPanVelLerp * vY;
     } else {
-        // nahe Zentrum: auslaufen lassen
+        // kein Ziel / nahe Zentrum: auslaufen lassen
         g.panVX *= 0.85f;
         g.panVY *= 0.85f;
     }
 
-    // --------- Center-Cone-Gate für Zoom (Hysterese) ----------
-    const bool insideCone = (absf(tgtNX) <= Tuned::kConeEnter && absf(tgtNY) <= Tuned::kConeEnter);
-    const bool outsideCone= (absf(tgtNX) >= Tuned::kConeExit  || absf(tgtNY) >= Tuned::kConeExit );
+    // --------- Zoom zweistufig ----------
+    // Phase 1: weit weg → sanftes Grundzoom, um schneller in interessante Strukturen zu kommen
+    float zTarget = (!g.filtInit ? 0.0f : Tuned::kZoomFarMin);
+
+    // Phase 2: nah am Zentrum → Cone-Gate + quadratischer Ramp-Up
+    const bool insideCone = (absf(g.tx) <= Tuned::kConeEnter && absf(g.ty) <= Tuned::kConeEnter);
+    const bool outsideCone= (absf(g.tx) >= Tuned::kConeExit  || absf(g.ty) >= Tuned::kConeExit );
     if (!g.canZoom && insideCone) g.canZoom = true;
     if ( g.canZoom && outsideCone) g.canZoom = false;
 
-    float zTarget = 0.0f;
     if (g.canZoom) {
         const float gateR   = Tuned::kConeEnter;
         const float rr      = clampf(r / gateR, 0.0f, 1.0f);
         const float weight  = (1.0f - rr);          // 0..1
-        zTarget = Tuned::kZoomGain * weight * weight;
-    } else {
-        zTarget = 0.0f;
+        zTarget = Tuned::kZoomNearGain * weight * weight; // je näher am Zentrum, desto höher die Rate (bis kZoomNearGain)
     }
+
     g.zoomV = (1.0f - Tuned::kZoomVelLerp) * g.zoomV + Tuned::kZoomVelLerp * zTarget;
 
     // --------- Anwenden ----------
@@ -281,18 +307,28 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& zs)
     RS_OFFSET_Y(rs) += g.panVY * dt;
     RS_ZOOM(rs)     *= std::exp(g.zoomV * dt);
 
-    // --------- Telemetrie ----------
+    // --------- Performance-Telemetrie (kompakt, alle kPerfEveryN Frames) ----------
     if constexpr (Settings::performanceLogging) {
         if ((g.frameIdx % Tuned::kPerfEveryN) == 0) {
-            const float best = (g.lockIdx >= 0 ? g.lockScore : 0.0f);
-            LUCHS_LOG_HOST("[ZoomV8] f=%llu statsPx=%d n=%d lock=%d best=%.4f r=%.4f panV=(%.4f,%.4f) cone=%d zoom=%.6f",
-                           (unsigned long long)g.frameIdx, statsPx, n, g.lockIdx, best, r,
-                           g.panVX, g.panVY, g.canZoom ? 1 : 0, RS_ZOOM(rs));
+            const int cand = zs.hadCandidate ? 1 : 0;
+            const float dtMs = dt * 1000.0f;
+            const float vMag = hypotf(g.panVX, g.panVY);
+            const int tilesN = n;
+            // Eine Zeile, alles Wichtige:
+            // f, dt, statsPx, tiles, idx, bestScore, cand, meas(x,y), filt(x,y), r, theta(deg), los(deg/s),
+            // panV(x,y)|mag, capHit, cone, zTarget, zoomV, zoom, tv(x,y)
+            LUCHS_LOG_HOST("[ZoomV9TL] f=%llu dt=%.1fms statsPx=%d tiles=%d idx=%d best=%.3f cand=%d "
+                           "meas=(%.3f,%.3f) filt=(%.3f,%.3f) r=%.4f th=%.1fdeg los=%.1fdeg/s "
+                           "panV=(%.4f,%.4f)|%.4f cap=%d cone=%d zt=%.3f zv=%.3f zoom=%.6f tv=(%.3f,%.3f)",
+                           (unsigned long long)g.frameIdx, dtMs, statsPx, tilesN, bestIdx, bestVal, cand,
+                           measNX, measNY, g.tx, g.ty, r, rad2deg(theta), rad2deg(losRate),
+                           g.panVX, g.panVY, vMag, vCapHit, (g.canZoom?1:0), zTarget, g.zoomV, RS_ZOOM(rs),
+                           g.tvx, g.tvy);
         }
-        const int cand = zs.hadCandidate ? 1 : 0;
-        if (g.prevCand != cand) {
-            LUCHS_LOG_HOST("[ZoomV8][CAND] cand=%d statsPx=%d", cand, statsPx);
-            g.prevCand = cand;
+        const int candNow = zs.hadCandidate ? 1 : 0;
+        if (g.prevCand != candNow) {
+            LUCHS_LOG_HOST("[ZoomV9][CAND] cand=%d statsPx=%d", candNow, statsPx);
+            g.prevCand = candNow;
         }
     }
 }
