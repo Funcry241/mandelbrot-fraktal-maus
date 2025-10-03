@@ -35,7 +35,32 @@ namespace Settings {
     // performanceLogging
     // Condensed [PERF] logs along the frame pipeline.
     // Range: {false, true} | Default: true
-    inline constexpr bool performanceLogging = true;
+    inline constexpr bool performanceLogging = false;
+
+    // --- ZoomLog (NEW) -------------------------------------------------------
+    // Foundation telemetry for all zoom stages (S1..Sn). Compact, ASCII-only.
+    // One optional header line plus a rate-limited data line.
+    namespace ZoomLog {
+        // enabled
+        // Master switch for zoom telemetry.
+        // Range: {false, true} | Default: true
+        inline constexpr bool enabled = true;
+
+        // everyN
+        // Emit a data line every N frames (1 = every frame).
+        // Range: 1 .. 120 | Default: 16
+        inline constexpr int  everyN  = 16;
+
+        // header
+        // Print a single header line once at startup.
+        // Range: {false, true} | Default: true
+        inline constexpr bool header  = true;
+
+        // includeCenter
+        // Append current center (cx,cy) to each data line.
+        // Range: {false, true} | Default: true
+        inline constexpr bool includeCenter = true;
+    } // namespace ZoomLog
 
 // ============================== Framerate / VSync ============================
 
