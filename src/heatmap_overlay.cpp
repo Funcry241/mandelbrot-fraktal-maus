@@ -1,4 +1,6 @@
-///// Otter: GPU Heatmap overlay (fragment shader glow/alpha), no external deps.
+///// Otter: GPU Heatmap overlay (fragment shader glow/alpha) + Z0 Sticker marker.
+//%%%  Otter: Minimal, risk-free: draw best-tile marker inside Pfau content rect.
+//%%%  Otter: No zoom/pan changes; pure visualization + one-line logs.
 ///// Schneefuchs: Coordinates harmonized with Eule; header/source in sync.
 ///// Maus: One-line logs, fixed field order; enable by default.
 ///// Datei: src/heatmap_overlay.cpp
@@ -29,6 +31,9 @@ static GLint  uViewportPx=-1, uPanelRectPx=-1, uRadiusPx=-1, uAlpha=-1, uBorderP
 
 static GLuint sHeatVAO=0, sHeatVBO=0, sHeatProg=0, sHeatTex=0; // Heat (texture + FS blur/alpha)
 static GLint  uHViewportPx=-1, uHContentRectPx=-1, uHGridSize=-1, uHGridTex=-1, uHAlphaBase=-1;
+
+static GLuint sMarkVAO=0, sMarkVBO=0, sMarkProg=0;        // Z0 Sticker (cross + ring, FS analytic)
+static GLint  uMViewportPx=-1, uMContentRectPx=-1, uMCenterPx=-1, uMRadiusPx=-1, uMAlphaM=-1;
 
 static int    sTexW=0, sTexH=0;
 
@@ -125,6 +130,51 @@ void main(){
 }
 )GLSL";
 
+// Z0 Sticker: draws a soft ring + crosshair at best tile center inside content rect.
+static const char* kMarkVS = R"GLSL(#version 430 core
+layout(location=0) in vec2 aPosPx;
+uniform vec2 uViewportPx; out vec2 vPx;
+vec2 toNdc(vec2 p, vec2 vp){ return vec2(p.x/vp.x*2-1, 1-p.y/vp.y*2); }
+void main(){ vPx=aPosPx; gl_Position=vec4(toNdc(aPosPx,uViewportPx),0,1); }
+)GLSL";
+
+static const char* kMarkFS = R"GLSL(#version 430 core
+in vec2 vPx; out vec4 FragColor;
+uniform vec4  uContentRectPx;     // [x0,y0,x1,y1]
+uniform vec2  uCenterPx;          // sticker center in *pixel* coords
+uniform float uRadiusPx;          // ring radius in px (≈ 0.7 * tile)
+uniform float uAlpha;             // overall alpha
+
+// soft ring + cross, analytic in pixel space
+void main(){
+  // clip to content rect
+  if(vPx.x < uContentRectPx.x || vPx.x > uContentRectPx.z ||
+     vPx.y < uContentRectPx.y || vPx.y > uContentRectPx.w){
+    FragColor = vec4(0.0); return;
+  }
+
+  vec2  d2  = vPx - uCenterPx;
+  float r   = length(d2);
+  float tPx = 1.5;                    // ring thickness in px
+  float edge = abs(r - uRadiusPx);
+
+  // smooth AA in px
+  float aa = fwidth(edge) + 0.75;     // bias to be visible on thin lines
+  float ring = 1.0 - smoothstep(tPx, tPx+aa, edge);
+
+  // crosshair: two thin bands
+  float cx = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.x));
+  float cy = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.y));
+  float cross = max(cx, cy);
+
+  float a = clamp(max(ring, cross) * uAlpha, 0.0, 1.0);
+
+  // bright gold/white mix
+  vec3 col = mix(vec3(1.00, 0.94, 0.70), vec3(1.0), 0.15);
+  FragColor = vec4(col, a);
+}
+)GLSL";
+
 // -----------------------------------------------------------------------------
 // GL helpers
 // -----------------------------------------------------------------------------
@@ -179,6 +229,12 @@ void cleanup(){
     sHeatVAO=sHeatVBO=sHeatProg=sHeatTex=0;
     uHViewportPx=uHContentRectPx=uHGridSize=uHGridTex=uHAlphaBase=-1;
 
+    if(sMarkVAO) glDeleteVertexArrays(1,&sMarkVAO);
+    if(sMarkVBO) glDeleteBuffers(1,&sMarkVBO);
+    if(sMarkProg) glDeleteProgram(sMarkProg);
+    sMarkVAO=sMarkVBO=sMarkProg=0;
+    uMViewportPx=uMContentRectPx=uMCenterPx=uMRadiusPx=uMAlphaM=-1;
+
     sTexW=sTexH=0;
     sExposureEMA = 0.0f;
 }
@@ -216,9 +272,19 @@ void drawOverlay(const std::vector<float>& entropy,
         uHGridTex       = glGetUniformLocation(sHeatProg, "uGrid");
         uHAlphaBase     = glGetUniformLocation(sHeatProg, "uAlphaBase");
     }
+    if(!sMarkProg){
+        sMarkProg = program(kMarkVS, kMarkFS);
+        if(!sMarkProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[UI/Pfau][HM] ERROR: mark program==0"); return; }
+        uMViewportPx    = glGetUniformLocation(sMarkProg, "uViewportPx");
+        uMContentRectPx = glGetUniformLocation(sMarkProg, "uContentRectPx");
+        uMCenterPx      = glGetUniformLocation(sMarkProg, "uCenterPx");
+        uMRadiusPx      = glGetUniformLocation(sMarkProg, "uRadiusPx");
+        uMAlphaM        = glGetUniformLocation(sMarkProg, "uAlpha");
+    }
 
     if(!sPanelVAO){ glGenVertexArrays(1,&sPanelVAO); glGenBuffers(1,&sPanelVBO); }
     if(!sHeatVAO){  glGenVertexArrays(1,&sHeatVAO);  glGenBuffers(1,&sHeatVBO);  }
+    if(!sMarkVAO){  glGenVertexArrays(1,&sMarkVAO);  glGenBuffers(1,&sMarkVBO);  }
 
     if(!sHeatTex){ glGenTextures(1,&sHeatTex); glBindTexture(GL_TEXTURE_2D,sHeatTex);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
@@ -229,9 +295,13 @@ void drawOverlay(const std::vector<float>& entropy,
 
     // --- Build/Update tiles texture with stabilized exposure ---
     float currentMax = 1e-6f;
+    int   bestIdxRaw = 0;
+    float bestRaw    = -1e30f;
+
     for(int i=0;i<nTiles;++i){
-        const float v = entropy[(size_t)i] + contrast[(size_t)i];
-        if (v > currentMax) currentMax = v;
+        const float raw = entropy[(size_t)i] + contrast[(size_t)i];
+        if (raw > currentMax) currentMax = raw;
+        if (raw > bestRaw){ bestRaw = raw; bestIdxRaw = i; }
     }
 
     // Initialize/Update EMA: keep from decreasing too fast (decay) but allow rise immediately
@@ -241,10 +311,14 @@ void drawOverlay(const std::vector<float>& entropy,
     const float normMax = std::max(1e-6f, sExposureEMA);
 
     std::vector<float> grid; grid.resize(size_t(nTiles));
+    int   bestIdx = 0;
+    float bestVal = -1e30f;
+
     for(int i=0;i<nTiles;++i){
         float v = (entropy[(size_t)i] + contrast[(size_t)i]) / normMax;
         v = std::clamp(v + kValueFloor, 0.0f, 1.0f); // bring-up floor (pre-smoothstep)
         grid[(size_t)i] = v;
+        if (v > bestVal){ bestVal = v; bestIdx = i; }
     }
 
     glBindTexture(GL_TEXTURE_2D, sHeatTex);
@@ -354,6 +428,62 @@ void drawOverlay(const std::vector<float>& entropy,
         glEnable(GL_BLEND);
         glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
         glDrawArrays(GL_TRIANGLES,0,6);
+    }
+
+    // --- Z0 Sticker (Argmax marker inside content rect) ---
+    {
+        // Compute best-tile center in panel pixel space
+        const int bx = bestIdx % tilesX;
+        const int by = bestIdx / tilesX;
+
+        const float tileWPx = (float)(contentX1 - contentX0) / std::max(1, tilesX);
+        const float tileHPx = (float)(contentY1 - contentY0) / std::max(1, tilesY);
+
+        const float centerPxX = (float)contentX0 + (bx + 0.5f) * tileWPx;
+        const float centerPxY = (float)contentY0 + (by + 0.5f) * tileHPx;
+
+        // Ring radius ~ 0.70 * half-diagonal of a tile → sichtbar, aber nicht störend
+        const float tileR = 0.70f * 0.5f * std::sqrt(tileWPx*tileWPx + tileHPx*tileHPx);
+        const float markAlpha = 0.95f;
+
+        // Full content-rect quad as draw area
+        const float quad[12]={
+            (float)contentX0,(float)contentY0,
+            (float)contentX1,(float)contentY0,
+            (float)contentX1,(float)contentY1,
+            (float)contentX0,(float)contentY0,
+            (float)contentX1,(float)contentY1,
+            (float)contentX0,(float)contentY1,
+        };
+
+        if(sMarkProg){
+            glUseProgram(sMarkProg);
+            if(uMViewportPx>=0)    glUniform2f(uMViewportPx,(float)width,(float)height);
+            if(uMContentRectPx>=0) glUniform4f(uMContentRectPx,(float)contentX0,(float)contentY0,(float)contentX1,(float)contentY1);
+            if(uMCenterPx>=0)      glUniform2f(uMCenterPx, centerPxX, centerPxY);
+            if(uMRadiusPx>=0)      glUniform1f(uMRadiusPx, tileR);
+            if(uMAlphaM>=0)        glUniform1f(uMAlphaM, markAlpha);
+
+            glBindVertexArray(sMarkVAO);
+            glBindBuffer(GL_ARRAY_BUFFER,sMarkVBO);
+            glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)sizeof(quad),nullptr,GL_DYNAMIC_DRAW);
+            glBufferSubData(GL_ARRAY_BUFFER,0,(GLsizeiptr)sizeof(quad),quad);
+            glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,2*sizeof(float),(void*)0);
+
+            glEnable(GL_BLEND);
+            glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+            glDrawArrays(GL_TRIANGLES,0,6);
+        }
+
+        if constexpr(Settings::debugLogging){
+            // NDC for the sticker center (for human sanity check)
+            const double ndcX = (centerPxX / (double)width) * 2.0 - 1.0;
+            const double ndcY = 1.0 - (centerPxY / (double)height) * 2.0;
+
+            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d raw=%.6f norm=%.6f ndc=(%.6f,%.6f) Rpx=%.2f panel=[%d,%d..%d,%d] content=[%d,%d..%d,%d]",
+                           tilesX, tilesY, bestIdx, bestRaw, bestVal, ndcX, ndcY, tileR,
+                           panelX0,panelY0,panelX1,panelY1, contentX0,contentY0,contentX1,contentY1);
+        }
     }
 
     // --- Restore GL state ---
