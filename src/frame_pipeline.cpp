@@ -1,6 +1,7 @@
 ///// Otter: Frame pipeline with double-authoritative zoom/offset, decoupled metrics (statsTileSize), HUD & FPS feed.
 ///// Schneefuchs: MAUS header compliant; ASCII logging only; no std::cout/printf; includes via pch first; stable API.
 ///// Maus: Compute → Metrics → Overlays → Zoom (one path); clear grid logs; no duplicate metrics builds.
+///** Fink: Interest stale-guard at frame start; PERF line cleaned (removed unused map).
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
@@ -10,7 +11,7 @@
 #include <cmath>      // sqrt
 #include <cuda_runtime.h>  // CUDA event timing
 
-#include "capybara_mapping.cuh" // capy_pixel_steps_from_zoom_scale(...)
+#include "capybara_mapping.cuh" // computeTileSizeFromZoom(...)
 #include "renderer_resources.hpp"
 #include "renderer_pipeline.hpp"
 #include "cuda_interop.hpp"
@@ -43,7 +44,7 @@ namespace {
     constexpr int PERF_LOG_EVERY     = 30;
     constexpr int RING_LOG_EVERY     = 120;
 
-    static double g_mapMs  = 0.0;
+    // Removed g_mapMs (unused)
     static double g_mandMs = 0.0;
     static double g_entMs  = 0.0;
     static double g_conMs  = 0.0;
@@ -291,6 +292,9 @@ void execute(RendererState& state) {
 
     beginFrameLocal();
 
+    // Interest zu Framebeginn invalidieren – wird vom HeatmapOverlay bei Bedarf gesetzt
+    state.interest.valid = false;
+
     // ---- Autoritative Double-Werte aus dem RendererState ----
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
@@ -366,10 +370,10 @@ void execute(RendererState& state) {
         const int n = std::snprintf(
             line, sizeof(line),
             "[PERF] t=%lld frame=%d res=%dx%d zoom=%.6f it=%d fps=%.2f maxfps=%.2f "
-            "map=%.2f mand=%.2f ent=%.2f con=%.2f up=%.2f ovl=%.2f tot=%.2f "
+            "mand=%.2f ent=%.2f con=%.2f up=%.2f ovl=%.2f tot=%.2f "
             "e0=%.4f c0=%.4f ring=%d skip=%d pbo=%u tex=%u",
             tEpoch, g_frame, resX, resY, (double)g_ctx.zoom, it, fps, maxfps,
-            g_mapMs, g_mandMs, g_entMs, g_conMs, g_texMs, g_ovlMs, g_totMs,
+            g_mandMs, g_entMs, g_conMs, g_texMs, g_ovlMs, g_totMs,
             e0, c0, ringIx, (int)state.skipUploadThisFrame, pbo, tex
         );
         line[(n >= 0 && n < (int)sizeof(line)) ? n : (int)sizeof(line) - 1] = '\0';

@@ -1,6 +1,7 @@
 ///// Otter: OpenGL PBO interop; map/unmap + pointer retrieval logged deterministically.
 ///// Schneefuchs: No GL forward-decls; numeric CUDA rc codes; perf events only when enabled.
 ///// Maus: Single Capybara path; pause toggle centrally; heatmap metrics delegated.
+///** Fink: Out-params mirrored in legacy render overload; ring-size sanity warn on register.
 ///// Datei: src/cuda_interop.cu
 
 #include "pch.hpp"
@@ -56,8 +57,6 @@ static bool s_pboActive = false;
 
 // ---- Global pause flag for zoom logic --------------------------------
 static bool s_pauseZoom = false;
-
-// *** ZENTRALER FIX: kein s_zoomBus hier mehr ***
 
 // RAII-Guard: map on ctor, unmap on dtor
 struct MapGuard {
@@ -117,6 +116,10 @@ void registerAllPBOs(const unsigned int* pboIds, int count) {
     s_pboActive = (count > 0);
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PBO] registered %d CUDA resources", count);
+        if ((int)s_pboResources.size() != RendererState::kPboRingSize) {
+            LUCHS_LOG_HOST("[PBO][WARN] resources=%d != ringSize=%d",
+                           (int)s_pboResources.size(), RendererState::kPboRingSize);
+        }
     }
 }
 
@@ -163,10 +166,11 @@ void renderCudaFrame(
     RendererState& state,
     cudaStream_t renderStream
 ){
-    // Silencing unreferenced-out-params (API bleibt stabil)
-    (void)newOffsetX;
-    (void)newOffsetY;
-    (void)shouldZoom;      
+    // Legacy out-params deterministisch spiegeln (auch wenn ungenutzt)
+    shouldZoom = false;
+    newOffsetX = offsetX;
+    newOffsetY = offsetY;
+
     if (!s_pboActive) {
         LUCHS_LOG_HOST("[PBO][ERR] render called without registered PBOs");
         state.skipUploadThisFrame = true;
