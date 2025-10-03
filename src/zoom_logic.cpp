@@ -95,6 +95,12 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     // Write back (assignment to the actual lvalue; no ref static_cast)
     RS_ZOOM(rs) = z1;
 
+    // --- Logging cadence for this frame (used by [ZPAN1] and [ZLOG]) ---------
+    const uint64_t modN      = (Settings::ZoomLog::everyN > 0)
+                             ? static_cast<uint64_t>(Settings::ZoomLog::everyN)
+                             : 1ULL;
+    const bool     emitEveryN = ((zls.frame % modN) == 0);
+
     // --- Gentle Nudge (PAN) --------------------------------------------------
     // Wir verschieben die Center-Koordinaten minimal Richtung Interest (Sticker),
     // indem wir den Bildschirm-Versatz (in px) -> Welt (PixelScale) abbilden.
@@ -140,17 +146,21 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
 
             // Pixel -> Welt (Komplexebene) per PixelScale
             const double2 ps = rs.pixelScale; // Schrittweite pro Pixel in Weltkoordinaten
-            const double dWorldX = step_px_x * static_cast<double>(ps.x);
-            const double dWorldY = step_px_y * static_cast<double>(ps.y);
+            if (ps.x != 0.0 || ps.y != 0.0) {
+                const double dWorldX = step_px_x * static_cast<double>(ps.x);
+                const double dWorldY = step_px_y * static_cast<double>(ps.y);
 
-            // Center in Richtung Sticker ziehen
-            RS_OFFSET_X(rs) += dWorldX;
-            RS_OFFSET_Y(rs) += dWorldY;
+                // Center in Richtung Sticker ziehen
+                RS_OFFSET_X(rs) += dWorldX;
+                RS_OFFSET_Y(rs) += dWorldY;
 
-            if constexpr (Settings::ZoomLog::enabled) {
-                LUCHS_LOG_HOST("[ZPAN1] ndc=(%.4f,%.4f) a=%.3f s=%.2f step_px=(%.2f,%.2f) dWorld=(%.9f,%.9f)",
-                               rs.interest.ndcX, rs.interest.ndcY, alpha, s,
-                               step_px_x, step_px_y, dWorldX, dWorldY);
+                if constexpr (Settings::ZoomLog::enabled) {
+                    if (emitEveryN) {
+                        LUCHS_LOG_HOST("[ZPAN1] ndc=(%.4f,%.4f) a=%.3f s=%.2f step_px=(%.2f,%.2f) dWorld=(%.9f,%.9f)",
+                                       rs.interest.ndcX, rs.interest.ndcY, alpha, s,
+                                       step_px_x, step_px_y, dWorldX, dWorldY);
+                    }
+                }
             }
         }
     }
@@ -158,10 +168,6 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     // --- Foundational Zoom Telemetry (rate-limited, header once) -------------
     if constexpr (Settings::ZoomLog::enabled) {
         const bool needHeader = (Settings::ZoomLog::header && !zls.headerPrinted);
-        const uint64_t modN   = (Settings::ZoomLog::everyN > 0)
-                              ? static_cast<uint64_t>(Settings::ZoomLog::everyN)
-                              : 1ULL;
-        const bool emitData   = ((zls.frame % modN) == 0);
 
         if (needHeader) {
             LUCHS_LOG_HOST("[ZHDR] keys=f,dt_ms,z0,z1,g,rps,ldz%s",
@@ -169,7 +175,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             zls.headerPrinted = true;
         }
 
-        if (emitData) {
+        if (emitEveryN) {
             const double dt_ms = static_cast<double>(dt) * 1000.0;
             if (Settings::ZoomLog::includeCenter) {
                 const double cx = static_cast<double>(RS_OFFSET_X(rs));
@@ -185,7 +191,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                                g, rate, ldz);
             }
 
-            // Optional Interest-Log (wie gehabt)
+            // Optional Interest-Log (zusätzlich zu [ZPAN1])
             if (rs.interest.valid) {
                 LUCHS_LOG_HOST("[ZPAN0] interest ndc=(%.6f,%.6f) R=%.4f s=%.2f",
                                rs.interest.ndcX, rs.interest.ndcY,
