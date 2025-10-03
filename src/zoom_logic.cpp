@@ -1,6 +1,7 @@
 ///// Otter: Rullmolder Step 2 — blunt zoom + gentle nudge toward Interest (dt-invariant).
 ///** Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts (no ref-casts).
 ///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF].
+///// Fink: Zoom-korrekte Pan-Umrechnung (px→world per pixelScale/zoom) gegen Überschwinger.
 ///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
@@ -154,13 +155,16 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             const bool hitCAP_X = (step_px_x != step_px_x_raw);
             const bool hitCAP_Y = (step_px_y != step_px_y_raw);
 
-            // Pixel -> Welt (Komplexebene) per PixelScale
-            const double2 ps = rs.pixelScale; // Schrittweite pro Pixel in Weltkoordinaten
-            const bool scaleZero = (ps.x == 0.0 && ps.y == 0.0);
+            // Pixel -> Welt (Komplexebene) per pixelScale **geteilt durch aktuellen Zoom**
+            // => ein 12px-Nudge bleibt bei großem Zoom auch in der Welt klein (kein Überschwingen)
+            const double psx = static_cast<double>(rs.pixelScale.x);
+            const double psy = static_cast<double>(rs.pixelScale.y);
+            const bool scaleZero = (psx == 0.0 && psy == 0.0);
 
             if (!scaleZero) {
-                const double dWorldX = step_px_x * static_cast<double>(ps.x);
-                const double dWorldY = step_px_y * static_cast<double>(ps.y);
+                const double invZ = (RS_ZOOM(rs) != 0.0) ? (1.0 / static_cast<double>(RS_ZOOM(rs))) : 0.0;
+                const double dWorldX = step_px_x * psx * invZ;
+                const double dWorldY = step_px_y * psy * invZ;
 
                 RS_OFFSET_X(rs) += dWorldX;
                 RS_OFFSET_Y(rs) += dWorldY;
@@ -175,11 +179,11 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                 if constexpr (Settings::ZoomLog::enabled) {
                     if (emitEveryN) {
                         LUCHS_LOG_HOST("[ZPAN1] f=%llu ndc=(%.4f,%.4f) a=%.3f s=%.2f "
-                                       "goal_px=(%.2f,%.2f) step_px=(%.2f,%.2f) dWorld=(%.9f,%.9f) flags=0x%02X",
+                                       "goal_px=(%.2f,%.2f) step_px=(%.2f,%.2f) dWorld=(%.9f,%.9f) invZ=%.6g flags=0x%02X",
                                        (unsigned long long)zls.frame,
                                        ndcX_raw, ndcY_raw, alpha, s,
                                        dx_px_goal, dy_px_goal, step_px_x, step_px_y,
-                                       dWorldX, dWorldY, flags);
+                                       dWorldX, dWorldY, invZ, flags);
                     }
                 }
             }
