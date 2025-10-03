@@ -1,7 +1,7 @@
 ///// Otter: GPU Heatmap overlay (fragment shader alpha) + Z0 sticker (argmax), no blur.
 /// /// Schneefuchs: Coordinates harmonized with Eule; header/source kept in sync; no extra programs.
-///// Maus: One-line ASCII logs; no behavioral change to zoom/pan; marker lives inside Heat FS.
-///// Datei: src/heatmap_overlay.cpp
+/// /// Maus: One-line ASCII logs; forwards interest to RendererState; no zoom/pan changes.
+/// /// Datei: src/heatmap_overlay.cpp
 
 #pragma warning(push)
 #pragma warning(disable: 4100)
@@ -203,6 +203,9 @@ void drawOverlay(const std::vector<float>& entropy,
                  [[maybe_unused]] unsigned int textureId,
                  RendererState& ctx)
 {
+    // Interest pro Frame invalidieren (nur gültig, wenn wir gleich einen Punkt setzen)
+    ctx.interest.valid = false;
+
     if(!ctx.heatmapOverlayEnabled || width<=0||height<=0||tileSize<=0) return;
 
     // Tiles geometry
@@ -382,6 +385,19 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uHMarkRadiusPx>=0) glUniform1f(uHMarkRadiusPx, ringRpx);
         if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.95f);
 
+        // --- Forward Interest to Zoom-Logic (NDC, no behavior change) ---
+        const double ndcX = (centerPxX / (double)width)  * 2.0 - 1.0;
+        const double ndcY = 1.0 - (centerPxY / (double)height) * 2.0;
+        const double rNdcX = (ringRpx / (double)width)  * 2.0;
+        const double rNdcY = (ringRpx / (double)height) * 2.0;
+        const double rNdc  = 0.5 * (rNdcX + rNdcY);
+
+        ctx.interest.ndcX      = ndcX;
+        ctx.interest.ndcY      = ndcY;
+        ctx.interest.radiusNdc = rNdc;
+        ctx.interest.strength  = 1.0;   // Z0 = Argmax voll gewichtet
+        ctx.interest.valid     = true;
+
         glBindVertexArray(sHeatVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sHeatVBO);
         glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)sizeof(quad),nullptr,GL_DYNAMIC_DRAW);
@@ -393,10 +409,8 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
 
         if constexpr(Settings::debugLogging){
-            const double ndcX = (centerPxX / (double)width) * 2.0 - 1.0;
-            const double ndcY = 1.0 - (centerPxY / (double)height) * 2.0;
-            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d raw=%.6f ndc=(%.6f,%.6f) Rpx=%.2f",
-                           tilesX, tilesY, bestIdxRaw, bestRaw, ndcX, ndcY, ringRpx);
+            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d raw=%.6f ndc=(%.6f,%.6f) Rpx=%.2f RNDC=%.4f",
+                           tilesX, tilesY, bestIdxRaw, bestRaw, ndcX, ndcY, ringRpx, rNdc);
         }
     }
 

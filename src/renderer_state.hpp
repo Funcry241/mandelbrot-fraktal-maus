@@ -99,6 +99,16 @@ public:
     bool        warzenschweinOverlayEnabled = false;
     std::string warzenschweinText;
 
+    // 🎯 Interest-Signal (Heatmap → Zoom-Logik)
+    struct ZoomInterest {
+        double ndcX = 0.0;       // -1..+1, Screenmitte = 0
+        double ndcY = 0.0;       // -1..+1, oben = +1 (NDC)
+        double radiusNdc = 0.15; // grober Radius in NDC
+        double strength  = 0.0;  // 0..1
+        bool   valid     = false;
+    };
+    ZoomInterest interest;
+
     // 🎬 CUDA Streams (Ownership im State) – non-blocking
     cudaStream_t renderStream = nullptr;
     cudaStream_t copyStream   = nullptr;

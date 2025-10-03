@@ -1,6 +1,7 @@
 ///// Otter: Rullmolder Step 1 — blunt zoom (depth only) + foundational telemetry.
 ///** Schneefuchs: Minimal invasive; no pan/targets; /WX clean; safe casts (no ref-casts).
 ///// Maus: Stable ASCII keys; rate-limited; dt-invariant math; pch first.
+///** Fink: Optional Interest-Log [ZPAN0] (reads RendererState::interest; no behavior change).
 ///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
@@ -112,6 +113,13 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                                (unsigned long long)zls.frame, dt_ms,
                                static_cast<double>(z0), static_cast<double>(z1),
                                g, rate, ldz);
+            }
+
+            // Optional Interest-Log (reads Heatmap → RendererState::interest, no behavior change)
+            if (rs.interest.valid) {
+                LUCHS_LOG_HOST("[ZPAN0] interest ndc=(%.6f,%.6f) R=%.4f s=%.2f",
+                               rs.interest.ndcX, rs.interest.ndcY,
+                               rs.interest.radiusNdc, rs.interest.strength);
             }
         }
     }
