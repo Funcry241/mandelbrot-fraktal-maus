@@ -1,6 +1,6 @@
 ///// Otter: GPU Heatmap overlay (fragment shader alpha) + Z0 sticker (argmax), no blur.
 /// /// Schneefuchs: Coordinates harmonized with Eule; header/source kept in sync; no extra programs.
-/// /// Maus: One-line ASCII logs; forwards interest to RendererState; no zoom/pan changes.
+/// /// Maus: One-line ASCII logs; forwards interest to RendererState (screen coords); no zoom/pan changes.
 /// /// Datei: src/heatmap_overlay.cpp
 
 #pragma warning(push)
@@ -92,7 +92,7 @@ uniform sampler2D uGrid;      // GL_R16F or GL_R32F, normalized to 0..1
 uniform float uAlphaBase;     // base alpha (scales Pfau alpha)
 // Z0 marker uniforms
 uniform float uMarkEnable;    // 0.0/1.0
-uniform vec2  uMarkCenterPx;  // screen pixel coords
+uniform vec2  uMarkCenterPx;  // screen pixel coords (panel space)
 uniform float uMarkRadiusPx;  // ring radius in px
 uniform float uMarkAlpha;     // marker intensity
 
@@ -203,7 +203,7 @@ void drawOverlay(const std::vector<float>& entropy,
                  [[maybe_unused]] unsigned int textureId,
                  RendererState& ctx)
 {
-    // Interest pro Frame invalidieren (nur gültig, wenn wir gleich einen Punkt setzen)
+    // Interest pro Frame invalidieren (nur gültig wenn wir gleich setzen)
     ctx.interest.valid = false;
 
     if(!ctx.heatmapOverlayEnabled || width<=0||height<=0||tileSize<=0) return;
@@ -371,26 +371,33 @@ void drawOverlay(const std::vector<float>& entropy,
         glBindTexture(GL_TEXTURE_2D, sHeatTex);
         if(uHGridTex>=0) glUniform1i(uHGridTex, 0);
 
-        // --- Set Z0 marker uniforms (argmax center inside content rect) ---
-        const int bx = bestIdxRaw % tilesX;
-        const int by = bestIdxRaw / tilesX;
-        const float tileWPx = (float)(contentX1 - contentX0) / std::max(1, tilesX);
-        const float tileHPx = (float)(contentY1 - contentY0) / std::max(1, tilesY);
-        const float centerPxX = (float)contentX0 + (bx + 0.5f) * tileWPx;
-        const float centerPxY = (float)contentY0 + (by + 0.5f) * tileHPx;
-        const float ringRpx   = 0.70f * 0.5f * std::sqrt(tileWPx*tileWPx + tileHPx*tileHPx);
+        // --- Argmax: Panel-Coords (für Sticker) -------------------------------
+        const int   bx = bestIdxRaw % tilesX;
+        const int   by = bestIdxRaw / tilesX;
+        const float tileWPx_panel = (float)(contentX1 - contentX0) / std::max(1, tilesX);
+        const float tileHPx_panel = (float)(contentY1 - contentY0) / std::max(1, tilesY);
+        const float centerPxX_panel = (float)contentX0 + (bx + 0.5f) * tileWPx_panel;
+        const float centerPxY_panel = (float)contentY0 + (by + 0.5f) * tileHPx_panel;
+        const float ringRpx_panel   = 0.70f * 0.5f * std::sqrt(tileWPx_panel*tileWPx_panel
+                                                             + tileHPx_panel*tileHPx_panel);
 
         if(uHMarkEnable>=0)   glUniform1f(uHMarkEnable,   1.0f);
-        if(uHMarkCenterPx>=0) glUniform2f(uHMarkCenterPx, centerPxX, centerPxY);
-        if(uHMarkRadiusPx>=0) glUniform1f(uHMarkRadiusPx, ringRpx);
+        if(uHMarkCenterPx>=0) glUniform2f(uHMarkCenterPx, centerPxX_panel, centerPxY_panel);
+        if(uHMarkRadiusPx>=0) glUniform1f(uHMarkRadiusPx, ringRpx_panel);
         if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.95f);
 
-        // --- Forward Interest to Zoom-Logic (NDC, no behavior change) ---
-        const double ndcX = (centerPxX / (double)width)  * 2.0 - 1.0;
-        const double ndcY = 1.0 - (centerPxY / (double)height) * 2.0;
-        const double rNdcX = (ringRpx / (double)width)  * 2.0;
-        const double rNdcY = (ringRpx / (double)height) * 2.0;
-        const double rNdc  = 0.5 * (rNdcX + rNdcY);
+        // --- Argmax: Screen-Coords (für Zoom-Interest) -----------------------
+        const float tileWPx_screen = (float)width  / std::max(1, tilesX);
+        const float tileHPx_screen = (float)height / std::max(1, tilesY);
+        const float centerPxX_screen = (bx + 0.5f) * tileWPx_screen;
+        const float centerPxY_screen = (by + 0.5f) * tileHPx_screen;
+        const float ringRpx_screen   = 0.70f * 0.5f * std::sqrt(tileWPx_screen*tileWPx_screen
+                                                              + tileHPx_screen*tileHPx_screen);
+
+        const double ndcX = (centerPxX_screen / (double)width)  * 2.0 - 1.0;
+        const double ndcY = 1.0 - (centerPxY_screen / (double)height) * 2.0;
+        const double rNdc = 0.5 * (((double)ringRpx_screen / (double)width ) * 2.0
+                                 + ((double)ringRpx_screen / (double)height) * 2.0);
 
         ctx.interest.ndcX      = ndcX;
         ctx.interest.ndcY      = ndcY;
@@ -409,8 +416,10 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
 
         if constexpr(Settings::debugLogging){
-            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d raw=%.6f ndc=(%.6f,%.6f) Rpx=%.2f RNDC=%.4f",
-                           tilesX, tilesY, bestIdxRaw, bestRaw, ndcX, ndcY, ringRpx, rNdc);
+            const double ndcX_panel = (centerPxX_panel / (double)width)  * 2.0 - 1.0;
+            const double ndcY_panel = 1.0 - (centerPxY_panel / (double)height) * 2.0;
+            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d raw=%.6f ndc_screen=(%.6f,%.6f) ndc_panel=(%.6f,%.6f) Rpx_screen=%.2f",
+                           tilesX, tilesY, bestIdxRaw, bestRaw, ndcX, ndcY, ndcX_panel, ndcY_panel, ringRpx_screen);
         }
     }
 
