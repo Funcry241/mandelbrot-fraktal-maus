@@ -41,8 +41,8 @@ static inline double blunt_zoom_rate_per_sec() noexcept {
 // Gentle nudge tunables
 struct NudgeCfg {
     double gainPerSec      = 0.95;
-    double deadzoneNdc     = 0.08;
-    double maxPxPerFrame   = 12.0;
+    double deadzoneNdc     = 0.10;
+    double maxPxPerFrame   = 8.0;
     double yScale          = 1.0;
     double strengthFloor   = 0.40;
 };
