@@ -36,7 +36,7 @@ static inline float get_dt_seconds(const FrameContext& fc) noexcept {
 
 static inline double blunt_zoom_rate_per_sec() noexcept {
     // Fixed rate for "depth only" part: +5% per second.
-    return 0.05; // 0.05 == +5%/s
+    return 0.10; // 0.05 == +5%/s
 }
 
 // Gentle nudge tunables (keine Settings-Abhängigkeit für schnellen Test)

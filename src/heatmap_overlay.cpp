@@ -131,7 +131,7 @@ void main(){
     float cy   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.y));
     m = max(ring, max(cx, cy)) * uMarkAlpha;
   }
-  vec3 markCol = vec3(1.0, 0.94, 0.70);
+  vec3 markCol = vec3(0.60, 1.00, 0.60);
   vec4 outCol  = mix(base, vec4(markCol, 1.0), m);
   outCol.a     = max(base.a, max(outCol.a, m));
   FragColor    = outCol;
