@@ -1,6 +1,6 @@
-///// Otter: Iteration→PBO colorizer – richer background (deep-space gradient + subtle dither).
-///// Schneefuchs: Bandarm (cosine palette), gamma-eased, deterministic hash; no API changes.
-///// Maus: Interior stays dark with thin halo; outside gets lively but not noisy.
+///// Otter: Iteration→PBO colorizer – fine gradients via local iteration gradient (phase blend).
+///// Schneefuchs: Cosine palette, gamma-eased, deterministic; no API changes.
+/**  Maus: Interior stays dark with thin halo; stable & flicker-free; only this TU changed.  */
 ///// Datei: src/colorize_iterations.cu
 
 #include <cuda_runtime.h>
@@ -19,13 +19,8 @@ static __device__ __forceinline__ uchar4 pack_rgba(float r, float g, float b, fl
                        (unsigned char)(b * 255.0f + 0.5f),
                        (unsigned char)(a * 255.0f + 0.5f));
 }
-static __device__ __forceinline__ float3 lerp3(const float3& a, const float3& b, float t){
-    return make_float3(a.x + (b.x - a.x)*t,
-                       a.y + (b.y - a.y)*t,
-                       a.z + (b.z - a.z)*t);
-}
 
-// deterministic 32→[0,1) hash (PCG-ish mix; fixed)
+// deterministic 32→[0,1) hash (PCG-ish mix; fixed, frame-stable)
 static __device__ __forceinline__ float hash01(uint32_t x){
     x ^= x >> 17; x *= 0xed5ad4bbu;
     x ^= x >> 11; x *= 0xac4c1b51u;
@@ -43,22 +38,17 @@ static __device__ __forceinline__ float3 cosine_palette(float t, float3 a, float
                        a.z + b.z * cosf(twoPi * ct.z));
 }
 
-// ---------------------------- tunables (background) ---------------------------
-// Unterhalb dieses Bruchs (rel. Iteration) behandeln wir "Hintergrund".
-static __constant__ float kBG_SPLIT = 0.0f;    // 0..1 — Anteil der Iterationsspanne für „Low-Detail“
-static __constant__ float kBG_NOISE = 0.0f;    // max. Dither-Amplitude (nur im Hintergrundzweig)
-static __constant__ float kBG_BLEND = 0.28f;   // Anteil der Cosine-Farbkomponente im Hintergrund
+// ---------------------------- tunables (band smoothing) -----------------------
+static __constant__ float kPHASE_GRAD = 0.12f; // Anteil Phase aus lokalem Gradienten (0.08..0.18)
+static __constant__ float kPHASE_HASH = 0.03f; // geringe, statische Pixelphase gegen Restbanding
 
-// ------------------------------ palette mapping ------------------------------
-// Innen bleibt dunkel; außen lebendige Cosine-Palette.
-// Für sehr niedrige Iterationen (Hintergrund) gibt es einen „Deep-Space“-Verlauf
-// + leichtes Dithering, damit große Flächen nicht eintönig blau wirken.
-static __device__ __forceinline__ uchar4 color_from_iter(
-    uint16_t it, int maxIter, int idxLinear)
+// -------------------------------- palette map --------------------------------
+// Innen bleibt dunkel; außen Cosine-Palette. Bänder werden über eine
+// phasenstabile, ortsgebundene Verschiebung (Gradient+Hash) geglättet.
+static __device__ __forceinline__ uchar4 color_from_iter_ex(
+    uint16_t it, int maxIter, int idxLinear, float grad01)
 {
-    if (maxIter <= 1) {
-        const float v = 0.02f; return pack_rgba(v, v, v, 1.0f);
-    }
+    if (maxIter <= 1) { const float v = 0.02f; return pack_rgba(v,v,v,1.0f); }
 
     const int interiorEdge = max(0, maxIter - 1);
     const int haloWidth    = 6;
@@ -66,56 +56,21 @@ static __device__ __forceinline__ uchar4 color_from_iter(
     // Innenbereich sehr dunkel
     if ((int)it >= interiorEdge) {
         const float v = 0.015f;
-        return pack_rgba(v, v, v, 1.0f);
+        return pack_rgba(v,v,v,1.0f);
     }
 
-    // Normierung
-    float t0 = (float)it / (float)max(interiorEdge, 1);
-    float t  = powf(t0, 0.82f); // leichte Entzerrung
+    // Normierung mit leichter Entzerrung + Gradientenantail (sub-iter)
+    float t0 = ((float)it + 0.65f * grad01) / (float)max(interiorEdge, 1);
+    t0 = clamp01(t0);
+    float t  = powf(t0, 0.82f);
 
-    // ---------- Hintergrund-Behandlung ----------
-    if (t0 < kBG_SPLIT) {
-        // u skaliert die Subspanne [0..kBG_SPLIT] → [0..1]
-        const float u = (kBG_SPLIT > 1e-6f) ? (t0 / kBG_SPLIT) : 0.f;
+    // Mehr Varianz ohne harte Bänder, Zyklen über 0..1
+    const float cycles = 2.90f;
 
-        // Deep-Space-Verlauf (kohlig → kühles Indigo)
-        const float3 spaceA = make_float3(0.06f, 0.07f, 0.09f);
-        const float3 spaceB = make_float3(0.10f, 0.11f, 0.16f);
-        float3 bg = lerp3(spaceA, spaceB, powf(u, 1.35f));
-
-        // Etwas Farbleben via Cosine-Palette, schwach beigemischt
-        // (begrenzter Hue-Sweep, damit keine „Regenbogen“-Anmutung)
-        const float3 A = make_float3(0.50f, 0.46f, 0.52f);
-        const float3 B = make_float3(0.36f, 0.30f, 0.34f);
-        const float3 C = make_float3(1.00f, 1.00f, 1.00f);
-        const float3 D = make_float3(0.05f, 0.22f, 0.40f);
-        const float  cycles = 1.35f;
-        float k = t * cycles - floorf(t * cycles); // fract
-        float3 cosCol = cosine_palette(k, A, B, C, D);
-
-        // Mischung (mehr „space“ bei u≈0, mehr Cosine wenn u wächst)
-        const float mixAmt = kBG_BLEND * (0.35f + 0.65f * u);
-        float3 col = lerp3(bg, cosCol, mixAmt);
-
-        // Sehr feines, deterministisches Dithering, das mit u ausfadet
-        float jitter = (hash01((uint32_t)idxLinear * 1664525u) - 0.5f) * (kBG_NOISE * (1.0f - u));
-        col.x = clamp01(col.x + jitter);
-        col.y = clamp01(col.y + jitter);
-        col.z = clamp01(col.z + jitter);
-
-        // leichte Gamma auf Value
-        const float gamma = 0.95f;
-        col.x = powf(col.x, gamma);
-        col.y = powf(col.y, gamma);
-        col.z = powf(col.z, gamma);
-
-        return pack_rgba(col.x, col.y, col.z, 1.0f);
-    }
-
-    // ---------- „Detail“-Palette (außerhalb Hintergrund) ----------
-    // Mehr Varianz: mehrere Zyklen über 0..1 (ohne harte Bänder)
-    const float cycles = 3.25f;
-    float k = t * cycles - floorf(t * cycles);
+    // Phasenverschiebung: lokal (Gradient) + minimale statische Pixelphase
+    const float phi = kPHASE_GRAD * grad01
+                    + kPHASE_HASH * (hash01((uint32_t)(idxLinear * 747796405u)) - 0.5f);
+    float k = t * cycles + phi; k -= floorf(k);
 
     // Cosine-Palette-Parameter (fein abgestimmt)
     const float3 A = make_float3(0.52f, 0.46f, 0.50f);
@@ -157,8 +112,23 @@ __global__ void kColorizeIterationsToPBO(
     if (x >= width || y >= height) return;
     const int idx = y * width + x;
 
-    const uint16_t it = d_it[idx];
-    d_out[idx] = color_from_iter(it, maxIter, idx);
+    const uint16_t it  = d_it[idx];
+
+    // sehr billiger lokaler Gradient (vorwärts, frame-stabil, O(1))
+    const int xr = min(x + 1, width  - 1);
+    const int yd = min(y + 1, height - 1);
+    const uint16_t itR = d_it[y  * width + xr];
+    const uint16_t itD = d_it[yd * width + x ];
+
+    const float gx = (float)((int)itR - (int)it);
+    const float gy = (float)((int)itD - (int)it);
+    float grad = sqrtf(gx*gx + gy*gy);
+
+    // auf 0..1 normieren (empirisch, verhindert Übersteuerung)
+    float grad01 = grad * (1.0f / 6.0f);
+    if (grad01 > 1.0f) grad01 = 1.0f;
+
+    d_out[idx] = color_from_iter_ex(it, maxIter, idx, grad01);
 }
 
 // ---------------------------------- launch -----------------------------------
