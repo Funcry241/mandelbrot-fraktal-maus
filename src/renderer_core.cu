@@ -16,7 +16,6 @@
 #include "settings.hpp"
 
 #include <stdexcept>
-#include <algorithm>
 
 namespace {
     void APIENTRY GlDebugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei,
