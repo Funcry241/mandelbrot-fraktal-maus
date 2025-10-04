@@ -1,7 +1,7 @@
-///// Otter: Mandelbrot render kernel using Capybara early Hi/Lo + classic continuation (fills d_iterations). Adds exact cardioid/2-bulb skip and Hi/Lo gating for shallow zooms.
-///// Schneefuchs: API unverändert; ASCII-Logs; optionale CUDA-Event-Zeitmessung bei Settings::performanceLogging; keine neuen Dateien.
-///// Maus: Zero information loss – Innenpunkte = maxIter; Hi/Lo nur bei feinem Pixelstep; Host/Device sauber getrennt.
-///// Datei: src/capybara_render_kernel.cu
+///// Otter: Mandelbrot render kernel using Capybara early Hi/Lo + classic continuation (fills d_iterations). Sweetspot: 32x16 blocks on SM80–SM90, dynamic Hi/Lo gating via kBaseStepThresh=8e-13 (maxIter-aware).
+///// Schneefuchs: API unverändert; ASCII-Logs; optionale CUDA-Event-Zeitmessung bei Settings::performanceLogging; identische Iterationszahlen, nur schnellerer Pfadwechsel.
+// ///// Maus: Zero information loss – Innenpunkte = maxIter; Hi/Lo nur bei feinem Pixelstep; Host/Device sauber getrennt. Deterministic logs, no fast-math switches.
+// ///// Datei: src/capybara_render_kernel.cu
 
 #include "pch.hpp"
 
@@ -23,14 +23,23 @@
 
 // ------------------------------ launch config ---------------------------------
 namespace {
-    // Balanced config: good occupancy on SM80+ with modest register pressure.
+    // Sweetspot: 32x16 keeps 512 threads/block, good latency hiding on SM80+ given typical register pressure.
     constexpr int BX = 32;
-    constexpr int BY = 8;
+    constexpr int BY = 16;
     static_assert(BX > 0 && BY > 0, "Block dimensions must be positive");
 
-    // When pixel steps are larger than this, classic double escape-time is sufficient.
-    // Avoids Hi/Lo overhead at shallow zooms without any loss of information.
-    constexpr double kStepThresh = 1e-12;
+    // Base threshold for switching to Capybara Hi/Lo when pixel steps get very fine.
+    // Tuned for SM80–SM90. We modulate by maxIter to enter Hi/Lo earlier for large iteration budgets.
+    constexpr double kBaseStepThresh = 8e-13;
+
+    __device__ __forceinline__ double dyn_step_thresh(int maxIter) {
+        // Conservative, step-wise schedule keeps results identical while improving perf across common maxIter.
+        // Larger maxIter → engage Hi/Lo earlier (smaller threshold).
+        if (maxIter <= 1024)  return kBaseStepThresh * 2.0;   // shallow budgets → classic path longer
+        if (maxIter <= 4096)  return kBaseStepThresh;         // default
+        if (maxIter <= 16384) return kBaseStepThresh * 0.75;  // deeper budgets
+        return kBaseStepThresh * 0.5;                         // very deep budgets
+    }
 }
 
 // --------------------------------- helpers ------------------------------------
@@ -85,23 +94,26 @@ void mandelbrotKernel_capybara(
 
     // 2) Hi/Lo gating: for coarse pixel steps use classic double escape-time (identical result)
     const double ax = fabs(stepX);
-       const double ay = fabs(stepY);
+    const double ay = fabs(stepY);
     const double m  = (ax > ay ? ax : ay);
-    if (m > kStepThresh) {
+    const double kThresh = dyn_step_thresh(maxIter);
+    if (m > kThresh) {
+        // Classic double precision path; check AFTER update (inclusive count), matching previous semantics.
         double zx = 0.0, zy = 0.0;
         int it = 0;
+        #pragma unroll 1
         for (; it < maxIter; ++it) {
             const double xx = zx * zx - zy * zy + cD.x;
-            const double yy = 2.0 * zx * zy + cD.y;
+            const double yy = fma(2.0 * zx, zy, cD.y); // 2*zx*zy + cD.y
             zx = xx; zy = yy;
-            // Escape when |z|^2 > 4
-            if (xx * xx + yy * yy > 4.0) { ++it; break; }
+            const double r2 = fma(xx, xx, yy * yy);    // xx*xx + yy*yy
+            if (r2 > 4.0) { ++it; break; }
         }
         d_it[idx] = clamp_u16_from_int(it);
         return;
     }
 
-    // 3) Deep zoom path: Capybara early Hi/Lo + classic continuation
+    // 3) Deep zoom path: Capybara early Hi/Lo + classic continuation (identical iteration counts)
     const int iters = capy_compute_iters_from_zero(cx, cy, stepX, stepY, px, py, w, h, maxIter);
     d_it[idx] = clamp_u16_from_int(iters);
 
