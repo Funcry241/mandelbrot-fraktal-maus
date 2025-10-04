@@ -2,7 +2,7 @@
 ///** Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts (no ref-casts).
 ///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF]/[ZLEASH].
 ///// Fink: Zoom-korrekte Pan-Umrechnung (px→world per pixelScale/zoom) gegen Überschwinger.
-///// Dachs: Quickfix Variante B — Radial-Leash gegen seitliches Weggleiten (kein State-Änderung).
+///// Dachs: Quickfix B+ — Axis-weighted Leash (X stärker), weniger Seitwärtsdrift.
 ///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
@@ -18,9 +18,9 @@
 #include <vector>
 #include <cmath>
 #include <cstdint>
-#include <type_traits> // remove_reference_t, remove_cv_t
+#include <type_traits>
 #include <algorithm>
-#include <chrono>      // perf timing (guarded by logging)
+#include <chrono>
 
 #define RS_OFFSET_X(ctx) ((ctx).center.x)
 #define RS_OFFSET_Y(ctx) ((ctx).center.y)
@@ -31,32 +31,29 @@ namespace ZoomLogic {
 // --- tiny helpers ------------------------------------------------------------
 
 static inline float get_dt_seconds(const FrameContext& fc) noexcept {
-    // Minimal guard: default ~60 FPS if dt invalid.
     return (fc.deltaSeconds > 0.0f) ? fc.deltaSeconds : (1.0f / 60.0f);
 }
 
 static inline double blunt_zoom_rate_per_sec() noexcept {
-    // Fixed rate for "depth only" part.
-    return 0.20; // 0.20 == +20%/s (vorher 0.05)
+    return 0.20; // +20%/s
 }
 
-// Gentle nudge tunables (keine Settings-Abhängigkeit für schnellen Test)
+// Gentle nudge tunables
 struct NudgeCfg {
-    double gainPerSec      = 1.25; // wie schnell wir den Offset "einholen" (~72% in 1 s)
-    double deadzoneNdc     = 0.08; // um 0..±0.08 NDC keine Bewegung (Jitterfrei)
-    double maxPxPerFrame   = 12.0; // harte Kappe pro Frame – sanft!
-    double yScale          = 1.0;  // ggf. <1.0 falls y nervös ist
-    double strengthFloor   = 0.40; // minimale Gewichtung
+    double gainPerSec      = 1.25;
+    double deadzoneNdc     = 0.08;
+    double maxPxPerFrame   = 12.0;
+    double yScale          = 1.0;
+    double strengthFloor   = 0.40;
 };
 static constexpr NudgeCfg kNudge{};
 
-// Quickfix Variante B: Radial-Leash (bremst Pan nahe Rand, hält Tiefenfokus)
-struct LeashCfg {
-    double rStart    = 0.35; // ab diesem NDC-Radius beginnt Bremsen
-    double rStop     = 0.85; // am Rand volle Bremse
-    double minFactor = 0.25; // nie ganz 0 -> etwas Rest-Pan bleibt
+// Axis-weighted Leash: X früh/stark bremsen, Y spät/schwach
+struct AxisLeashCfg {
+    double xStart = 0.20, xStop = 0.55, xMin = 0.05;
+    double yStart = 0.40, yStop = 0.90, yMin = 0.35;
 };
-static constexpr LeashCfg kLeash{};
+static constexpr AxisLeashCfg kLeash{};
 
 // --- local telemetry state ---------------------------------------------------
 
@@ -66,7 +63,7 @@ struct ZLogState {
 };
 static ZLogState zls;
 
-// --- public surface (API preserved) ------------------------------------------
+// --- public surface ----------------------------------------------------------
 
 ZoomResult evaluateTarget(const std::vector<float>& /*entropy*/,
                           const std::vector<float>& /*contrast*/,
@@ -78,102 +75,92 @@ ZoomResult evaluateTarget(const std::vector<float>& /*entropy*/,
 {
     ZoomResult zr{};
     state.hadCandidate = false;
-    zr.shouldZoom      = true;     // depth-only zoom regardless of metrics
+    zr.shouldZoom      = true;
     zr.bestIndex       = -1;
     zr.newOffsetX      = currentOffset.x;
     zr.newOffsetY      = currentOffset.y;
     return zr;
 }
 
-// Internal: apply blunt zoom (depth only) and gentle nudge toward Interest.
+// --- core --------------------------------------------------------------------
+
 static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
 {
     using Clock = std::chrono::steady_clock;
     [[maybe_unused]] const auto tUpdateStart = Clock::now();
-    long long pan_us = 0; // per-frame microseconds spent in pan section (for [ZPERF])
+    long long pan_us = 0;
 
     zls.frame++;
 
     const float  dt   = get_dt_seconds(frameCtx);
     const double rate = blunt_zoom_rate_per_sec();
 
-    // Safely derive scalar type of zoom without cv/ref
     using ZoomT = std::remove_cv_t<std::remove_reference_t<decltype(RS_ZOOM(rs))>>;
-
-    const ZoomT  z0  = static_cast<ZoomT>(RS_ZOOM(rs));                // old zoom (copied)
-    const double ldz = rate * static_cast<double>(dt);                 // log delta this frame
-    const double g   = std::exp(ldz);                                  // growth multiplier
-    const ZoomT  z1  = static_cast<ZoomT>(static_cast<double>(z0) * g);// new zoom (typed)
-
-    // Write back (assignment to the actual lvalue; no ref static_cast)
+    const ZoomT  z0  = static_cast<ZoomT>(RS_ZOOM(rs));
+    const double ldz = rate * static_cast<double>(dt);
+    const double g   = std::exp(ldz);
+    const ZoomT  z1  = static_cast<ZoomT>(static_cast<double>(z0) * g);
     RS_ZOOM(rs) = z1;
 
-    // --- Logging cadence for this frame (used by [ZPAN1]/[ZLOG]/[ZPERF]/[ZLEASH]) -----
+    // Logging cadence (einmal definieren, überall nutzen)
     const uint64_t modN       = (Settings::ZoomLog::everyN > 0)
-                              ? static_cast<uint64_t>(Settings::ZoomLog::everyN)
-                              : 1ULL;
+                              ? static_cast<uint64_t>(Settings::ZoomLog::everyN) : 1ULL;
     const bool     emitEveryN = ((zls.frame % modN) == 0);
 
-    // --- Gentle Nudge (PAN) --------------------------------------------------
-    // verschiebt das Center minimal Richtung Interest (Sticker), Screen -> Welt
+    // -------------------- Gentle Nudge (PAN) ---------------------------------
     if (rs.interest.valid && rs.width > 0 && rs.height > 0) {
-        // START perf section (only meaningful if logging is enabled)
         [[maybe_unused]] const auto tPanStart = Clock::now();
 
-        // Roh-NDC vor Deadzone (für Flags)
         const double ndcX_raw = rs.interest.ndcX;
         const double ndcY_raw = rs.interest.ndcY;
 
-        // Deadzone: kleine Abweichungen ignorieren (Jitter vermeiden)
         auto applyDeadzone = [](double v, double dz)->double {
             const double a = std::abs(v);
             if (a <= dz) return 0.0;
-            const double t = std::min(1.0, (a - dz) / (1.0 - dz)); // weiche Kante
+            const double t = std::min(1.0, (a - dz) / (1.0 - dz));
             return (v < 0.0) ? -t : t;
         };
         double ndcX = applyDeadzone(ndcX_raw, kNudge.deadzoneNdc);
         double ndcY = applyDeadzone(ndcY_raw, kNudge.deadzoneNdc);
 
-        // --- Quickfix B: Radial-Leash VOR Pixel-Zielberechnung ----------------
-        // Bremst Pan, wenn Interest weit vom Zentrum (großes r) → mehr Tiefen- statt Seitenbewegung.
+        // ---- Axis-weighted radial leash (B+) ----
         auto smooth01 = [](double x, double a, double b)->double{
             if (x <= a) return 0.0;
             if (x >= b) return 1.0;
             const double t = (x - a) / (b - a);
-            return t*t*(3.0 - 2.0*t); // smoothstep
+            return t*t*(3.0 - 2.0*t);
         };
-        const double r = std::sqrt(ndcX*ndcX + ndcY*ndcY);
-        const double leash = std::max(kLeash.minFactor, 1.0 - smooth01(r, kLeash.rStart, kLeash.rStop));
-        ndcX *= leash;
-        ndcY *= leash;
+        auto leashAxis = [&](double a, double s, double e, double minF)->double{
+            const double r = std::abs(a);
+            return std::max(minF, 1.0 - smooth01(r, s, e));
+        };
+        const double leashX = leashAxis(ndcX, kLeash.xStart, kLeash.xStop, kLeash.xMin);
+        const double leashY = leashAxis(ndcY, kLeash.yStart, kLeash.yStop, kLeash.yMin);
+        ndcX *= leashX;
+        ndcY *= leashY;
 
         if constexpr (Settings::ZoomLog::enabled) {
-            if (emitEveryN && leash < 0.999) {
-                LUCHS_LOG_HOST("[ZLEASH] f=%llu r=%.3f leash=%.2f ndc'=(%.3f,%.3f)",
-                               (unsigned long long)zls.frame, r, leash, ndcX, ndcY);
+            if (emitEveryN && (leashX < 0.999 || leashY < 0.999)) {
+                LUCHS_LOG_HOST("[ZLEASH] f=%llu leashX=%.2f leashY=%.2f ndc'=(%.3f,%.3f)",
+                               (unsigned long long)zls.frame, leashX, leashY, ndcX, ndcY);
             }
         }
-        // ---------------------------------------------------------------------
+        // -----------------------------------------
 
         const bool hitDZ_X = (std::abs(ndcX_raw) <= kNudge.deadzoneNdc);
         const bool hitDZ_Y = (std::abs(ndcY_raw) <= kNudge.deadzoneNdc);
 
         if (ndcX != 0.0 || ndcY != 0.0) {
-            // Interesse-Gewichtung: Floor, damit bei schwachen Werten nicht "tot"
             const double s = std::max(kNudge.strengthFloor, std::min(1.0, rs.interest.strength));
 
-            // Ziel-Offset in Pixeln (vom Center aus): NDC -> px
             const double dx_px_goal = ndcX * 0.5 * static_cast<double>(rs.width);
             const double dy_px_goal = ndcY * 0.5 * static_cast<double>(rs.height);
 
-            // Exponentielle Annäherung: alpha = 1 - exp(-gain*dt)
             const double alpha = 1.0 - std::exp(-(kNudge.gainPerSec * s) * static_cast<double>(dt));
 
-            // Roh-Schritt in Pixeln (vor Cap)
             const double step_px_x_raw = dx_px_goal * alpha;
             const double step_px_y_raw = dy_px_goal * alpha * kNudge.yScale;
 
-            // Cap pro Frame
             auto cap = [](double v, double cap)->double {
                 if (v >  cap) return cap;
                 if (v < -cap) return -cap;
@@ -185,8 +172,6 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             const bool hitCAP_X = (step_px_x != step_px_x_raw);
             const bool hitCAP_Y = (step_px_y != step_px_y_raw);
 
-            // Pixel -> Welt (Komplexebene) per pixelScale **geteilt durch aktuellen Zoom**
-            // => ein 12px-Nudge bleibt bei großem Zoom auch in der Welt klein (kein Überschwingen)
             const double psx = static_cast<double>(rs.pixelScale.x);
             const double psy = static_cast<double>(rs.pixelScale.y);
             const bool scaleZero = (psx == 0.0 && psy == 0.0);
@@ -199,7 +184,6 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                 RS_OFFSET_X(rs) += dWorldX;
                 RS_OFFSET_Y(rs) += dWorldY;
 
-                // Flags (bitfield): 1=dzX, 2=dzY, 4=capX, 8=capY, 16=scaleZero
                 const int flags = (hitDZ_X ? 1 : 0)
                                 | (hitDZ_Y ? 2 : 0)
                                 | (hitCAP_X ? 4 : 0)
@@ -218,17 +202,14 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                 }
             }
 
-            // END perf section
             pan_us += (long long)std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - tPanStart).count();
         }
     }
 
-    // --- Foundational Zoom Telemetry (rate-limited, header once) -------------
+    // --- Foundational Zoom Telemetry -----------------------------------------
     if constexpr (Settings::ZoomLog::enabled) {
         const bool needHeader = (Settings::ZoomLog::header && !zls.headerPrinted);
-
         if (needHeader) {
-            // Einheitliche Spalten-Beschriftung
             LUCHS_LOG_HOST("[ZHDR] keys=f,dt_ms,z0,z1,g,rps,ldz%s",
                            Settings::ZoomLog::includeCenter ? ",cx,cy" : "");
             zls.headerPrinted = true;
@@ -250,7 +231,6 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                                g, rate, ldz);
             }
 
-            // Optional Interest-Log (Rohsignal)
             if (rs.interest.valid) {
                 LUCHS_LOG_HOST("[ZPAN0] f=%llu interest ndc=(%.6f,%.6f) R=%.4f s=%.2f",
                                (unsigned long long)zls.frame,
@@ -258,7 +238,6 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                                rs.interest.radiusNdc, rs.interest.strength);
             }
 
-            // Perf: gesamte update()-Zeit + Pan-Anteil
             const long long update_us =
                 (long long)std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - tUpdateStart).count();
             LUCHS_LOG_HOST("[ZPERF] f=%llu update_us=%lld pan_us=%lld",
