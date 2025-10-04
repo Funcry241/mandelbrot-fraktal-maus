@@ -1,7 +1,8 @@
 ///// Otter: Rullmolder Step 2 — blunt zoom + gentle nudge toward Interest (dt-invariant).
 ///** Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts (no ref-casts).
-///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF].
+///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF]/[ZLEASH].
 ///// Fink: Zoom-korrekte Pan-Umrechnung (px→world per pixelScale/zoom) gegen Überschwinger.
+///// Dachs: Quickfix Variante B — Radial-Leash gegen seitliches Weggleiten (kein State-Änderung).
 ///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
@@ -35,8 +36,8 @@ static inline float get_dt_seconds(const FrameContext& fc) noexcept {
 }
 
 static inline double blunt_zoom_rate_per_sec() noexcept {
-    // Fixed rate for "depth only" part: +5% per second.
-    return 0.20; // 0.05 == +5%/s
+    // Fixed rate for "depth only" part.
+    return 0.20; // 0.20 == +20%/s (vorher 0.05)
 }
 
 // Gentle nudge tunables (keine Settings-Abhängigkeit für schnellen Test)
@@ -48,6 +49,14 @@ struct NudgeCfg {
     double strengthFloor   = 0.40; // minimale Gewichtung
 };
 static constexpr NudgeCfg kNudge{};
+
+// Quickfix Variante B: Radial-Leash (bremst Pan nahe Rand, hält Tiefenfokus)
+struct LeashCfg {
+    double rStart    = 0.35; // ab diesem NDC-Radius beginnt Bremsen
+    double rStop     = 0.85; // am Rand volle Bremse
+    double minFactor = 0.25; // nie ganz 0 -> etwas Rest-Pan bleibt
+};
+static constexpr LeashCfg kLeash{};
 
 // --- local telemetry state ---------------------------------------------------
 
@@ -99,7 +108,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     // Write back (assignment to the actual lvalue; no ref static_cast)
     RS_ZOOM(rs) = z1;
 
-    // --- Logging cadence for this frame (used by [ZPAN1]/[ZLOG]/[ZPERF]) -----
+    // --- Logging cadence for this frame (used by [ZPAN1]/[ZLOG]/[ZPERF]/[ZLEASH]) -----
     const uint64_t modN       = (Settings::ZoomLog::everyN > 0)
                               ? static_cast<uint64_t>(Settings::ZoomLog::everyN)
                               : 1ULL;
@@ -124,6 +133,27 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         };
         double ndcX = applyDeadzone(ndcX_raw, kNudge.deadzoneNdc);
         double ndcY = applyDeadzone(ndcY_raw, kNudge.deadzoneNdc);
+
+        // --- Quickfix B: Radial-Leash VOR Pixel-Zielberechnung ----------------
+        // Bremst Pan, wenn Interest weit vom Zentrum (großes r) → mehr Tiefen- statt Seitenbewegung.
+        auto smooth01 = [](double x, double a, double b)->double{
+            if (x <= a) return 0.0;
+            if (x >= b) return 1.0;
+            const double t = (x - a) / (b - a);
+            return t*t*(3.0 - 2.0*t); // smoothstep
+        };
+        const double r = std::sqrt(ndcX*ndcX + ndcY*ndcY);
+        const double leash = std::max(kLeash.minFactor, 1.0 - smooth01(r, kLeash.rStart, kLeash.rStop));
+        ndcX *= leash;
+        ndcY *= leash;
+
+        if constexpr (Settings::ZoomLog::enabled) {
+            if (emitEveryN && leash < 0.999) {
+                LUCHS_LOG_HOST("[ZLEASH] f=%llu r=%.3f leash=%.2f ndc'=(%.3f,%.3f)",
+                               (unsigned long long)zls.frame, r, leash, ndcX, ndcY);
+            }
+        }
+        // ---------------------------------------------------------------------
 
         const bool hitDZ_X = (std::abs(ndcX_raw) <= kNudge.deadzoneNdc);
         const bool hitDZ_Y = (std::abs(ndcY_raw) <= kNudge.deadzoneNdc);
