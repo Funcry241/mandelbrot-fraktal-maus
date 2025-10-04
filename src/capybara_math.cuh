@@ -153,21 +153,6 @@ CAPY_HD void capy_add(CapyHiLo& x, const CapyHiLo& y)
     x.lo = t.lo;
 }
 
-// Multiply x by scalar y with error recovery using FMA where available
-CAPY_HD void capy_mul(CapyHiLo& out, const CapyHiLo& x, double y)
-{
-    double p = x.hi * y;
-#if defined(__CUDA_ARCH__) || defined(__cpp_lib_fma) || (__cplusplus >= 201103L)
-    double err = fma(x.hi, y, -p); // exact residual if FMA available
-#else
-    double err = 0.0; // Fallback; still useful with the hi+lo path
-#endif
-    err += x.lo * y;
-    CapyHiLo t = capy_quick_two_sum(p, err);
-    out.hi = t.hi;
-    out.lo = t.lo;
-}
-
 // Renormalize if low part grows too large relative to hi
 CAPY_HD bool capy_renorm_if_needed(CapyHiLo& v)
 {

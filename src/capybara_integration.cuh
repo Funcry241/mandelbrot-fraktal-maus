@@ -92,20 +92,3 @@ CAPY_D int capy_mandelbrot_early(double2& z, const double2& cD, const CapyHiLo2&
     (void)cD; // kept for symmetry / future checks; not used here.
     return done;
 }
-
-// --------------------------- Classic continuation shim ------------------------
-// A tiny helper to continue classic double iterations with the remaining budget.
-// This is optional; if you already have your classic loop, keep it unchanged.
-CAPY_D int capy_continue_classic(double2& z, const double2& c, int it, int maxIter)
-{
-    int i = it;
-    for (; i < maxIter; ++i) {
-        // z = z*z + c;
-        const double x = z.x, y = z.y;
-        const double xx = x * x - y * y + c.x;
-        const double yy = 2.0 * x * y + c.y;
-        z.x = xx; z.y = yy;
-        if (xx*xx + yy*yy > 4.0) { ++i; break; }
-    }
-    return i - it; // number of iterations performed in this segment
-}
