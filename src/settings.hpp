@@ -25,11 +25,13 @@ namespace Settings {
 
 // ============================== Logging / Perf ===============================
 
-    // Targeted debug/diagnostic output (host/device). Default: false
+    // Targeted debug/diagnostic output (host/device).
+    // Range: {false, true} | Default: false
     inline constexpr bool debugLogging  = false;
 
-    // Condensed [PERF] logs along the frame pipeline. Default: true
-    inline constexpr bool performanceLogging = true;
+    // Condensed [PERF] logs along the frame pipeline.
+    // Range: {false, true} | Default: true
+    inline constexpr bool performanceLogging = false;
 
     // --- ZoomLog --------------------------------------------------------------
     // Foundation telemetry for all zoom stages (S1..Sn). Compact, ASCII-only.
@@ -49,13 +51,15 @@ namespace Settings {
 
 // ============================== Interop / Upload =============================
 
-    inline constexpr int pboRingSize = 8;      // 3..12
+    // Number of PBOs in the CUDA<->OpenGL streaming ring.
+    // Typical: 3..12 | Sweet-spot: 4..8 | Default: 8
+    inline constexpr int pboRingSize = 8;
 
 // ============================== Overlays / HUD ===============================
 
-    inline constexpr bool  heatmapOverlayEnabled       = true;   // {false,true}
-    inline constexpr bool  warzenschweinOverlayEnabled = true;   // {false,true}
-    inline constexpr float hudPixelSize                = 0.0025f;// 0.0015..0.004
+    inline constexpr bool  heatmapOverlayEnabled        = true;   // {false,true}
+    inline constexpr bool  warzenschweinOverlayEnabled  = true;   // {false,true}
+    inline constexpr float hudPixelSize                 = 0.0025f;// 0.0015..0.004
 
 // ============================== Start / Window ===============================
 
@@ -70,10 +74,17 @@ namespace Settings {
 
 // ============================== Iterations / Tiles ===========================
 
-    inline constexpr int INITIAL_ITERATIONS = 100;    // 50..400
-    inline constexpr int MAX_ITERATIONS_CAP = 50000;  // 10k..200k
+    // Start budget (per-pixel iterations). Grows dynamically.
+    // Range: 50 .. 400 | Default: 100
+    inline constexpr int INITIAL_ITERATIONS = 100;
 
-    inline constexpr int BASE_TILE_SIZE = 32;         // MIN<=BASE<=MAX
+    // Hard upper bound for iterations/pixel (safety).
+    // Range: 10'000 .. 200'000 | Default: 50'000
+    inline constexpr int MAX_ITERATIONS_CAP = 50000;
+
+    // CUDA kernel tiling (constraint: MIN ≤ BASE ≤ MAX).
+    // Default: 32 / 8 / 64
+    inline constexpr int BASE_TILE_SIZE = 32;
     inline constexpr int MIN_TILE_SIZE  = 8;
     inline constexpr int MAX_TILE_SIZE  = 64;
 
@@ -97,14 +108,15 @@ namespace Kolibri {
 } // namespace Kolibri
 
 // ============================== Target Bias ==================================
-// Prefer nearer targets on screen (center-weighted scoring in overlay).
-// score_biased = raw * ((1 - mix) + mix * exp(-r_ndc^2 / sigmaNdc^2))
-// r_ndc is distance in NDC from screen center; smaller sigma ⇒ stronger bias.
+// Prefer nearer/farther targets on screen (overlay scoring).
+// score_biased = raw * ((1 - |mix|) + |mix| * w), with
+//   w = exp(-r_ndc^2 / sigmaNdc^2)      if mix >= 0 (center bias)
+//   w = 1 - exp(-r_ndc^2 / sigmaNdc^2)  if mix <  0 (edge  bias)
 // -----------------------------------------------------------------------------
 namespace TargetBias {
-    inline constexpr bool   enabled  = true;  // {false,true} | Default: true
-    inline constexpr double sigmaNdc = 0.65;  // 0.3..1.2     | Default: 0.65
-    inline constexpr double mix      = 0.35;  // 0..1         | Default: 0.35
+    inline constexpr bool   enabled  =  true;   // {false,true}
+    inline constexpr double sigmaNdc =  0.55;   // 0.3..1.2
+    inline constexpr double mix      = -0.45;   // [-1..1] (negativ = Rand bevorzugt)
 } // namespace TargetBias
 
 // ============================== Sanity checks ================================
@@ -115,6 +127,6 @@ static_assert(MIN_TILE_SIZE <= BASE_TILE_SIZE && BASE_TILE_SIZE <= MAX_TILE_SIZE
 static_assert(Kolibri::desiredTilePx > 0, "desiredTilePx must be > 0");
 static_assert(MANDEL_BLOCK_X > 0 && MANDEL_BLOCK_Y > 0, "MANDEL_BLOCK dims must be > 0");
 static_assert(TargetBias::sigmaNdc > 0.0, "sigmaNdc must be > 0");
-static_assert(TargetBias::mix >= 0.0 && TargetBias::mix <= 1.0, "mix in [0,1]");
+static_assert(TargetBias::mix >= -1.0 && TargetBias::mix <= 1.0, "mix in [-1,1]");
 
 } // namespace Settings

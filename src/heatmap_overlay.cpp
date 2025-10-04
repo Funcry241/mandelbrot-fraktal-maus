@@ -16,7 +16,7 @@
 
 namespace HeatmapOverlay {
 
-// --- GL handles / uniforms (kompakt) -----------------------------------------
+// --- GL handles / uniforms ---------------------------------------------------
 static GLuint sPanelVAO=0, sPanelVBO=0, sPanelProg=0;
 static GLint  uViewportPx=-1, uPanelRectPx=-1, uRadiusPx=-1, uAlpha=-1, uBorderPx=-1;
 
@@ -27,14 +27,14 @@ static GLint  uHMarkEnable=-1, uHMarkCenterPx=-1, uHMarkRadiusPx=-1, uHMarkAlpha
 static int    sTexW=0, sTexH=0;
 static float  sExposureEMA = 0.0f;
 
-// Tuning (lokal, Settings bleiben schmal)
+// Tuning (lokal)
 static constexpr float  kExposureDecay = 0.92f;
 static constexpr float  kValueFloor    = 0.03f;
 static constexpr double kBendStartZ    = 1.0;
 static constexpr double kBendFullZ     = 18.0;
 static constexpr double kBendExp       = 0.5;
 
-// --- API ---------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 void toggle(RendererState& ctx){
 #if defined(USE_HEATMAP_OVERLAY)
     ctx.heatmapOverlayEnabled = !ctx.heatmapOverlayEnabled;
@@ -58,7 +58,8 @@ void cleanup(){
     uHViewportPx=uHContentRectPx=uHGridTex=uHAlphaBase=-1;
     uHMarkEnable=uHMarkCenterPx=uHMarkRadiusPx=uHMarkAlpha=-1;
 
-    sTexW=sTexH=0; sExposureEMA=0.0f;
+    sTexW=sTexH=0;
+    sExposureEMA=0.0f;
 }
 
 void drawOverlay(const std::vector<float>& entropy,
@@ -107,7 +108,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     }
 
-    // Stabilized grid + near bias scoring
+    // Stabilized grid + center/edge bias scoring
     float  currentMax = 1e-6f;
     int    bestIdx    = 0;
     float  bestRaw    = -1e30f;
@@ -116,23 +117,32 @@ void drawOverlay(const std::vector<float>& entropy,
 
     const double sigmaNdc = Settings::TargetBias::sigmaNdc;
     const double mix      = Settings::TargetBias::mix;
-    const bool   nearOn   = Settings::TargetBias::enabled && (mix > 0.0);
+    const bool   biasOn   = Settings::TargetBias::enabled && (mix != 0.0);
 
     for(int i=0;i<nTiles;++i){
         const float raw = entropy[(size_t)i] + contrast[(size_t)i];
         if (raw > currentMax) currentMax = raw;
+
         grid[(size_t)i] = raw;
+
         double score = (double)raw;
-        if (nearOn) {
+        if (biasOn) {
             const int tx = i % tilesX, ty = i / tilesX;
             const double cx = ((double)tx + 0.5) * (double)width  / (double)tilesX;
             const double cy = ((double)ty + 0.5) * (double)height / (double)tilesY;
             const double ndcX = (cx / (double)width) * 2.0 - 1.0;
             const double ndcY = 1.0 - (cy / (double)height) * 2.0;
             const double r2   = ndcX*ndcX + ndcY*ndcY;
-            const double w    = std::exp(- r2 / (sigmaNdc*sigmaNdc));
-            score = (1.0 - mix) * score + mix * score * w;
+
+            // center weight (1 in center → 0 at edge)
+            const double wCenter = std::exp(- r2 / (sigmaNdc*sigmaNdc));
+
+            // symmetric Formel: mix>0 = Mitte, mix<0 = Rand
+            const double m = std::clamp(mix, -1.0, 1.0);
+            const double w = (m >= 0.0) ? wCenter : (1.0 - wCenter);
+            score = (1.0 - std::abs(m)) * score + std::abs(m) * score * w;
         }
+
         if(score > bestScore){ bestScore=score; bestIdx=i; if(raw>bestRaw) bestRaw=raw; }
     }
 
@@ -167,7 +177,7 @@ void drawOverlay(const std::vector<float>& entropy,
     const int contentX0 = panelX0 + padPx, contentY0 = panelY0 + padPx;
     const int contentX1 = contentX0 + contentWPx, contentY1 = contentY0 + contentHPx;
 
-    // Save GL blend/program/vao state (kurz)
+    // Save GL state
     GLint prevVAO=0, prevBuf=0, prevProg=0, srcRGB=0,dstRGB=0,srcA=0,dstA=0;
     GLboolean wasBlend=GL_FALSE, wasDepth=GL_FALSE;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&prevVAO);
@@ -243,7 +253,7 @@ void drawOverlay(const std::vector<float>& entropy,
                 for (int dx=-r; dx<=r; ++dx){
                     const int tx = bx + dx; if (tx < 0 || tx >= tilesX) continue;
                     const size_t idx = (size_t)ty*(size_t)tilesX + (size_t)tx;
-                    const double v = (double)grid[idx];
+                    const double v = (double)grid[idx]; // normalized 0..1
                     const double g = std::exp(-(dx*dx + dy*dy)/(2.0*sigma2));
                     const double w = std::pow(std::max(0.0, v), gammaW) * g;
                     wsum += w; xsum += w * (tx + 0.5); ysum += w * (ty + 0.5);
@@ -252,10 +262,12 @@ void drawOverlay(const std::vector<float>& entropy,
             if (wsum > 1e-9) { cx_com = xsum / wsum; cy_com = ysum / wsum; }
         }
 
+        // Zoom-dependent blend argmax → CoM
         double bendT = 0.0;
-        { const double z=(double)ctx.zoom;
-          if (z > kBendStartZ) bendT = std::min(1.0, (z-kBendStartZ)/(kBendFullZ-kBendStartZ));
-          bendT = std::pow(bendT, kBendExp);
+        {
+            const double z=(double)ctx.zoom;
+            if (z > kBendStartZ) bendT = std::min(1.0, (z-kBendStartZ)/(kBendFullZ-kBendStartZ));
+            bendT = std::pow(bendT, kBendExp);
         }
 
         const double cx_tile = (1.0 - bendT)*(bx + 0.5) + bendT*cx_com;
@@ -296,8 +308,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
 
         if constexpr(Settings::debugLogging){
-            const int bx0 = bestIdx % tilesX, by0 = bestIdx / tilesX;
-            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d rawMax=%.6f nearMix=%.2f sig=%.2f ndc=(%.6f,%.6f)",
+            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d rawMax=%.6f mix=%.2f sig=%.2f ndc=(%.6f,%.6f)",
                            tilesX,tilesY,bestIdx,bestRaw,Settings::TargetBias::mix,Settings::TargetBias::sigmaNdc, ndcX, ndcY);
         }
     }
