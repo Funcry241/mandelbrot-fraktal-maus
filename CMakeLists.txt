@@ -1,6 +1,6 @@
-##### Otter: CUDA 13 guard; CCCL/CUB/Thrust via CUDAToolkit; dynamic GLEW (no GLEW_STATIC); Ninja response-files.
-##### Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; duplicate-free defines; safe device-runtime link.
-##### Maus: Arch 80/86/89/90; CUDA C++20; deterministic build; fail early if CUDA < 13.0; silence C4505 only for CUDA TUs; Capybara-only path.
+##### Otter: Add per-file ptxas register cap for Capybara kernel (-maxrregcount=64, -O3) to hit the 32x16/512 sweetspot without spills.
+##### Schneefuchs: Keep dynamic GLEW, static CUDA runtime, separable compilation; no fast-math; deterministic, duplicate-free flags.
+##### Maus: Arch 80/86/89/90; CUDA C++20; early fail if CUDA<13; Ninja response files; zero behavioral change—pure perf build tweak.
 ##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
@@ -233,6 +233,13 @@ if(MSVC)
     message(FATAL_ERROR "HIGHENTROPYVA erfordert 64-bit (/MACHINE:X64). Bitte 64-bit Toolchain verwenden.")
   endif()
 endif()
+
+# ---------------------- Per-file PTXAS Sweetspot -------------------------------
+# Cap the registers for the Capybara kernel only; helps keep 2 resident blocks/SM with BX=32,BY=16.
+# Safe across configs; no behavioral change.
+set_source_files_properties(src/capybara_render_kernel.cu PROPERTIES
+  COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-maxrregcount=64;-Xptxas=-O3>"
+)
 
 # ---------------------- Defaults ---------------------------
 if(NOT CMAKE_BUILD_TYPE)
