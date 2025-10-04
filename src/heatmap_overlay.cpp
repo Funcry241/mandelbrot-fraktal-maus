@@ -3,9 +3,6 @@
 ///// Maus: One-line ASCII logs; forwards blended interest to RendererState (screen coords); no zoom/pan changes.
 ///// Datei: src/heatmap_overlay.cpp
 
-#pragma warning(push)
-#pragma warning(disable: 4100)
-
 #include "pch.hpp"
 #include "heatmap_overlay.hpp"
 #include "settings.hpp"
@@ -14,10 +11,6 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
-
-#define RS_OFFSET_X(ctx) ((ctx).center.x)
-#define RS_OFFSET_Y(ctx) ((ctx).center.y)
-#define RS_ZOOM(ctx)     ((ctx).zoom)
 
 namespace HeatmapOverlay {
 
@@ -28,14 +21,14 @@ static GLuint sPanelVAO=0, sPanelVBO=0, sPanelProg=0;     // Panel (rounded, alp
 static GLint  uViewportPx=-1, uPanelRectPx=-1, uRadiusPx=-1, uAlpha=-1, uBorderPx=-1;
 
 static GLuint sHeatVAO=0, sHeatVBO=0, sHeatProg=0, sHeatTex=0; // Heat (texture + alpha + sticker)
-static GLint  uHViewportPx=-1, uHContentRectPx=-1, uHGridSize=-1, uHGridTex=-1, uHAlphaBase=-1;
+static GLint  uHViewportPx=-1, uHContentRectPx=-1, uHGridTex=-1, uHAlphaBase=-1;
 // Z0 sticker uniforms inside Heat FS
 static GLint  uHMarkEnable=-1, uHMarkCenterPx=-1, uHMarkRadiusPx=-1, uHMarkAlpha=-1;
 
 static int    sTexW=0, sTexH=0;
 
 // Exposure control (stabilized normalization)
-static float  sExposureEMA = 0.0f;            // tracks a smoothed per-frame maximum
+static float  sExposureEMA = 0.0f;             // tracks a smoothed per-frame maximum
 static constexpr float kExposureDecay = 0.92f; // EMA decay (0.90..0.95 recommended)
 static constexpr float kValueFloor    = 0.03f; // minimal floor added before shader mapping
 
@@ -91,15 +84,14 @@ void main(){ vPx=aPosPx; gl_Position=vec4(toNdc(aPosPx,uViewportPx),0,1); }
 
 static const char* kHeatFS = R"GLSL(#version 430 core
 in vec2 vPx; out vec4 FragColor;
-uniform vec4 uContentRectPx;  // [x0,y0,x1,y1] inner area (no padding)
-uniform ivec2 uGridSize;      // tilesX, tilesY (kept for compatibility)
-uniform sampler2D uGrid;      // GL_R16F or GL_R32F, normalized to 0..1
-uniform float uAlphaBase;     // base alpha (scales Pfau alpha)
+uniform vec4   uContentRectPx;  // [x0,y0,x1,y1] inner area (no padding)
+uniform sampler2D uGrid;        // GL_R16F or GL_R32F, normalized to 0..1
+uniform float  uAlphaBase;      // base alpha (scales Pfau alpha)
 // Z0 marker uniforms
-uniform float uMarkEnable;    // 0.0/1.0
-uniform vec2  uMarkCenterPx;  // screen pixel coords (panel space)
-uniform float uMarkRadiusPx;  // ring radius in px
-uniform float uMarkAlpha;     // marker intensity
+uniform float  uMarkEnable;     // 0.0/1.0
+uniform vec2   uMarkCenterPx;   // screen pixel coords (panel space)
+uniform float  uMarkRadiusPx;   // ring radius in px
+uniform float  uMarkAlpha;      // marker intensity
 
 vec3 mapGold(float v){
   float g = clamp(v,0.0,1.0);
@@ -195,7 +187,7 @@ void cleanup(){
     if(sHeatProg) glDeleteProgram(sHeatProg);
     if(sHeatTex) glDeleteTextures(1,&sHeatTex);
     sHeatVAO=sHeatVBO=sHeatProg=sHeatTex=0;
-    uHViewportPx=uHContentRectPx=uHGridSize=uHGridTex=uHAlphaBase=-1;
+    uHViewportPx=uHContentRectPx=uHGridTex=uHAlphaBase=-1;
     uHMarkEnable=uHMarkCenterPx=uHMarkRadiusPx=uHMarkAlpha=-1;
 
     sTexW=sTexH=0;
@@ -234,7 +226,6 @@ void drawOverlay(const std::vector<float>& entropy,
         if(!sHeatProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[UI/Pfau][HM] ERROR: heat program==0"); return; }
         uHViewportPx    = glGetUniformLocation(sHeatProg, "uViewportPx");
         uHContentRectPx = glGetUniformLocation(sHeatProg, "uContentRectPx");
-        uHGridSize      = glGetUniformLocation(sHeatProg, "uGridSize");
         uHGridTex       = glGetUniformLocation(sHeatProg, "uGrid");
         uHAlphaBase     = glGetUniformLocation(sHeatProg, "uAlphaBase");
         // Z0 marker uniforms
@@ -244,8 +235,24 @@ void drawOverlay(const std::vector<float>& entropy,
         uHMarkAlpha     = glGetUniformLocation(sHeatProg, "uMarkAlpha");
     }
 
-    if(!sPanelVAO){ glGenVertexArrays(1,&sPanelVAO); glGenBuffers(1,&sPanelVBO); }
-    if(!sHeatVAO){  glGenVertexArrays(1,&sHeatVAO);  glGenBuffers(1,&sHeatVBO);  }
+    // --- VAO/VBO init once (attrib layout persistent in VAO) ---
+    if(!sPanelVAO){
+        glGenVertexArrays(1,&sPanelVAO);
+        glGenBuffers(1,&sPanelVBO);
+        glBindVertexArray(sPanelVAO);
+        glBindBuffer(GL_ARRAY_BUFFER,sPanelVBO);
+        // layout: vec2 pos, vec3 color (interleaved)
+        glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,5*sizeof(float),(void*)0);
+        glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,5*sizeof(float),(void*)(2*sizeof(float)));
+    }
+    if(!sHeatVAO){
+        glGenVertexArrays(1,&sHeatVAO);
+        glGenBuffers(1,&sHeatVBO);
+        glBindVertexArray(sHeatVAO);
+        glBindBuffer(GL_ARRAY_BUFFER,sHeatVBO);
+        // layout: vec2 pos
+        glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,2*sizeof(float),(void*)0);
+    }
 
     if(!sHeatTex){ glGenTextures(1,&sHeatTex); glBindTexture(GL_TEXTURE_2D,sHeatTex);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
@@ -271,7 +278,8 @@ void drawOverlay(const std::vector<float>& entropy,
 
     const float normMax = std::max(1e-6f, sExposureEMA);
 
-    std::vector<float> grid; grid.resize((size_t)nTiles);
+    static thread_local std::vector<float> grid;
+    grid.assign((size_t)nTiles, 0.0f);
     for(int i=0;i<nTiles;++i){
         float v = (entropy[(size_t)i] + contrast[(size_t)i]) / normMax;
         v = std::clamp(v + kValueFloor, 0.0f, 1.0f); // bring-up floor (pre-smoothstep)
@@ -345,8 +353,6 @@ void drawOverlay(const std::vector<float>& entropy,
         glBindBuffer(GL_ARRAY_BUFFER,sPanelVBO);
         glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)sizeof(quad),nullptr,GL_DYNAMIC_DRAW);
         glBufferSubData(GL_ARRAY_BUFFER,0,(GLsizeiptr)sizeof(quad),quad);
-        glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,5*sizeof(float),(void*)0);
-        glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,5*sizeof(float),(void*)(2*sizeof(float)));
         glDisable(GL_DEPTH_TEST); glEnable(GL_BLEND);
         glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
         glDrawArrays(GL_TRIANGLES,0,6);
@@ -366,7 +372,6 @@ void drawOverlay(const std::vector<float>& entropy,
         glUseProgram(sHeatProg);
         if(uHViewportPx>=0)    glUniform2f(uHViewportPx,(float)width,(float)height);
         if(uHContentRectPx>=0) glUniform4f(uHContentRectPx,(float)contentX0,(float)contentY0,(float)contentX1,(float)contentY1);
-        if(uHGridSize>=0)      glUniform2i(uHGridSize, tilesX, tilesY);
 
         float alphaBase = Pfau::PANEL_ALPHA * 1.10f; // etwas höheres Grund-Alpha
         if (alphaBase > 1.0f) alphaBase = 1.0f;
@@ -410,7 +415,7 @@ void drawOverlay(const std::vector<float>& entropy,
         // --- Zoom-abhängiges Bend (Argmax -> CoM) ----------------------------
         double bendT = 0.0;
         {
-            const double z = (double)RS_ZOOM(ctx);
+            const double z = (double)ctx.zoom;
             if (z > kBendStartZ) {
                 bendT = (z - kBendStartZ) / (kBendFullZ - kBendStartZ);
                 if (bendT > 1.0) bendT = 1.0;
@@ -457,7 +462,6 @@ void drawOverlay(const std::vector<float>& entropy,
         glBindBuffer(GL_ARRAY_BUFFER,sHeatVBO);
         glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)sizeof(quad),nullptr,GL_DYNAMIC_DRAW);
         glBufferSubData(GL_ARRAY_BUFFER,0,(GLsizeiptr)sizeof(quad),quad);
-        glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,2*sizeof(float),(void*)0);
 
         glEnable(GL_BLEND);
         glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
@@ -478,19 +482,16 @@ void drawOverlay(const std::vector<float>& entropy,
     glBlendFuncSeparate(srcRGB,dstRGB,srcA,dstA);
     if(!wasBlend) glDisable(GL_BLEND);
     if(wasDepth) glEnable(GL_DEPTH_TEST);
-    glDisableVertexAttribArray(0); glDisableVertexAttribArray(1);
     glBindBuffer(GL_ARRAY_BUFFER,prevBuf);
     glBindVertexArray((GLuint)prevVAO);
     glUseProgram((GLuint)prevProg);
 
     if constexpr(Settings::debugLogging){
         LUCHS_LOG_HOST("[UI/Pfau][HM] ok TR grid=%dx%d zoom=%.6f c=(%.9f,%.9f) panel=[%d,%d..%d,%d] content=[%d,%d..%d,%d] expEMA=%.6f",
-                       tilesX,tilesY,RS_ZOOM(ctx),RS_OFFSET_X(ctx),RS_OFFSET_Y(ctx),
+                       tilesX,tilesY,(double)ctx.zoom,(double)ctx.center.x,(double)ctx.center.y,
                        panelX0,panelY0,panelX1,panelY1, contentX0,contentY0,contentX1,contentY1, sExposureEMA);
         GLenum err=glGetError(); if(err!=GL_NO_ERROR) LUCHS_LOG_HOST("[UI/Pfau][HM-GL] err=0x%04X",err);
     }
 }
 
 } // namespace HeatmapOverlay
-
-#pragma warning(pop)
