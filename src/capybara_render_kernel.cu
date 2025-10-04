@@ -1,7 +1,7 @@
 ///// Otter: Mandelbrot render kernel using Capybara early Hi/Lo + classic continuation (fills d_iterations). Sweetspot: 32x16 blocks on SM80–SM90, dynamic Hi/Lo gating via kBaseStepThresh=8e-13 (maxIter-aware).
 ///// Schneefuchs: API unverändert; ASCII-Logs; optionale CUDA-Event-Zeitmessung bei Settings::performanceLogging; identische Iterationszahlen, nur schnellerer Pfadwechsel.
-// ///// Maus: Zero information loss – Innenpunkte = maxIter; Hi/Lo nur bei feinem Pixelstep; Host/Device sauber getrennt. Deterministic logs, no fast-math switches.
-// ///// Datei: src/capybara_render_kernel.cu
+///// Maus: Zero information loss – Innenpunkte = maxIter; Hi/Lo nur bei feinem Pixelstep; Host/Device sauber getrennt. Deterministic logs, no fast-math switches.
+///// Datei: src/capybara_render_kernel.cu
 
 #include "pch.hpp"
 
