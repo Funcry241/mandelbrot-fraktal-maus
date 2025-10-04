@@ -386,7 +386,7 @@ void drawOverlay(const std::vector<float>& entropy,
         {
             const int r = 1;               // 3x3 Nachbarschaft
             const double sigma2 = 0.75*0.75;
-            const double gammaW = 2.0;     // v^gamma, betont Peaks
+            const double gammaW = 3.0;     // v^gamma, betont Peaks
             double wsum = 0.0, xsum = 0.0, ysum = 0.0;
             for (int dy=-r; dy<=r; ++dy){
                 const int ty = by + dy; if (ty < 0 || ty >= tilesY) continue;
