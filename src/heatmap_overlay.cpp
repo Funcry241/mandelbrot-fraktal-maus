@@ -33,9 +33,9 @@ static constexpr float kExposureDecay = 0.92f; // EMA decay (0.90..0.95 recommen
 static constexpr float kValueFloor    = 0.03f; // minimal floor added before shader mapping
 
 // Late-bend (Argmax -> local CoM) — stärker & früher
-static constexpr double kBendStartZ = 1.0;   // früher starten
-static constexpr double kBendFullZ  = 18.0;  // schneller voll
-static constexpr double kBendExp    = 0.5;   // <1 ⇒ frühe, stärkere Wirkung
+static constexpr double kBendStartZ = 1.0;
+static constexpr double kBendFullZ  = 18.0;
+static constexpr double kBendExp    = 0.5;
 
 // -----------------------------------------------------------------------------
 // Shaders
@@ -73,8 +73,7 @@ void main(){
 }
 )GLSL";
 
-// Heat pass: draw only the content rect; fragment shader samples the tiles texture
-// (NO BLUR), maps to gold, emits alpha by value, and overlays a Z0 sticker.
+// Heat pass (no blur), gold mapping + Z0 sticker
 static const char* kHeatVS = R"GLSL(#version 430 core
 layout(location=0) in vec2 aPosPx;
 uniform vec2 uViewportPx; out vec2 vPx;
@@ -84,19 +83,19 @@ void main(){ vPx=aPosPx; gl_Position=vec4(toNdc(aPosPx,uViewportPx),0,1); }
 
 static const char* kHeatFS = R"GLSL(#version 430 core
 in vec2 vPx; out vec4 FragColor;
-uniform vec4   uContentRectPx;  // [x0,y0,x1,y1] inner area (no padding)
+uniform vec4   uContentRectPx;  // [x0,y0,x1,y1]
 uniform sampler2D uGrid;        // GL_R16F or GL_R32F, normalized to 0..1
-uniform float  uAlphaBase;      // base alpha (scales Pfau alpha)
+uniform float  uAlphaBase;
 // Z0 marker uniforms
-uniform float  uMarkEnable;     // 0.0/1.0
-uniform vec2   uMarkCenterPx;   // screen pixel coords (panel space)
-uniform float  uMarkRadiusPx;   // ring radius in px
-uniform float  uMarkAlpha;      // marker intensity
+uniform float  uMarkEnable;
+uniform vec2   uMarkCenterPx;
+uniform float  uMarkRadiusPx;
+uniform float  uMarkAlpha;
 
 vec3 mapGold(float v){
   float g = clamp(v,0.0,1.0);
   g = smoothstep(0.0,1.0,g);
-  g = pow(g, 0.90); // a tad brighter than 0.94
+  g = pow(g, 0.90);
   return mix(vec3(0.08,0.08,0.10), vec3(0.98,0.78,0.30), g);
 }
 
@@ -104,31 +103,27 @@ void main(){
   vec2 sizePx = uContentRectPx.zw - uContentRectPx.xy;
   vec2 uv = (vPx - uContentRectPx.xy) / sizePx;
 
-  // clip strictly to content rect (no alpha outside)
   if(any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))){
     FragColor = vec4(0.0); return;
   }
 
-  // --- NO BLUR: single texture fetch ---
   float v = texture(uGrid, uv).r;
 
-  // alpha from value
   float a = smoothstep(0.05, 0.65, v) * uAlphaBase;
   vec4 base = vec4(mapGold(v), a);
 
-  // --- Z0 sticker overlay (ring + crosshair), analytic in pixel space ---
   float m = 0.0;
   if(uMarkEnable > 0.5){
     vec2  d2   = vPx - uMarkCenterPx;
     float r    = length(d2);
     float edge = abs(r - uMarkRadiusPx);
-    float aa   = fwidth(edge) + 0.75;         // bias to stay visible
+    float aa   = fwidth(edge) + 0.75;
     float ring = 1.0 - smoothstep(1.5, 1.5+aa, edge);
     float cx   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.x));
     float cy   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.y));
     m = max(ring, max(cx, cy)) * uMarkAlpha;
   }
-  vec3 markCol = vec3(0.60, 1.00, 0.60);  // helles Grün
+  vec3 markCol = vec3(0.60, 1.00, 0.60);
   vec4 outCol  = mix(base, vec4(markCol, 1.0), m);
   outCol.a     = max(base.a, max(outCol.a, m));
   FragColor    = outCol;
@@ -200,18 +195,15 @@ void drawOverlay(const std::vector<float>& entropy,
                  [[maybe_unused]] unsigned int textureId,
                  RendererState& ctx)
 {
-    // Interest pro Frame invalidieren (nur gültig wenn wir gleich setzen)
     ctx.interest.valid = false;
-
     if(!ctx.heatmapOverlayEnabled || width<=0||height<=0||tileSize<=0) return;
 
-    // Tiles geometry
     const int tilesX = (width  + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
     const int nTiles = tilesX * tilesY;
     if((int)entropy.size()<nTiles || (int)contrast.size()<nTiles) return;
 
-    // --- Lazy init programs ---
+    // --- Lazy init programs & VAOs ---
     if(!sPanelProg){
         sPanelProg = program(kPanelVS, kPanelFS);
         if(!sPanelProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[UI/Pfau][HM] ERROR: panel program==0"); return; }
@@ -228,20 +220,16 @@ void drawOverlay(const std::vector<float>& entropy,
         uHContentRectPx = glGetUniformLocation(sHeatProg, "uContentRectPx");
         uHGridTex       = glGetUniformLocation(sHeatProg, "uGrid");
         uHAlphaBase     = glGetUniformLocation(sHeatProg, "uAlphaBase");
-        // Z0 marker uniforms
         uHMarkEnable    = glGetUniformLocation(sHeatProg, "uMarkEnable");
         uHMarkCenterPx  = glGetUniformLocation(sHeatProg, "uMarkCenterPx");
         uHMarkRadiusPx  = glGetUniformLocation(sHeatProg, "uMarkRadiusPx");
         uHMarkAlpha     = glGetUniformLocation(sHeatProg, "uMarkAlpha");
     }
-
-    // --- VAO/VBO init once (attrib layout persistent in VAO) ---
     if(!sPanelVAO){
         glGenVertexArrays(1,&sPanelVAO);
         glGenBuffers(1,&sPanelVBO);
         glBindVertexArray(sPanelVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sPanelVBO);
-        // layout: vec2 pos, vec3 color (interleaved)
         glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,5*sizeof(float),(void*)0);
         glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,5*sizeof(float),(void*)(2*sizeof(float)));
     }
@@ -250,10 +238,8 @@ void drawOverlay(const std::vector<float>& entropy,
         glGenBuffers(1,&sHeatVBO);
         glBindVertexArray(sHeatVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sHeatVBO);
-        // layout: vec2 pos
         glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,2*sizeof(float),(void*)0);
     }
-
     if(!sHeatTex){ glGenTextures(1,&sHeatTex); glBindTexture(GL_TEXTURE_2D,sHeatTex);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
@@ -261,28 +247,55 @@ void drawOverlay(const std::vector<float>& entropy,
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     }
 
-    // --- Build/Update tiles texture with stabilized exposure, track raw argmax ---
-    float currentMax = 1e-6f;
-    int   bestIdxRaw = 0;
-    float bestRaw    = -1e30f;
+    // --- Build stabilized grid texture; compute biased best index -------------
+    float  currentMax = 1e-6f;
+    int    bestIdx    = 0;
+    float  bestRaw    = -1e30f;
+    double bestScore  = -1e300;
+
+    static thread_local std::vector<float> grid;
+    grid.assign((size_t)nTiles, 0.0f);
+
+    const double sigmaNdc = Settings::TargetBias::sigmaNdc;
+    const double mix      = Settings::TargetBias::mix;
+    const bool   nearOn   = Settings::TargetBias::enabled && (mix > 0.0);
 
     for(int i=0;i<nTiles;++i){
         const float raw = entropy[(size_t)i] + contrast[(size_t)i];
         if (raw > currentMax) currentMax = raw;
-        if (raw > bestRaw){ bestRaw = raw; bestIdxRaw = i; }
+
+        // normalize later for texture; keep pre-smoothed floor
+        grid[(size_t)i] = raw;
+
+        // compute biased score (center-weighted)
+        double score = (double)raw;
+        if (nearOn) {
+            const int tx = i % tilesX;
+            const int ty = i / tilesX;
+            const double cx_screen = ( (double)tx + 0.5 ) * (double)width  / (double)tilesX;
+            const double cy_screen = ( (double)ty + 0.5 ) * (double)height / (double)tilesY;
+            const double ndcX = (cx_screen / (double)width)  * 2.0 - 1.0;
+            const double ndcY = 1.0 - (cy_screen / (double)height) * 2.0;
+            const double r2   = ndcX*ndcX + ndcY*ndcY;
+            const double w    = std::exp(- r2 / (sigmaNdc*sigmaNdc));  // 0..1
+            score = (1.0 - mix) * score + mix * score * w;
+        }
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestIdx   = i;
+            if (raw > bestRaw) bestRaw = raw; // track for log only
+        }
     }
 
-    // Initialize/Update EMA: keep from decreasing too fast (decay) but allow rise immediately
-    if (sExposureEMA <= 0.0f) sExposureEMA = currentMax;
-    else                      sExposureEMA = std::max(kExposureDecay * sExposureEMA, currentMax);
+    // Normalize grid to 0..1 (with floor) for the shader texture
+    const float normMax = std::max(1e-6f, sExposureEMA <= 0.0f ? currentMax
+                                : std::max(currentMax, kExposureDecay * sExposureEMA));
+    sExposureEMA = normMax; // keep EMA in same variable after decay/max logic above
 
-    const float normMax = std::max(1e-6f, sExposureEMA);
-
-    static thread_local std::vector<float> grid;
-    grid.assign((size_t)nTiles, 0.0f);
     for(int i=0;i<nTiles;++i){
-        float v = (entropy[(size_t)i] + contrast[(size_t)i]) / normMax;
-        v = std::clamp(v + kValueFloor, 0.0f, 1.0f); // bring-up floor (pre-smoothstep)
+        float v = grid[(size_t)i] / normMax;
+        v = std::clamp(v + kValueFloor, 0.0f, 1.0f);
         grid[(size_t)i] = v;
     }
 
@@ -295,7 +308,7 @@ void drawOverlay(const std::vector<float>& entropy,
     }
 
     // --- Layout (Pfau TR) ---
-    constexpr int contentHPx = 92; // optisch leichter als 100
+    constexpr int contentHPx = 92;
     const float aspect  = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
     const int   contentWPx = std::max(1, (int)std::round(contentHPx*aspect));
 
@@ -326,7 +339,7 @@ void drawOverlay(const std::vector<float>& entropy,
     glGetIntegerv(GL_BLEND_SRC_RGB,&srcRGB); glGetIntegerv(GL_BLEND_DST_RGB,&dstRGB);
     glGetIntegerv(GL_BLEND_SRC_ALPHA,&srcA); glGetIntegerv(GL_BLEND_DST_ALPHA,&dstA);
 
-    // --- Panel (rounded, semi-transparent) ---
+    // --- Panel (rounded) ---
     {
         const float base[3]={0.10f,0.10f,0.10f};
         const float quad[30]={
@@ -338,7 +351,7 @@ void drawOverlay(const std::vector<float>& entropy,
             (float)panelX0,(float)panelY1, base[0],base[1],base[2],
         };
 
-        const float panelAlpha = Pfau::PANEL_ALPHA * 0.86f;   // ≈0.72 bei 0.84 Basis
+        const float panelAlpha = Pfau::PANEL_ALPHA * 0.86f;
         const float radiusPx   = Pfau::UI_RADIUS * (0.85f * sPanelScale);
         const float borderPx   = Pfau::UI_BORDER * (0.35f * sPanelScale);
 
@@ -358,7 +371,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
     }
 
-    // --- Heat pass (content rect quad; FS does value mapping + Z0 sticker) ---
+    // --- Heat pass + Z0 sticker ---
     {
         const float quad[12]={
             (float)contentX0,(float)contentY0,
@@ -373,7 +386,7 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uHViewportPx>=0)    glUniform2f(uHViewportPx,(float)width,(float)height);
         if(uHContentRectPx>=0) glUniform4f(uHContentRectPx,(float)contentX0,(float)contentY0,(float)contentX1,(float)contentY1);
 
-        float alphaBase = Pfau::PANEL_ALPHA * 1.10f; // etwas höheres Grund-Alpha
+        float alphaBase = Pfau::PANEL_ALPHA * 1.10f;
         if (alphaBase > 1.0f) alphaBase = 1.0f;
         if(uHAlphaBase>=0)     glUniform1f(uHAlphaBase, alphaBase);
 
@@ -381,24 +394,24 @@ void drawOverlay(const std::vector<float>& entropy,
         glBindTexture(GL_TEXTURE_2D, sHeatTex);
         if(uHGridTex>=0) glUniform1i(uHGridTex, 0);
 
-        // --- Argmax -----------------------------------------------------------
-        const int bx = bestIdxRaw % tilesX;
-        const int by = bestIdxRaw / tilesX;
+        // --- Selected tile (biased argmax) -----------------------------------
+        const int bx = bestIdx % tilesX;
+        const int by = bestIdx / tilesX;
 
-        // --- Lokaler Schwerpunkt (3x3) um Argmax in Tile-Koordinaten ---------
+        // Local CoM around (bx,by)
         double cx_com = bx + 0.5;
         double cy_com = by + 0.5;
         {
-            const int r = 1;               // 3x3 Nachbarschaft
+            const int r = 1;               // 3x3 neighborhood
             const double sigma2 = 0.75*0.75;
-            const double gammaW = 3.0;     // v^gamma, betont Peaks
+            const double gammaW = 3.0;     // emphasize peaks
             double wsum = 0.0, xsum = 0.0, ysum = 0.0;
             for (int dy=-r; dy<=r; ++dy){
                 const int ty = by + dy; if (ty < 0 || ty >= tilesY) continue;
                 for (int dx=-r; dx<=r; ++dx){
                     const int tx = bx + dx; if (tx < 0 || tx >= tilesX) continue;
                     const size_t idx = (size_t)ty * (size_t)tilesX + (size_t)tx;
-                    const double v = (double)grid[idx];           // 0..1, stabilisiert
+                    const double v = (double)grid[idx];           // normalized 0..1
                     const double g = std::exp(-(dx*dx + dy*dy)/(2.0*sigma2));
                     const double w = std::pow(std::max(0.0, v), gammaW) * g;
                     wsum += w;
@@ -406,13 +419,10 @@ void drawOverlay(const std::vector<float>& entropy,
                     ysum += w * (ty + 0.5);
                 }
             }
-            if (wsum > 1e-9) {
-                cx_com = xsum / wsum;
-                cy_com = ysum / wsum;
-            }
+            if (wsum > 1e-9) { cx_com = xsum / wsum; cy_com = ysum / wsum; }
         }
 
-        // --- Zoom-abhängiges Bend (Argmax -> CoM) ----------------------------
+        // Zoom-dependent blend argmax → CoM
         double bendT = 0.0;
         {
             const double z = (double)ctx.zoom;
@@ -420,13 +430,13 @@ void drawOverlay(const std::vector<float>& entropy,
                 bendT = (z - kBendStartZ) / (kBendFullZ - kBendStartZ);
                 if (bendT > 1.0) bendT = 1.0;
             }
-            bendT = std::pow(bendT, kBendExp); // früher/stärker
+            bendT = std::pow(bendT, kBendExp);
         }
 
         const double cx_tile = (1.0 - bendT)*(bx + 0.5) + bendT*cx_com;
         const double cy_tile = (1.0 - bendT)*(by + 0.5) + bendT*cy_com;
 
-        // --- Panel-Coords für Sticker ----------------------------------------
+        // Panel-space sticker coords
         const float tileWPx_panel = (float)(contentX1 - contentX0) / std::max(1, tilesX);
         const float tileHPx_panel = (float)(contentY1 - contentY0) / std::max(1, tilesY);
         const float centerPxX_panel = (float)contentX0 + (float)cx_tile * tileWPx_panel;
@@ -439,7 +449,7 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uHMarkRadiusPx>=0) glUniform1f(uHMarkRadiusPx, ringRpx_panel);
         if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.95f);
 
-        // --- Screen-Coords für Zoom-Interest ---------------------------------
+        // Screen-space interest (for zoom logic)
         const float tileWPx_screen  = (float)width  / std::max(1, tilesX);
         const float tileHPx_screen  = (float)height / std::max(1, tilesY);
         const float centerPxX_screen= (float)cx_tile * tileWPx_screen;
@@ -455,7 +465,7 @@ void drawOverlay(const std::vector<float>& entropy,
         ctx.interest.ndcX      = ndcX;
         ctx.interest.ndcY      = ndcY;
         ctx.interest.radiusNdc = rNdc;
-        ctx.interest.strength  = 1.0;   // weiterhin voll gewichtet
+        ctx.interest.strength  = 1.0;
         ctx.interest.valid     = true;
 
         glBindVertexArray(sHeatVAO);
@@ -468,12 +478,12 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
 
         if constexpr(Settings::debugLogging){
-            const int   bx0 = bestIdxRaw % tilesX;
-            const int   by0 = bestIdxRaw / tilesX;
+            const int   bx0 = bestIdx % tilesX;
+            const int   by0 = bestIdx / tilesX;
             const double cx_arg = bx0 + 0.5, cy_arg = by0 + 0.5;
-            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d raw=%.6f bendT=%.3f "
+            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d rawMax=%.6f nearMix=%.2f sig=%.2f "
                            "arg=(%.2f,%.2f) com=(%.2f,%.2f) mix=(%.2f,%.2f) ndc=(%.6f,%.6f)",
-                           tilesX, tilesY, bestIdxRaw, bestRaw, bendT,
+                           tilesX, tilesY, bestIdx, bestRaw, Settings::TargetBias::mix, Settings::TargetBias::sigmaNdc,
                            cx_arg, cy_arg, cx_com, cy_com, cx_tile, cy_tile, ndcX, ndcY);
         }
     }
@@ -487,9 +497,8 @@ void drawOverlay(const std::vector<float>& entropy,
     glUseProgram((GLuint)prevProg);
 
     if constexpr(Settings::debugLogging){
-        LUCHS_LOG_HOST("[UI/Pfau][HM] ok TR grid=%dx%d zoom=%.6f c=(%.9f,%.9f) panel=[%d,%d..%d,%d] content=[%d,%d..%d,%d] expEMA=%.6f",
-                       tilesX,tilesY,(double)ctx.zoom,(double)ctx.center.x,(double)ctx.center.y,
-                       panelX0,panelY0,panelX1,panelY1, contentX0,contentY0,contentX1,contentY1, sExposureEMA);
+        LUCHS_LOG_HOST("[UI/Pfau][HM] ok TR grid=%dx%d zoom=%.6f c=(%.9f,%.9f) expEMA=%.6f",
+                       tilesX,tilesY,(double)ctx.zoom,(double)ctx.center.x,(double)ctx.center.y, sExposureEMA);
         GLenum err=glGetError(); if(err!=GL_NO_ERROR) LUCHS_LOG_HOST("[UI/Pfau][HM-GL] err=0x%04X",err);
     }
 }

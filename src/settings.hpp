@@ -15,47 +15,41 @@ namespace Settings {
 
 // ============================== Zoom / Planner ===============================
 
-    // ForceAlwaysZoom
     // Forces continuous zoom, independent of entropy/contrast signals.
     // Range: {false, true} | Default: true
     inline constexpr bool   ForceAlwaysZoom = true;
 
-    // warmUpFreezeSeconds
     // After (re-)targeting, freeze direction for this time for stability.
     // Range: 0.2 .. 2.0 (seconds) | Default: 1.0
     inline constexpr double warmUpFreezeSeconds = 1.0;
 
 // ============================== Logging / Perf ===============================
 
-    // debugLogging
-    // Targeted debug/diagnostic output (host/device).
-    // Range: {false, true} | Default: false
+    // Targeted debug/diagnostic output (host/device). Default: false
     inline constexpr bool debugLogging  = false;
 
-    // performanceLogging
-    // Condensed [PERF] logs along the frame pipeline.
-    // Range: {false, true} | Default: true
+    // Condensed [PERF] logs along the frame pipeline. Default: true
     inline constexpr bool performanceLogging = true;
 
     // --- ZoomLog --------------------------------------------------------------
     // Foundation telemetry for all zoom stages (S1..Sn). Compact, ASCII-only.
     // One optional header line plus a rate-limited data line.
     namespace ZoomLog {
-        inline constexpr bool enabled       = true;  // {false,true}  | Default: true
-        inline constexpr int  everyN        = 16;    // 1..120        | Default: 16
-        inline constexpr bool header        = true;  // {false,true}  | Default: true
-        inline constexpr bool includeCenter = true;  // {false,true}  | Default: true
+        inline constexpr bool enabled       = true;  // {false,true}
+        inline constexpr int  everyN        = 16;    // 1..120
+        inline constexpr bool header        = true;  // {false,true}
+        inline constexpr bool includeCenter = true;  // {false,true}
     } // namespace ZoomLog
 
 // ============================== Framerate / VSync ============================
 
-    inline constexpr bool capFramerate = true; // {false,true} | Default: true
-    inline constexpr int  capTargetFps = 60;   // 30..240      | Default: 60
-    inline constexpr bool preferVSync  = true; // {false,true} | Default: true
+    inline constexpr bool capFramerate = true; // {false,true}
+    inline constexpr int  capTargetFps = 60;   // 30..240
+    inline constexpr bool preferVSync  = true; // {false,true}
 
 // ============================== Interop / Upload =============================
 
-    inline constexpr int pboRingSize = 8;      // 3..12 | Default: 8
+    inline constexpr int pboRingSize = 8;      // 3..12
 
 // ============================== Overlays / HUD ===============================
 
@@ -102,6 +96,17 @@ namespace Kolibri {
     inline constexpr int  desiredTilePx      = 28;   // 20..40
 } // namespace Kolibri
 
+// ============================== Target Bias ==================================
+// Prefer nearer targets on screen (center-weighted scoring in overlay).
+// score_biased = raw * ((1 - mix) + mix * exp(-r_ndc^2 / sigmaNdc^2))
+// r_ndc is distance in NDC from screen center; smaller sigma ⇒ stronger bias.
+// -----------------------------------------------------------------------------
+namespace TargetBias {
+    inline constexpr bool   enabled  = true;  // {false,true} | Default: true
+    inline constexpr double sigmaNdc = 0.65;  // 0.3..1.2     | Default: 0.65
+    inline constexpr double mix      = 0.35;  // 0..1         | Default: 0.35
+} // namespace TargetBias
+
 // ============================== Sanity checks ================================
 
 static_assert(pboRingSize > 0, "pboRingSize must be > 0");
@@ -109,5 +114,7 @@ static_assert(MIN_TILE_SIZE <= BASE_TILE_SIZE && BASE_TILE_SIZE <= MAX_TILE_SIZE
               "MIN_TILE_SIZE <= BASE_TILE_SIZE <= MAX_TILE_SIZE required");
 static_assert(Kolibri::desiredTilePx > 0, "desiredTilePx must be > 0");
 static_assert(MANDEL_BLOCK_X > 0 && MANDEL_BLOCK_Y > 0, "MANDEL_BLOCK dims must be > 0");
+static_assert(TargetBias::sigmaNdc > 0.0, "sigmaNdc must be > 0");
+static_assert(TargetBias::mix >= 0.0 && TargetBias::mix <= 1.0, "mix in [0,1]");
 
 } // namespace Settings
