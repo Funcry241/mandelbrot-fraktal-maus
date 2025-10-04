@@ -2,6 +2,7 @@
 ##### Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; duplicate-free defines; safe device-runtime link.
 ##### Maus: Arch 80/86/89/90; CUDA C++20; deterministic build; fail early if CUDA < 13.0; silence C4505 only for CUDA TUs; Capybara-only path.
 ##### Datei: CMakeLists.txt
+
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
@@ -42,7 +43,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
 # ---------------------- CUDA Runtime -----------------------
-set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON) # (also enforced via target props below)
+set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON)
 
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
@@ -73,8 +74,6 @@ foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
   endif()
 endforeach()
 
-# Windows: regulär via CONFIG (vcpkg liefert GLEW::GLEW / GLEW::glew)
-# Linux: per importiertem Ziel aus vcpkg_installed (robust gg. Find-GLEW-Issues)
 if(WIN32)
   find_package(GLEW CONFIG REQUIRED)
   if(TARGET GLEW::GLEW)
@@ -138,19 +137,19 @@ add_executable(mandelbrot_otterdream
 
 # ---------------------- Compile-Options --------------------
 if(MSVC)
-  # Einheitliche /MT (und /MTd) – Host & NVCC-Host-Compiler
+  # Einheitliche /MT (und /MTd)
   set_property(TARGET mandelbrot_otterdream PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-  # Host (C++) streng: /WX + /we4505 (unreferenced function = Error)
+  # Host (C++): /EHsc ergänzt, damit C4530 nicht triggert (und /WX darf bleiben)
   target_compile_options(mandelbrot_otterdream PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /we4505 /sdl /permissive- /Zc:__cplusplus /Brepro>
-    # CUDA host-compiler: streng, aber C4505 NUR HIER stummschalten (CRT/Stub-Lärm)
+    $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /sdl /permissive- /Zc:__cplusplus /EHsc /Brepro>
     $<$<COMPILE_LANGUAGE:CUDA>:
       -Xcompiler=/W4
       -Xcompiler=/WX
       -Xcompiler=/permissive-
       -Xcompiler=/Zc:__cplusplus
+      -Xcompiler=/EHsc
       -Xcompiler=/wd4505
       -Xcompiler=/MT$<$<CONFIG:Debug>:d>
       -Xcompiler=/Brepro
@@ -199,7 +198,7 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
   GLEW_NO_GLU
   CAPY_DEFAULT_ON=1
 )
-# CUDA 13 vector-types deprecation guard (harmlos falls ungenutzt)
+# CUDA 13 vector-types deprecation guard (harmlos wenn ungenutzt)
 target_compile_definitions(mandelbrot_otterdream PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:__NV_NO_VECTOR_DEPRECATION_DIAG>
 )
