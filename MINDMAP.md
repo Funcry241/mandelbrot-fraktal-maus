@@ -88,7 +88,6 @@ mindmap
 - `src/capybara_math.cuh`
 - `src/capybara_pixel_iter.cuh`
 - `src/capybara_render_kernel.cu`
-- `src/capybara_selector.cuh`
 - `src/capybara_ziter.cuh`
 
 ### Colorization & Post-processing

@@ -37,7 +37,7 @@ namespace Settings {
     // Range: {false, true} | Default: true
     inline constexpr bool performanceLogging = false;
 
-    // --- ZoomLog (NEW) -------------------------------------------------------
+    // --- ZoomLog --------------------------------------------------------------
     // Foundation telemetry for all zoom stages (S1..Sn). Compact, ASCII-only.
     // One optional header line plus a rate-limited data line.
     namespace ZoomLog {
@@ -184,13 +184,8 @@ namespace Settings {
 
 // ============================== Capybara (Hi/Lo early) =======================
 // Precision-improved early phase: hi+lo accumulation with optional renorm.
-// Telemetry is ASCII-only and rate-limited.
+// Telemetry is ASCII-only and rate-limited. Single-path renderer (no legacy).
 // -----------------------------------------------------------------------------
-
-    // capybaraEnabled
-    // Master on/off for Capybara early phase.
-    // Range: {false, true} | Default: true
-    inline constexpr bool capybaraEnabled = true;
 
     // capybaraHiLoEarlyIters
     // Iteration budget for early hi+lo before classic double.

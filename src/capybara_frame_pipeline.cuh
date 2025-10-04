@@ -8,7 +8,7 @@
 #include <cuda_runtime.h>
 
 #include "luchs_log_host.hpp"
-#include "capybara_selector.cuh"   // launch_mandelbrot_select(..., /*useCapybara=*/true)
+#include "capybara_api.cuh"        // launch_mandelbrot_capybara(...)
 
 // -----------------------------------------------------------------------------
 // Render iterations into d_it via Capybara (single path).
@@ -35,9 +35,8 @@ static inline void capy_render(
     }
 
     // --- Render (Capybara only; classic path removed) ---
-    launch_mandelbrot_select(
-        d_it, w, h, cx, cy, stepX, stepY, maxIter, renderStream,
-        /*useCapybara=*/true
+    launch_mandelbrot_capybara(
+        d_it, w, h, cx, cy, stepX, stepY, maxIter, renderStream
     );
 
     // --- Optional event for downstream scheduling (no host sync here) ---
