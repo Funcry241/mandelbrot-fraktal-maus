@@ -2,7 +2,6 @@
 ##### Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; duplicate-free defines; safe device-runtime link.
 ##### Maus: Arch 80/86/89/90; CUDA C++20; deterministic build; fail early if CUDA < 13.0; silence C4505 only for CUDA TUs; Capybara-only path.
 ##### Datei: CMakeLists.txt
-
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
@@ -43,7 +42,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
 # ---------------------- CUDA Runtime -----------------------
-set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON)
+set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON) # (also enforced via target props below)
 
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
@@ -124,7 +123,7 @@ add_executable(mandelbrot_otterdream
   src/capybara_render_kernel.cu
   src/colorize_iterations.cu
   # Zoom & control
-  src/zoom_logic.cpp  
+  src/zoom_logic.cpp
   # Frame + context + utilities
   src/frame_pipeline.cpp
   src/frame_context.cpp
@@ -133,8 +132,8 @@ add_executable(mandelbrot_otterdream
   src/frame_capture.cpp
   src/fps_meter.cpp
   src/renderer_state_cuda.cpp
-  src/renderer_state_gl.cpp    
-  src/heatmap_metrics.cu  
+  src/renderer_state_gl.cpp
+  src/heatmap_metrics.cu
 )
 
 # ---------------------- Compile-Options --------------------
@@ -143,9 +142,10 @@ if(MSVC)
   set_property(TARGET mandelbrot_otterdream PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-  # Host (C++) STRIKT mit /WX; CUDA-Host ebenfalls /WX, aber gezielt C4505 aus CUDA CRT unterdrücken
+  # Host (C++) streng: /WX + /we4505 (unreferenced function = Error)
   target_compile_options(mandelbrot_otterdream PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /sdl /permissive- /Zc:__cplusplus /Brepro>
+    $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /we4505 /sdl /permissive- /Zc:__cplusplus /Brepro>
+    # CUDA host-compiler: streng, aber C4505 NUR HIER stummschalten (CRT/Stub-Lärm)
     $<$<COMPILE_LANGUAGE:CUDA>:
       -Xcompiler=/W4
       -Xcompiler=/WX
@@ -199,7 +199,7 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
   GLEW_NO_GLU
   CAPY_DEFAULT_ON=1
 )
-# CUDA 13 vector-types deprecation guard (harmless if unused)
+# CUDA 13 vector-types deprecation guard (harmlos falls ungenutzt)
 target_compile_definitions(mandelbrot_otterdream PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:__NV_NO_VECTOR_DEPRECATION_DIAG>
 )
