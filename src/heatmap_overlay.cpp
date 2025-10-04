@@ -39,6 +39,10 @@ static float  sExposureEMA = 0.0f;            // tracks a smoothed per-frame max
 static constexpr float kExposureDecay = 0.92f; // EMA decay (0.90..0.95 recommended)
 static constexpr float kValueFloor    = 0.03f; // minimal floor added before shader mapping
 
+// Late-bend (Argmax -> local CoM)
+static constexpr double kBendStartZ = 5.0;    // start bending at this zoom
+static constexpr double kBendFullZ  = 200.0;  // fully on CoM at this zoom
+
 // -----------------------------------------------------------------------------
 // Shaders
 // -----------------------------------------------------------------------------
@@ -386,23 +390,60 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uHMarkRadiusPx>=0) glUniform1f(uHMarkRadiusPx, ringRpx_panel);
         if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.95f);
 
-        // --- Argmax: Screen-Coords (für Zoom-Interest) -----------------------
-        const float tileWPx_screen = (float)width  / std::max(1, tilesX);
-        const float tileHPx_screen = (float)height / std::max(1, tilesY);
-        const float centerPxX_screen = (bx + 0.5f) * tileWPx_screen;
-        const float centerPxY_screen = (by + 0.5f) * tileHPx_screen;
-        const float ringRpx_screen   = 0.70f * 0.5f * std::sqrt(tileWPx_screen*tileWPx_screen
-                                                              + tileHPx_screen*tileHPx_screen);
+        // --- Argmax/CoM geblendet: Screen-Coords (für Zoom-Interest) ----------
+        // 3x3 lokaler Schwerpunkt um (bx,by)
+        double wsum = 0.0, sx = 0.0, sy = 0.0;
+        for (int j = -1; j <= 1; ++j) {
+            const int y = std::clamp(by + j, 0, tilesY - 1);
+            for (int i = -1; i <= 1; ++i) {
+                const int x = std::clamp(bx + i, 0, tilesX - 1);
+                const float w = grid[(size_t)y * (size_t)tilesX + (size_t)x];
+                wsum += (double)w;
+                sx   += (double)w * ((double)x + 0.5);
+                sy   += (double)w * ((double)y + 0.5);
+            }
+        }
+        const double cx_tile_argmax = (double)bx + 0.5;
+        const double cy_tile_argmax = (double)by + 0.5;
+        const double cx_tile_com    = (wsum > 1e-12) ? (sx / wsum) : cx_tile_argmax;
+        const double cy_tile_com    = (wsum > 1e-12) ? (sy / wsum) : cy_tile_argmax;
 
+        // Zoom-abhängiges Bend: 0..1
+        double bendT = 0.0;
+        {
+            const double z = (double)RS_ZOOM(ctx);
+            if (z > kBendStartZ) {
+                bendT = (z - kBendStartZ) / (kBendFullZ - kBendStartZ);
+                if (bendT < 0.0) bendT = 0.0;
+                if (bendT > 1.0) bendT = 1.0;
+            }
+        }
+
+        // Geblendete Zielmitte im Tile-Raster
+        const double cx_tile = cx_tile_argmax * (1.0 - bendT) + cx_tile_com * bendT;
+        const double cy_tile = cy_tile_argmax * (1.0 - bendT) + cy_tile_com * bendT;
+
+        // Tile -> Screen-Pixel
+        const double tileWPx_screen = (double)width  / std::max(1, tilesX);
+        const double tileHPx_screen = (double)height / std::max(1, tilesY);
+        const double centerPxX_screen = cx_tile * tileWPx_screen;
+        const double centerPxY_screen = cy_tile * tileHPx_screen;
+
+        // Ringgröße (informativ)
+        const double ringRpx_screen = 0.70 * 0.5 * std::sqrt(tileWPx_screen*tileWPx_screen
+                                                            + tileHPx_screen*tileHPx_screen);
+
+        // Screen-Pixel -> NDC
         const double ndcX = (centerPxX_screen / (double)width)  * 2.0 - 1.0;
         const double ndcY = 1.0 - (centerPxY_screen / (double)height) * 2.0;
         const double rNdc = 0.5 * (((double)ringRpx_screen / (double)width ) * 2.0
                                  + ((double)ringRpx_screen / (double)height) * 2.0);
 
+        // Interest an Zoom-Logik übergeben
         ctx.interest.ndcX      = ndcX;
         ctx.interest.ndcY      = ndcY;
         ctx.interest.radiusNdc = rNdc;
-        ctx.interest.strength  = 1.0;   // Z0 = Argmax voll gewichtet
+        ctx.interest.strength  = 1.0;   // Z0 voll gewichtet
         ctx.interest.valid     = true;
 
         glBindVertexArray(sHeatVAO);
@@ -418,8 +459,12 @@ void drawOverlay(const std::vector<float>& entropy,
         if constexpr(Settings::debugLogging){
             const double ndcX_panel = (centerPxX_panel / (double)width)  * 2.0 - 1.0;
             const double ndcY_panel = 1.0 - (centerPxY_panel / (double)height) * 2.0;
-            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d raw=%.6f ndc_screen=(%.6f,%.6f) ndc_panel=(%.6f,%.6f) Rpx_screen=%.2f",
-                           tilesX, tilesY, bestIdxRaw, bestRaw, ndcX, ndcY, ndcX_panel, ndcY_panel, ringRpx_screen);
+            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d raw=%.6f bendT=%.3f "
+                           "argmaxTile=(%.2f,%.2f) comTile=(%.2f,%.2f) "
+                           "ndc_screen=(%.6f,%.6f) ndc_panel=(%.6f,%.6f) Rpx_screen=%.2f",
+                           tilesX, tilesY, bestIdxRaw, bestRaw, bendT,
+                           cx_tile_argmax, cy_tile_argmax, cx_tile_com, cy_tile_com,
+                           ndcX, ndcY, ndcX_panel, ndcY_panel, (float)ringRpx_screen);
         }
     }
 
