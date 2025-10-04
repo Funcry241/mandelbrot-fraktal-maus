@@ -40,9 +40,9 @@ static constexpr float kExposureDecay = 0.92f; // EMA decay (0.90..0.95 recommen
 static constexpr float kValueFloor    = 0.03f; // minimal floor added before shader mapping
 
 // Late-bend (Argmax -> local CoM) — stärker & früher
-static constexpr double kBendStartZ = 2.0;   // früher starten
-static constexpr double kBendFullZ  = 40.0;  // schneller voll
-static constexpr double kBendExp    = 0.6;   // <1 ⇒ frühe, stärkere Wirkung
+static constexpr double kBendStartZ = 1.0;   // früher starten
+static constexpr double kBendFullZ  = 18.0;  // schneller voll
+static constexpr double kBendExp    = 0.5;   // <1 ⇒ frühe, stärkere Wirkung
 
 // -----------------------------------------------------------------------------
 // Shaders
