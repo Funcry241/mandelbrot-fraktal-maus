@@ -278,37 +278,6 @@ void renderCudaFrame(
     }
 }
 
-// optional debug: iterations -> host mirror
-bool downloadIterationsToHost(RendererState& state,
-                              int width, int height,
-                              std::vector<uint16_t>& host,
-                              cudaStream_t stream) noexcept
-{
-    if (width <= 0 || height <= 0) return false;
-    const size_t n = (size_t)width * (size_t)height;
-    const size_t bytes = n * sizeof(uint16_t);
-    host.resize(n);
-
-    const void* dptr = state.d_iterations.get();
-    if (!dptr) return false;
-
-    auto rc = cudaMemcpyAsync(host.data(), dptr, bytes, cudaMemcpyDeviceToHost, stream);
-    if (rc != cudaSuccess) {
-        LUCHS_LOG_HOST("[HM][ERR] memcpyAsync iter->host rc=%d", (int)rc);
-        LuchsLogger::flushDeviceLogToHost(0);
-        return false;
-    }
-    if (stream) {
-        rc = cudaStreamSynchronize(stream);
-        if (rc != cudaSuccess) {
-            LUCHS_LOG_HOST("[HM][ERR] streamSync after memcpy rc=%d", (int)rc);
-            LuchsLogger::flushDeviceLogToHost(0);
-            return false;
-        }
-    }
-    return true;
-}
-
 // keep old API, delegate to HeatmapMetrics
 bool buildHeatmapMetrics(RendererState& state,
                          int width, int height, int tilePx,
