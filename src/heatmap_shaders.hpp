@@ -58,6 +58,7 @@ vec3 mapGold(float v){
 void main(){
   vec2 sizePx = uContentRectPx.zw - uContentRectPx.xy;
   vec2 uv = (vPx - uContentRectPx.xy) / sizePx;
+  uv.y = 1.0 - uv.y;   // Flip Y: Buffer-oben → Texture-unten
   if(any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))){ FragColor = vec4(0.0); return; }
   float v = texture(uGrid, uv).r;
   float a = smoothstep(0.05, 0.65, v) * uAlphaBase;
