@@ -1,3 +1,10 @@
+///// Otter: Quiet & deterministic — Root-fix: re-center UVs to texel centers via textureSize.
+///// Schneefuchs: Koordinaten sauber (Panel oben-links, Texture unten-links); keine Heuristik.
+///// Maus: Einzeilige Freude; hübsches Gold; Kreuz bleibt in Panel-Pixeln (kein Extra-Flip).
+///// Flip: uv.y = 1.0 - uv.y (Orientation); danach Half-Texel-Recenter in X und Y.
+///// Datei: heatmap_shaders.hpp
+///// Vertrag: CPU/ROI nutzen weiterhin Buffer-/Panel-Pixel; Shader übernimmt Alignment.
+
 #pragma once
 // Header-only: hält nur GLSL-Quellen zusammen.
 // Kein C++-Code, keine GL-Abhängigkeit.
@@ -7,8 +14,8 @@ namespace HeatmapShaders {
 inline constexpr const char* PanelVS = R"GLSL(#version 430 core
 layout(location=0) in vec2 aPosPx; layout(location=1) in vec3 aColor;
 uniform vec2 uViewportPx; out vec3 vColor; out vec2 vPx;
-vec2 toNdc(vec2 p, vec2 vp){ return vec2(p.x/vp.x*2-1, 1-p.y/vp.y*2); }
-void main(){ vColor=aColor; vPx=aPosPx; gl_Position=vec4(toNdc(aPosPx,uViewportPx),0,1); }
+vec2 toNdc(vec2 p, vec2 vp){ return vec2(p.x/vp.x*2.0-1.0, 1.0-p.y/vp.y*2.0); }
+void main(){ vColor=aColor; vPx=aPosPx; gl_Position=vec4(toNdc(aPosPx,uViewportPx),0.0,1.0); }
 )GLSL";
 
 inline constexpr const char* PanelFS = R"GLSL(#version 430 core
@@ -34,8 +41,8 @@ void main(){
 inline constexpr const char* HeatVS = R"GLSL(#version 430 core
 layout(location=0) in vec2 aPosPx;
 uniform vec2 uViewportPx; out vec2 vPx;
-vec2 toNdc(vec2 p, vec2 vp){ return vec2(p.x/vp.x*2-1, 1-p.y/vp.y*2); }
-void main(){ vPx=aPosPx; gl_Position=vec4(toNdc(aPosPx,uViewportPx),0,1); }
+vec2 toNdc(vec2 p, vec2 vp){ return vec2(p.x/vp.x*2.0-1.0, 1.0-p.y/vp.y*2.0); }
+void main(){ vPx=aPosPx; gl_Position=vec4(toNdc(aPosPx,uViewportPx),0.0,1.0); }
 )GLSL";
 
 inline constexpr const char* HeatFS = R"GLSL(#version 430 core
@@ -56,13 +63,29 @@ vec3 mapGold(float v){
 }
 
 void main(){
+  // Panel-Pixel -> [0,1] -> Flip Y (OpenGL-UV) -------------------------------
   vec2 sizePx = uContentRectPx.zw - uContentRectPx.xy;
   vec2 uv = (vPx - uContentRectPx.xy) / sizePx;
-  uv.y = 1.0 - uv.y;   // Flip Y: Buffer-oben → Texture-unten
-  if(any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))){ FragColor = vec4(0.0); return; }
+  uv.y = 1.0 - uv.y;
+
+  // ROOT FIX: Vertex-zu-Texel-Zentren re-centern (half-texel Korrektur) ------
+  // Wenn das Grid als N Kanten-Samples (0..N-1) erzeugt wurde, liegen die
+  // texel-Zentren bei (j + 0.5)/N. Das Mapping unten sorgt dafür, dass
+  // uv=0..1 genau diese Zentren trifft (und nicht die Kanten).
+  vec2 texDim = vec2(textureSize(uGrid, 0));         // (W, H)
+  uv = ((texDim - 1.0) * uv + 0.5) / texDim;
+
+  // Out-of-bounds? (durch AA am Rand) ----------------------------------------
+  if(any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))){
+    FragColor = vec4(0.0); return;
+  }
+
+  // Heat-Sampling + Gold-Mapping ---------------------------------------------
   float v = texture(uGrid, uv).r;
   float a = smoothstep(0.05, 0.65, v) * uAlphaBase;
   vec4 base = vec4(mapGold(v), a);
+
+  // Marker (Fadenkreuz/Ring) in Panel-Pixeln – KEIN zusätzlicher Flip --------
   float m = 0.0;
   if(uMarkEnable > 0.5){
     vec2  d2   = vPx - uMarkCenterPx;
@@ -74,6 +97,7 @@ void main(){
     float cy   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.y));
     m = max(ring, max(cx, cy)) * uMarkAlpha;
   }
+
   vec3 markCol = vec3(0.60, 1.00, 0.60);
   vec4 outCol  = mix(base, vec4(markCol, 1.0), m);
   outCol.a     = max(base.a, max(outCol.a, m));
