@@ -1,8 +1,8 @@
 ///// Otter: Rullmolder Step 2 — blunt zoom + gentle nudge toward Interest (dt-invariant).
-///** Schneefuchs: Zoom-Hold bei Leash/großem Fehler/schwachem Signal; Logs [ZHOLD]; Caps & Deadzone wie gehabt; /WX clean.
-///** Maus: Axis-weighted Leash (X stärker); zoom-korrekte Pan-Umrechnung; stabile ASCII-Logs [ZPAN0/1][ZPERF][ZLEASH].
+///** Schneefuchs: Major-axis Zoom-Hold (nur halten, wenn die dominante Achse gebremst ist); weniger False-Positives.
+///** Maus: Axis-weighted Leash (X stärker); zoom-korrekte Pan-Umrechnung; stabile ASCII-Logs [ZPAN0/1][ZPERF][ZLEASH][ZHOLD].
 ///// Fink: Zoom-korrekte Pan-Umrechnung (px→world per pixelScale/zoom) gegen Überschwinger.
-///// Dachs: Minimal invasiv — nur Reihenfolge geändert (erst Pan/Leash, dann Zoom-Entscheid).
+///// Dachs: Minimal invasiv — Reihenfolge: erst Pan/Leash, dann Zoom-Entscheid.
 ///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
@@ -38,7 +38,7 @@ static inline double blunt_zoom_rate_per_sec() noexcept {
     return 0.20; // +20%/s (Basisslope)
 }
 
-// Gentle nudge tunables (dt-invariant über alpha)
+// Gentle nudge tunables (dt-invariant via alpha)
 struct NudgeCfg {
     double gainPerSec      = 1.8;   // schnelleres Nachführen (zeitbasiert)
     double deadzoneNdc     = 0.06;  // früher pannen
@@ -104,10 +104,14 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
 
     // --- Wir pannen zuerst (inkl. Leash/Deadzone/Caps) und entscheiden DANACH über den Zoom ---
     // Telemetrie für die spätere Zoom-Entscheidung
-    bool   leashActive = false;         // true, wenn Leash oder Caps/DZ greifen
-    double errPx       = 1e12;          // Fehler in Pixeln
-    bool   weakSignal  = true;          // schwaches Heatmap-Signal
-    bool   haveInterest= false;
+    bool   haveInterest  = false;
+    bool   weakSignal    = true;
+    double errPx         = 1e12;        // Fehler in Pixeln
+
+    // „letzte“ Achsenmetriken für Major-Axis-Entscheidung
+    double leashX_last   = 1.0, leashY_last = 1.0;
+    bool   hitDZ_X_last  = false, hitDZ_Y_last  = false;
+    bool   hitCAP_X_last = false, hitCAP_Y_last = false;
 
     // -------------------- Gentle Nudge (PAN) ---------------------------------
     if (rs.interest.valid && rs.width > 0 && rs.height > 0) {
@@ -172,8 +176,10 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         const bool hitCAP_X = (step_px_x != step_px_x_raw);
         const bool hitCAP_Y = (step_px_y != step_px_y_raw);
 
-        // „Leash aktiv“ wenn Deadzone, Leash-Faktor < 1 oder Caps greifen
-        leashActive = (hitDZ_X || hitDZ_Y) || (leashX < 0.999 || leashY < 0.999) || (hitCAP_X || hitCAP_Y);
+        // „letzte“ Achsenmetriken für die Zoom-Hold-Entscheidung merken
+        leashX_last   = leashX;   leashY_last   = leashY;
+        hitDZ_X_last  = hitDZ_X;  hitDZ_Y_last  = hitDZ_Y;
+        hitCAP_X_last = hitCAP_X; hitCAP_Y_last = hitCAP_Y;
 
         // Pan in Weltkoordinaten (pixelScale / zoom)
         const double psx = static_cast<double>(rs.pixelScale.x);
@@ -200,7 +206,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                                    ndcX_raw, ndcY_raw, alpha, s,
                                    dx_px_goal, dy_px_goal, step_px_x, step_px_y,
                                    dWorldX, dWorldY, invZ,
-                                   (hitDZ_X?1:0)|(hitDZ_Y?2:0)|(hitCAP_X?4:0)|(hitCAP_Y?8:0)|(scaleZero?16:0));
+                                   (hitDZ_X?1:0)|(hitDZ_Y?2:0)|(hitCAP_X?4:0)|(hitCAP_Y?8:0)|((scaleZero)?16:0));
                 }
             }
         }
@@ -208,16 +214,38 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         pan_us += (long long)std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - tPanStart).count();
     } // end PAN
 
-    // -------------------- Zoom-Entscheidung (Hold vs. Base) -------------------
+    // -------------------- Zoom-Entscheidung (Major-Axis Hold vs. Base) -------
     using ZoomT = std::remove_cv_t<std::remove_reference_t<decltype(RS_ZOOM(rs))>>;
     const ZoomT z0 = static_cast<ZoomT>(RS_ZOOM(rs));
 
-    // Bedingungen für „Zoom halten“:
-    //  - Leash/Caps/DZ greifen (Pan kommt (noch) nicht hinterher)
-    //  - Fehler groß (hier: > 25% der kürzeren Bildkante)
-    //  - schwaches Signal oder kein Interest
-    const double errThreshPx = 0.25 * static_cast<double>(std::min(std::max(rs.width, 0), std::max(rs.height, 0)));
-    const bool   holdZoom    = leashActive || (!haveInterest) || weakSignal || (errPx > errThreshPx);
+    const double errThreshPx = 0.25 * static_cast<double>(
+        std::min(std::max(rs.width, 0), std::max(rs.height, 0))
+    );
+
+    // Leash blockiert nur, wenn die MAJOR-ACHSE (größeres |ndc|) tatsächlich limitiert ist
+    bool leashBlocking = false;
+    if (haveInterest) {
+        const double ax = std::abs(rs.interest.ndcX);
+        const double ay = std::abs(rs.interest.ndcY);
+        const bool   majorX = (ax >= ay);
+
+        const double leashMajor = majorX ? leashX_last : leashY_last;
+        const bool   dzMajor    = majorX ? hitDZ_X_last : hitDZ_Y_last;
+        const bool   capMajor   = majorX ? hitCAP_X_last: hitCAP_Y_last;
+
+        // Blockiert, wenn Leash deutlich greift (<0.70) ODER Cap ODER Deadzone auf der Major-Achse
+        leashBlocking = (leashMajor < 0.70) || capMajor || dzMajor;
+
+        if constexpr (Settings::ZoomLog::enabled) {
+            if (emitEveryN && leashBlocking) {
+                LUCHS_LOG_HOST("[ZLEASH*] f=%llu major=%c leashMajor=%.2f dz=%d cap=%d",
+                               (unsigned long long)zls.frame, majorX?'X':'Y',
+                               leashMajor, dzMajor?1:0, capMajor?1:0);
+            }
+        }
+    }
+
+    const bool holdZoom = (!haveInterest) || weakSignal || (errPx > errThreshPx) || leashBlocking;
 
     const double g_applied = holdZoom ? 1.0 : g_base;
     const double ldz_appl  = std::log(g_applied);
@@ -226,11 +254,12 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
 
     if constexpr (Settings::ZoomLog::enabled) {
         if (emitEveryN && holdZoom) {
-            LUCHS_LOG_HOST("[ZHOLD] f=%llu reason=%s%s%s errPx=%.1f thr=%.1f",
+            LUCHS_LOG_HOST("[ZHOLD] f=%llu reason=%s%s%s%s errPx=%.1f thr=%.1f",
                            (unsigned long long)zls.frame,
-                           leashActive ? "LEASH " : "",
-                           (!haveInterest || weakSignal) ? "WEAK " : "",
+                           (!haveInterest) ? "NOINT " : "",
+                           weakSignal ? "WEAK " : "",
                            (errPx > errThreshPx) ? "ERR " : "",
+                           leashBlocking ? "LEASH " : "",
                            errPx, errThreshPx);
         }
     }
