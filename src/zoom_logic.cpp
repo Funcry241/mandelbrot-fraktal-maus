@@ -40,11 +40,11 @@ static inline double blunt_zoom_rate_per_sec() noexcept {
 
 // Gentle nudge tunables
 struct NudgeCfg {
-    double gainPerSec      = 0.95;
-    double deadzoneNdc     = 0.09;
-    double maxPxPerFrame   = 8.0;
-    double yScale          = 0.95;
-    double strengthFloor   = 0.30;
+    double gainPerSec      = 1.8;   // schnelleres Nachführen (zeitbasiert)
+    double deadzoneNdc     = 0.06;  // früher pannen
+    double maxPxPerFrame   = 24.0;  // Panning schafft weite Wege
+    double yScale          = 1.00;  // keine Y-Dämpfung
+    double strengthFloor   = 0.08;  // kein erzwungener Zoom bei „kein Signal“
 };
 static constexpr NudgeCfg kNudge{};
 
