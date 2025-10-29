@@ -100,3 +100,8 @@ target/
 !rust/otter_proc/target/
 !rust/otter_proc/target/release/
 !rust/otter_proc/target/release/otter_proc.exe
+
+# ----------------------------------------------------------------------
+# 📊 Build metrics: keep in repo (auch wenn sie *.log enthalten)
+!.build_metrics/
+!.build_metrics/**
