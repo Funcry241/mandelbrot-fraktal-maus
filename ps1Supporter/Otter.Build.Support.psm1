@@ -1,7 +1,8 @@
 ##### Otter: Robust fallback when Rust runner is missing — no hard fail; external tool output still gets clean “[RUST] …” provenance with de-duped tool tags; gentle color for spinner and PS logs.
-##### Schneefuchs: PS 5.1-safe (no PS7 ops); removed \Q...\E; approved verb names; fixed null checks; compact vcpkg/CMake noise filter; progress heartbeat during long silences.
+##### Schneefuchs: PS 5.1-safe (no PS7 ops); removed \\Q...\\E; approved verb names; fixed null checks; compact vcpkg/CMake noise filter; progress heartbeat during long silences.
 ##### Maus: Deterministic, readable console: only one of “[PS]” or “[RUST]” per line; no “[NINJA] [NINJA]”; spinner keeps ticking; baseline metrics preserved.
 ##### Datei: ps1Supporter/Otter.Build.Support.psm1
+
 # -------- module state --------------------------------------------------------
 $script:UseColor              = ($Host -and $Host.UI -and $Host.UI.RawUI)
 $script:ProgressEnabled       = $false
@@ -119,12 +120,20 @@ function Stop-BuildProgress {
 }
 
 # -------- logging -------------------------------------------------------------
-function Write-InfoPretty([string]$Msg){
-    if (-not $script:UseColor) { Write-Host ("[PS] " + $Msg); return }
+function Write-InfoPretty {
+    param(
+        [string]$Msg,
+        [switch]$NoPrefix
+    )
+    if (-not $script:UseColor) {
+        if ($NoPrefix) { Write-Host $Msg }
+        else { Write-Host ("[PS] " + $Msg) }
+        return
+    }
     $s = $Msg
     while ($s -match '^\s*(\[[^\]]+\])\s*(.*)$') {
         $tag  = $matches[1]; $rest = $matches[2]
-        Write-Host "[PS] " -NoNewline -ForegroundColor Gray
+        if (-not $NoPrefix) { Write-Host "[PS] " -NoNewline -ForegroundColor Gray }
         Write-Host $tag -NoNewline -ForegroundColor Gray
         if ($rest -and ($rest -notmatch '^\[')) {
             Write-Host ' ' -NoNewline
@@ -143,7 +152,8 @@ function Write-InfoPretty([string]$Msg){
         Write-Host ' ' -NoNewline
         $s = $rest
     }
-    Write-Host ("[PS] " + $s) -ForegroundColor Gray
+    if ($NoPrefix) { Write-Host $s -ForegroundColor Gray }
+    else { Write-Host ("[PS] " + $s) -ForegroundColor Gray }
 }
 function Write-Rule([string]$label=''){
     Clear-InlineProgressForLog
@@ -171,7 +181,7 @@ function Write-Log {
     } else {
         switch ($Level) {
             'STEP' { Write-Host "[PS] [STEP] " -NoNewline -ForegroundColor Cyan;   Write-Host $Msg -ForegroundColor Gray }
-            'INFO' { Write-Host "[PS] [INFO] " -NoNewline -ForegroundColor Gray;   Write-InfoPretty $Msg }
+            'INFO' { Write-Host "[PS] [INFO] " -NoNewline -ForegroundColor Gray;   Write-InfoPretty -Msg $Msg -NoPrefix }
             'OK'   { Write-Host "[PS] [OK] "   -NoNewline -ForegroundColor Green;  Write-Host $Msg -ForegroundColor Green }
             'WARN' { Write-Host "[PS] [WARN] " -NoNewline -ForegroundColor Yellow; Write-Host $Msg }
             'ERR'  { Write-Host "[PS] [ERR] "  -NoNewline -ForegroundColor Red;    Write-Host $Msg }

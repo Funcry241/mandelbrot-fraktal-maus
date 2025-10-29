@@ -1,4 +1,4 @@
-##### Otter: Spinner heartbeat via timer (no PS7 deps), fast-dev knobs (OTTER_FAST): native CUDA arch + optional sccache; install-step skip when fast; no global build-dir change per 2.2.  (Option B: keep single inner tool tag; drop initial duplicate)
+##### Otter: Spinner heartbeat via timer (no PS7 deps), fast-dev knobs (OTTER_FAST): native CUDA arch + optional sccache; install-step skip when fast; no global build-dir change per 2.2. (Option B: keep single inner tool tag; drop initial duplicate)
 ##### Schneefuchs: Keep PS5.1-safe: only -f formatting, no pipeline chain ops, no ?.?
 ##### Maus: Deterministic logs; stable progress even in silent phases; rebase self-heal handled in support script; timings log consolidated (single line); empty-timings safe.
 ##### Datei: build.ps1
@@ -544,60 +544,7 @@ Invoke-Step 'Runtime DLLs' {
     } else { Write-Log -Level INFO -Msg '[CUDA] Static CUDA runtime detected; no DLL copy.' }
 }
 
-Invoke-Step 'Supporter hooks' {
-    $supporterDir = Join-Path $ProjectRoot 'ps1Supporter'
-    if (-not (Test-Path $supporterDir)) {
-        Write-Log -Level WARN -Msg ('[SUPPORT] Folder {0} missing - skipping hooks' -f $supporterDir)
-    } else {
-        $pathBak = $origPath
-        $gitDir2 = Resolve-GitDir
-        if ($gitDir2) { Write-Log -Level INFO -Msg ('[GIT] Using: {0}' -f $gitDir2) }
-
-        $additions = @()
-        if ($script:CMakeDir) { $additions += $script:CMakeDir }
-        if ($NinjaFound -and $script:NinjaDir) { $additions += $script:NinjaDir }
-        if ($gitDir2) { $additions += $gitDir2 }
-
-        $env:Path = ($additions + $pathBak) -join ';'
-        $env:CMAKE_EXE = $script:CMakeExe
-        if ($NinjaFound -and $script:NinjaDir) {
-            $env:NINJA_EXE = (Join-Path -Path $script:NinjaDir -ChildPath 'ninja.exe')
-        } else {
-            Remove-Item Env:\NINJA_EXE -ErrorAction SilentlyContinue
-        }
-
-        $gitOk = $false
-        try { & git --version | Out-Null; $gitOk = $true } catch { Write-Log -Level WARN -Msg '[GIT] git.exe not found; will skip auto-commit.' }
-
-        $scripts = @('MausDelete.ps1','MausGitAutoCommit.ps1')
-        foreach ($scriptName in $scripts) {
-            if (($scriptName -eq 'MausGitAutoCommit.ps1') -and (-not $gitOk)) { Write-Log -Level WARN -Msg ('[SUPPORT] Skipping {0} (git not available).' -f $scriptName); continue }
-            $path = Join-Path $supporterDir $scriptName
-            if (-not (Test-Path $path)) { Write-Log -Level WARN -Msg ('[SUPPORT] Missing: {0} (skipping)' -f $scriptName); continue }
-
-            Write-Log -Level INFO -Msg ('[SUPPORT] Executing {0}...' -f $scriptName)
-            $eap = $ErrorActionPreference
-            try {
-                $ErrorActionPreference = 'Continue'
-                $global:LASTEXITCODE = 0
-                $out = & $path 2>&1
-                if ($out) {
-                    $out | ForEach-Object {
-                        $line = ($_ | Out-String).TrimEnd()
-                        if ($line) {
-                            $sel = ($line | Select-ToolOutput)
-                            if ($sel) { Write-Log -Level INFO -Msg ('[SUPPORT] {0}' -f $sel) }
-                        }
-                    }
-                }
-                if ($LASTEXITCODE -ne 0) { Write-Log -Level WARN -Msg ('[SUPPORT] {0} exited with code {1} -- ignored.' -f $scriptName,$LASTEXITCODE); $global:LASTEXITCODE = 0 }
-            } catch {
-                Write-Log -Level WARN -Msg ('[SUPPORT] {0} raised: {1} -- ignored.' -f $scriptName,$_.Exception.Message)
-            } finally { $ErrorActionPreference = $eap }
-        }
-        $env:Path = $pathBak
-    }
-}
+# (Supporter hooks moved later; see end of script)
 
 Invoke-Step 'Verify and install' {
     if ($UseFast) {
@@ -652,5 +599,61 @@ if ($script:TIMINGS -and $script:TIMINGS.Count -gt 0) {
     Add-RunToHistory -Timings $script:TIMINGS -Config $Configuration -Generator $script:Generator
 }
 Update-BaselineFromHistory -Config $Configuration -Generator $script:Generator
+
+# ---- Supporter hooks moved AFTER metrics history/baseline update ------------
+Invoke-Step 'Supporter hooks' {
+    $supporterDir = Join-Path $ProjectRoot 'ps1Supporter'
+    if (-not (Test-Path $supporterDir)) {
+        Write-Log -Level WARN -Msg ('[SUPPORT] Folder {0} missing - skipping hooks' -f $supporterDir)
+    } else {
+        $pathBak = $origPath
+        $gitDir2 = Resolve-GitDir
+        if ($gitDir2) { Write-Log -Level INFO -Msg ('[GIT] Using: {0}' -f $gitDir2) }
+
+        $additions = @()
+        if ($script:CMakeDir) { $additions += $script:CMakeDir }
+        if ($NinjaFound -and $script:NinjaDir) { $additions += $script:NinjaDir }
+        if ($gitDir2) { $additions += $gitDir2 }
+
+        $env:Path = ($additions + $pathBak) -join ';'
+        $env:CMAKE_EXE = $script:CMakeExe
+        if ($NinjaFound -and $script:NinjaDir) {
+            $env:NINJA_EXE = (Join-Path -Path $script:NinjaDir -ChildPath 'ninja.exe')
+        } else {
+            Remove-Item Env:\NINJA_EXE -ErrorAction SilentlyContinue
+        }
+
+        $gitOk = $false
+        try { & git --version | Out-Null; $gitOk = $true } catch { Write-Log -Level WARN -Msg '[GIT] git.exe not found; will skip auto-commit.' }
+
+        $scripts = @('MausDelete.ps1','MausGitAutoCommit.ps1')
+        foreach ($scriptName in $scripts) {
+            if (($scriptName -eq 'MausGitAutoCommit.ps1') -and (-not $gitOk)) { Write-Log -Level WARN -Msg ('[SUPPORT] Skipping {0} (git not available).' -f $scriptName); continue }
+            $path = Join-Path $supporterDir $scriptName
+            if (-not (Test-Path $path)) { Write-Log -Level WARN -Msg ('[SUPPORT] Missing: {0} (skipping)' -f $scriptName); continue }
+
+            Write-Log -Level INFO -Msg ('[SUPPORT] Executing {0}...' -f $scriptName)
+            $eap = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = 'Continue'
+                $global:LASTEXITCODE = 0
+                $out = & $path 2>&1
+                if ($out) {
+                    $out | ForEach-Object {
+                        $line = ($_ | Out-String).TrimEnd()
+                        if ($line) {
+                            $sel = ($line | Select-ToolOutput)
+                            if ($sel) { Write-Log -Level INFO -Msg ('[SUPPORT] {0}' -f $sel) }
+                        }
+                    }
+                }
+                if ($LASTEXITCODE -ne 0) { Write-Log -Level WARN -Msg ('[SUPPORT] {0} exited with code {1} -- ignored.' -f $scriptName,$LASTEXITCODE); $global:LASTEXITCODE = 0 }
+            } catch {
+                Write-Log -Level WARN -Msg ('[SUPPORT] {0} raised: {1} -- ignored.' -f $scriptName,$_.Exception.Message)
+            } finally { $ErrorActionPreference = $eap }
+        }
+        $env:Path = $pathBak
+    }
+}
 
 exit 0
