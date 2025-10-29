@@ -2,6 +2,7 @@
 ##### Schneefuchs: Keep PS5.1-safe: only -f formatting, no pipeline chain ops, no ?.?
 ##### Maus: Deterministic logs; stable progress even in silent phases; rebase self-heal handled in support script; timings log consolidated (single line); empty-timings safe.
 ##### Datei: build.ps1
+
 param(
     [ValidateSet('Debug','Release','RelWithDebInfo','MinSizeRel')]
     [string]$Configuration = 'RelWithDebInfo',
@@ -19,8 +20,8 @@ $SupportModulePath = Join-Path $PSScriptRoot 'ps1Supporter\Otter.Build.Support.p
 if (-not (Test-Path $SupportModulePath)) { throw 'Support module missing: {0}' -f $SupportModulePath }
 Import-Module $SupportModulePath -Force
 
-# timings container (local to orchestrator)
-$TIMINGS = @()
+# timings container (script-scope!)
+$script:TIMINGS = @()
 function Invoke-Step {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -31,11 +32,11 @@ function Invoke-Step {
     try {
         & $Do
         $sw.Stop()
-        $TIMINGS += [PSCustomObject]@{ Name = $Name; Ms = [double]$sw.Elapsed.TotalMilliseconds }
+        $script:TIMINGS += [PSCustomObject]@{ Name = $Name; Ms = [double]$sw.Elapsed.TotalMilliseconds }
         Write-Log -Level OK -Msg ('{0,-24} done in {1:N1} ms' -f $Name,$sw.Elapsed.TotalMilliseconds)
     } catch {
         $sw.Stop()
-        $TIMINGS += [PSCustomObject]@{ Name = ($Name + ' (fail)'); Ms = [double]$sw.Elapsed.TotalMilliseconds }
+        $script:TIMINGS += [PSCustomObject]@{ Name = ($Name + ' (fail)'); Ms = [double]$sw.Elapsed.TotalMilliseconds }
         Write-Log -Level ERR -Msg ('{0,-24} failed after {1:N1} ms' -f $Name,$sw.Elapsed.TotalMilliseconds)
         throw
     }
@@ -629,9 +630,9 @@ Write-Host ''
 Write-SuccessBox 'Build completed successfully'
 Write-Host ''
 
-$pad = ($TIMINGS | ForEach-Object { $_.Name.Length } | Measure-Object -Maximum).Maximum
+$pad = ($script:TIMINGS | ForEach-Object { $_.Name.Length } | Measure-Object -Maximum).Maximum
 if (-not $pad) { $pad = 10 }
-$TIMINGS | Sort-Object { $_.Ms } -Descending | ForEach-Object {
+$script:TIMINGS | Sort-Object { $_.Ms } -Descending | ForEach-Object {
     $name = $_.Name.PadRight([Math]::Min([Math]::Max($pad,24),48))
     ('{0}  {1,8:N1} ms' -f $name, $_.Ms)
 } | ForEach-Object { Write-Log -Level INFO -Msg ('[TIME] {0}' -f $_) }
@@ -639,16 +640,16 @@ $TIMINGS | Sort-Object { $_.Ms } -Descending | ForEach-Object {
 # console-only total (no dist exports; timings persist in .build_metrics)
 try {
     $total = 0.0
-    if ($TIMINGS -and $TIMINGS.Count -gt 0) {
-        $sum = ($TIMINGS | Measure-Object -Property Ms -Sum).Sum
+    if ($script:TIMINGS -and $script:TIMINGS.Count -gt 0) {
+        $sum = ($script:TIMINGS | Measure-Object -Property Ms -Sum).Sum
         if ($null -ne $sum) { $total = [Math]::Round([double]$sum,1) }
     }
     Write-Log -Level INFO -Msg ('[TIME] Total: {0:N1} ms  ({1:N3} s)  [baseline: .build_metrics]' -f $total, ($total/1000.0))
 } catch {}
 
 # history append only when timings exist
-if ($TIMINGS -and $TIMINGS.Count -gt 0) {
-    Add-RunToHistory -Timings $TIMINGS -Config $Configuration -Generator $script:Generator
+if ($script:TIMINGS -and $script:TIMINGS.Count -gt 0) {
+    Add-RunToHistory -Timings $script:TIMINGS -Config $Configuration -Generator $script:Generator
 }
 Update-BaselineFromHistory -Config $Configuration -Generator $script:Generator
 
