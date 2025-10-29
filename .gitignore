@@ -1,20 +1,22 @@
+# ///// Otter: ps1Supporter-Skripte tracken; build.ps1 lokal. vcpkg_cache strikt ignorieren.
+# ///// Schneefuchs: Reihenfolge streng – erst ignorieren, dann Re-Includes; keine doppelten dist-Regeln.
+# ///// Maus: Klar kommentiert, minimal, keine Überraschungen.
+# ///// Datei: .gitignore
+
 # ----------------------------------------------------------------------
 # 🛠️ Build-Ordner & Distribution
 /build/
 /build-*/
 
-# ⚠️ Wichtig: Verzeichnis 'dist' nicht pauschal ignorieren,
-# damit einzelne Dateien via "!" re-includiert werden koennen.
-# -> zuerst ignorieren, dann unten die Ausnahmen freigeben!
+# ⚠️ 'dist' zunächst komplett ignorieren – Ausnahmen folgen unten
 /dist/*
-!/dist/frame_0100.bmp   # 🦦 Otter: explizit freigeben (Bezug zu Otter)
-# (Optional: falls du das Verzeichnis immer im Repo haben willst)
-# !/dist/.gitkeep
+!/dist/.gitkeep            # Falls du das Verzeichnis im Repo halten willst
 
 # ----------------------------------------------------------------------
-# 🧰 Lokale Build-Skripte nicht veröffentlichen
+# 🧰 Lokale Build-Skripte
+# ps1Supporter soll getrackt werden ⇒ KEIN Ignore hier!
+# Nur das Orchestrator-Skript bleibt lokal:
 build.ps1
-/ps1supporter/
 
 # ----------------------------------------------------------------------
 # 📁 Visual Studio
@@ -42,6 +44,7 @@ Desktop.ini
 # 📦 vcpkg-Ordner
 /vcpkg/
 /vcpkg_installed/
+/vcpkg_cache/          # ← neu: hat im Repo nichts verloren
 
 # ----------------------------------------------------------------------
 # 🧱 Build-Artefakte (kompiliert)
@@ -57,9 +60,9 @@ Desktop.ini
 # ⚙️ CMake & Generator-Dateien
 CMakeCache.txt
 CMakeFiles/
-/cmake_install.cmake
-/Makefile
-/compile_commands.json
+cmake_install.cmake
+Makefile
+compile_commands.json
 
 # ----------------------------------------------------------------------
 # 🧠 JetBrains (CLion, Rider, etc.)
@@ -70,7 +73,7 @@ CMakeFiles/
 .DS_Store
 
 # ----------------------------------------------------------------------
-# 🐧 Linux-Systemdateien
+# 🐧 Linux/Allgemein
 *~
 
 # ----------------------------------------------------------------------
@@ -80,11 +83,20 @@ OtterDream_Project.zip
 
 # ----------------------------------------------------------------------
 # 👤 Benutzerabhängige Konfiguration
-/imgui.ini
+imgui.ini
 
 # ----------------------------------------------------------------------
-# 🎯 Einzelne, projektbezogene Ignorierer
+# 🎯 Projektbezogene Ignorierer
 wupp.txt
 
-# 🐑 Schneefuchs: Re-Includes müssen NACH dem Ignore stehen. (Bezug zu Schneefuchs)
-#                 Keine zweite /dist/*-Regel weiter unten, damit die Ausnahme greift.
+# ----------------------------------------------------------------------
+# 🦀 Rust: target/ global ignorieren, aber Runner-EXE erlauben
+# Zuerst alles 'target/' raus …
+target/
+
+# … dann den Runner wieder explizit rein (inkl. Elternpfade!)
+!rust/
+!rust/otter_proc/
+!rust/otter_proc/target/
+!rust/otter_proc/target/release/
+!rust/otter_proc/target/release/otter_proc.exe
