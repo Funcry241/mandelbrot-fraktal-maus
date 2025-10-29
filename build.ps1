@@ -636,51 +636,15 @@ $TIMINGS | Sort-Object { $_.Ms } -Descending | ForEach-Object {
     ('{0}  {1,8:N1} ms' -f $name, $_.Ms)
 } | ForEach-Object { Write-Log -Level INFO -Msg ('[TIME] {0}' -f $_) }
 
+# console-only total (no dist exports; timings persist in .build_metrics)
 try {
-    $ts     = Get-Date -Format 'yyyyMMdd_HHmmss'
-    $txt    = Join-Path $distDir 'build_timings.txt'
-    $csv    = Join-Path $distDir ("build_timings_{0}_{1}.csv" -f $Configuration,$ts)
-    $json   = Join-Path $distDir ("build_timings_{0}_{1}.json" -f $Configuration,$ts)
-
-    $total  = 0.0
+    $total = 0.0
     if ($TIMINGS -and $TIMINGS.Count -gt 0) {
         $sum = ($TIMINGS | Measure-Object -Property Ms -Sum).Sum
-        if ($null -ne $sum) { $total = [Math]::Round([double]$sum,1) }   # PSSA: null on left
+        if ($null -ne $sum) { $total = [Math]::Round([double]$sum,1) }
     }
-    $pad2   = [Math]::Min([Math]::Max($pad,24),48)
-    $lines  = @()
-    $lines += 'Build timings'
-    $lines += ('Date: {0}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
-    $lines += ('Config: {0}   Generator: {1}' -f $Configuration,$script:Generator)
-    $lines += ('Total: {0:N1} ms  ({1:N3} s)' -f $total, ($total/1000.0))
-    $lines += ('-' * 50)
-    $TIMINGS | Sort-Object { $_.Ms } -Descending | ForEach-Object {
-        $nm = $_.Name.PadRight($pad2)
-        $lines += ('{0}  {1,10:N1} ms  {2,7:N3} s' -f $nm, $_.Ms, ($_.Ms/1000.0))
-    }
-    if (-not (Test-Path $distDir)) { New-Item -ItemType Directory -Path $distDir -Force | Out-Null }
-    $lines | Set-Content -Path $txt -Encoding UTF8
-
-    $rows = $TIMINGS | Sort-Object { $_.Ms } -Descending | ForEach-Object {
-        [PSCustomObject]@{ Step=$_.Name; Ms=[Math]::Round($_.Ms,1); Seconds=[Math]::Round($_.Ms/1000.0,3) }
-    }
-    $rows | Export-Csv -Path $csv -NoTypeInformation -Encoding UTF8 -UseCulture
-
-    $meta = [PSCustomObject]@{
-        Date          = (Get-Date)
-        Configuration = $Configuration
-        Generator     = $script:Generator
-        NinjaFound    = $NinjaFound
-        TotalMs       = $total
-        Steps         = $rows
-    }
-    $meta | ConvertTo-Json -Depth 5 | Set-Content -Path $json -Encoding UTF8
-
-    # consolidated single line (no duplicates)
-    Write-Log -Level INFO -Msg ('Saved timings: {0}, {1}, {2}' -f $txt, (Split-Path $csv -Leaf), (Split-Path $json -Leaf))
-} catch {
-    Write-Log -Level WARN -Msg ('[TIME] Failed to write timing files: {0}' -f $_.Exception.Message)
-}
+    Write-Log -Level INFO -Msg ('[TIME] Total: {0:N1} ms  ({1:N3} s)  [baseline: .build_metrics]' -f $total, ($total/1000.0))
+} catch {}
 
 # history append only when timings exist
 if ($TIMINGS -and $TIMINGS.Count -gt 0) {
