@@ -1,6 +1,6 @@
-##### Otter: Robust fallback when Rust runner is missing — no hard fail; external tool output still gets clean “[RUST] …” provenance with de-duped tool tags; gentle color for spinner and PS logs.
-##### Schneefuchs: PS 5.1-safe (no PS7 ops); removed \\Q...\\E; approved verb names; fixed null checks; compact vcpkg/CMake noise filter; progress heartbeat during long silences.
-##### Maus: Deterministic, readable console: only one of “[PS]” or “[RUST]” per line; no “[NINJA] [NINJA]”; spinner keeps ticking; baseline metrics preserved.
+##### Otter: Clean one-tag console ([PS] for script, [RUST] for external tools), native fallback paths, softer spinner color, compact vcpkg/CMake filtering.
+##### Schneefuchs: PS5.1-safe; removed extra prefixes; robust null checks; deduped leading tool tags; heartbeat keeps rendering during silences.
+##### Maus: Deterministic output & metrics; no “[NINJA] [NINJA]”; progress ETA; baseline learning preserved.
 ##### Datei: ps1Supporter/Otter.Build.Support.psm1
 
 # -------- module state --------------------------------------------------------
@@ -670,8 +670,9 @@ function Invoke-WithNativeProc {
         while (-not $out.EndOfStream) {
             $line = $out.ReadLine()
             if ($null -ne $line) {
-                $pref = "[{0}] {1}" -f $SourceTag, $line
-                $final = Remove-InitialDuplicateTag $pref
+                $flt = Select-ToolOutput $line
+                if ($null -eq $flt) { continue }
+                $final = Remove-InitialDuplicateTag $flt
                 if ($logWriter) { $logWriter.WriteLine($final) }
                 Write-RustLine $final
                 & $OnLine $final
@@ -680,8 +681,9 @@ function Invoke-WithNativeProc {
         while (-not $err.EndOfStream) {
             $line = $err.ReadLine()
             if ($null -ne $line) {
-                $pref = "[{0}] {1}" -f $SourceTag, $line
-                $final = Remove-InitialDuplicateTag $pref
+                $flt = Select-ToolOutput $line
+                if ($null -eq $flt) { continue }
+                $final = Remove-InitialDuplicateTag $flt
                 if ($logWriter) { $logWriter.WriteLine($final) }
                 Write-RustLine $final
                 & $OnLine $final
@@ -693,8 +695,9 @@ function Invoke-WithNativeProc {
     while (-not $out.EndOfStream) {
         $line = $out.ReadLine()
         if ($null -ne $line) {
-            $pref = "[{0}] {1}" -f $SourceTag, $line
-            $final = Remove-InitialDuplicateTag $pref
+            $flt = Select-ToolOutput $line
+            if ($null -eq $flt) { continue }
+            $final = Remove-InitialDuplicateTag $flt
             if ($logWriter) { $logWriter.WriteLine($final) }
             Write-RustLine $final
             & $OnLine $final
@@ -703,8 +706,9 @@ function Invoke-WithNativeProc {
     while (-not $err.EndOfStream) {
         $line = $err.ReadLine()
         if ($null -ne $line) {
-            $pref = "[{0}] {1}" -f $SourceTag, $line
-            $final = Remove-InitialDuplicateTag $pref
+            $flt = Select-ToolOutput $line
+            if ($null -eq $flt) { continue }
+            $final = Remove-InitialDuplicateTag $flt
             if ($logWriter) { $logWriter.WriteLine($final) }
             Write-RustLine $final
             & $OnLine $final
@@ -762,13 +766,45 @@ function Invoke-WithOtterProc {
     if ($env:OTTER_ECHO_TOOL_STDOUT -and ($env:OTTER_ECHO_TOOL_STDOUT -match '^(0|false)$')) { $echoRaw = $false }
 
     while (-not $proc.HasExited) {
-        while (-not $out.EndOfStream) { $line = $out.ReadLine(); if ($null -ne $line) { if ($echoRaw) { Write-RustLine $line }; & $OnLine $line } }
-        while (-not $err.EndOfStream) { $line = $err.ReadLine(); if ($null -ne $line) { if ($echoRaw) { Write-RustLine $line }; & $OnLine $line } }
+        while (-not $out.EndOfStream) {
+            $line = $out.ReadLine()
+            if ($null -ne $line) {
+                $flt = Select-ToolOutput $line
+                if ($null -eq $flt) { continue }
+                if ($echoRaw) { Write-RustLine $flt }
+                & $OnLine $flt
+            }
+        }
+        while (-not $err.EndOfStream) {
+            $line = $err.ReadLine()
+            if ($null -ne $line) {
+                $flt = Select-ToolOutput $line
+                if ($null -eq $flt) { continue }
+                if ($echoRaw) { Write-RustLine $flt }
+                & $OnLine $flt
+            }
+        }
         Update-BuildProgress -Percent -1 -Status $script:LastStatusText
         Start-Sleep -Milliseconds 50
     }
-    while (-not $out.EndOfStream) { $line = $out.ReadLine(); if ($null -ne $line) { if ($echoRaw) { Write-RustLine $line }; & $OnLine $line } }
-    while (-not $err.EndOfStream) { $line = $err.ReadLine(); if ($null -ne $line) { if ($echoRaw) { Write-RustLine $line }; & $OnLine $line } }
+    while (-not $out.EndOfStream) {
+        $line = $out.ReadLine()
+        if ($null -ne $line) {
+            $flt = Select-ToolOutput $line
+            if ($null -eq $flt) { continue }
+            if ($echoRaw) { Write-RustLine $flt }
+            & $OnLine $flt
+        }
+    }
+    while (-not $err.EndOfStream) {
+        $line = $err.ReadLine()
+        if ($null -ne $line) {
+            $flt = Select-ToolOutput $line
+            if ($null -eq $flt) { continue }
+            if ($echoRaw) { Write-RustLine $flt }
+            & $OnLine $flt
+        }
+    }
 
     $proc.WaitForExit()
     return $proc.ExitCode
