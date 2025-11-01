@@ -13,13 +13,39 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 ## 🧑‍🔬 Overview
 
-| Agent/Tool              | Zweck                         | Trigger            | Aktionen                                                |
-| ----------------------- | ----------------------------- | ------------------ | ------------------------------------------------------- |
-| **GitHub Actions (CI)** | Build-, Test-, Install-Check  | Push/PR auf `main` | CMake Configure → Ninja Build → `cmake --install`       |
-| **Dependabot**          | Abhängigkeits-Updates (vcpkg) | Wöchentlich        | PRs für `vcpkg.json`, CI baut PR                        |
-| **Waschbär-Watchdog**   | Hygiene & Auto-Fixes (lokal)  | On-Demand          | Räumt CMake-Caches, fixt typische GLEW/vcpkg-Fallen     |
+| Agent/Tool               | Zweck                           | Trigger                 | Aktionen                                                             |
+| ------------------------ | ------------------------------- | ----------------------- | -------------------------------------------------------------------- |
+| **GitHub Actions (CI)**  | Build-, Test-, Install-Check    | Push/PR auf `main`      | CMake Configure → Ninja Build → `cmake --install`                    |
+| **Dependabot**           | Abhängigkeits-Updates (vcpkg)   | Wöchentlich             | PRs für `vcpkg.json`, CI baut PR                                     |
+| **Waschbär-Watchdog**    | Hygiene & Auto-Fixes (lokal)    | On-Demand               | Räumt CMake-Caches, fixt typische GLEW/vcpkg-Fallen                  |
+| **Autogit (lokal)**      | Mini-CI für Commits/Push        | Nach erfolgreichem Build| `git add -A` → `git commit -m "<msg>"` → `git push` (https Fallback) |
+| **Rust Runner (lokal)**  | Komfort-Build mit Live-Progress | Manuell (CLI/PS)        | Farben/Spinner/%/ETA, Log-Tags `[PS]/[RUST]/[PROC]`, ETA aus Metrics |
 
 > CI stellt sicher, dass **Debug-/Perf-Logging keine Seiteneffekte** erzeugt (keine erzwungenen Synchronisationen im Hot-Path).
+
+---
+
+## 🦀 Rust Build Runner (otter_proc)
+
+**Zweck:** Lokale Orchestrierung mit **Live-Progress** (Spinner, **%**, **ETA**, ASCII-Bar), farbigen Tags und stabilen Logs.  
+**Tags:** `[PS]` = Shell/Script, `[RUST]` = Runner selbst, `[PROC]` = Kindprozess (CMake/Ninja).
+
+**Signal-Parsers:**  
+- Prozent **`68%`** und Ratio **`[17/45]`** (CMake/Ninja/MSBuild-ähnlich).  
+- Debounce/Rate-Limit: **200 ms** Animationstakt.
+
+**ETA-Seeding:**  
+- Datei: `.build_metrics/metrics.json` (pro Arbeitsverzeichnis).  
+- Key-Signatur: `exe:phase` (z. B. `cmake:configure`, `cmd:build`).  
+- Zeitbasierte Fortschritts-Absicherung (Zeit-Prozent max mit Builder-Prozent fusioniert).
+
+**Env-Toggles:**  
+- `OTTER_PROGRESS=0` → Progress-UI aus (Default: **an**)  
+- `OTTER_COLOR=0` → Farben aus (Default: **an**)  
+- `OTTER_ASCII=1` → ASCII-Spinner/Balken erzwingen
+
+**Cache-Schutz:**  
+- Erkanntes **CMake-Cache-Mismatch** (Repo-Root-Wechsel) ⇒ Runner löscht `build/` sicher und konfiguriert neu.
 
 ---
 
@@ -54,31 +80,31 @@ Die passende Compute Capability deiner GPU findest du in NVIDIAs Übersicht.
 
 ## 🧯 Host/Device-Logging (LUCHS_LOG)
 
-* **Host**: `LUCHS_LOG_HOST(...)` - ASCII-only, **eine Zeile pro Event**, Zeitstempel als **Epoch-Millis**.
-* **Device**: `LUCHS_LOG_DEVICE(msg)` - schreibt in den Device-Puffer; Flush auf Host synchronisiert **außerhalb** des Hot-Paths.  
-  *Hinweis:* Nachricht mit `snprintf` zusammenbauen ist ok - der **finale** Aufruf ist genau **ein** `LUCHS_LOG_DEVICE(const char*)`.
+* **Host**: `LUCHS_LOG_HOST(...)` – ASCII-only, **eine Zeile pro Event**, Zeitstempel als **Epoch-Millis**.
+* **Device**: `LUCHS_LOG_DEVICE(msg)` – schreibt in den Device-Puffer; Flush auf Host **außerhalb** des Hot-Paths.  
+  *Hinweis:* Nachricht mit `snprintf` zusammenbauen ist ok – der **finale** Aufruf ist genau **ein** `LUCHS_LOG_DEVICE(const char*)`.
 * **Kein `printf/fprintf`** im Produktionspfad. Logs dürfen **keine** impliziten Synchronisationen auslösen.
-* **Zwei Schalter** (`Settings`):  
-  `performanceLogging` → kompakte Messwerte via CUDA-Events; **ASCII**  
+* **Schalter (Settings)**:  
+  `performanceLogging` → kompakte Messwerte via CUDA-Events (ASCII)  
   `debugLogging` → detaillierter, ggf. langsamer
 
 ---
 
 ## ⏱️ Frame-Budget-Pacing (Silk-Lite kompatibel)
 
-Der Mandelbrot-Pfad hält sich an ein weiches Zeitbudget pro Frame. Silk-Lite steuert Bewegung (Yaw-Limiter + Dämpfung).  
-**Regel**: Pacing misst mit CUDA-Events (kostenarm) und **erzwingt keine** globale Synchronisation.
+Der Mandelbrot-Pfad hält sich an ein weiches **Zeitbudget** pro Frame. Silk-Lite steuert Bewegung (Yaw-Limiter + Dämpfung).  
+**Regel:** Pacing misst mit **CUDA-Events** (kostenarm) und **erzwingt keine** globale Synchronisation.
 
 ---
 
 ## 🎨 Renderer-Pfad & Farbgebung (Status)
 
-* **Aktiver Pfad**: **Capybara-Iteration** (Float), Escape-Test **vor** dem Update (`|z|^2 > 4`).  
+* **Aktiver Pfad:** **Capybara-Iteration** (Float), Escape-Test **vor** dem Update (`|z|^2 > 4`).  
   → *Innen* schreibt `iterOut = maxIter`, *Escape* schreibt den Iterationsindex.  
-* **Pipeline**: `capy_render(...)` (Iterations) → `colorize_iterations_to_pbo(...)` → PBO (GL-Interop).  
-* **Palette**: **GT (Cyan→Amber)** mit Interpolation im **Linearraum** gegen Banding.  
+* **Pipeline:** `capy_render(...)` (Iterations) → `colorize_iterations_to_pbo(...)` → PBO (GL-Interop).  
+* **Palette:** **GT (Cyan→Amber)**, Interpolation im **Linearraum** (Banding-mindernd).  
   **Stripes** sind **standardmäßig aus** (`stripes = 0.0f`) für ringfreie Darstellung.  
-* **Mapping**: Projektweit über `screenToComplex(...)` (Koordinaten-Harmonisierung, „Eule“).
+* **Mapping:** Projektweit über `screenToComplex(...)` (Koordinaten-Harmonisierung, „Eule“).
 
 > Hinweis: Entropie/Kontrast (EC) ist **deaktiviert/entfernt**. Heatmap-Overlay existiert optional, liefert derzeit **kein** Signal.
 
@@ -86,11 +112,11 @@ Der Mandelbrot-Pfad hält sich an ein weiches Zeitbudget pro Frame. Silk-Lite st
 
 ## ⌨️ Hotkeys (Runtime)
 
-| Taste   | Funktion                       |
-| ------- | ------------------------------ |
-| `P`     | Auto-Zoom pausieren/fortsetzen |
-| `H`     | Heatmap-Overlay toggeln (derzeit ohne EC-Daten) |
-| `T`     | HUD (Warzenschwein) toggeln    |
+| Taste   | Funktion                               |
+| ------- | -------------------------------------- |
+| `P`     | Auto-Zoom pausieren/fortsetzen         |
+| `H`     | Heatmap-Overlay toggeln (ohne EC-Daten)|
+| `T`     | HUD (Warzenschwein) toggeln            |
 
 > Hinweis: `Space` ist derzeit **nicht** gemappt (kein Alias zu `P`).
 
@@ -148,11 +174,11 @@ cmake --install build --prefix ./dist
 
 ## 🧷 Toolchain & Hardening (Windows)
 
-* **CRT vereinheitlicht**: `/MT` (inkl. NVCC-Host) → keine LNK2038-Mismatches.
-* **`CUDA::cudart_static`**: passt zum `/MT`-CRT.
-* **GLEW dynamisch**: **kein** `GLEW_STATIC`; vcpkg-Triplet passend wählen.
-* **Hardening nur im Host-Link**: `/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf` über `$<HOST_LINK:...>`.
-* **Separable Compilation** + **Device-Symbols** aktiviert (CMake Properties).
+* **CRT vereinheitlicht**: `/MT` (inkl. NVCC-Host) → keine LNK2038-Mismatches.  
+* **`CUDA::cudart_static`**: passt zum `/MT`-CRT.  
+* **GLEW dynamisch**: **kein** `GLEW_STATIC`; vcpkg-Triplet passend wählen.  
+* **Hardening nur im Host-Link**: `/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf` über `$<HOST_LINK:...>`.  
+* **Separable Compilation** + **Device-Symbole** aktiviert (CMake Properties).
 
 ---
 
@@ -168,8 +194,8 @@ cmake --install build --prefix ./dist
 
 ## 🧪 Logging-Formate (Kern, kompakt)
 
-* **ASCII-only**, **eine Zeile pro Logeintrag**.
-* **Epoch-Millis** (UTC) als Zeitstempel.
+* **ASCII-only**, **eine Zeile pro Logeintrag**.  
+* **Epoch-Millis** (UTC) als Zeitstempel.  
 * **Keine Seiteneffekte** im Hot-Path (keine globale Sync).
 
 ### Kompakte PERF-Zeile (Render/Colorize)
@@ -188,8 +214,8 @@ cmake --install build --prefix ./dist
 
 **GitHub Actions** (`.github/workflows/ci.yml`)
 
-* Configure → Build (Ninja) → Install
-* Artefakte: Install-Tree unter `dist/`
+* Configure → Build (Ninja) → Install  
+* Artefakte: Install-Tree unter `dist/`  
 * Prüfungen:
   * CUDA-Kompilation für Presets
   * konsistente CMake-Presets
@@ -197,16 +223,16 @@ cmake --install build --prefix ./dist
 
 **Dependabot**
 
-* PRs für `vcpkg.json` (wöchentlich)
+* PRs für `vcpkg.json` (wöchentlich)  
 * CI baut und verifiziert
 
 ---
 
 ## ❓ Troubleshooting (Kurz)
 
-* **`nvcc` fehlt** → **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen
-* **GLEW-Mismatch (z. B. `glew32d.lib`)** → auf **dynamisches GLEW** wechseln und Triplet/Cache prüfen
-* **Schwarze Frames** bei extremem Pan/Zoom → Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs
+* **`nvcc` fehlt** → **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen  
+* **GLEW-Mismatch** (z. B. `glew32d.lib`) → **dynamisches GLEW** sicherstellen und Triplet/Cache prüfen  
+* **Schwarze Frames** bei extremem Pan/Zoom → Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs  
 * **CUDA-Interop Stalls** → PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences
 
 ---

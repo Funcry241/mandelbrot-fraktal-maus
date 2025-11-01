@@ -91,6 +91,19 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom - u
 
 ---
 
+## 🦀 Rust Build Runner – Live Progress (optional)
+
+Der **Rust-Runner `otter_proc`** orchestriert den Build mit **Live-Progress** (Spinner, **%**, **ETA**, ASCII-Bar) und farbigen Tags (`[PS]`, `[RUST]`, `[PROC]`).  
+Robuste Parser erkennen `68%` und **Ratio** `[17/45]`; Animation rate-limited auf **200 ms**.  
+**Metrik-Seeding:** `.build_metrics/metrics.json` speichert Laufzeiten pro Phase zur besseren ETA.
+
+**Toggles (Environment):**
+- `OTTER_PROGRESS=0` – Progress-UI aus (Default: an)  
+- `OTTER_COLOR=0` – Farben aus (Default: an)  
+- `OTTER_ASCII=1` – ASCII-Spinner/Balken
+
+---
+
 ## 🔧 Build-Anleitung
 
 > **Hinweis:** Der Build läuft vollständig über **Standard-CMake** (host-agnostisch).
@@ -189,6 +202,14 @@ Der Planner arbeitet daher mit **ForceAlwaysZoom**, Yaw-Limiter, Dämpfung, Hyst
 ```mermaid
 mindmap
   root((Mandelbrot Otterdream))
+    Build & Tooling
+      Rust runner (otter_proc)
+        Live progress (spinner/%/ETA)
+        Color tags & ASCII bar
+        Metrics seeding (.build_metrics)
+        Env toggles (OTTER_COLOR/PROGRESS/ASCII)
+      PowerShell build.ps1
+      CMake + vcpkg (GLEW dynamic)
     Renderer Orchestration & Windowing
       Renderer Window / Loop / Pipeline
       State (GL/CUDA) & Resources
@@ -204,7 +225,7 @@ mindmap
     Colorization & Post-processing
       Iteration buffer → RGBA
     Overlays & HUD
-      Heatmap (entropy/contrast)
+      Heatmap (preview, EC off)
       Text HUD (Warzenschwein)
     Project Settings, Common & PCH
       Global flags & constants
@@ -213,6 +234,7 @@ mindmap
       Palette sampling, etc.
     Logging & Diagnostics (Luchs)
       Host & CUDA device log buffers
+      ASCII-only, PERF line cadence
 ```
 
 # Architecture Mindmap & Responsibilities
