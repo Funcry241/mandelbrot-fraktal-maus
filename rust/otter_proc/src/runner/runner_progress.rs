@@ -13,15 +13,17 @@ pub struct ProgressState {
     pub spinner_idx: usize,
     pub last_snippet: String,
     pub best_builder_pct: Option<u32>,
+    pub runtime_phase: String, // "proc" | "configure" | "build"
 }
 impl ProgressState {
-    pub fn new() -> Self {
+    pub fn new(phase: &str) -> Self {
         Self {
             start: Instant::now(),
             last_tick: Instant::now(),
             spinner_idx: 0,
             last_snippet: String::new(),
             best_builder_pct: None,
+            runtime_phase: phase.to_string(),
         }
     }
 }
@@ -98,10 +100,10 @@ pub fn parse_ratio_percent(line: &str) -> Option<u32> {
 }
 
 /// Compose the progress line and print it ephemerally.
-pub fn render_and_print(state: &mut ProgressState, phase: &str, predicted_ms: u128) {
+pub fn render_and_print(state: &mut ProgressState, phase_for_display: &str, predicted_ms: u128) {
     let elapsed_ms = state.start.elapsed().as_millis() as u128;
 
-    // time-based pct (capped to 99% until finish to avoid “stuck at 100” while still running)
+    // time-based pct (capped to 99% until finish)
     let time_pct = if predicted_ms > 0 {
         let mut p = ((elapsed_ms as f64 / predicted_ms as f64) * 100.0).floor() as u32;
         if p > 99 { p = 99; }
@@ -127,7 +129,7 @@ pub fn render_and_print(state: &mut ProgressState, phase: &str, predicted_ms: u1
 
     // Prefix without bar.
     let prefix = format!("[PROG]  [{}] {}{}{} {}  pred={}s  {} ",
-        phase.to_ascii_uppercase(),
+        phase_for_display.to_ascii_uppercase(),
         CYA, spin, RESET,
         elapsed, pred_s, pct_str
     );

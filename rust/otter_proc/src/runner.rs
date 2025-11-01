@@ -1,6 +1,6 @@
 ///// Otter: Process runner with live progress (ratio+time), metrics-seeded ETA, colored tags.
-/// ///// Schneefuchs: No external crates; Windows+POSIX; prints durable logs & smooth 200ms animation.
-/// ///// Maus: Parses both “68%” and “[17/45]”; merges with predicted; ASCII-only; safe saves to .build_metrics.
+///// Schneefuchs: No external crates; Windows+POSIX; prints durable logs & smooth 200ms animation.
+///// Maus: Parses both “68%” and “[17/45]”; merges with predicted; ASCII-only; safe saves to .build_metrics.
 ///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;
@@ -8,7 +8,6 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
 
 use crate::build_metrics::BuildMetrics;
 
@@ -18,8 +17,11 @@ mod runner_classify;
 mod runner_phase; // placeholder module (keeps reorg noise low)
 
 use runner_classify::{classify_line, Sev};
-use runner_progress::{ProgressState, render_and_print, parse_percent, parse_ratio_percent, last_nonempty_snippet, progress_enabled, due};
-use runner_term::{enable_ansi, out_err, out_info, out_warn, print_ephemeral, end_ephemeral};
+use runner_progress::{
+    ProgressState, render_and_print, parse_percent, parse_ratio_percent,
+    last_nonempty_snippet, progress_enabled, due
+};
+use runner_term::{enable_ansi, out_err, out_info, out_warn, end_ephemeral};
 
 #[derive(Default)]
 pub struct RunResult { pub code: i32 }
@@ -34,15 +36,9 @@ struct PhaseDetect {
 fn detect_phase_and_sig(exe: &str, args: &[String]) -> PhaseDetect {
     let mut phase = "proc".to_string();
 
-    // We accept a few conventional “cmd glue” signatures from our PS runner.
+    // Try to infer build vs configure
     let mut is_build = false;
     for a in args {
-        if a.contains("VsDevCmd.bat") && a.contains("-arch=") {
-            // Our PS wrapper: first call → env/cmake (proc), second call with “build” marker → build.
-            if let Some(x) = args.iter().find(|s| s.as_str().eq_ignore_ascii_case("build")) {
-                let _ = x; // hint for intent, not used
-            }
-        }
         if a.eq_ignore_ascii_case("build") || a.contains("cmake --build") {
             is_build = true;
         }
@@ -50,7 +46,7 @@ fn detect_phase_and_sig(exe: &str, args: &[String]) -> PhaseDetect {
     if exe.eq_ignore_ascii_case("cmake") && !is_build { phase = "configure".to_string(); }
     if is_build { phase = "build".to_string(); }
 
-    // Signal used for metrics table key (stable & short)
+    // Signal used for metrics key
     let sig = if exe.eq_ignore_ascii_case("cmake") {
         format!("cmake:{}", phase)
     } else if exe.eq_ignore_ascii_case("cmd") {
@@ -62,6 +58,13 @@ fn detect_phase_and_sig(exe: &str, args: &[String]) -> PhaseDetect {
     };
 
     PhaseDetect { phase, sig }
+}
+
+// Avoid simultaneous &mut and & borrows of pstate (E0502).
+#[inline]
+fn render_now(pstate: &mut ProgressState, predicted_ms: u128) {
+    let phase = pstate.runtime_phase.clone();
+    render_and_print(pstate, &phase, predicted_ms);
 }
 
 pub fn run_streamed_with_env(
@@ -110,7 +113,7 @@ pub fn run_streamed_with_env(
     let predicted_ms = metrics.get_last_ms(&phase_sig.sig, &phase_sig.phase).unwrap_or(0);
 
     // Progress
-    let mut pstate = ProgressState::new();
+    let mut pstate = ProgressState::new(&phase_sig.phase);
 
     // Tag for child streams in logs
     let tag = if exe.eq_ignore_ascii_case("cmd") { "PS" } else { "PROC" };
@@ -124,21 +127,28 @@ pub fn run_streamed_with_env(
         out_buf.clear();
         if let Ok(n) = out_reader.read_line(&mut out_buf) {
             if n > 0 {
-                // Make durable: end ephemeral first
-                end_ephemeral();
-
                 // Update progress knowledge from the line
                 if let Some(p) = parse_percent(&out_buf).or_else(|| parse_ratio_percent(&out_buf)) {
                     pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
+                    // Heuristic: ratio -> build
+                    if parse_ratio_percent(&out_buf).is_some() { pstate.runtime_phase = "build".into(); }
                 }
                 let snip = last_nonempty_snippet(&out_buf, 120);
                 if !snip.is_empty() { pstate.last_snippet = snip; }
 
+                // Durable log line (clear ephemeral before)
+                end_ephemeral();
                 match classify_line(&out_buf) {
                     Sev::Err  => out_err (tag, &out_buf),
                     Sev::Warn => out_warn(tag, &out_buf),
                     Sev::Info => out_info(tag, &out_buf),
                 }
+
+                // Keep animation alive even while lines stream
+                if progress_enabled() && due(&pstate) {
+                    render_now(&mut pstate, predicted_ms);
+                }
+
                 progressed = true;
             }
         }
@@ -146,35 +156,40 @@ pub fn run_streamed_with_env(
         err_buf.clear();
         if let Ok(n) = err_reader.read_line(&mut err_buf) {
             if n > 0 {
-                end_ephemeral();
-
                 if let Some(p) = parse_percent(&err_buf).or_else(|| parse_ratio_percent(&err_buf)) {
                     pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
+                    if parse_ratio_percent(&err_buf).is_some() { pstate.runtime_phase = "build".into(); }
                 }
                 let snip = last_nonempty_snippet(&err_buf, 120);
                 if !snip.is_empty() { pstate.last_snippet = snip; }
 
+                end_ephemeral();
                 match classify_line(&err_buf) {
                     Sev::Err  => out_err (tag, &err_buf),
                     Sev::Warn => out_warn(tag, &err_buf),
                     Sev::Info => out_info(tag, &err_buf),
                 }
+
+                if progress_enabled() && due(&pstate) {
+                    render_now(&mut pstate, predicted_ms);
+                }
+
                 progressed = true;
             }
         }
 
         if !progressed {
             if progress_enabled() && due(&pstate) {
-                render_and_print(&mut pstate, &phase_sig.phase, predicted_ms);
+                render_now(&mut pstate, predicted_ms);
             }
 
             match child.try_wait() {
                 Ok(Some(st)) => {
                     // finish: clear ephemeral, print done line, save metrics
                     end_ephemeral();
-                    out_info("RUST", &format!("RUN phase={} done (elapsed={}s)", phase_sig.phase, pstate.start.elapsed().as_secs()));
+                    out_info("RUST", &format!("RUN phase={} done (elapsed={}s)", pstate.runtime_phase, pstate.start.elapsed().as_secs()));
                     let elapsed_ms = pstate.start.elapsed().as_millis() as u128;
-                    metrics.upsert_phase_ms(&phase_sig.sig, &phase_sig.phase, elapsed_ms);
+                    metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
                     let _ = metrics.save(&workdir);
                     return RunResult { code: st.code().unwrap_or(1) };
                 }

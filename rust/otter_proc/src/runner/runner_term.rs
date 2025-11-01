@@ -86,10 +86,16 @@ pub fn term_cols() -> usize {
     unsafe {
         use std::ffi::c_void;
         type HANDLE = *mut c_void;
+
+        #[allow(non_snake_case)]
         #[repr(C)]
         struct COORD { x: i16, y: i16 }
+
+        #[allow(non_snake_case)]
         #[repr(C)]
         struct SMALL_RECT { left: i16, top: i16, right: i16, bottom: i16 }
+
+        #[allow(non_snake_case)]
         #[repr(C)]
         struct CONSOLE_SCREEN_BUFFER_INFO {
             _dwSize: COORD,
