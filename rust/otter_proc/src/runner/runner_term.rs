@@ -97,6 +97,16 @@ pub fn out_err(src: &str, msg: &str) {
     let _ = io::stdout().flush();
 }
 
+/// Wie `out_info`, aber komplett eingefärbt (z. B. für OK/FAIL-Zeilen).
+pub fn out_info_col(src: &str, msg: &str, color_code: &str) {
+    let _ = end_ephemeral();
+    let t = tag_colored(src);
+    let m = paint(msg.trim_end_matches('\n'), color_code);
+    let _ = writeln!(io::stdout(), "{} {}", t, m);
+    let _ = io::stdout().flush();
+}
+pub fn out_info_green(src: &str, msg: &str) { out_info_col(src, msg, GREEN); }
+
 /// Ephemere Statuszeile zeichnen/aktualisieren (eine Zeile).
 pub fn print_ephemeral(s: &str) {
     let _ = write!(io::stdout(), "\r{}\x1b[K", s);
@@ -133,10 +143,10 @@ pub fn term_cols() -> usize {
     120
 }
 
-/// Minimaler, farbiger Trailer („Variante A“).
+/// Minimaler, farbiger Trailer im Stil „Variante A“.
 /// Beispiel:
 /// [RUST] DONE • OK (code=0) • 61.4s
-/// Optional: `extra` (z. B. „artifact=… • git: pushed … ✓“).
+/// Optionales `extra` kann vom Aufrufer genutzt werden (z. B. „artifact=… • git: pushed … ✓“).
 pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
     let tag = tag_colored("RUST");
     let status = if ok { paint("OK", GREEN) } else { paint("FAIL", RED) };
@@ -145,11 +155,7 @@ pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
     if let Some(x) = extra {
         if !x.trim().is_empty() {
             line.push_str(bullet);
-            if color_enabled() {
-                line.push_str(&paint_dim(x));
-            } else {
-                line.push_str(x);
-            }
+            if color_enabled() { line.push_str(&paint_dim(x)); } else { line.push_str(x); }
         }
     }
     let _ = writeln!(io::stdout(), "{line}");

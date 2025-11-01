@@ -26,7 +26,7 @@ use runner_progress::{
 };
 use runner_term::{
     enable_ansi, out_err, out_info, out_warn, end_ephemeral, sanitize_line,
-    out_trailer_min, print_ephemeral,
+    out_trailer_min, print_ephemeral, out_info_col, out_info_green,
 };
 
 #[derive(Default)]
@@ -98,17 +98,16 @@ impl TrailerAgg {
 
         // Artefakte
         if let Some(idx) = l.find("[RUNNER] artifact:") {
-            // Format: "[RUNNER] artifact: C:\...\mandelbrot_otterdream.exe"
             if let Some(path) = l.get(idx + 19..).map(|s| s.trim()) {
                 if !path.is_empty() { self.artifact = Some(path.to_string()); }
             }
-            return true; // leise sammeln, nicht doppelt ausgeben
+            return true;
         }
         if l.contains("[RUNNER] artifact-candidate:") {
-            return true; // Rauschen unterdrücken
+            return true;
         }
 
-        // AUTOGIT Start/Kommandos-Rauschen
+        // AUTOGIT Rauschen
         if l.starts_with("[AUTOGIT] start")
             || l.starts_with("[AUTOGIT][RUN] git")
             || l.starts_with("Enumerating objects:")
@@ -122,7 +121,7 @@ impl TrailerAgg {
             return true;
         }
 
-        // Bypassed/Protected-Branch-Hinweise merken, aber nicht spammen
+        // Protected-Branch Hinweise
         if l.starts_with("remote: Bypassed rule violations")
             || l.contains("Cannot update this protected ref")
         {
@@ -133,12 +132,10 @@ impl TrailerAgg {
         // Push-Ziel / Remote (z. B. "To https://...  main -> main")
         if l.starts_with("To ") {
             self.git_pushed_ok = true;
-            // branch heuristisch ziehen
             if let Some(pos) = l.rfind("->") {
                 let tail = &l[pos+2..].trim();
                 if !tail.is_empty() { self.git_branch = Some(tail.to_string()); }
             }
-            // remote
             if let Some(space) = l.find(' ') {
                 self.git_remote = Some(l[3..space].trim().to_string());
             }
@@ -153,16 +150,14 @@ impl TrailerAgg {
                 if let Some(br) = it.next() { if !br.is_empty() { self.git_branch = Some(br.to_string()); } }
                 if let Some(sh) = it.next() { if !sh.is_empty() { self.git_commit_short = Some(sh.to_string()); } }
             }
-            return false; // commit-Zeile lassen wir sichtbar
+            return false; // commit-Zeile sichtbar lassen
         }
 
-        // Abschluss von AUTOGIT
         if l.starts_with("[AUTOGIT] done status=OK") {
             self.git_pushed_ok = true;
             return true;
         }
 
-        // branch 'main' set up to track 'origin/main'.
         if l.starts_with("branch '") && l.contains(" set up to track ") {
             let name = l.trim_start_matches("branch '")
                 .split('\'').next().unwrap_or("").trim();
@@ -184,17 +179,9 @@ impl TrailerAgg {
 
         if self.git_pushed_ok {
             let mut s = String::from("git: pushed ✓");
-            if let Some(b) = &self.git_branch {
-                s.push(' ');
-                s.push_str(b);
-            }
-            if let Some(c) = &self.git_commit_short {
-                s.push_str(" @");
-                s.push_str(c);
-            }
-            if self.git_rules_bypassed {
-                s.push_str(" (rules)");
-            }
+            if let Some(b) = &self.git_branch { s.push(' '); s.push_str(b); }
+            if let Some(c) = &self.git_commit_short { s.push_str(" @"); s.push_str(c); }
+            if self.git_rules_bypassed { s.push_str(" (rules)"); }
             parts.push(s);
         }
 
@@ -218,7 +205,7 @@ pub fn run_streamed_with_env(
     // Sofortiger Start-Heartbeat, damit der Beginn nie „stuck“ wirkt.
     print_ephemeral("[proc] starting...");
 
-    // Metrics: load or seed, log only once per process
+    // Metrics einmalig ausgeben
     let (mut metrics, metrics_file, seed_src) = BuildMetrics::load_or_seed(&workdir);
     if !METRICS_PRINTED_ONCE.swap(true, Ordering::SeqCst) {
         out_info("RUST", &format!("metrics={}", metrics_file.display()));
@@ -227,7 +214,7 @@ pub fn run_streamed_with_env(
         }
     }
 
-    // Spawn child
+    // Child starten
     let mut cmd = Command::new(exe);
     cmd.args(args)
         .stdin(Stdio::null())
@@ -241,7 +228,7 @@ pub fn run_streamed_with_env(
     let phase_sig = detect_phase_and_sig(exe, args);
     out_info("RUST", &format!("RUN exe=\"{}\" phase={} sig={}", exe, phase_sig.phase, phase_sig.sig));
 
-    // Spawn-Latenz messen (z. B. Smartscreen/AV)
+    // Spawn-Latenz messen
     let t_spawn0 = Instant::now();
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -270,10 +257,10 @@ pub fn run_streamed_with_env(
     // Trailer-Aggregator
     let mut trailer = TrailerAgg::default();
 
-    // Tag for child streams in logs
+    // Tag für Kind-Streams
     let tag = if exe.eq_ignore_ascii_case("cmd") { "PS" } else { "PROC" };
 
-    // Non-blocking design: two reader threads feed a channel; main loop ticks UI every 200 ms.
+    // Zwei Leser-Threads → Channel; UI tickt alle 200 ms
     let (tx, rx) = mpsc::channel::<String>();
 
     // stdout reader
@@ -305,13 +292,30 @@ pub fn run_streamed_with_env(
     }
     drop(tx); // main thread keeps only rx
 
-    // Helper: processes one cleaned line (update progress + durable log)
+    // Helper: verarbeitet eine Zeile (Progress + hübsche Ausgabe)
     fn handle_line(pstate: &mut ProgressState, cleaned: &str, tag: &str, trailer: &mut TrailerAgg) {
         if cleaned.is_empty() { return; }
 
-        // Trailers sammeln / Rauschen ggf. unterdrücken
+        // Schönfärben: Build-Finish erkennt und einfärben
+        if let Some(pos) = cleaned.find("Build finished (code=") {
+            // Versuche code=… zu parsen
+            let rest = &cleaned[pos + "Build finished (code=".len()..];
+            if let Some(end) = rest.find(')') {
+                let code_str = &rest[..end];
+                if let Ok(n) = code_str.parse::<i32>() {
+                    if n == 0 {
+                        out_info_green(tag, cleaned);
+                    } else {
+                        out_info_col(tag, cleaned, "\x1b[31m"); // rot
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Trailer sammeln / Rauschen unterdrücken
         if trailer.feed(cleaned) {
-            return; // nichts ausgeben
+            return;
         }
 
         // Progress aus den Inhalten schätzen
@@ -339,7 +343,7 @@ pub fn run_streamed_with_env(
     let mut readers_done = false;
     let mut exit_code: Option<i32> = None;
 
-    // Initial ephemeral or start line
+    // Initiale Ephemeral oder Startzeile
     if progress_enabled() {
         render_and_print(&mut pstate, predicted_ms);
     } else {
@@ -348,7 +352,7 @@ pub fn run_streamed_with_env(
     }
 
     loop {
-        // Drain currently available lines
+        // Vorliegende Zeilen abräumen
         let mut drained_any = false;
         loop {
             match rx.try_recv() {
@@ -367,12 +371,12 @@ pub fn run_streamed_with_env(
             }
         }
 
-        // Keep animation alive
+        // Animation am Leben halten
         if progress_enabled() && due(&pstate) {
             render_and_print(&mut pstate, predicted_ms);
         }
 
-        // Poll child exit
+        // Child-Exit pollen
         match child.try_wait() {
             Ok(Some(st)) => { exit_code = Some(st.code().unwrap_or(1)); }
             Ok(None) => {}
@@ -383,7 +387,7 @@ pub fn run_streamed_with_env(
             }
         }
 
-        // Finish condition: child exited AND all readers done
+        // Fertig wenn: child beendet UND alle Reader fertig
         if let Some(code) = exit_code {
             if readers_done {
                 let _ = end_ephemeral();
