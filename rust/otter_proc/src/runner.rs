@@ -95,7 +95,7 @@ pub fn run_streamed_with_env(
 
     enable_ansi();
 
-    // Ephemerer Sofort-Herzschlag, damit der Start nie „still“ wirkt.
+    // Sofortiger Start-Heartbeat, damit der Beginn nie „stuck“ wirkt.
     print_ephemeral("[proc] starting...");
 
     // Metrics: load or seed, log only once per process
@@ -121,7 +121,7 @@ pub fn run_streamed_with_env(
     let phase_sig = detect_phase_and_sig(exe, args);
     out_info("RUST", &format!("RUN exe=\"{}\" phase={} sig={}", exe, phase_sig.phase, phase_sig.sig));
 
-    // Spawn-Latenz messen (z. B. Smartscreen/AV).
+    // Spawn-Latenz messen (z. B. Smartscreen/AV)
     let t_spawn0 = Instant::now();
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -258,20 +258,23 @@ pub fn run_streamed_with_env(
         if let Some(code) = exit_code {
             if readers_done {
                 let _ = end_ephemeral();
-                out_info("RUST", &format!(
-                    "RUN phase={} done (elapsed={}s)",
-                    pstate.runtime_phase,
-                    pstate.start.elapsed().as_secs()
-                ));
+
+                // Dauer erfassen & persistieren
                 let elapsed_ms = pstate.start.elapsed().as_millis() as u128;
                 metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
                 let _ = metrics.save(&workdir);
 
-                // Trailer standardmäßig an:
+                // Hübsches Ende: Trailer ODER (falls deaktiviert) die alte „RUN done“-Zeile
                 if trailer_enabled() {
                     let secs = (elapsed_ms as f32) / 1000.0;
                     let ok = code == 0;
                     out_trailer_min(ok, code, secs, None);
+                } else {
+                    out_info("RUST", &format!(
+                        "RUN phase={} done (elapsed={}s)",
+                        pstate.runtime_phase,
+                        pstate.start.elapsed().as_secs()
+                    ));
                 }
 
                 return RunResult { code };

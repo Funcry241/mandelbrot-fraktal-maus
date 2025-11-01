@@ -133,10 +133,10 @@ pub fn term_cols() -> usize {
     120
 }
 
-/// Minimaler, farbiger Trailer im Stil „Variante A“.
+/// Minimaler, farbiger Trailer („Variante A“).
 /// Beispiel:
 /// [RUST] DONE • OK (code=0) • 61.4s
-/// Optionales `extra` kann vom Aufrufer genutzt werden (z. B. „artifact=… • git: pushed … ✓“).
+/// Optional: `extra` (z. B. „artifact=… • git: pushed … ✓“).
 pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
     let tag = tag_colored("RUST");
     let status = if ok { paint("OK", GREEN) } else { paint("FAIL", RED) };
@@ -145,7 +145,6 @@ pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
     if let Some(x) = extra {
         if !x.trim().is_empty() {
             line.push_str(bullet);
-            // Dimmen erlaubt unaufdringliche Zusatzelemente am Ende
             if color_enabled() {
                 line.push_str(&paint_dim(x));
             } else {
