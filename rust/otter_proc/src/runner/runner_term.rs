@@ -51,18 +51,16 @@ pub fn color_enabled() -> bool {
 const RESET: &str = "\x1b[0m";
 const RED: &str = "\x1b[31m";
 const YELLOW: &str = "\x1b[33m";
-const GREEN: &str = "\x1b[32m";
 const BLUE: &str = "\x1b[34m";
 const MAGENTA: &str = "\x1b[35m";
 const CYAN: &str = "\x1b[36m";
-const BRIGHT_BLACK: &str = "\x1b[90m";
 
 fn paint(s: &str, code: &str) -> String {
     if color_enabled() { format!("{code}{s}{RESET}") } else { s.to_string() }
 }
 
 fn tag_colored(s: &str) -> String {
-    // L1: Tag-Farben — jetzt mit eigenem String, keine temporären Borrows
+    // L1: Tag-Farben — eigener String, keine temporären Borrows
     let (txt_owned, col) = match s {
         "PS"   => ("[PS]".to_string(), MAGENTA),
         "RUST" => ("[RUST]".to_string(), CYAN),
