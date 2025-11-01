@@ -1,13 +1,16 @@
-///// Otter: Terminal-Helfer: ANSI aktivieren (Win), farbige Tags & ephemeres Zeilenlöschen.
-///// Schneefuchs: ASCII-only, keine externen Crates; robuste no-op auf non-Windows.
-///// Maus: Ruhig arbeiten; clear_ephemeral_line() für Progress-Redraw.
-///// Datei: rust/otter_proc/src/runner/runner_term.rs
+///// Otter: Terminal-Helpers: ANSI aktivieren, farbige Tags, Ephemeral-Line-Steuerung.
+/// ///// Schneefuchs: ASCII-only Content; keine externen Crates; Windows-Enable best effort.
+/// ///// Maus: color_src("RUST"/"PS"/"CMAKE") + clear/print/end_ephemeral; simple API.
+/// ///// Datei: rust/otter_proc/src/runner/runner_term.rs
 
 use std::io::{self, Write};
 
 pub const RED:   &str = "\x1b[31m";
 pub const YEL:   &str = "\x1b[33m";
+pub const GRN:   &str = "\x1b[32m";
 pub const CYA:   &str = "\x1b[36m";
+pub const MAG:   &str = "\x1b[35m";
+pub const BLU:   &str = "\x1b[34m";
 pub const RESET: &str = "\x1b[0m";
 
 #[cfg(windows)]
@@ -46,19 +49,33 @@ pub fn enable_ansi() {
 #[inline]
 pub fn enable_ansi() { /* no-op */ }
 
-pub fn out_info(source: &str, msg: &str) {
-    println!("[INFO]  [{}] {}", source, msg);
-}
-pub fn out_warn(source: &str, msg: &str) {
-    println!("{}[WARN]{}  [{}] {}", YEL, RESET, source, msg);
-}
-pub fn out_err(source: &str, msg: &str) {
-    eprintln!("{}[ERR]{}   [{}] {}", RED, RESET, source, msg);
+pub fn color_src(src: &str) -> String {
+    match src {
+        "RUST"  => format!("{}RUST{}", MAG, RESET),
+        "PS"    => format!("{}PS{}", CYA, RESET),
+        "CMAKE" => format!("{}CMAKE{}", BLU, RESET),
+        other   => other.to_string(),
+    }
 }
 
-/// Löscht die aktuelle Zeile „ephemer“ (Progresszeile) und setzt den Cursor an den Anfang.
+pub fn out_info(source: &str, msg: &str) {
+    println!("[INFO]  [{}] {}", color_src(source), msg);
+}
+pub fn out_warn(source: &str, msg: &str) {
+    println!("{}[WARN]{}  [{}] {}", YEL, RESET, color_src(source), msg);
+}
+pub fn out_err(source: &str, msg: &str) {
+    eprintln!("{}[ERR]{}   [{}] {}",  RED, RESET, color_src(source), msg);
+}
+
+// Ephemeral-Line: eine Zeile, die laufend überschrieben wird.
 pub fn clear_ephemeral_line() {
-    // konservativ breite Zeile; bewusst ohne Terminal-Query
-    print!("\r{:<160}\r", "");
-    let _ = io::stdout().flush();
+    print!("\r{:>160}\r", ""); let _ = io::stdout().flush();
+}
+pub fn print_ephemeral(s: &str) {
+    print!("\r{}", s); let _ = io::stdout().flush();
+}
+pub fn end_ephemeral() {
+    clear_ephemeral_line();
+    println!();
 }
