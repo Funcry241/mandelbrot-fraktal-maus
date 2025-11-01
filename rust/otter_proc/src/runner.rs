@@ -141,7 +141,7 @@ pub fn run_streamed_with_env(
                     if !snip.is_empty() { pstate.last_snippet = snip; }
 
                     // Durable log line (clear ephemeral before)
-                    end_ephemeral();
+                    let _ = end_ephemeral();
                     match classify_line(&cleaned) {
                         Sev::Err  => out_err (tag, &cleaned),
                         Sev::Warn => out_warn(tag, &cleaned),
@@ -169,7 +169,7 @@ pub fn run_streamed_with_env(
                     let snip = last_nonempty_snippet(&cleaned, 120);
                     if !snip.is_empty() { pstate.last_snippet = snip; }
 
-                    end_ephemeral();
+                    let _ = end_ephemeral();
                     match classify_line(&cleaned) {
                         Sev::Err  => out_err (tag, &cleaned),
                         Sev::Warn => out_warn(tag, &cleaned),
@@ -192,7 +192,7 @@ pub fn run_streamed_with_env(
             match child.try_wait() {
                 Ok(Some(st)) => {
                     // finish: clear ephemeral, print done line, save metrics
-                    end_ephemeral();
+                    let _ = end_ephemeral();
                     out_info("RUST", &format!("RUN phase={} done (elapsed={}s)", pstate.runtime_phase, pstate.start.elapsed().as_secs()));
                     let elapsed_ms = pstate.start.elapsed().as_millis() as u128;
                     metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
@@ -200,7 +200,11 @@ pub fn run_streamed_with_env(
                     return RunResult { code: st.code().unwrap_or(1) };
                 }
                 Ok(None) => { std::thread::sleep(std::time::Duration::from_millis(10)); }
-                Err(e) => { end_ephemeral(); out_err("RUST", &format!("wait failed: {}", e)); return RunResult { code: 1 }; }
+                Err(e) => {
+                    let _ = end_ephemeral();
+                    out_err("RUST", &format!("wait failed: {}", e));
+                    return RunResult { code: 1 };
+                }
             }
         }
     }
