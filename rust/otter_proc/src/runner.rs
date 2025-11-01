@@ -145,16 +145,15 @@ impl TrailerAgg {
             return true;
         }
 
-        // Commit-Zeile: "[main ba51fed] chore: update"
-        if l.starts_with("[main ") && l.contains(']') {
-            // Branch + short SHA
+        // Commit-Zeile in Klammern: "[<branch> <shortsha>] ..."
+        if l.starts_with('[') && l.contains(']') {
             if let Some(end) = l.find(']') {
-                let body = &l[1..end]; // main ba51fed
+                let body = &l[1..end]; // z. B. "main ba51fed"
                 let mut it = body.split_whitespace();
-                self.git_branch = it.next().map(|s| s.to_string());
-                self.git_commit_short = it.next().map(|s| s.to_string());
+                if let Some(br) = it.next() { if !br.is_empty() { self.git_branch = Some(br.to_string()); } }
+                if let Some(sh) = it.next() { if !sh.is_empty() { self.git_commit_short = Some(sh.to_string()); } }
             }
-            return false; // darf sichtbar bleiben, ist oft nützlich
+            return false; // commit-Zeile lassen wir sichtbar
         }
 
         // Abschluss von AUTOGIT
@@ -165,7 +164,6 @@ impl TrailerAgg {
 
         // branch 'main' set up to track 'origin/main'.
         if l.starts_with("branch '") && l.contains(" set up to track ") {
-            // branch extrahieren
             let name = l.trim_start_matches("branch '")
                 .split('\'').next().unwrap_or("").trim();
             if !name.is_empty() { self.git_branch = Some(name.to_string()); }
