@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::build_metrics::BuildMetrics;
 
@@ -24,7 +24,10 @@ use runner_progress::{
     ProgressState, render_and_print, parse_percent, parse_ratio_percent,
     last_nonempty_snippet, progress_enabled, due
 };
-use runner_term::{enable_ansi, out_err, out_info, out_warn, end_ephemeral, sanitize_line, out_trailer_min};
+use runner_term::{
+    enable_ansi, out_err, out_info, out_warn, end_ephemeral, sanitize_line,
+    out_trailer_min, print_ephemeral,
+};
 
 #[derive(Default)]
 pub struct RunResult { pub code: i32 }
@@ -73,8 +76,7 @@ fn trailer_enabled() -> bool {
     match env::var("OTTER_TRAILER") {
         Ok(v) => {
             let t = v.trim().to_ascii_lowercase();
-            t == "1" || t == "on" || t == "yes" || t.is_empty()
-                || !(t == "0" || t == "off" || t == "no")
+            !(t == "0" || t == "off" || t == "no")
         }
         Err(_) => true, // Default: an
     }
@@ -92,6 +94,9 @@ pub fn run_streamed_with_env(
     };
 
     enable_ansi();
+
+    // Ephemerer Sofort-Herzschlag, damit der Start nie „still“ wirkt.
+    print_ephemeral("[proc] starting...");
 
     // Metrics: load or seed, log only once per process
     let (mut metrics, metrics_file, seed_src) = BuildMetrics::load_or_seed(&workdir);
@@ -116,10 +121,17 @@ pub fn run_streamed_with_env(
     let phase_sig = detect_phase_and_sig(exe, args);
     out_info("RUST", &format!("RUN exe=\"{}\" phase={} sig={}", exe, phase_sig.phase, phase_sig.sig));
 
+    // Spawn-Latenz messen (z. B. Smartscreen/AV).
+    let t_spawn0 = Instant::now();
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => { out_err("RUST", &format!("spawn failed exe={} err={}", exe, e)); return RunResult { code: 1 }; }
     };
+    let spawn_ms = t_spawn0.elapsed().as_millis();
+    if spawn_ms > 400 {
+        let _ = end_ephemeral();
+        out_info("RUST", &format!("spawn-latency={}ms", spawn_ms));
+    }
 
     let stdout = match child.stdout.take() {
         Some(s) => s,
@@ -198,7 +210,7 @@ pub fn run_streamed_with_env(
     let mut readers_done = false;
     let mut exit_code: Option<i32> = None;
 
-    // Initial ephemeral to avoid "quiet console looks frozen"
+    // Initial ephemeral or start line
     if progress_enabled() {
         render_and_print(&mut pstate, predicted_ms);
     } else {
