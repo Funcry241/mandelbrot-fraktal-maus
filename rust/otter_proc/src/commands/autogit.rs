@@ -1,5 +1,5 @@
 ///// Otter: Simple git automation (add/commit/push) with optional HTTPS fallback.
-///// Schneefuchs: ASCII-only logs; no secrets; robust exit codes (0=OK, 1=issues).
+///// Schneefuchs: ASCII-only logs; no secrets; robust exit codes (0=OK, 1=issues). CRLF-Warnungen pro Aufruf unterdrückt via -c core.safecrlf=false & -c core.autocrlf=input.
 ///// Maus: Accepts optional commit message; falls back to "chore: update"; Branch-Autodetect.
 ///// Datei: rust/otter_proc/src/commands/autogit.rs
 
@@ -8,9 +8,20 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 fn run_cmd_in(root: &Path, program: &str, args: &[&str]) -> io::Result<i32> {
-    println!("[AUTOGIT][RUN] {} {}", program, args.join(" "));
+    // Für git-Befehle per-Aufruf Konfigs setzen, um CRLF→LF-Warnungen zu vermeiden.
+    let is_git = program == "git";
+    let mut full_args: Vec<&str> = Vec::new();
+    if is_git {
+        full_args.extend_from_slice(&[
+            "-c", "core.safecrlf=false",
+            "-c", "core.autocrlf=input",
+        ]);
+    }
+    full_args.extend_from_slice(args);
+
+    println!("[AUTOGIT][RUN] {} {}", program, full_args.join(" "));
     let status = Command::new(program)
-        .args(args)
+        .args(&full_args)
         .current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
