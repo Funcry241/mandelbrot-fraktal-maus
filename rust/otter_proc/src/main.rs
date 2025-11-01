@@ -1,7 +1,7 @@
-///// Otter: Mini entrypoint – delegiert an Module (full, clean, autogit); ASCII-only.
-///// Schneefuchs: Nach erfolgreichem FULL immer Autogit (ohne Flags/Env) → origin/main.
-///// Maus: prockit::display_path, utils::epoch_ms; robuste Exit-Logs.
-///// Datei: rust/otter_proc/src/main.rs
+///// Otter: Mini-Entrypoint – delegiert an (full, clean, autogit) und committet nach erfolgreichem Full-Build.
+/// ///// Schneefuchs: Clap-Parser; PS-5.1-kompatible CMake-Aufrufe; ASCII-Logs.
+/// ///// Maus: Kein Over-Engineering; nur benötigte Imports.
+/// ///// Datei: rust/otter_proc/src/main.rs
 
 mod utils;     // minimales Helfer-Modul (epoch_ms)
 mod prockit;   // Runner-Helpers (Proc/Git/Guards)
@@ -10,24 +10,27 @@ mod commands;
 
 use clap::Parser;
 use cli::{Cli, Commands};
-use std::path::Path;
 
 fn main() {
-    let cli  = Cli::parse();
+    let cli = Cli::parse();
     let root = cli.root.unwrap_or_else(|| std::env::current_dir().unwrap());
+
+    // Vor dem konsumierenden match merken, ob es ein Full-Aufruf ist (verhindert E0382).
+    let auto_commit_after = matches!(&cli.command, Commands::Full { .. });
+
     let ts_ms = utils::epoch_ms();
     println!("[RUNNER] ts_ms={} root={}", ts_ms, prockit::display_path(&root));
 
-    // Merken, ob FULL erfolgreich war (Exitcode 0)
-    let mut ran_full_ok = false;
-
+    // Jetzt cli.command konsumieren – danach nicht mehr verwenden.
     let res = match cli.command {
         Commands::Full { cfg, configure_preset, build_preset, parallel } => {
-            let r = commands::full::run(&root, &cfg, configure_preset.as_deref(), build_preset.as_deref(), parallel);
-            if let Ok(code) = r {
-                if code == 0 { ran_full_ok = true; }
-            }
-            r
+            commands::full::run(
+                &root,
+                &cfg,
+                configure_preset.as_deref(),
+                build_preset.as_deref(),
+                parallel,
+            )
         }
         Commands::Clean { dry_run, hard, extra } =>
             commands::clean::run(&root, dry_run, hard, &extra),
@@ -40,11 +43,8 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Immer automatisch commit/push nach erfolgreichem FULL (ohne Schalter)
-    if ran_full_ok {
-        if let Err(e) = commands::autogit::run(&root, None, false, "origin", None, true) {
-            eprintln!("[AUTOGIT][ERR] {}", e);
-            // kein exit – Build bleibt erfolgreich, Autogit ist Poststep
-        }
+    // Nach erfolgreichem Full-Build automatisch commit/pushen.
+    if auto_commit_after {
+        let _ = commands::autogit::run(&root, None, false, "origin", Some("main"), true);
     }
 }
