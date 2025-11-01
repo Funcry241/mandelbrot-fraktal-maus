@@ -1,12 +1,14 @@
 ///// Otter: Mini-Entrypoint – delegiert an (full, clean, autogit) und committet nach erfolgreichem Full-Build.
-/// ///// Schneefuchs: Clap-Parser; PS-5.1-kompatible CMake-Aufrufe; ASCII-Logs.
-/// ///// Maus: Kein Over-Engineering; nur benötigte Imports.
-/// ///// Datei: rust/otter_proc/src/main.rs
+///// Schneefuchs: Clap-Parser; PS-5.1-kompatible CMake-Aufrufe; ASCII-Logs.
+///// Maus: Kein Over-Engineering; nur benötigte Imports.
+///// Datei: rust/otter_proc/src/main.rs
 
-mod utils;     // minimales Helfer-Modul (epoch_ms)
-mod prockit;   // Runner-Helpers (Proc/Git/Guards)
+mod utils;         // minimales Helfer-Modul (epoch_ms)
+mod prockit;       // Runner-Helpers (Proc/Git/Guards)
 mod cli;
 mod commands;
+mod build_metrics; // Zentral: .build_metrics (ASCII), Seeding & atomisches Speichern
+mod runner;        // <<— NEU: für crate::runner in winenv.rs
 
 use clap::Parser;
 use cli::{Cli, Commands};

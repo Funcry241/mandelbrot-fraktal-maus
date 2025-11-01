@@ -1,5 +1,5 @@
 ///// Otter: CLI-Definition (Clap) – Optionen & Subcommands.
-/// ///// Schneefuchs: Defaults wie zuvor (RelWithDebInfo, windows-msvc/build).
+///// Schneefuchs: Defaults wie zuvor (RelWithDebInfo, windows-msvc/build).
 ///// Maus: Nur Signaturen, keine Ausführungslogik.
 ///// Datei: rust/otter_proc/src/cli.rs
 
