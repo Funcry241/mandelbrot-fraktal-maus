@@ -1,2 +1,0 @@
-V1
-phase|sig=cmd:/C call C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat -arch=x64|name=build|last_ms=1686
