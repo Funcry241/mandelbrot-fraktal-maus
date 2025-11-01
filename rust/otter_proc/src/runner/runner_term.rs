@@ -1,6 +1,6 @@
 ///// Otter: Terminal-Helpers: ANSI aktivieren, farbige Tags, Ephemeral-Line-Steuerung.
 /// ///// Schneefuchs: ASCII-only Content; keine externen Crates; Windows-Enable best effort.
-/// ///// Maus: color_src("RUST"/"PS"/"CMAKE") + clear/print/end_ephemeral; simple API.
+/// ///// Maus: color_src("RUST"/"PS"/"CMAKE"/"RUN") + clear/print/end_ephemeral; simple API.
 /// ///// Datei: rust/otter_proc/src/runner/runner_term.rs
 
 use std::io::{self, Write};
@@ -54,6 +54,7 @@ pub fn color_src(src: &str) -> String {
         "RUST"  => format!("{}RUST{}", MAG, RESET),
         "PS"    => format!("{}PS{}", CYA, RESET),
         "CMAKE" => format!("{}CMAKE{}", BLU, RESET),
+        "RUN"   => format!("{}RUN{}", GRN, RESET),
         other   => other.to_string(),
     }
 }

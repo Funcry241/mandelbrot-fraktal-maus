@@ -1,6 +1,6 @@
 ///// Otter: Prozessstart mit Streaming + hübscher Progress-Zeile & farbigen Herkunfts-Tags.
 /// ///// Schneefuchs: Keine Borrow-Fallen; stabile Signaturen; Metrics genutzt wenn vorhanden.
-/// ///// Maus: [RUST] für interne Logs, [PS] für Prozessausgaben; 1 Hz-Progress; ETA+%.
+/// ///// Maus: Spinner/ETA alle 200 ms; nach jeder PS-Zeile Ephemeral sofort wieder herstellen.
 /// ///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ mod runner_progress;
 mod runner_classify;
 mod runner_phase;
 
-use runner_term::{enable_ansi, out_err, out_info, out_warn, clear_ephemeral_line, print_ephemeral, end_ephemeral, CYA, RESET};
+use runner_term::{enable_ansi, out_err, out_info, out_warn, clear_ephemeral_line, print_ephemeral, end_ephemeral};
 use runner_progress::{ProgressState, render_progress_line};
 use runner_classify::{classify_line, Sev};
 
@@ -41,19 +41,17 @@ fn parse_percent(line: &str) -> Option<u32> {
 struct PhaseDetect { phase: String, sig: String }
 
 fn detect_phase_and_sig(exe: &str, args: &[String]) -> PhaseDetect {
-    // Für unsere cmd-VsDev-Aufrufe sind die Args stabil; wir normalisieren opak auf kurze Sig.
     let mut phase = "proc".to_string();
     if args.iter().any(|a| a == "--build") { phase = "build".to_string(); }
     let sig = if exe.eq_ignore_ascii_case("cmake") {
-        // cmake-spezifische Kurzsignatur
-        let mut cfg = "-"; let mut preset = "-";
+        let mut cfg: Option<&str> = None;
+        let mut preset: Option<&str> = None;
         for i in 0..args.len() {
-            if args[i] == "--config"  && i+1 < args.len() { cfg = &args[i+1]; }
-            if args[i] == "--preset"  && i+1 < args.len() { preset = &args[i+1]; }
+            if args[i] == "--config" && i+1 < args.len() { cfg = Some(&args[i+1]); }
+            if args[i] == "--preset" && i+1 < args.len() { preset = Some(&args[i+1]); }
         }
-        format!("cmake:{}:{}", preset, cfg)
+        format!("cmake:{}:{}", preset.unwrap_or("-"), cfg.unwrap_or("-"))
     } else {
-        // cmd / VsDev → harte Kurzform, damit Metrics matchen
         if phase == "build" { "cmd:build".to_string() } else { "cmd:proc".to_string() }
     };
     PhaseDetect { phase, sig }
@@ -84,9 +82,7 @@ pub fn run_streamed_with_env(
     // Metrics laden/seed
     let (mut metrics, metrics_file, seed_src) = BuildMetrics::load_or_seed(&workdir);
     out_info("RUST", &format!("metrics={}", metrics_file.display()));
-    if let Some(src) = seed_src {
-        out_info("RUST", &format!("metrics-seeded-from={}", src.display()));
-    }
+    if let Some(src) = seed_src { out_info("RUST", &format!("metrics-seeded-from={}", src.display())); }
 
     let phase_sig = detect_phase_and_sig(exe, args);
     out_info("RUST", &format!("RUN exe=\"{}\" phase={} sig={}", exe, &phase_sig.phase, &phase_sig.sig));
@@ -115,7 +111,9 @@ pub fn run_streamed_with_env(
     let mut state = ProgressState::new();
     let mut best_builder_pct: Option<u32> = None;
     let mut last_snippet = String::new();
-    let mut last_ephemeral = false;
+    let mut ephemeral_visible = false;
+    let mut tick = Instant::now();
+    let tick_interval = Duration::from_millis(200);
 
     let mut out_buf = String::new();
     let mut err_buf = String::new();
@@ -123,10 +121,11 @@ pub fn run_streamed_with_env(
     loop {
         let mut progressed = false;
 
+        // --- STDOUT
         out_buf.clear();
         if let Ok(n) = out_reader.read_line(&mut out_buf) {
             if n > 0 {
-                if last_ephemeral { clear_ephemeral_line(); last_ephemeral = false; }
+                if ephemeral_visible { clear_ephemeral_line(); ephemeral_visible = false; }
                 if let Some(p) = parse_percent(&out_buf) {
                     best_builder_pct = Some(best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
                 }
@@ -140,10 +139,11 @@ pub fn run_streamed_with_env(
             }
         }
 
+        // --- STDERR
         err_buf.clear();
         if let Ok(n) = err_reader.read_line(&mut err_buf) {
             if n > 0 {
-                if last_ephemeral { clear_ephemeral_line(); last_ephemeral = false; }
+                if ephemeral_visible { clear_ephemeral_line(); ephemeral_visible = false; }
                 if let Some(p) = parse_percent(&err_buf) {
                     best_builder_pct = Some(best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
                 }
@@ -158,9 +158,31 @@ pub fn run_streamed_with_env(
             }
         }
 
-        // 1 Hz Progress-Update
-        if !progressed && progress_enabled() && state.last_tick.elapsed() >= Duration::from_secs(1) {
-            state.last_tick = Instant::now();
+        // Nach realem Output die Ephemeral-Zeile sofort wieder hinstellen:
+        if progressed && progress_enabled() {
+            let elapsed_ms = start.elapsed().as_millis();
+            let time_pct = if predicted_ms > 0 {
+                let mut p = ((elapsed_ms as f64 / predicted_ms as f64) * 100.0).floor() as u32;
+                if p > 99 { p = 99; }
+                Some(p)
+            } else { None };
+
+            let pct = match (best_builder_pct, time_pct) {
+                (Some(b), Some(t)) => Some(b.max(t)),
+                (Some(b), None)    => Some(b),
+                (None,    Some(t)) => Some(t),
+                (None,    None)    => None,
+            };
+
+            let line = render_progress_line(&phase_sig.phase, pct, elapsed_ms, predicted_ms, &last_snippet, state.spin_idx);
+            print_ephemeral(&line);
+            ephemeral_visible = true;
+        }
+
+        // Tick-getriebene Aktualisierung (Animation), auch wenn keine Zeile kam:
+        if progress_enabled() && tick.elapsed() >= tick_interval {
+            tick = Instant::now();
+            state.spin_idx = (state.spin_idx + 1) % 4;
 
             let elapsed_ms = start.elapsed().as_millis();
             let time_pct = if predicted_ms > 0 {
@@ -177,14 +199,14 @@ pub fn run_streamed_with_env(
             };
 
             let line = render_progress_line(&phase_sig.phase, pct, elapsed_ms, predicted_ms, &last_snippet, state.spin_idx);
-            state.spin_idx = (state.spin_idx + 1) % 4;
             print_ephemeral(&line);
-            last_ephemeral = true;
+            ephemeral_visible = true;
         }
 
+        // Prozessende?
         match child.try_wait() {
             Ok(Some(st)) => {
-                if last_ephemeral {
+                if ephemeral_visible {
                     clear_ephemeral_line();
                     out_info("RUST", &format!("RUN phase={} done (elapsed={}s)", &phase_sig.phase, start.elapsed().as_secs()));
                     end_ephemeral();

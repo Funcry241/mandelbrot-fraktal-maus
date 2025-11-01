@@ -1,31 +1,23 @@
 ///// Otter: Fortschrittsbalken/ETA-Renderer (ASCII), dynamische Breite, Spinner.
 /// ///// Schneefuchs: Keine externen Crates; robust bei fehlenden Metrics (pred=—).
-/// ///// Maus: 1 Hz-Takt gedacht; liefert fertige Zeile als String.
+/// ///// Maus: 200 ms gedacht; liefert fertige Zeile als String.
 /// ///// Datei: rust/otter_proc/src/runner/runner_progress.rs
 
 use std::env;
-use std::time::Instant;
 
 use crate::runner::runner_term::{CYA, RESET};
 
 pub struct ProgressState {
-    pub start: Instant,
-    pub last_tick: Instant,
     pub spin_idx: usize,
 }
 
 impl ProgressState {
-    pub fn new() -> Self {
-        let now = Instant::now();
-        Self { start: now, last_tick: now, spin_idx: 0 }
-    }
+    pub fn new() -> Self { Self { spin_idx: 0 } }
 }
 
 fn term_cols() -> usize {
     if let Ok(v) = env::var("COLUMNS") {
-        if let Ok(n) = v.parse::<usize>() {
-            return n.clamp(60, 160);
-        }
+        if let Ok(n) = v.parse::<usize>() { return n.clamp(60, 160); }
     }
     100
 }
@@ -70,11 +62,9 @@ pub fn render_progress_line(
 
     let snip = {
         let s = last_snippet.trim();
-        if s.is_empty() { "".to_string() }
-        else {
-            // Platz übrig? Wir kappen, um nicht umzubrechen.
+        if s.is_empty() { "".to_string() } else {
             let mut max = cols.saturating_sub(prefix.len() + mid.len() + bar.len() + 6);
-            if max < 0 { max = 0; }
+            // kein negativer Check bei usize – saturating_sub deckt ab
             let mut ss = s.replace('\t', " ");
             if ss.len() > max { ss.truncate(max); }
             ss
