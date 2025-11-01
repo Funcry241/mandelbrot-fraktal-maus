@@ -1,6 +1,6 @@
 ///// Otter: Prozessstart, Streaming-Logs & ephemere Progress-Zeile (Spinner, ETA, % aus Metrics & Builder); ANSI-Farbe aktiv.
 ///// Schneefuchs: Fehlercodes sauber weiterreichen; CWD optional; ENV-Overlay; .build_metrics zentral über build_metrics.rs (atomar, Seeding).
-///// Maus: Ruhig bei Output-Dauerfeuer, 1 Hz-Throttle; keine externen Crates; Metrics-Log nur 1× pro Prozess; Warn-/Error-Triage farbig.
+///// Maus: Ruhig bei Output-Dauerfeuer, 1 Hz-Throttle; keine externen Crates; Metrics-Log nur 1× pro Prozess; Warn-/Error-Triage farbig; **Source-Tag farbig** (RUN/PROC/CMAKE/PS).
 ///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;
@@ -14,7 +14,10 @@ use crate::build_metrics::BuildMetrics;
 
 // --- ANSI colors (always on; best-effort enable on Windows) ------------------
 const RED:   &str = "\x1b[31m";
+const GRN:   &str = "\x1b[32m";
 const YEL:   &str = "\x1b[33m";
+const BLU:   &str = "\x1b[34m";
+const MAG:   &str = "\x1b[35m";
 const CYA:   &str = "\x1b[36m";
 const RESET: &str = "\x1b[0m";
 
@@ -54,10 +57,35 @@ fn enable_ansi() {
 #[inline]
 fn enable_ansi() { /* no-op */ }
 
-// --- simple tagged output helpers (with color) --------------------------------
-pub fn out_info(source: &str, msg: &str) { println!("[INFO]  [{}] {}", source, msg); }
-pub fn out_warn(source: &str, msg: &str) { println!("{}[WARN]{}  [{}] {}", YEL, RESET, source, msg); }
-pub fn out_err (source: &str, msg: &str) { eprintln!("{}[ERR]{}   [{}] {}",  RED, RESET, source, msg); }
+// Pick a color for the source tag, e.g. [CMAKE], [PROC], [RUN], [PS]
+fn color_for_source(src: &str) -> &'static str {
+    let up = src.to_ascii_uppercase();
+    if up.starts_with("CMAKE") {
+        MAG
+    } else if up == "RUN" {
+        CYA
+    } else if up == "PROC" {
+        GRN
+    } else if up == "PS" {
+        BLU
+    } else {
+        CYA
+    }
+}
+
+// --- simple tagged output helpers (with color for tag + source) ---------------
+pub fn out_info(source: &str, msg: &str) {
+    let c = color_for_source(source);
+    println!("[INFO]  [{}{}{}] {}", c, source, RESET, msg);
+}
+pub fn out_warn(source: &str, msg: &str) {
+    let c = color_for_source(source);
+    println!("{}[WARN]{}  [{}{}{}] {}", YEL, RESET, c, source, RESET, msg);
+}
+pub fn out_err(source: &str, msg: &str) {
+    let c = color_for_source(source);
+    eprintln!("{}[ERR]{}   [{}{}{}] {}", RED, RESET, c, source, RESET, msg);
+}
 
 #[derive(Default)]
 pub struct RunResult { pub code: i32 }
