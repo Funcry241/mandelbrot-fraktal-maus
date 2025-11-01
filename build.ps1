@@ -1,7 +1,7 @@
-# Otter: Ultra-thin wrapper — Cargo runs the Rust orchestrator; no PS “magie”.
-# Schneefuchs: PS 5.1-safe; clean exit-code pass-through; strict paths.
-# Maus: One-line ASCII steps; deterministic; fail fast if cargo/runner fails.
-# Datei: .\build.ps1
+##### Otter: Ultra-thin wrapper — Cargo runs the Rust orchestrator; no PS “magie”.
+##### Schneefuchs: PS 5.1-safe; clean exit-code pass-through; strict paths; colored end line.
+##### Maus: One-line ASCII steps; deterministic; fail fast if cargo/runner fails.
+##### Datei: .\build.ps1
 param(
   [ValidateSet('Debug','Release','RelWithDebInfo','MinSizeRel')]
   [string]$Configuration = 'RelWithDebInfo'
@@ -21,13 +21,13 @@ Write-Host "[PS] [INFO] === Build (Cargo-run) started: $(Get-Date -Format 'yyyy-
 # preflight: cargo present?
 $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
 if (-not $cargoCmd) {
-  Write-Host "[PS] [ERR] 'cargo' not found in PATH"
+  Write-Host "[PS] [ERR] 'cargo' not found in PATH" -ForegroundColor Red
   exit 88
 }
 
 # preflight: runner dir present?
 if (-not (Test-Path -LiteralPath $runnerDir)) {
-  Write-Host "[PS] [ERR] Runner directory missing: $runnerDir"
+  Write-Host "[PS] [ERR] Runner directory missing: $runnerDir" -ForegroundColor Red
   exit 87
 }
 
@@ -46,9 +46,11 @@ finally {
 }
 
 if ($code -ne 0) {
-  Write-Host "[PS] [ERR] cargo run failed (code=$code)"
+  Write-Host "[PS] [ERR] cargo run failed (code=$code)" -ForegroundColor Red
+  Write-Host "[PS] [INFO] === Build finished (code=$code) ===" -ForegroundColor Red
   exit $code
 }
 
-Write-Host "[PS] [INFO] === Build finished (code=0) ==="
+# Success trailer in green (PS 5.1-safe)
+Write-Host "[PS] [INFO] === Build finished (code=0) ===" -ForegroundColor Green
 exit 0
