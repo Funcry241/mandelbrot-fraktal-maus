@@ -1,7 +1,7 @@
 ///// Otter: Terminal helpers (ANSI enable, pretty tags, ephemeral line, sanitize).
-/// ///// Schneefuchs: No external crates; Windows FFI zu kernel32; trims banner noise.
-/// ///// Maus: Termbreite aus $COLUMNS (Fallback 120); ASCII-only; ruhiges Verhalten auf Nicht-TTY.
-/// ///// Datei: rust/otter_proc/src/runner_term.rs
+///// Schneefuchs: No external crates; Windows FFI zu kernel32; trims banner noise.
+///// Maus: Termbreite aus $COLUMNS (Fallback 120); ASCII-only; ruhiges Verhalten auf Nicht-TTY.
+///// Datei: rust/otter_proc/src/runner_term.rs
 
 use std::env;
 use std::io::{self, Write};

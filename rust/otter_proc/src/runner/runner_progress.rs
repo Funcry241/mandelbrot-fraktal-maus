@@ -1,7 +1,7 @@
 ///// Otter: Progress state & pretty renderer (spinner, %, ETA, seeded by metrics).
-/// ///// Schneefuchs: Keine externen Crates; 200 ms Rate-Limit; robuste Parser für % und [n/m].
-/// ///// Maus: Standardmäßig aktiv (OTTER_PROGRESS=0 zum Abschalten); ASCII-Bar, term_cols() aus runner_term.
-/// ///// Datei: rust/otter_proc/src/runner_progress.rs
+///// Schneefuchs: Keine externen Crates; 200 ms Rate-Limit; robuste Parser für % und [n/m].
+///// Maus: Standardmäßig aktiv (OTTER_PROGRESS=0 zum Abschalten); ASCII-Bar, term_cols() aus runner_term.
+///// Datei: rust/otter_proc/src/runner_progress.rs
 
 use std::env;
 use std::time::{Duration, Instant};
@@ -162,12 +162,18 @@ pub fn render_and_print(p: &mut ProgressState, predicted_ms: u128) {
         -1.0
     };
 
-    // 3) Spinner
-    const SPIN: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-    p.spinner_ix = (p.spinner_ix + 1) % SPIN.len();
-    let spin = SPIN[p.spinner_ix];
+    // 3) Spinner (Unicode default; ASCII-Fallback via OTTER_ASCII=1/true)
+    let ascii = matches!(env::var("OTTER_ASCII"), Ok(ref v) if v == "1" || v.eq_ignore_ascii_case("true"));
+    const SPIN_UNI: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    const SPIN_ASCII: &[char] = &['|', '/', '-', '\\'];
+    p.spinner_ix = if ascii {
+        (p.spinner_ix + 1) % SPIN_ASCII.len()
+    } else {
+        (p.spinner_ix + 1) % SPIN_UNI.len()
+    };
+    let spin = if ascii { SPIN_ASCII[p.spinner_ix] } else { SPIN_UNI[p.spinner_ix] };
 
-    // 4) Bar
+    // 4) Bar (ASCII-Fallback: '#', sonst '█')
     let cols = term_cols();
     let pct100 = (pct * 100.0).round() as i32;
     let left = format!("[{}] {} {:>3}%", p.runtime_phase, spin, pct100);
@@ -178,18 +184,18 @@ pub fn render_and_print(p: &mut ProgressState, predicted_ms: u128) {
         "ETA  …s".to_string()
     };
 
-    // Barbreite dynamisch: Platz nach links/mid/eta + 2 Klammern
     let bar_room = cols.saturating_sub(left.len() + mid.len() + eta_s.len() + 2).clamp(10, 120);
     let filled = ((bar_room as f32) * pct).round() as usize;
     let rest = bar_room.saturating_sub(filled);
 
-    let bar = format!("[{}{}]", "█".repeat(filled), " ".repeat(rest));
+    let fill_char = if ascii { '#' } else { '█' };
+    let bar = format!("[{}{}]", std::iter::repeat(fill_char).take(filled).collect::<String>(),
+                                std::iter::repeat(' ').take(rest).collect::<String>());
 
     // 5) Letztes Snippet ggf. rechts anhängen, wenn noch Platz bleibt
     let mut line = format!("{left}{mid}{eta_s} {bar}");
     let remain = cols.saturating_sub(line.len());
     if remain > 4 && !p.last_snippet.is_empty() {
-        // … und maximal 'remain' nutzen
         let mut snip = p
             .last_snippet
             .replace('\r', "")

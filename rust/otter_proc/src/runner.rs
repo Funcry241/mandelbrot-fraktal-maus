@@ -8,6 +8,9 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, TryRecvError};
+use std::thread;
+use std::time::Duration;
 
 use crate::build_metrics::BuildMetrics;
 
@@ -85,7 +88,7 @@ pub fn run_streamed_with_env(
         }
     }
 
-    // Spawn
+    // Spawn child
     let mut cmd = Command::new(exe);
     cmd.args(args)
         .stdin(Stdio::null())
@@ -104,12 +107,12 @@ pub fn run_streamed_with_env(
         Err(e) => { out_err("RUST", &format!("spawn failed exe={} err={}", exe, e)); return RunResult { code: 1 }; }
     };
 
-    let mut out_reader = match child.stdout.take() {
-        Some(s) => BufReader::new(s),
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
         None => { out_err("RUST", "failed to take stdout"); return RunResult { code: 1 }; }
     };
-    let mut err_reader = match child.stderr.take() {
-        Some(s) => BufReader::new(s),
+    let stderr = match child.stderr.take() {
+        Some(s) => s,
         None => { out_err("RUST", "failed to take stderr"); return RunResult { code: 1 }; }
     };
 
@@ -121,91 +124,135 @@ pub fn run_streamed_with_env(
     // Tag for child streams in logs
     let tag = if exe.eq_ignore_ascii_case("cmd") { "PS" } else { "PROC" };
 
-    let mut out_buf = String::new();
-    let mut err_buf = String::new();
+    // Non-blocking design: two reader threads feed a channel; main loop ticks UI every 200 ms.
+    let (tx, rx) = mpsc::channel::<String>();
+
+    // stdout reader
+    {
+        let tx = tx.clone();
+        thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) => { let _ = tx.send(l); }
+                    Err(_) => break,
+                }
+            }
+            // drop(tx) on scope end
+        });
+    }
+
+    // stderr reader
+    {
+        let tx = tx.clone();
+        thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) => { let _ = tx.send(l); }
+                    Err(_) => break,
+                }
+            }
+            // drop(tx) on scope end
+        });
+    }
+    drop(tx); // main thread keeps only rx
+
+    // Helper: processes one cleaned line (update progress + durable log)
+    fn handle_line(pstate: &mut ProgressState, cleaned: &str, tag: &str) {
+        if cleaned.is_empty() { return; }
+
+        // Parse percent once; track ratio to infer build phase.
+        let ratio = parse_ratio_percent(cleaned);
+        let pct = parse_percent(cleaned).or(ratio);
+
+        if let Some(p) = pct {
+            pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
+        }
+        if ratio.is_some() {
+            pstate.runtime_phase = "build".into();
+        }
+
+        let snip = last_nonempty_snippet(cleaned, 120);
+        if !snip.is_empty() { pstate.last_snippet = snip; }
+
+        let _ = end_ephemeral();
+        match classify_line(cleaned) {
+            Sev::Err  => out_err (tag, cleaned),
+            Sev::Warn => out_warn(tag, cleaned),
+            Sev::Info => out_info(tag, cleaned),
+        }
+    }
+
+    let mut readers_done = false;
+    let mut exit_code: Option<i32> = None;
+
+    // Initial ephemeral to avoid "quiet console looks frozen"
+    if progress_enabled() {
+        render_and_print(&mut pstate, predicted_ms);
+    } else {
+        // Falls Progress aus ist, zeige zumindest Startzeile einmal.
+        let _ = end_ephemeral();
+        out_info("RUST", &format!("RUN phase={} started", pstate.runtime_phase));
+    }
 
     loop {
-        let mut progressed = false;
-
-        out_buf.clear();
-        if let Ok(n) = out_reader.read_line(&mut out_buf) {
-            if n > 0 {
-                let cleaned = sanitize_line(&out_buf);
-                if !cleaned.is_empty() {
-                    // Update progress knowledge from the line
-                    if let Some(p) = parse_percent(&cleaned).or_else(|| parse_ratio_percent(&cleaned)) {
-                        pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
-                        if parse_ratio_percent(&cleaned).is_some() { pstate.runtime_phase = "build".into(); }
+        // Drain all currently available lines
+        let mut drained_any = false;
+        loop {
+            match rx.try_recv() {
+                Ok(raw) => {
+                    let cleaned = sanitize_line(&raw);
+                    if !cleaned.is_empty() {
+                        handle_line(&mut pstate, &cleaned, tag);
                     }
-                    let snip = last_nonempty_snippet(&cleaned, 120);
-                    if !snip.is_empty() { pstate.last_snippet = snip; }
-
-                    // Durable log line (clear ephemeral before)
-                    let _ = end_ephemeral();
-                    match classify_line(&cleaned) {
-                        Sev::Err  => out_err (tag, &cleaned),
-                        Sev::Warn => out_warn(tag, &cleaned),
-                        Sev::Info => out_info(tag, &cleaned),
-                    }
+                    drained_any = true;
                 }
-
-                // Keep animation alive even while lines stream
-                if progress_enabled() && due(&pstate) {
-                    render_and_print(&mut pstate, predicted_ms);
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    readers_done = true;
+                    break;
                 }
-                progressed = true;
             }
         }
 
-        err_buf.clear();
-        if let Ok(n) = err_reader.read_line(&mut err_buf) {
-            if n > 0 {
-                let cleaned = sanitize_line(&err_buf);
-                if !cleaned.is_empty() {
-                    if let Some(p) = parse_percent(&cleaned).or_else(|| parse_ratio_percent(&cleaned)) {
-                        pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
-                        if parse_ratio_percent(&cleaned).is_some() { pstate.runtime_phase = "build".into(); }
-                    }
-                    let snip = last_nonempty_snippet(&cleaned, 120);
-                    if !snip.is_empty() { pstate.last_snippet = snip; }
+        // Keep animation alive even in quiet phases
+        if progress_enabled() && due(&pstate) {
+            render_and_print(&mut pstate, predicted_ms);
+        }
 
-                    let _ = end_ephemeral();
-                    match classify_line(&cleaned) {
-                        Sev::Err  => out_err (tag, &cleaned),
-                        Sev::Warn => out_warn(tag, &cleaned),
-                        Sev::Info => out_info(tag, &cleaned),
-                    }
-                }
-
-                if progress_enabled() && due(&pstate) {
-                    render_and_print(&mut pstate, predicted_ms);
-                }
-                progressed = true;
+        // Poll child exit
+        match child.try_wait() {
+            Ok(Some(st)) => {
+                exit_code = Some(st.code().unwrap_or(1));
+            }
+            Ok(None) => {}
+            Err(e) => {
+                let _ = end_ephemeral();
+                out_err("RUST", &format!("wait failed: {}", e));
+                return RunResult { code: 1 };
             }
         }
 
-        if !progressed {
-            if progress_enabled() && due(&pstate) {
-                render_and_print(&mut pstate, predicted_ms);
+        // Finish condition: child exited AND all readers are done
+        if let Some(code) = exit_code {
+            if readers_done {
+                let _ = end_ephemeral();
+                out_info("RUST", &format!(
+                    "RUN phase={} done (elapsed={}s)",
+                    pstate.runtime_phase,
+                    pstate.start.elapsed().as_secs()
+                ));
+                let elapsed_ms = pstate.start.elapsed().as_millis() as u128;
+                metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
+                let _ = metrics.save(&workdir);
+                return RunResult { code };
             }
+        }
 
-            match child.try_wait() {
-                Ok(Some(st)) => {
-                    // finish: clear ephemeral, print done line, save metrics
-                    let _ = end_ephemeral();
-                    out_info("RUST", &format!("RUN phase={} done (elapsed={}s)", pstate.runtime_phase, pstate.start.elapsed().as_secs()));
-                    let elapsed_ms = pstate.start.elapsed().as_millis() as u128;
-                    metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
-                    let _ = metrics.save(&workdir);
-                    return RunResult { code: st.code().unwrap_or(1) };
-                }
-                Ok(None) => { std::thread::sleep(std::time::Duration::from_millis(10)); }
-                Err(e) => {
-                    let _ = end_ephemeral();
-                    out_err("RUST", &format!("wait failed: {}", e));
-                    return RunResult { code: 1 };
-                }
-            }
+        // Avoid busy-spin in fully quiet moments
+        if !drained_any {
+            thread::sleep(Duration::from_millis(20));
         }
     }
 }
