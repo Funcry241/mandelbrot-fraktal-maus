@@ -67,10 +67,17 @@ fn detect_phase_and_sig(exe: &str, args: &[String]) -> PhaseDetect {
     PhaseDetect { phase, sig }
 }
 
-/// OTTER_TRAILER toggle:
-///   "0" -> aus; "min" oder leer -> farbige Einzeile (Status/Code/Dauer)
+/// Trailer standardmäßig **an**.
+/// Nur wenn OTTER_TRAILER=0|off gesetzt ist, wird er unterdrückt.
 fn trailer_enabled() -> bool {
-    !matches!(env::var("OTTER_TRAILER"), Ok(v) if v.trim() == "0")
+    match env::var("OTTER_TRAILER") {
+        Ok(v) => {
+            let t = v.trim().to_ascii_lowercase();
+            t == "1" || t == "on" || t == "yes" || t.is_empty()
+                || !(t == "0" || t == "off" || t == "no")
+        }
+        Err(_) => true, // Default: an
+    }
 }
 
 pub fn run_streamed_with_env(
@@ -145,7 +152,6 @@ pub fn run_streamed_with_env(
                     Err(_) => break,
                 }
             }
-            // drop(tx) on scope end
         });
     }
 
@@ -160,7 +166,6 @@ pub fn run_streamed_with_env(
                     Err(_) => break,
                 }
             }
-            // drop(tx) on scope end
         });
     }
     drop(tx); // main thread keeps only rx
@@ -169,7 +174,6 @@ pub fn run_streamed_with_env(
     fn handle_line(pstate: &mut ProgressState, cleaned: &str, tag: &str) {
         if cleaned.is_empty() { return; }
 
-        // Parse percent once; track ratio to infer build phase.
         let ratio = parse_ratio_percent(cleaned);
         let pct = parse_percent(cleaned).or(ratio);
 
@@ -198,13 +202,12 @@ pub fn run_streamed_with_env(
     if progress_enabled() {
         render_and_print(&mut pstate, predicted_ms);
     } else {
-        // Falls Progress aus ist, zeige zumindest Startzeile einmal.
         let _ = end_ephemeral();
         out_info("RUST", &format!("RUN phase={} started", pstate.runtime_phase));
     }
 
     loop {
-        // Drain all currently available lines
+        // Drain currently available lines
         let mut drained_any = false;
         loop {
             match rx.try_recv() {
@@ -223,16 +226,14 @@ pub fn run_streamed_with_env(
             }
         }
 
-        // Keep animation alive even in quiet phases
+        // Keep animation alive
         if progress_enabled() && due(&pstate) {
             render_and_print(&mut pstate, predicted_ms);
         }
 
         // Poll child exit
         match child.try_wait() {
-            Ok(Some(st)) => {
-                exit_code = Some(st.code().unwrap_or(1));
-            }
+            Ok(Some(st)) => { exit_code = Some(st.code().unwrap_or(1)); }
             Ok(None) => {}
             Err(e) => {
                 let _ = end_ephemeral();
@@ -241,34 +242,30 @@ pub fn run_streamed_with_env(
             }
         }
 
-        // Finish condition: child exited AND all readers are done
+        // Finish condition: child exited AND all readers done
         if let Some(code) = exit_code {
             if readers_done {
                 let _ = end_ephemeral();
-
-                // Classic done line for logs
                 out_info("RUST", &format!(
                     "RUN phase={} done (elapsed={}s)",
                     pstate.runtime_phase,
                     pstate.start.elapsed().as_secs()
                 ));
-
-                // Persist metrics
                 let elapsed_ms = pstate.start.elapsed().as_millis() as u128;
                 metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
                 let _ = metrics.save(&workdir);
 
-                // Pretty colored trailer (Variant A, minimal)
+                // Trailer standardmäßig an:
                 if trailer_enabled() {
-                    let secs_f = (elapsed_ms as f32) / 1000.0;
-                    out_trailer_min(code == 0, code, secs_f, None);
+                    let secs = (elapsed_ms as f32) / 1000.0;
+                    let ok = code == 0;
+                    out_trailer_min(ok, code, secs, None);
                 }
 
                 return RunResult { code };
             }
         }
 
-        // Avoid busy-spin in fully quiet moments
         if !drained_any {
             thread::sleep(Duration::from_millis(20));
         }
