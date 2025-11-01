@@ -1,57 +1,67 @@
-///// Otter: Progress state + pretty bar (ratio+[time] merge), responsive to term width.
-///// Schneefuchs: 200ms tick; bar fill colored; safe truncation; ASCII-only.
-/// ///// Maus: Parses [n/m] and “68%”; snippet carried into tail if space permits.
+///// Otter: Progress UI — spinner, ETA, percent merge (builder vs time), ASCII bar.
+///// Schneefuchs: 200 ms throttle; width auto via env (OTTER_TERM_COLS/COLUMNS) with sane fallback.
+///// Maus: ASCII-only; trims/snips messages; ratio parser “[n/m]” and plain “68%”.
 ///// Datei: rust/otter_proc/src/runner/runner_progress.rs
 
 use std::time::{Duration, Instant};
 
-use crate::runner::runner_term::{term_cols, print_ephemeral, CYA, GRN, RESET};
+use crate::runner::runner_term::print_ephemeral;
+use crate::runner::runner_term::term_cols;
 
+// Public state carried by runner.rs
 pub struct ProgressState {
     pub start: Instant,
     pub last_tick: Instant,
-    pub spinner_idx: usize,
+    pub last_print_len: usize,
+    pub runtime_phase: String,
     pub last_snippet: String,
     pub best_builder_pct: Option<u32>,
-    pub runtime_phase: String, // "proc" | "configure" | "build"
+    spinner_idx: usize,
 }
+
 impl ProgressState {
     pub fn new(phase: &str) -> Self {
+        let now = Instant::now();
         Self {
-            start: Instant::now(),
-            last_tick: Instant::now(),
-            spinner_idx: 0,
+            start: now,
+            last_tick: now.checked_sub(Duration::from_millis(1000)).unwrap_or(now),
+            last_print_len: 0,
+            runtime_phase: phase.to_string(),
             last_snippet: String::new(),
             best_builder_pct: None,
-            runtime_phase: phase.to_string(),
+            spinner_idx: 0,
         }
     }
 }
 
+// --- helpers ------------------------------------------------------------------
+
 pub fn progress_enabled() -> bool {
-    // Default: enabled. Disable with OTTER_NO_PROGRESS=1/true.
-    !matches!(
-        std::env::var("OTTER_NO_PROGRESS").map(|v| v.to_ascii_lowercase()).as_deref(),
-        Ok("1") | Ok("true")
-    )
-}
-
-pub fn fmt_hms(mut secs: u64) -> String {
-    let h = secs / 3600; secs %= 3600;
-    let m = secs / 60;   let s = secs % 60;
-    if h > 0 { format!("{:02}:{:02}:{:02}", h, m, s) } else { format!("{:02}:{:02}", m, s) }
-}
-
-pub fn last_nonempty_snippet(buf: &str, max_len: usize) -> String {
-    let s = buf.trim_end_matches(&['\r','\n'][..]).trim();
-    if s.is_empty() { String::new() } else {
-        let mut t = s.replace('\t', " ");
-        if t.len() > max_len { t.truncate(max_len); }
-        t
+    // default on; disable with OTTER_NO_PROGRESS=1 / true
+    match std::env::var("OTTER_NO_PROGRESS") {
+        Ok(v) => {
+            let s = v.to_ascii_lowercase();
+            !(s == "1" || s == "true" || s == "yes")
+        }
+        Err(_) => true,
     }
 }
 
+pub fn due(p: &ProgressState) -> bool {
+    p.last_tick.elapsed() >= Duration::from_millis(200)
+}
+
+pub fn last_nonempty_snippet(s: &str, max_len: usize) -> String {
+    let t = s.trim();
+    if t.is_empty() { return String::new(); }
+    let mut snip = t.replace('\t', " ");
+    snip = snip.split_whitespace().collect::<Vec<_>>().join(" ");
+    if snip.len() > max_len { snip.truncate(max_len); }
+    snip
+}
+
 pub fn parse_percent(line: &str) -> Option<u32> {
+    // find "... 68% ..." anywhere
     if let Some(pos) = line.find('%') {
         let left = &line[..pos];
         let digits: String = left.chars().rev().take_while(|c| c.is_ascii_digit()).collect();
@@ -62,117 +72,98 @@ pub fn parse_percent(line: &str) -> Option<u32> {
     None
 }
 
-/// Parse a ratio like “[17/45]” anywhere in the line → percent.
 pub fn parse_ratio_percent(line: &str) -> Option<u32> {
+    // matches e.g. "[17/45]" or "17/45" (loose)
     let bytes = line.as_bytes();
-    let mut i = 0usize;
-    while i + 3 < bytes.len() {
-        if bytes[i] == b'[' {
-            // read numerator
-            let mut j = i + 1;
-            let mut num: u64 = 0;
-            let mut had_num = false;
-            while j < bytes.len() && bytes[j].is_ascii_digit() {
-                had_num = true;
-                num = num * 10 + (bytes[j] - b'0') as u64;
-                j += 1;
-            }
-            if had_num && j < bytes.len() && bytes[j] == b'/' {
-                j += 1;
-                // read denominator
-                let mut den: u64 = 0;
-                let mut had_den = false;
-                while j < bytes.len() && bytes[j].is_ascii_digit() {
-                    had_den = true;
-                    den = den * 10 + (bytes[j] - b'0') as u64;
-                    j += 1;
-                }
-                if had_den && den > 0 {
-                    let pct = ((num as f64 / den as f64) * 100.0).floor() as i64;
-                    let pct = pct.clamp(0, 100) as u32;
-                    return Some(pct);
-                }
-            }
+    let mut num = String::new();
+    let mut den = String::new();
+    let mut in_num = false;
+    let mut in_den = false;
+    for &b in bytes {
+        let c = b as char;
+        if !in_num && c.is_ascii_digit() {
+            in_num = true;
+            num.push(c);
+        } else if in_num && !in_den && c.is_ascii_digit() {
+            num.push(c);
+        } else if in_num && !in_den && c == '/' {
+            in_den = true;
+        } else if in_den && c.is_ascii_digit() {
+            den.push(c);
+        } else if in_den {
+            break;
         }
-        i += 1;
     }
-    None
+    if num.is_empty() || den.is_empty() { return None; }
+    let n = num.parse::<u32>().ok()?;
+    let d = den.parse::<u32>().ok()?;
+    if d == 0 { return None; }
+    let pct = ((n as f64 / d as f64) * 100.0).floor() as u32;
+    if pct <= 100 { Some(pct) } else { Some(100) }
 }
 
-/// Compose the progress line and print it ephemerally.
-pub fn render_and_print(state: &mut ProgressState, phase_for_display: &str, predicted_ms: u128) {
-    let elapsed_ms = state.start.elapsed().as_millis() as u128;
+fn fmt_hms(mut secs: u64) -> String {
+    let h = secs / 3600; secs %= 3600;
+    let m = secs / 60;   let s = secs % 60;
+    if h > 0 { format!("{:02}:{:02}:{:02}", h, m, s) } else { format!("{:02}:{:02}", m, s) }
+}
 
-    // time-based pct (capped to 99% until finish)
+fn bar_string(cols: usize, pct: Option<u32>) -> String {
+    let width = cols.min(40).max(10);
+    let p = pct.unwrap_or(0).min(100);
+    let filled = ((p as usize * width) / 100).min(width);
+    let mut s = String::with_capacity(width + 2);
+    s.push('[');
+    for i in 0..width {
+        if i < filled { s.push('='); } else { s.push('-'); }
+    }
+    s.push(']');
+    s
+}
+
+fn spinner_char(idx: usize) -> char {
+    ['|','/','-','\\'][idx % 4]
+}
+
+pub fn render_and_print(p: &mut ProgressState, predicted_ms: u128) {
+    p.last_tick = Instant::now();
+
+    let elapsed_ms = p.start.elapsed().as_millis() as u128;
     let time_pct = if predicted_ms > 0 {
-        let mut p = ((elapsed_ms as f64 / predicted_ms as f64) * 100.0).floor() as u32;
-        if p > 99 { p = 99; }
-        Some(p)
+        let mut v = ((elapsed_ms as f64 / predicted_ms as f64) * 100.0).floor() as u32;
+        if v > 99 { v = 99; } // never claim 100% before done
+        Some(v)
     } else { None };
 
-    let raw_pct = match (state.best_builder_pct, time_pct) {
+    let pct = match (p.best_builder_pct, time_pct) {
         (Some(b), Some(t)) => Some(b.max(t)),
         (Some(b), None)    => Some(b),
         (None,    Some(t)) => Some(t),
         (None,    None)    => None,
     };
 
-    let cols = term_cols().max(40);
-    let spinner = ['|','/','-','\\'];
-    let spin = spinner[state.spinner_idx % spinner.len()];
-    state.spinner_idx = (state.spinner_idx + 1) % spinner.len();
+    let cols = term_cols();
+    let spin = spinner_char(p.spinner_idx);
+    p.spinner_idx = (p.spinner_idx + 1) % 4;
 
-    let elapsed = fmt_hms((elapsed_ms/1000) as u64);
-    let pred_s  = if predicted_ms > 0 { (predicted_ms/1000) as u64 } else { 0 };
+    let elapsed = fmt_hms((elapsed_ms / 1000) as u64);
+    let eta = if predicted_ms > 0 && elapsed_ms < predicted_ms {
+        let remain = ((predicted_ms - elapsed_ms) / 1000) as u64;
+        fmt_hms(remain)
+    } else { "--:--".into() };
 
-    let pct_str = raw_pct.map(|v| format!("{:>3}%", v)).unwrap_or_else(|| "---%".into());
+    let pct_str = pct.map(|v| format!("{:>3}%", v)).unwrap_or("---%".into());
+    let bar = bar_string((cols / 3).max(10), pct);
+    let pred_s = if predicted_ms > 0 { (predicted_ms/1000) as u64 } else { 0 };
 
-    // Prefix without bar.
-    let prefix = format!("[PROG]  [{}] {}{}{} {}  pred={}s  {} ",
-        phase_for_display.to_ascii_uppercase(),
-        CYA, spin, RESET,
-        elapsed, pred_s, pct_str
-    );
+    // Compose line
+    let left = format!("[PROG] [{}] {} {}  eta={}  pred={}s  {}", p.runtime_phase.to_ascii_uppercase(), spin, elapsed, eta, pred_s, pct_str);
+    let mid  = format!(" {}", bar);
+    let mut room = cols.saturating_sub(left.len() + mid.len() + 1);
+    if room < 8 { room = 8; }
+    let mut snip = p.last_snippet.clone();
+    if snip.len() > room { snip.truncate(room); }
 
-    // Bar budget.
-    let mut bar_cols = cols.saturating_sub(prefix.len() + 2);
-    if bar_cols < 10 { bar_cols = 10; }
-    if bar_cols > 60 { bar_cols = 60; }
-
-    let fill = raw_pct.unwrap_or(0);
-    let filled = (fill as usize * bar_cols) / 100;
-    let mut s = String::with_capacity(bar_cols + 2);
-    s.push('[');
-    if filled > 0 {
-        s.push_str(GRN);
-        s.push_str(&"=".repeat(filled));
-        s.push_str(RESET);
-    }
-    if filled < bar_cols {
-        s.push_str(&"-".repeat(bar_cols - filled));
-    }
-    s.push(']');
-
-    // Optional snippet tail if space remains.
-    let mut tail = String::new();
-    if !state.last_snippet.is_empty() {
-        let used = prefix.len() + s.len() + 1;
-        if cols > used {
-            let max_tail = cols - used;
-            let mut snip = state.last_snippet.clone();
-            if snip.len() > max_tail { snip.truncate(max_tail); }
-            tail.push(' ');
-            tail.push_str(&snip);
-        }
-    }
-
-    let line = format!("{}{}{}", prefix, s, tail);
-    print_ephemeral(&line);
-
-    state.last_tick = Instant::now();
-}
-
-/// 200 ms throttle reached?
-pub fn due(state: &ProgressState) -> bool {
-    state.last_tick.elapsed() >= Duration::from_millis(200)
+    let line = format!("{}{} {}", left, mid, snip);
+    p.last_print_len = print_ephemeral(&line, p.last_print_len);
 }

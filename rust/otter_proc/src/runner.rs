@@ -1,6 +1,6 @@
-///// Otter: Process runner with live progress (ratio+time), metrics-seeded ETA, colored tags.
-///// Schneefuchs: No external crates; Windows+POSIX; prints durable logs & smooth 200ms animation.
-///// Maus: Parses both “68%” and “[17/45]”; merges with predicted; ASCII-only; safe saves to .build_metrics.
+///// Otter: Process runner with live progress (spinner, ETA, %, ratio merge); pretty tags.
+///// Schneefuchs: No external crates; trims blank lines; smooth 200 ms animation; saves metrics safely.
+///// Maus: Colors for source ([RUST]/[PS]); ASCII bar; parses both “68%” and “[17/45]”; Windows+POSIX.
 ///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;
@@ -21,7 +21,7 @@ use runner_progress::{
     ProgressState, render_and_print, parse_percent, parse_ratio_percent,
     last_nonempty_snippet, progress_enabled, due
 };
-use runner_term::{enable_ansi, out_err, out_info, out_warn, end_ephemeral};
+use runner_term::{enable_ansi, out_err, out_info, out_warn, end_ephemeral, sanitize_line};
 
 #[derive(Default)]
 pub struct RunResult { pub code: i32 }
@@ -36,11 +36,12 @@ struct PhaseDetect {
 fn detect_phase_and_sig(exe: &str, args: &[String]) -> PhaseDetect {
     let mut phase = "proc".to_string();
 
-    // Try to infer build vs configure
+    // Heuristic: try to infer build vs configure
     let mut is_build = false;
     for a in args {
         if a.eq_ignore_ascii_case("build") || a.contains("cmake --build") {
             is_build = true;
+            break;
         }
     }
     if exe.eq_ignore_ascii_case("cmake") && !is_build { phase = "configure".to_string(); }
@@ -53,18 +54,14 @@ fn detect_phase_and_sig(exe: &str, args: &[String]) -> PhaseDetect {
         format!("cmd:{}", phase)
     } else {
         let mut short = String::new();
-        for a in args.iter().take(4) { if !short.is_empty() { short.push(' '); } short.push_str(a); }
+        for a in args.iter().take(4) {
+            if !short.is_empty() { short.push(' '); }
+            short.push_str(a);
+        }
         format!("{}:{}", exe, short)
     };
 
     PhaseDetect { phase, sig }
-}
-
-// Avoid simultaneous &mut and & borrows of pstate (E0502).
-#[inline]
-fn render_now(pstate: &mut ProgressState, predicted_ms: u128) {
-    let phase = pstate.runtime_phase.clone();
-    render_and_print(pstate, &phase, predicted_ms);
 }
 
 pub fn run_streamed_with_env(
@@ -84,14 +81,21 @@ pub fn run_streamed_with_env(
     let (mut metrics, metrics_file, seed_src) = BuildMetrics::load_or_seed(&workdir);
     if !METRICS_PRINTED_ONCE.swap(true, Ordering::SeqCst) {
         out_info("RUST", &format!("metrics={}", metrics_file.display()));
-        if let Some(src) = seed_src { out_info("RUST", &format!("metrics-seeded-from={}", src.display())); }
+        if let Some(src) = seed_src {
+            out_info("RUST", &format!("metrics-seeded-from={}", src.display()));
+        }
     }
 
     // Spawn
     let mut cmd = Command::new(exe);
-    cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if let Some(d) = cwd { cmd.current_dir(d); }
-    if let Some(envmap) = env_overlay { for (k,v) in envmap.iter() { cmd.env(k, v); } }
+    if let Some(envmap) = env_overlay {
+        for (k,v) in envmap.iter() { cmd.env(k, v); }
+    }
 
     let phase_sig = detect_phase_and_sig(exe, args);
     out_info("RUST", &format!("RUN exe=\"{}\" phase={} sig={}", exe, phase_sig.phase, phase_sig.sig));
@@ -127,28 +131,29 @@ pub fn run_streamed_with_env(
         out_buf.clear();
         if let Ok(n) = out_reader.read_line(&mut out_buf) {
             if n > 0 {
-                // Update progress knowledge from the line
-                if let Some(p) = parse_percent(&out_buf).or_else(|| parse_ratio_percent(&out_buf)) {
-                    pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
-                    // Heuristic: ratio -> build
-                    if parse_ratio_percent(&out_buf).is_some() { pstate.runtime_phase = "build".into(); }
-                }
-                let snip = last_nonempty_snippet(&out_buf, 120);
-                if !snip.is_empty() { pstate.last_snippet = snip; }
+                let cleaned = sanitize_line(&out_buf);
+                if !cleaned.is_empty() {
+                    // Update progress knowledge from the line
+                    if let Some(p) = parse_percent(&cleaned).or_else(|| parse_ratio_percent(&cleaned)) {
+                        pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
+                        if parse_ratio_percent(&cleaned).is_some() { pstate.runtime_phase = "build".into(); }
+                    }
+                    let snip = last_nonempty_snippet(&cleaned, 120);
+                    if !snip.is_empty() { pstate.last_snippet = snip; }
 
-                // Durable log line (clear ephemeral before)
-                end_ephemeral();
-                match classify_line(&out_buf) {
-                    Sev::Err  => out_err (tag, &out_buf),
-                    Sev::Warn => out_warn(tag, &out_buf),
-                    Sev::Info => out_info(tag, &out_buf),
+                    // Durable log line (clear ephemeral before)
+                    end_ephemeral();
+                    match classify_line(&cleaned) {
+                        Sev::Err  => out_err (tag, &cleaned),
+                        Sev::Warn => out_warn(tag, &cleaned),
+                        Sev::Info => out_info(tag, &cleaned),
+                    }
                 }
 
                 // Keep animation alive even while lines stream
                 if progress_enabled() && due(&pstate) {
-                    render_now(&mut pstate, predicted_ms);
+                    render_and_print(&mut pstate, predicted_ms);
                 }
-
                 progressed = true;
             }
         }
@@ -156,31 +161,33 @@ pub fn run_streamed_with_env(
         err_buf.clear();
         if let Ok(n) = err_reader.read_line(&mut err_buf) {
             if n > 0 {
-                if let Some(p) = parse_percent(&err_buf).or_else(|| parse_ratio_percent(&err_buf)) {
-                    pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
-                    if parse_ratio_percent(&err_buf).is_some() { pstate.runtime_phase = "build".into(); }
-                }
-                let snip = last_nonempty_snippet(&err_buf, 120);
-                if !snip.is_empty() { pstate.last_snippet = snip; }
+                let cleaned = sanitize_line(&err_buf);
+                if !cleaned.is_empty() {
+                    if let Some(p) = parse_percent(&cleaned).or_else(|| parse_ratio_percent(&cleaned)) {
+                        pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
+                        if parse_ratio_percent(&cleaned).is_some() { pstate.runtime_phase = "build".into(); }
+                    }
+                    let snip = last_nonempty_snippet(&cleaned, 120);
+                    if !snip.is_empty() { pstate.last_snippet = snip; }
 
-                end_ephemeral();
-                match classify_line(&err_buf) {
-                    Sev::Err  => out_err (tag, &err_buf),
-                    Sev::Warn => out_warn(tag, &err_buf),
-                    Sev::Info => out_info(tag, &err_buf),
+                    end_ephemeral();
+                    match classify_line(&cleaned) {
+                        Sev::Err  => out_err (tag, &cleaned),
+                        Sev::Warn => out_warn(tag, &cleaned),
+                        Sev::Info => out_info(tag, &cleaned),
+                    }
                 }
 
                 if progress_enabled() && due(&pstate) {
-                    render_now(&mut pstate, predicted_ms);
+                    render_and_print(&mut pstate, predicted_ms);
                 }
-
                 progressed = true;
             }
         }
 
         if !progressed {
             if progress_enabled() && due(&pstate) {
-                render_now(&mut pstate, predicted_ms);
+                render_and_print(&mut pstate, predicted_ms);
             }
 
             match child.try_wait() {

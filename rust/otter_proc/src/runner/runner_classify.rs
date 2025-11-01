@@ -1,6 +1,6 @@
-///// Otter: Klassifizierer für Output-Zeilen (Info/Warn/Err) mit einfacher Heuristik.
-///// Schneefuchs: ASCII-only; bewusst konservativ, um False-Positives zu vermeiden.
-///// Maus: Minimale API: Sev + classify_line(&str) -> Sev.
+///// Otter: Classify child lines into Info/Warn/Err for colored durable logs.
+///// Schneefuchs: Simple heuristics; case-insensitive; avoids false-positives.
+///// Maus: Prefer “error:”/“warning” tokens; keeps ASCII; minimal branching.
 ///// Datei: rust/otter_proc/src/runner/runner_classify.rs
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -8,9 +8,13 @@ pub enum Sev { Info, Warn, Err }
 
 fn is_error_line(line: &str) -> bool {
     let l = line.to_ascii_lowercase();
-    l.contains("fatal error") || l.contains("error:")
-        || l.contains(" cmake error") || l.starts_with("error")
+    l.contains("fatal error")
+        || l.contains(" cmake error")
+        || l.contains("error:")
+        || l.starts_with("error")
         || l.contains("] error")
+        || l.contains("build failed")
+        || l.contains("build failed.")
 }
 
 fn is_warning_line(line: &str) -> bool {
