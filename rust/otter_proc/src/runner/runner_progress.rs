@@ -162,7 +162,7 @@ pub fn render_and_print(p: &mut ProgressState, predicted_ms: u128) {
         -1.0
     };
 
-    // 3) Spinner (Unicode default; ASCII-Fallback via OTTER_ASCII=1/true)
+    // 3) Spinner-Frames (Unicode/ASCII)
     let ascii = matches!(env::var("OTTER_ASCII"), Ok(ref v) if v == "1" || v.eq_ignore_ascii_case("true"));
     const SPIN_UNI: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     const SPIN_ASCII: &[char] = &['|', '/', '-', '\\'];
@@ -171,40 +171,101 @@ pub fn render_and_print(p: &mut ProgressState, predicted_ms: u128) {
     } else {
         (p.spinner_ix + 1) % SPIN_UNI.len()
     };
-    let spin = if ascii { SPIN_ASCII[p.spinner_ix] } else { SPIN_UNI[p.spinner_ix] };
+    let spin_char = if ascii { SPIN_ASCII[p.spinner_ix] } else { SPIN_UNI[p.spinner_ix] };
 
-    // 4) Bar (ASCII-Fallback: '#', sonst '█')
+    // ----- Layout zuerst UNFARBIG berechnen -----
     let cols = term_cols();
     let pct100 = (pct * 100.0).round() as i32;
-    let left = format!("[{}] {} {:>3}%", p.runtime_phase, spin, pct100);
+
+    let phase_plain = format!("[{}]", p.runtime_phase);
+    let left_plain = format!("{phase_plain} {} {:>3}%", spin_char, pct100);
+
     let mid = " | ";
-    let eta_s = if eta >= 0.0 {
+    let eta_plain = if eta >= 0.0 {
         format!("ETA {:>4.0}s", eta)
     } else {
         "ETA  …s".to_string()
     };
 
-    let bar_room = cols.saturating_sub(left.len() + mid.len() + eta_s.len() + 2).clamp(10, 120);
+    // Barbreite dynamisch: Platz nach links/mid/eta + 2 Klammern
+    let bar_room = cols
+        .saturating_sub(left_plain.len() + mid.len() + eta_plain.len() + 2)
+        .clamp(10, 120);
     let filled = ((bar_room as f32) * pct).round() as usize;
     let rest = bar_room.saturating_sub(filled);
 
     let fill_char = if ascii { '#' } else { '█' };
-    let bar = format!("[{}{}]", std::iter::repeat(fill_char).take(filled).collect::<String>(),
-                                std::iter::repeat(' ').take(rest).collect::<String>());
+    let bar_plain = format!(
+        "[{}{}]",
+        std::iter::repeat(fill_char).take(filled).collect::<String>(),
+        std::iter::repeat(' ').take(rest).collect::<String>()
+    );
 
-    // 5) Letztes Snippet ggf. rechts anhängen, wenn noch Platz bleibt
-    let mut line = format!("{left}{mid}{eta_s} {bar}");
-    let remain = cols.saturating_sub(line.len());
+    // Plain-Line (für Breitenbudget & Snippet-Kürzung)
+    let line_plain = format!("{left_plain}{mid}{eta_plain} {bar_plain}");
+    let remain = cols.saturating_sub(line_plain.len());
+
+    // Snippet vorbereiten (plain, rechtsbündig gekürzt)
+    let mut snip = String::new();
     if remain > 4 && !p.last_snippet.is_empty() {
-        let mut snip = p
-            .last_snippet
-            .replace('\r', "")
-            .replace('\n', " ");
-        if snip.len() > remain {
-            snip = format!("…{}", &snip[snip.len() - (remain - 1)..]);
+        let mut t = p.last_snippet.replace('\r', "").replace('\n', " ");
+        if t.len() > remain {
+            t = format!("…{}", &t[t.len() - (remain - 1)..]);
         }
+        snip = t;
+    }
+
+    // ----- Ab hier Farben anwenden (L1 + L2 + L3) -----
+    let colors_on = runner_term::color_enabled();
+
+    // Phase-Tint (L2): configure=blau, build=grün, proc=neutral
+    let phase_col = match p.runtime_phase.as_str() {
+        "configure" => "\x1b[34m", // BLUE
+        "build"     => "\x1b[32m", // GREEN
+        _           => "",
+    };
+    let phase_colored = if colors_on && !phase_col.is_empty() {
+        format!("{phase_col}{phase_plain}\x1b[0m")
+    } else {
+        phase_plain
+    };
+
+    // Bar-Farbe (L2): 0–33% rot, 34–66% gelb, 67–99% grün
+    let bar_col = if pct < 0.34 {
+        "\x1b[31m" // RED
+    } else if pct < 0.67 {
+        "\x1b[33m" // YELLOW
+    } else {
+        "\x1b[32m" // GREEN
+    };
+    let bar_colored = if colors_on {
+        format!("{bar_col}{bar_plain}\x1b[0m")
+    } else {
+        bar_plain
+    };
+
+    // Spinner-Farbe (L3): wie Bar-Farbe
+    let spin_str_colored = if colors_on {
+        format!("{bar_col}{spin_char}\x1b[0m")
+    } else {
+        spin_char.to_string()
+    };
+
+    // Linke Seite neu zusammensetzen (Phase getintet, Spinner farbig)
+    let left_colored = format!("{phase_colored} {spin_str_colored} {:>3}%", pct100);
+
+    // Snippet dezent grau (L3)
+    let snip_colored = if colors_on && !snip.is_empty() {
+        format!("\x1b[90m{snip}\x1b[0m")
+    } else {
+        snip
+    };
+
+    // Finale farbige Zeile (Layout basiert auf den plain-Längen)
+    let mut line = format!("{left_colored}{mid}{eta_plain} {bar_colored}");
+    if !snip_colored.is_empty() {
         line.push(' ');
-        line.push_str(&snip);
+        line.push_str(&snip_colored);
     }
 
     // Takt zurücksetzen und ausgeben

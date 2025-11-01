@@ -41,30 +41,58 @@ pub fn enable_ansi() {
     }
 }
 
-fn tag(s: &str) -> String {
-    match s {
-        "PS"   => "[PS]".to_string(),
-        "RUST" => "[RUST]".to_string(),
-        "PROC" => "[PROC]".to_string(),
-        other  => format!("[{}]", other),
-    }
+/// Farben global aktiv?
+/// OTTER_COLOR=0 -> aus; alles andere -> an (Default).
+pub fn color_enabled() -> bool {
+    !matches!(env::var("OTTER_COLOR"), Ok(v) if v.trim() == "0")
+}
+
+// ANSI Codes (nur verwenden, wenn color_enabled()).
+const RESET: &str = "\x1b[0m";
+const RED: &str = "\x1b[31m";
+const YELLOW: &str = "\x1b[33m";
+const GREEN: &str = "\x1b[32m";
+const BLUE: &str = "\x1b[34m";
+const MAGENTA: &str = "\x1b[35m";
+const CYAN: &str = "\x1b[36m";
+const BRIGHT_BLACK: &str = "\x1b[90m";
+
+fn paint(s: &str, code: &str) -> String {
+    if color_enabled() { format!("{code}{s}{RESET}") } else { s.to_string() }
+}
+
+fn tag_colored(s: &str) -> String {
+    // L1: Tag-Farben — jetzt mit eigenem String, keine temporären Borrows
+    let (txt_owned, col) = match s {
+        "PS"   => ("[PS]".to_string(), MAGENTA),
+        "RUST" => ("[RUST]".to_string(), CYAN),
+        "PROC" => ("[PROC]".to_string(), BLUE),
+        other  => (format!("[{}]", other), CYAN),
+    };
+    paint(&txt_owned, col)
 }
 
 pub fn out_info(src: &str, msg: &str) {
     let _ = end_ephemeral();
-    let _ = writeln!(io::stdout(), "{} {}", tag(src), msg.trim_end_matches('\n'));
+    let t = tag_colored(src);
+    let m = msg.trim_end_matches('\n');
+    let _ = writeln!(io::stdout(), "{} {}", t, m);
     let _ = io::stdout().flush();
 }
 
 pub fn out_warn(src: &str, msg: &str) {
     let _ = end_ephemeral();
-    let _ = writeln!(io::stdout(), "{} {}", tag(src), msg.trim_end_matches('\n'));
+    let t = tag_colored(src);
+    let m = paint(msg.trim_end_matches('\n'), YELLOW);
+    let _ = writeln!(io::stdout(), "{} {}", t, m);
     let _ = io::stdout().flush();
 }
 
 pub fn out_err(src: &str, msg: &str) {
     let _ = end_ephemeral();
-    let _ = writeln!(io::stdout(), "{} {}", tag(src), msg.trim_end_matches('\n'));
+    let t = tag_colored(src);
+    let m = paint(msg.trim_end_matches('\n'), RED);
+    let _ = writeln!(io::stdout(), "{} {}", t, m);
     let _ = io::stdout().flush();
 }
 
