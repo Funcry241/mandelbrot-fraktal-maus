@@ -82,6 +82,128 @@ fn trailer_enabled() -> bool {
     }
 }
 
+/// Aggregiert Artefakt- & Git-Infos aus Kindprozess-Logs für den hübschen Trailer.
+#[derive(Default)]
+struct TrailerAgg {
+    artifact: Option<String>,
+    git_remote: Option<String>,
+    git_branch: Option<String>,
+    git_commit_short: Option<String>,
+    git_pushed_ok: bool,
+    git_rules_bypassed: bool,
+}
+impl TrailerAgg {
+    fn feed(&mut self, line: &str) -> bool /* suppress printing? */ {
+        let l = line.trim();
+
+        // Artefakte
+        if let Some(idx) = l.find("[RUNNER] artifact:") {
+            // Format: "[RUNNER] artifact: C:\...\mandelbrot_otterdream.exe"
+            if let Some(path) = l.get(idx + 19..).map(|s| s.trim()) {
+                if !path.is_empty() { self.artifact = Some(path.to_string()); }
+            }
+            return true; // leise sammeln, nicht doppelt ausgeben
+        }
+        if l.contains("[RUNNER] artifact-candidate:") {
+            return true; // Rauschen unterdrücken
+        }
+
+        // AUTOGIT Start/Kommandos-Rauschen
+        if l.starts_with("[AUTOGIT] start")
+            || l.starts_with("[AUTOGIT][RUN] git")
+            || l.starts_with("Enumerating objects:")
+            || l.starts_with("Counting objects:")
+            || l.starts_with("Delta compression")
+            || l.starts_with("Compressing objects:")
+            || l.starts_with("Writing objects:")
+            || l.starts_with("Total ")
+            || l.starts_with("remote: Resolving deltas:")
+        {
+            return true;
+        }
+
+        // Bypassed/Protected-Branch-Hinweise merken, aber nicht spammen
+        if l.starts_with("remote: Bypassed rule violations")
+            || l.contains("Cannot update this protected ref")
+        {
+            self.git_rules_bypassed = true;
+            return true;
+        }
+
+        // Push-Ziel / Remote (z. B. "To https://...  main -> main")
+        if l.starts_with("To ") {
+            self.git_pushed_ok = true;
+            // branch heuristisch ziehen
+            if let Some(pos) = l.rfind("->") {
+                let tail = &l[pos+2..].trim();
+                if !tail.is_empty() { self.git_branch = Some(tail.to_string()); }
+            }
+            // remote
+            if let Some(space) = l.find(' ') {
+                self.git_remote = Some(l[3..space].trim().to_string());
+            }
+            return true;
+        }
+
+        // Commit-Zeile: "[main ba51fed] chore: update"
+        if l.starts_with("[main ") && l.contains(']') {
+            // Branch + short SHA
+            if let Some(end) = l.find(']') {
+                let body = &l[1..end]; // main ba51fed
+                let mut it = body.split_whitespace();
+                self.git_branch = it.next().map(|s| s.to_string());
+                self.git_commit_short = it.next().map(|s| s.to_string());
+            }
+            return false; // darf sichtbar bleiben, ist oft nützlich
+        }
+
+        // Abschluss von AUTOGIT
+        if l.starts_with("[AUTOGIT] done status=OK") {
+            self.git_pushed_ok = true;
+            return true;
+        }
+
+        // branch 'main' set up to track 'origin/main'.
+        if l.starts_with("branch '") && l.contains(" set up to track ") {
+            // branch extrahieren
+            let name = l.trim_start_matches("branch '")
+                .split('\'').next().unwrap_or("").trim();
+            if !name.is_empty() { self.git_branch = Some(name.to_string()); }
+            return true;
+        }
+
+        false
+    }
+
+    fn build_extra(&self) -> Option<String> {
+        let mut parts: Vec<String> = Vec::new();
+
+        if let Some(p) = &self.artifact {
+            let base = Path::new(p).file_name()
+                .and_then(|o| o.to_str()).unwrap_or(p);
+            parts.push(format!("artifact={}", base));
+        }
+
+        if self.git_pushed_ok {
+            let mut s = String::from("git: pushed ✓");
+            if let Some(b) = &self.git_branch {
+                s.push(' ');
+                s.push_str(b);
+            }
+            if let Some(c) = &self.git_commit_short {
+                s.push_str(" @");
+                s.push_str(c);
+            }
+            if self.git_rules_bypassed {
+                s.push_str(" (rules)");
+            }
+            parts.push(s);
+        }
+
+        if parts.is_empty() { None } else { Some(parts.join(" • ")) }
+    }
+}
+
 pub fn run_streamed_with_env(
     exe: &str,
     args: &[String],
@@ -147,6 +269,9 @@ pub fn run_streamed_with_env(
     // Progress
     let mut pstate = ProgressState::new(&phase_sig.phase);
 
+    // Trailer-Aggregator
+    let mut trailer = TrailerAgg::default();
+
     // Tag for child streams in logs
     let tag = if exe.eq_ignore_ascii_case("cmd") { "PS" } else { "PROC" };
 
@@ -183,9 +308,15 @@ pub fn run_streamed_with_env(
     drop(tx); // main thread keeps only rx
 
     // Helper: processes one cleaned line (update progress + durable log)
-    fn handle_line(pstate: &mut ProgressState, cleaned: &str, tag: &str) {
+    fn handle_line(pstate: &mut ProgressState, cleaned: &str, tag: &str, trailer: &mut TrailerAgg) {
         if cleaned.is_empty() { return; }
 
+        // Trailers sammeln / Rauschen ggf. unterdrücken
+        if trailer.feed(cleaned) {
+            return; // nichts ausgeben
+        }
+
+        // Progress aus den Inhalten schätzen
         let ratio = parse_ratio_percent(cleaned);
         let pct = parse_percent(cleaned).or(ratio);
 
@@ -226,7 +357,7 @@ pub fn run_streamed_with_env(
                 Ok(raw) => {
                     let cleaned = sanitize_line(&raw);
                     if !cleaned.is_empty() {
-                        handle_line(&mut pstate, &cleaned, tag);
+                        handle_line(&mut pstate, &cleaned, tag, &mut trailer);
                     }
                     drained_any = true;
                 }
@@ -264,11 +395,12 @@ pub fn run_streamed_with_env(
                 metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
                 let _ = metrics.save(&workdir);
 
-                // Hübsches Ende: Trailer ODER (falls deaktiviert) die alte „RUN done“-Zeile
+                // Hübsches Ende: farbiger Trailer + kompakte Extras
                 if trailer_enabled() {
                     let secs = (elapsed_ms as f32) / 1000.0;
                     let ok = code == 0;
-                    out_trailer_min(ok, code, secs, None);
+                    let extra = trailer.build_extra();
+                    out_trailer_min(ok, code, secs, extra.as_deref());
                 } else {
                     out_info("RUST", &format!(
                         "RUN phase={} done (elapsed={}s)",
