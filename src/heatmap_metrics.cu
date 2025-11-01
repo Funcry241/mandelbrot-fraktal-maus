@@ -1,5 +1,5 @@
 ///// Datei: src/heatmap_metrics.cu
-///// Otter: GPU heatmap metrics — boundary score + stddev contrast (compact).
+///// Otter: GPU heatmap metrics - boundary score + stddev contrast (compact).
 ///// Schneefuchs: No GL; numeric rc logs; slab device buffers; deterministic behavior.
 ///// Maus: One kernel launch; immediate stream sync for same-frame use.
 

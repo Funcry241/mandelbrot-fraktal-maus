@@ -1,4 +1,4 @@
-///// Otter: Quiet & deterministic — Root-fix: re-center UVs to texel centers via textureSize.
+///// Otter: Quiet & deterministic - Root-fix: re-center UVs to texel centers via textureSize.
 ///// Schneefuchs: Koordinaten sauber (Panel oben-links, Texture unten-links); keine Heuristik.
 ///// Maus: Einzeilige Freude; hübsches Gold; Kreuz bleibt in Panel-Pixeln (kein Extra-Flip).
 ///// Flip: uv.y = 1.0 - uv.y (Orientation); danach Half-Texel-Recenter in X und Y.

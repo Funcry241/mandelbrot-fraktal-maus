@@ -30,7 +30,7 @@ namespace LuchsLogger {
     static cudaStream_t s_logStream = nullptr;
 
     // =========================================================================
-    // Device logging — reserve, then copy (no varargs on device)
+    // Device logging - reserve, then copy (no varargs on device)
     // =========================================================================
 
     __device__ void deviceLog(const char* file, int line, const char* msg) {
@@ -84,7 +84,7 @@ namespace LuchsLogger {
 
         // Bounds check and copy
         if (idx >= (unsigned long long)LOG_BUFFER_SIZE) {
-            // reservation beyond buffer — drop silently
+            // reservation beyond buffer - drop silently
             return;
         }
         unsigned long long maxCopy = (unsigned long long)LOG_BUFFER_SIZE - idx;

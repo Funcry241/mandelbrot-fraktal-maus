@@ -299,7 +299,7 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx, float& newO
                     state, state.renderStream);
 }
 
-// ---- Convenience overload (double offsets) — hohe Präzision, KEINE Zoom-Logik ----
+// ---- Convenience overload (double offsets) - hohe Präzision, KEINE Zoom-Logik ----
 void renderCudaFrame(RendererState& state, const FrameContext& fctx,
                      double& newOffsetX, double& newOffsetY)
 {
@@ -348,7 +348,7 @@ void renderCudaFrame(RendererState& state, const FrameContext& fctx,
         state.ringUse[state.pboIndex]++;
     }
 
-    // 2) capybara render (iterations) — *double* Offsets aus RendererState
+    // 2) capybara render (iterations) - *double* Offsets aus RendererState
     const double cx = (double)state.center.x;
     const double cy = (double)state.center.y;
 

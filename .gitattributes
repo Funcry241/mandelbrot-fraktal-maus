@@ -1,13 +1,13 @@
-# 🧠 Maus-Kommentar: Einheitliche Line Endings, saubere Diffs – Mandelbrot-Otterdream
-# 🦊 Schneefuchs: Spezifische Regeln kommen NACH allgemeinen; keine CRLF/LF-Warnflut.
-# 🦦 Otter: PowerShell/Batch bewusst CRLF, Quellcode strikt LF.
-
+##### Otter: Consistent EOLs; PowerShell/Batch as CRLF for Windows editors; code & docs as LF.
+##### Schneefuchs: Specific rules after general; avoid churn; no CRLF/LF warning flood.
+##### Maus: Clean diffs across OS; simple and explicit.
+##### Datei: .gitattributes
 # --------------------------------------------------------
-# Standardtextdateien: global LF als Default
+# Default text normalization: LF
 * text=auto eol=lf
 
 # --------------------------------------------------------
-# Quellcode – strikt Unix LF, unabhängig vom OS
+# Source code - force LF
 *.cpp     text eol=lf
 *.c       text eol=lf
 *.cu      text eol=lf
@@ -22,9 +22,12 @@
 *.cmake   text eol=lf
 CMakeLists.txt      text eol=lf
 CMakePresets.json   text eol=lf
+rust/**/*.rs        text eol=lf
+Cargo.toml          text eol=lf
+Cargo.lock          text eol=lf
 
 # --------------------------------------------------------
-# Batch-/Shell-/PowerShell – bewusst CRLF für bessere Win-Editor-Kompatibilität
+# Scripts - Windows-friendly CRLF for PS/Batch; LF for sh
 *.bat     text eol=crlf
 *.cmd     text eol=crlf
 *.ps1     text eol=crlf
@@ -33,7 +36,7 @@ CMakePresets.json   text eol=lf
 *.sh      text eol=lf
 
 # --------------------------------------------------------
-# Markdown / Doku / Konfig
+# Docs / config
 *.md      text eol=lf
 *.txt     text eol=lf
 LICENSE   text eol=lf
@@ -48,7 +51,7 @@ LICENSE   text eol=lf
 .vscode/*       text eol=lf
 
 # --------------------------------------------------------
-# (Optional, falls im Repo) Visual-Studio-Projektdateien – LF ist ok
+# (Optional) Visual Studio project files - LF to avoid churn
 *.sln     text eol=lf
 *.vcxproj text eol=lf
 *.vcxproj.filters text eol=lf
@@ -56,7 +59,7 @@ LICENSE   text eol=lf
 *.targets text eol=lf
 
 # --------------------------------------------------------
-# Binärformate – niemals als Text behandeln
+# Binary formats - never treated as text
 *.exe     -text
 *.dll     -text
 *.lib     -text

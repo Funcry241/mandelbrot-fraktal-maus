@@ -53,7 +53,7 @@ mindmap
 - `src/renderer_window.hpp`
 
 ### Frame Pipeline & Timing
-- *Single place* for per-frame control flow and timings — maps PBO → texture, draws base image, draws overlays, logs one fixed ASCII PERF line.
+- *Single place* for per-frame control flow and timings - maps PBO → texture, draws base image, draws overlays, logs one fixed ASCII PERF line.
 - Decides tile sizes, triggers zoom logic, maintains `FrameContext` as the authoritative per-frame data.
 - Owns ring-usage stats and periodic logs.
 

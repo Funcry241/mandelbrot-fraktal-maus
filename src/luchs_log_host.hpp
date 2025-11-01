@@ -22,7 +22,7 @@ namespace LuchsLogger {
 // Variadic convenience macro: captures call site file/line.
 #define LUCHS_LOG_HOST(...) ::LuchsLogger::logMessage(__FILE__, __LINE__, __VA_ARGS__)
 
-// CUDA error check — ASCII-only & throws, no stderr side-effects.
+// CUDA error check - ASCII-only & throws, no stderr side-effects.
 // Guarded to avoid redefinition if included multiple times.
 #ifndef CUDA_CHECK
 #define CUDA_CHECK(expr)                                                           \

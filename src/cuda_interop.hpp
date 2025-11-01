@@ -1,4 +1,4 @@
-///// Otter: Public CUDA interop API — single Capybara render path; no EC baggage; clean declarations.
+///// Otter: Public CUDA interop API - single Capybara render path; no EC baggage; clean declarations.
 ///// Schneefuchs: Headers & sources in sync; minimal includes; no GL in header; stable signatures.
 ///// Maus: Expose only what's needed by callers; heavy impl stays in .cu; ASCII-only logs live elsewhere.
 ///// Datei: src/cuda_interop.hpp

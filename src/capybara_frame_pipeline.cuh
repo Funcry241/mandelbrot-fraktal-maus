@@ -1,4 +1,4 @@
-///// Otter: Clean render-only API — no legacy EC params, no deprecated wrappers; zero host sync; optional done-event.
+///// Otter: Clean render-only API - no legacy EC params, no deprecated wrappers; zero host sync; optional done-event.
 ///// Schneefuchs: Single path (Capybara). Stable signature. Headers/sources stay in sync. ASCII-only logs elsewhere.
 ///// Maus: Call from cuda_interop via capy_render(...); downstream colorizer writes PBO; no compat layers left.
 ///// Datei: src/capybara_frame_pipeline.cuh

@@ -59,6 +59,20 @@
         "VCPKG_DEFAULT_BINARY_CACHE": "${sourceDir}/vcpkg_cache",
         "VCPKG_KEEP_ENV_VARS": "CUDA_PATH:PATH:INCLUDE:LIB"
       }
+    },
+    {
+      "name": "bootstrap",
+      "displayName": "Bootstrap (no vcpkg, no CUDA, no GL)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build_bootstrap",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_STANDARD": "23",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "OTTER_BOOTSTRAP": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -72,6 +86,12 @@
       "name": "linux-build",
       "displayName": "Build (Linux, GCC 13)",
       "configurePreset": "linux-gcc13",
+      "configuration": "Release"
+    },
+    {
+      "name": "bootstrap-build",
+      "displayName": "Build (Bootstrap)",
+      "configurePreset": "bootstrap",
       "configuration": "Release"
     }
   ]

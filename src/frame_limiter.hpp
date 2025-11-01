@@ -74,7 +74,7 @@ public:
             sleptMs += std::chrono::duration<double, std::milli>(after - before).count();
         }
 
-        // Fine spin — keeps jitter low without timeBeginPeriod.
+        // Fine spin - keeps jitter low without timeBeginPeriod.
         for (;;) {
             const auto n = clock::now();
             if (n >= _nextTick) break;

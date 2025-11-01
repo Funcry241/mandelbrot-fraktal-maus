@@ -1,4 +1,4 @@
-///// Otter: FrameContext V3 — feste Typen Vec2f/Vec2d (keine anonymen Structs) -> Zuweisungen kompiliert.
+///// Otter: FrameContext V3 - feste Typen Vec2f/Vec2d (keine anonymen Structs) -> Zuweisungen kompiliert.
 ///// Schneefuchs: /WX-kompatibel, ASCII-only; keine GL/CUDA-Includes im Header.
 ///// Maus: Backcompat-Felder (newOffset) wieder da; Double ist Quelle der Wahrheit. ***/
 ///// Datei: src/frame_context.hpp
@@ -20,7 +20,7 @@ struct FrameContext {
     // Compute-Tiling (Kernel-Raster)
     int   tileSize      = 0;
 
-    // Analysis-Tiling (Metrik-/Heatmap-Raster) — entkoppelt vom Compute-Raster.
+    // Analysis-Tiling (Metrik-/Heatmap-Raster) - entkoppelt vom Compute-Raster.
     // 0 => Fallback auf tileSize (gekoppelt).
     int   statsTileSize = 0;
 

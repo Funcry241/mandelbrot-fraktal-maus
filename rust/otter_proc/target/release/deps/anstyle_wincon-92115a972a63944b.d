@@ -1,0 +1,10 @@
+C:\Users\wmair\mandelbrot_cuda_project\20251029_03\rust\otter_proc\target\release\deps\anstyle_wincon-92115a972a63944b.d: C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\lib.rs C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\ansi.rs C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\stream.rs C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\windows.rs
+
+C:\Users\wmair\mandelbrot_cuda_project\20251029_03\rust\otter_proc\target\release\deps\libanstyle_wincon-92115a972a63944b.rlib: C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\lib.rs C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\ansi.rs C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\stream.rs C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\windows.rs
+
+C:\Users\wmair\mandelbrot_cuda_project\20251029_03\rust\otter_proc\target\release\deps\libanstyle_wincon-92115a972a63944b.rmeta: C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\lib.rs C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\ansi.rs C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\stream.rs C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\windows.rs
+
+C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\lib.rs:
+C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\ansi.rs:
+C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\stream.rs:
+C:\Users\wmair\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anstyle-wincon-3.0.10\src\windows.rs:

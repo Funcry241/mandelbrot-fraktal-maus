@@ -1,10 +1,14 @@
-##### Otter: CUDA 13 guard; CCCL/CUB/Thrust via CUDAToolkit; dynamic GLEW (no GLEW_STATIC); Ninja response-files.
-##### Schneefuchs: Static CUDA runtime; /MT unified; separable compilation ON; host /WX; duplicate-free defines; safe device-runtime link.
-##### Maus: Arch 80/86/89/90; CUDA C++20; deterministic build; fail early if CUDA < 13.0; silence C4505 only for CUDA TUs; Capybara-only path.
+##### Otter: Modern build (no PS-magic) — dynamic CRT (/MD), dynamic GLEW, CUDA13 guard, Ninja response files, clean target props.
+##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; removed `-Xcompiler=/MT...` for CUDA TUs; keep compile warnings strict; duplicate-free defines.
+##### Maus: Deterministic build; Arch=80/86/89/90; C++23 / CUDA20; separable compilation on; AppLocal-friendly link setup.
 ##### Datei: CMakeLists.txt
-
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
+
+# Allow MSVC runtime to be controlled by MSVC_RUNTIME_LIBRARY
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -42,9 +46,6 @@ endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
-# ---------------------- CUDA Runtime -----------------------
-set(CMAKE_CUDA_USE_STATIC_CUDA_RUNTIME ON)
-
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
 find_package(OpenGL REQUIRED)                 # OpenGL::GL
@@ -62,6 +63,7 @@ if(NOT CUDA_GL_INTEROP_HEADER)
 endif()
 
 # ---------------------- GLEW (dynamisch) -------------------
+# Ensure we never inject GLEW_STATIC and prefer the import lib + DLL.
 set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
 remove_definitions(-DGLEW_STATIC)
 foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
@@ -84,6 +86,7 @@ if(WIN32)
     message(FATAL_ERROR "GLEW CMake-Target nicht gefunden (erwartet GLEW::GLEW oder GLEW::glew).")
   endif()
 else()
+  # Fallback for non-Windows if no CONFIG package is exported by the triplet:
   if(NOT DEFINED VCPKG_INSTALLED_DIR)
     if(DEFINED ENV{VCPKG_INSTALLED_DIR})
       set(VCPKG_INSTALLED_DIR "$ENV{VCPKG_INSTALLED_DIR}")
@@ -137,11 +140,11 @@ add_executable(mandelbrot_otterdream
 
 # ---------------------- Compile-Options --------------------
 if(MSVC)
-  # Einheitliche /MT (und /MTd)
+  # Einheitliche /MD (und /MDd) — Option A
   set_property(TARGET mandelbrot_otterdream PROPERTY
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
 
-  # Host (C++): /EHsc ergänzt, damit C4530 nicht triggert (und /WX darf bleiben)
+  # Host (C++): /EHsc ergänzt, damit C4530 nicht triggert (und /WX bleibt)
   target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /sdl /permissive- /Zc:__cplusplus /EHsc /Brepro>
     $<$<COMPILE_LANGUAGE:CUDA>:
@@ -151,7 +154,6 @@ if(MSVC)
       -Xcompiler=/Zc:__cplusplus
       -Xcompiler=/EHsc
       -Xcompiler=/wd4505
-      -Xcompiler=/MT$<$<CONFIG:Debug>:d>
       -Xcompiler=/Brepro
     >
   )
@@ -183,6 +185,7 @@ target_compile_options(mandelbrot_otterdream PRIVATE
 set_target_properties(mandelbrot_otterdream PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON
   CUDA_RESOLVE_DEVICE_SYMBOLS ON
+  # Keep CUDA runtime static by default (independent from MSVC host CRT).
   CUDA_RUNTIME_LIBRARY Static
 )
 

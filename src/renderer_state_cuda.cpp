@@ -184,7 +184,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
         lastTileSize == tileSize;
 
     if (sizesOk) {
-        // (EC disabled) — keine Host-Pinning-/Mirror-Aktionen
+        // (EC disabled) - keine Host-Pinning-/Mirror-Aktionen
         return;
     }
 

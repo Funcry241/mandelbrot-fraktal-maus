@@ -54,12 +54,12 @@ Die passende Compute Capability deiner GPU findest du in NVIDIAs Übersicht.
 
 ## 🧯 Host/Device-Logging (LUCHS_LOG)
 
-* **Host**: `LUCHS_LOG_HOST(...)` — ASCII-only, **eine Zeile pro Event**, Zeitstempel als **Epoch-Millis**.
-* **Device**: `LUCHS_LOG_DEVICE(msg)` — schreibt in den Device-Puffer; Flush auf Host synchronisiert **außerhalb** des Hot-Paths.  
-  *Hinweis:* Nachricht mit `snprintf` zusammenbauen ist ok — der **finale** Aufruf ist genau **ein** `LUCHS_LOG_DEVICE(const char*)`.
+* **Host**: `LUCHS_LOG_HOST(...)` - ASCII-only, **eine Zeile pro Event**, Zeitstempel als **Epoch-Millis**.
+* **Device**: `LUCHS_LOG_DEVICE(msg)` - schreibt in den Device-Puffer; Flush auf Host synchronisiert **außerhalb** des Hot-Paths.  
+  *Hinweis:* Nachricht mit `snprintf` zusammenbauen ist ok - der **finale** Aufruf ist genau **ein** `LUCHS_LOG_DEVICE(const char*)`.
 * **Kein `printf/fprintf`** im Produktionspfad. Logs dürfen **keine** impliziten Synchronisationen auslösen.
-* **Zwei Schalter** (`Settings`):
-  `performanceLogging` → kompakte Messwerte via CUDA-Events  
+* **Zwei Schalter** (`Settings`):  
+  `performanceLogging` → kompakte Messwerte via CUDA-Events; **ASCII**  
   `debugLogging` → detaillierter, ggf. langsamer
 
 ---
@@ -111,7 +111,7 @@ Der Mandelbrot-Pfad hält sich an ein weiches Zeitbudget pro Frame. Silk-Lite st
 ```powershell
 cmake --preset windows-msvc
 cmake --build --preset windows-msvc
-cmake --install build\windows --prefix .\dist
+cmake --install --preset windows-msvc --prefix .\dist
 .\dist\mandelbrot_otterdream.exe
 ```
 
@@ -123,7 +123,7 @@ cmake --install build\windows --prefix .\dist
 
 ```bash
 sudo apt update
-sudo apt install build-essential cmake git ninja-build   libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config
+sudo apt install build-essential cmake git ninja-build libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config
 ```
 
 2. Klonen & vcpkg bootstrap (wie in der README):
@@ -138,7 +138,7 @@ git clone https://github.com/microsoft/vcpkg.git
 3. Bauen & installieren:
 
 ```bash
-cmake -S . -B build -G Ninja   -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake"   -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 cmake --install build --prefix ./dist
 ./dist/mandelbrot_otterdream
@@ -170,7 +170,7 @@ cmake --install build --prefix ./dist
 
 * **ASCII-only**, **eine Zeile pro Logeintrag**.
 * **Epoch-Millis** (UTC) als Zeitstempel.
-* **Keine Seiteneffekte** im Hot-Path (keine globalen Syncs).
+* **Keine Seiteneffekte** im Hot-Path (keine globale Sync).
 
 ### Kompakte PERF-Zeile (Render/Colorize)
 

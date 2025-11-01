@@ -32,7 +32,7 @@ namespace LuchsLogger {
     // Host-side: transfer device buffer via stream to host and print through LUCHS_LOG_HOST
     void flushDeviceLogToHost(cudaStream_t stream);
 
-    // Convenience without stream — uses default stream (0)
+    // Convenience without stream - uses default stream (0)
     inline void flushDeviceLogToHost() {
         flushDeviceLogToHost(0);
     }

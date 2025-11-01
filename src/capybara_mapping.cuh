@@ -71,7 +71,7 @@ CAPY_HD void capy_pixel_offsets(int px, int py, int w, int h,
 }
 
 // -----------------------------------------------------------------------------
-// Klassische Abbildung (double) — stabil bei moderaten Zooms.
+// Klassische Abbildung (double) - stabil bei moderaten Zooms.
 // Maus: FMA reduziert Rundungsfehler a*step + center, bleibt aber single-sum.
 // -----------------------------------------------------------------------------
 CAPY_HD double2 capy_map_pixel_double(double cx, double cy,
@@ -87,7 +87,7 @@ CAPY_HD double2 capy_map_pixel_double(double cx, double cy,
 }
 
 // -----------------------------------------------------------------------------
-// Capybara-Abbildung (Hi/Lo) — numerisch stabil bei tiefen Zooms.
+// Capybara-Abbildung (Hi/Lo) - numerisch stabil bei tiefen Zooms.
 // nutzt capy_map_center_step(cx,cy, stepX,stepY, offx,offy)
 // -----------------------------------------------------------------------------
 CAPY_HD CapyHiLo2 capy_map_pixel_hilo(double cx, double cy,

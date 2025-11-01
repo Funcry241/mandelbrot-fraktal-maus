@@ -1,58 +1,51 @@
-///// Otter: build.ps1 jetzt tracken; ps1Supporter bleibt im Repo. vcpkg_cache strikt ignorieren.
-///// Schneefuchs: Reihenfolge streng – erst ignorieren, dann Re-Includes; Rust-Target nur EXE whitelisten.
-///// Maus: Klar kommentiert, minimal, keine Überraschungen.
-///// Datei: .gitignore
-----------------------------------------------------------------------
-🛠️ Build-Ordner & Distribution
+##### Otter: Keep /dist tracked; ignore build/vcpkg caches; Rust runner target ignored except exe pinned by path rule if desired.
+##### Schneefuchs: Specific rules after general ones; Windows-friendly; no surprises.
+##### Maus: Minimal, readable; comments explain intent.
+##### Datei: .gitignore
 
-/build/
-/build-*/
+# ----------------------------------------------------------------------
+# Build trees (local)
+build/
+build-*/
 
-⚠️ 'dist' zunächst komplett ignorieren – Ausnahmen folgen unten
+# ----------------------------------------------------------------------
+# vcpkg work dirs & caches (local only)
+vcpkg/
+vcpkg_installed/
+vcpkg_cache/
 
-/dist/*
-!/dist/.gitkeep # Falls du das Verzeichnis im Repo halten willst
-
-----------------------------------------------------------------------
-🧰 Lokale Build-Skripte
-👉 build.ps1 SOLL ins Repo – daher KEIN Ignore hier mehr
-ps1Supporter-Skripte bleiben getrackt
-----------------------------------------------------------------------
-📁 Visual Studio
-
-*.sln
-.vcxproj
+# ----------------------------------------------------------------------
+# VS / IDE metadata
 *.suo
 *.user
-*.vcxproj.filters
-
-----------------------------------------------------------------------
-💡 VSCode Konfigurationen
-
+*.VC.db
 .vscode/*
 !.vscode/c_cpp_properties.json
 !.vscode/settings.json
+.idea/
+.vs/
 
-----------------------------------------------------------------------
-🧹 Temporäre Dateien & Logs
+# ----------------------------------------------------------------------
+# CMake generator files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
 
+# ----------------------------------------------------------------------
+# Common temporaries
 *.log
 *.tmp
 *.bak
+*~
 Thumbs.db
 Desktop.ini
 
-----------------------------------------------------------------------
-📦 vcpkg-Ordner
-
-/vcpkg/
-/vcpkg_installed/
-/vcpkg_cache/ # ← hat im Repo nichts verloren
-
-----------------------------------------------------------------------
-🧱 Build-Artefakte (kompiliert)
-
+# ----------------------------------------------------------------------
+# Compiled artifacts (we stage selected ones into /dist)
 *.obj
+*.o
 *.lib
 *.dll
 *.exe
@@ -60,69 +53,25 @@ Desktop.ini
 *.dmp
 *.ilk
 
-----------------------------------------------------------------------
-⚙️ CMake & Generator-Dateien
+# ----------------------------------------------------------------------
+# Keep /dist in the repo (staged outputs live here)
+!dist/
+!dist/**
 
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
-compile_commands.json
-
-----------------------------------------------------------------------
-🧠 JetBrains (CLion, Rider, etc.)
-
-.idea/
-
-----------------------------------------------------------------------
-🍏 macOS-Systemdateien
-
-.DS_Store
-
-----------------------------------------------------------------------
-🐧 Linux/Allgemein
-
-*~
-
-----------------------------------------------------------------------
-📦 Exportdateien
-
-*.zip
-OtterDream_Project.zip
-
-----------------------------------------------------------------------
-👤 Benutzerabhängige Konfiguration
-
-imgui.ini
-
-----------------------------------------------------------------------
-🎯 Projektbezogene Ignorierer
-
-wupp.txt
-
-----------------------------------------------------------------------
-🦀 Rust: target/ global ignorieren, NUR Runner-EXE whitelisten
-1) Alles target/ ignorieren
-
+# ----------------------------------------------------------------------
+# Rust: ignore generic target trees globally, keep sources
 target/
-
-2) Für die Whitelist muss Git durch die Elternordner "sehen" können
-
 !rust/
 !rust/otter_proc/
-!rust/otter_proc/target/
-!rust/otter_proc/target/release/
+!rust/otter_proc/**
 
-3) Sicherheitsnetz: Unter diesem target weiter alles ignorieren …
+# ----------------------------------------------------------------------
+# Project-specific
+imgui.ini
+wupp.txt
 
-/rust/otter_proc/target/**
-
-4) … und nur die gewünschte EXE reinnehmen
-
-!/rust/otter_proc/target/release/otter_proc.exe
-
-----------------------------------------------------------------------
-📊 Build-Metriken behalten (auch wenn darin *.log liegt)
-
-!.build_metrics/
-!.build_metrics/**
+# ----------------------------------------------------------------------
+# Archives
+*.zip
+*.7z
+OtterDream_Project.zip

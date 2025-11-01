@@ -47,7 +47,7 @@ public:
     float  fps       = 0.0f;
     float  deltaTime = 0.0f;
 
-    // 🧩 Analyse/Overlay (Host) — EC-Pfad aktuell deaktiviert.
+    // 🧩 Analyse/Overlay (Host) - EC-Pfad aktuell deaktiviert.
     // Diese Felder bleiben als Legacy-Placeholder erhalten, damit optionale Overlays/HUD kompilieren.
     int                 lastTileSize = 0;
     std::vector<float>  h_entropy;         // legacy/overlay (leer im aktiven Pfad)
@@ -70,7 +70,7 @@ public:
     // 🎥 OpenGL-Zielpuffer (Interop via CUDA) mit RAII
     // Spiegel von Settings::pboRingSize (numerisch, um Header entkoppelt zu halten).
     // Konsistenz wird in TU(s) via static_assert geprüft.
-    static constexpr int kPboRingSize = 8; // <— an Settings::pboRingSize angleichen
+    static constexpr int kPboRingSize = 8; // <- an Settings::pboRingSize angleichen
 
     std::array<Hermelin::GLBuffer, kPboRingSize> pboRing{};
     int pboIndex = 0;

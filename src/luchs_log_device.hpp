@@ -1,4 +1,4 @@
-///// Otter: Device logging shim — route ASCII messages into CUDA device log buffer.
+///// Otter: Device logging shim - route ASCII messages into CUDA device log buffer.
 ///// Schneefuchs: No varargs on device; only pass preformatted C-strings; host compiles to no-op.
 ///// Maus: Uses __FILE__/__LINE__ for origin; header-only; safe to include from both host and device code.
 ///// Datei: src/luchs_log_device.hpp

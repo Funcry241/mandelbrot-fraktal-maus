@@ -1,4 +1,4 @@
-///// Otter: Capybara pixel-iter — drop-in device helpers to compute Mandelbrot iterations with early Hi/Lo + classic continuation.
+///// Otter: Capybara pixel-iter - drop-in device helpers to compute Mandelbrot iterations with early Hi/Lo + classic continuation.
 ///// Schneefuchs: Header-only; device-inline; ASCII one-liners via capy_*; no API break; defaults configurable via CAPY_* macros.
 ///// Maus: Returns either just the iteration count or (iters, final z). Escape radius^2 kept at 4.0 for parity.
 ///// Datei: src/capybara_pixel_iter.cuh

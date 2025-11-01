@@ -1,8 +1,8 @@
-///// Otter: Rullmolder Step 2 — blunt zoom + gentle nudge toward Interest (dt-invariant).
+///// Otter: Rullmolder Step 2 - blunt zoom + gentle nudge toward Interest (dt-invariant).
 ///** Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts (no ref-casts).
 ///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF]/[ZLEASH].
 ///// Fink: Zoom-korrekte Pan-Umrechnung (px→world per pixelScale/zoom) gegen Überschwinger.
-///// Dachs: Quickfix B+ — Axis-weighted Leash (X stärker), weniger Seitwärtsdrift.
+///// Dachs: Quickfix B+ - Axis-weighted Leash (X stärker), weniger Seitwärtsdrift.
 ///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)

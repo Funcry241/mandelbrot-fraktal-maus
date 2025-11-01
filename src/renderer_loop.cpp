@@ -77,7 +77,7 @@ void renderFrame_impl(RendererState& state) {
         }
     }
 
-    // 60 FPS cap — precise sleep+spin pacing, low jitter.
+    // 60 FPS cap - precise sleep+spin pacing, low jitter.
     static pace::FrameLimiter limiter;
     if constexpr (Settings::capFramerate) {
         limiter.limit(Settings::capTargetFps);
