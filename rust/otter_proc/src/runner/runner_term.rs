@@ -1,103 +1,105 @@
-///// Otter: Terminal helpers — ANSI enable (Win), colored tags, ephemeral printing.
-///// Schneefuchs: No external crates; cross-platform; safe trimming; fixes E0716 by avoiding chained temporaries.
-///// Maus: Colors only on tag ([RUST]/[PS]); ASCII-only messages; line sanitizer.
-///// Datei: rust/otter_proc/src/runner/runner_term.rs
+///// Otter: Terminal helpers (ANSI enable, pretty tags, ephemeral line, sanitize).
+/// ///// Schneefuchs: No external crates; Windows FFI zu kernel32; trims banner noise.
+/// ///// Maus: Termbreite aus $COLUMNS (Fallback 120); ASCII-only; ruhiges Verhalten auf Nicht-TTY.
+/// ///// Datei: rust/otter_proc/src/runner_term.rs
 
+use std::env;
 use std::io::{self, Write};
 
-// ANSI color codes
-const RESET: &str = "\x1b[0m";
-const CYA:   &str = "\x1b[36m";
-const MAG:   &str = "\x1b[35m";
-const YEL:   &str = "\x1b[33m";
-const RED:   &str = "\x1b[31m";
-
-#[cfg(windows)]
+/// Aktiviert ANSI-Sequenzen (Farben/Cursor) – ohne externe Crates.
+/// Auf Windows via direktem FFI zu kernel32; auf anderen Plattformen no-op.
 pub fn enable_ansi() {
-    use std::sync::Once;
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| unsafe {
+    #[cfg(windows)]
+    unsafe {
+        // Minimaler FFI-Sockel, keine winapi/windows-Crates.
         use std::ffi::c_void;
         type HANDLE = *mut c_void;
         type DWORD = u32;
-        const STD_OUTPUT_HANDLE: i32 = -11;
-        const STD_ERROR_HANDLE:  i32 = -12;
+        type BOOL  = i32;
+
+        const STD_OUTPUT_HANDLE: i32 = -11; // (DWORD)-11
         const ENABLE_VIRTUAL_TERMINAL_PROCESSING: DWORD = 0x0004;
 
         #[link(name = "kernel32")]
         extern "system" {
             fn GetStdHandle(nStdHandle: i32) -> HANDLE;
-            fn GetConsoleMode(hConsoleHandle: HANDLE, lpMode: *mut DWORD) -> i32;
-            fn SetConsoleMode(hConsoleHandle: HANDLE, dwMode: DWORD) -> i32;
+            fn GetConsoleMode(hConsoleHandle: HANDLE, lpMode: *mut DWORD) -> BOOL;
+            fn SetConsoleMode(hConsoleHandle: HANDLE, dwMode: DWORD) -> BOOL;
         }
 
-        let handles = [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE];
-        for h in handles {
-            let handle = GetStdHandle(h);
-            if !handle.is_null() {
-                let mut mode: DWORD = 0;
-                if GetConsoleMode(handle, &mut mode as *mut DWORD) != 0 {
-                    let _ = SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-                }
+        let h = GetStdHandle(STD_OUTPUT_HANDLE);
+        if !h.is_null() {
+            let mut mode: DWORD = 0;
+            if GetConsoleMode(h, &mut mode) != 0 {
+                let _ = SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
             }
         }
-    });
+    }
+    #[cfg(not(windows))]
+    {
+        // nix zu tun
+    }
 }
 
-#[cfg(not(windows))]
-#[inline]
-pub fn enable_ansi() { /* no-op */ }
-
-fn colored_src_tag(source: &str) -> String {
-    let (col_l, col_r) = match source {
-        "RUST" => (CYA, RESET),
-        "PS"   => (MAG, RESET),
-        _      => (RESET, RESET),
-    };
-    format!("{}[{}]{}", col_l, source, col_r)
+fn tag(s: &str) -> String {
+    match s {
+        "PS"   => "[PS]".to_string(),
+        "RUST" => "[RUST]".to_string(),
+        "PROC" => "[PROC]".to_string(),
+        other  => format!("[{}]", other),
+    }
 }
 
-pub fn out_info(source: &str, msg: &str) {
-    println!("[INFO]  {} {}", colored_src_tag(source), msg.trim_end());
-}
-pub fn out_warn(source: &str, msg: &str) {
-    println!("{}[WARN]{}  {} {}", YEL, RESET, colored_src_tag(source), msg.trim_end());
-}
-pub fn out_err(source: &str, msg: &str) {
-    eprintln!("{}[ERR]{}   {} {}", RED, RESET, colored_src_tag(source), msg.trim_end());
-}
-
-// Ephemeral line helpers (single-line animation)
-pub fn print_ephemeral(line: &str, _prev_len: usize) -> usize {
-    // Clear current line and print without newline
-    print!("\r\x1b[2K{}", line);
-    let _ = io::stdout().flush();
-    line.len()
-}
-
-pub fn end_ephemeral() {
-    // Clear line and move to start for durable print that follows
-    print!("\r\x1b[2K");
+pub fn out_info(src: &str, msg: &str) {
+    let _ = end_ephemeral();
+    let _ = writeln!(io::stdout(), "{} {}", tag(src), msg.trim_end_matches('\n'));
     let _ = io::stdout().flush();
 }
 
-// Best-effort terminal width
+pub fn out_warn(src: &str, msg: &str) {
+    let _ = end_ephemeral();
+    let _ = writeln!(io::stdout(), "{} {}", tag(src), msg.trim_end_matches('\n'));
+    let _ = io::stdout().flush();
+}
+
+pub fn out_err(src: &str, msg: &str) {
+    let _ = end_ephemeral();
+    let _ = writeln!(io::stdout(), "{} {}", tag(src), msg.trim_end_matches('\n'));
+    let _ = io::stdout().flush();
+}
+
+/// Ephemere Statuszeile zeichnen/aktualisieren (eine Zeile).
+pub fn print_ephemeral(s: &str) {
+    let _ = write!(io::stdout(), "\r{}\x1b[K", s);
+    let _ = io::stdout().flush();
+}
+
+/// Ephemere Zeile löschen.
+pub fn end_ephemeral() -> io::Result<()> {
+    write!(io::stdout(), "\r\x1b[K")?;
+    io::stdout().flush()
+}
+
+/// Sanfte Bereinigung: CR entfernen, leere Zeilen verwerfen, etwas Rauschen eindampfen.
+pub fn sanitize_line(s: &str) -> String {
+    // zwei kurze, besitzende Schritte vermeiden temporäre Borrow-Lifetime-Probleme
+    let step1 = s.replace('\r', "");
+    let step2 = step1.trim_end_matches('\n').trim();
+    if step2.is_empty() {
+        return String::new();
+    }
+    if step2.contains("heuristically generated") {
+        return String::from("glfw3 provides CMake targets (heuristic).");
+    }
+    step2.to_string()
+}
+
+/// Terminalbreite: $COLUMNS, sonst 120 als praktikabler Default.
 pub fn term_cols() -> usize {
-    if let Ok(v) = std::env::var("OTTER_TERM_COLS").or_else(|_| std::env::var("COLUMNS")) {
-        if let Ok(n) = v.parse::<usize>() { return n.max(40).min(240); }
+    if let Ok(v) = env::var("COLUMNS") {
+        if let Ok(n) = v.parse::<usize>() {
+            return n.max(40).min(240);
+        }
     }
     120
-}
-
-// Very light sanitizer: trim, drop empty, collapse long star-only lines
-pub fn sanitize_line(s: &str) -> String {
-    // Avoid chained temporaries (fixes E0716): bind each step so lifetimes are clear.
-    let no_cr = s.replace('\r', "");                 // owned String
-    let no_crlf: &str = no_cr.trim_end_matches('\n'); // &str into `no_cr`
-    let trimmed: &str = no_crlf.trim();               // &str into `no_cr`
-
-    if trimmed.is_empty() { return String::new(); }
-    if trimmed.chars().all(|c| c == '*') { return String::new(); }
-
-    trimmed.to_string()
 }

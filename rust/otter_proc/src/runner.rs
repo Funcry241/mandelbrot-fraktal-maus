@@ -14,7 +14,6 @@ use crate::build_metrics::BuildMetrics;
 mod runner_term;
 mod runner_progress;
 mod runner_classify;
-mod runner_phase; // placeholder module (keeps reorg noise low)
 
 use runner_classify::{classify_line, Sev};
 use runner_progress::{

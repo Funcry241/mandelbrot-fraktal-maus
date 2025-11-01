@@ -1,22 +1,22 @@
-///// Otter: Progress UI — spinner, ETA, percent merge (builder vs time), ASCII bar.
-///// Schneefuchs: 200 ms throttle; width auto via env (OTTER_TERM_COLS/COLUMNS) with sane fallback.
-///// Maus: ASCII-only; trims/snips messages; ratio parser “[n/m]” and plain “68%”.
-///// Datei: rust/otter_proc/src/runner/runner_progress.rs
+///// Otter: Progress state & pretty renderer (spinner, %, ETA, seeded by metrics).
+/// ///// Schneefuchs: Keine externen Crates; 200 ms Rate-Limit; robuste Parser für % und [n/m].
+/// ///// Maus: Standardmäßig aktiv (OTTER_PROGRESS=0 zum Abschalten); ASCII-Bar, term_cols() aus runner_term.
+/// ///// Datei: rust/otter_proc/src/runner_progress.rs
 
+use std::env;
 use std::time::{Duration, Instant};
 
-use crate::runner::runner_term::print_ephemeral;
-use crate::runner::runner_term::term_cols;
+use super::runner_term;
+use super::runner_term::term_cols;
 
-// Public state carried by runner.rs
+/// Interner Zustand für die Live-Anzeige.
 pub struct ProgressState {
     pub start: Instant,
     pub last_tick: Instant,
-    pub last_print_len: usize,
-    pub runtime_phase: String,
+    pub spinner_ix: usize,
+    pub runtime_phase: String,       // "proc" | "configure" | "build"
+    pub best_builder_pct: Option<f32>,
     pub last_snippet: String,
-    pub best_builder_pct: Option<u32>,
-    spinner_idx: usize,
 }
 
 impl ProgressState {
@@ -24,146 +24,184 @@ impl ProgressState {
         let now = Instant::now();
         Self {
             start: now,
-            last_tick: now.checked_sub(Duration::from_millis(1000)).unwrap_or(now),
-            last_print_len: 0,
+            last_tick: now
+                .checked_sub(Duration::from_millis(201))
+                .unwrap_or(now),
+            spinner_ix: 0,
             runtime_phase: phase.to_string(),
-            last_snippet: String::new(),
             best_builder_pct: None,
-            spinner_idx: 0,
+            last_snippet: String::new(),
         }
     }
 }
 
-// --- helpers ------------------------------------------------------------------
-
+/// Default: Progress an. Mit Umgebungsvariable OTTER_PROGRESS=0 kann man es abschalten.
 pub fn progress_enabled() -> bool {
-    // default on; disable with OTTER_NO_PROGRESS=1 / true
-    match std::env::var("OTTER_NO_PROGRESS") {
-        Ok(v) => {
-            let s = v.to_ascii_lowercase();
-            !(s == "1" || s == "true" || s == "yes")
-        }
-        Err(_) => true,
+    match env::var("OTTER_PROGRESS") {
+        Ok(v) if v.trim() == "0" => false,
+        _ => true,
     }
 }
 
+/// Soll die nächste Animationszeile raus? (200 ms Takt)
 pub fn due(p: &ProgressState) -> bool {
     p.last_tick.elapsed() >= Duration::from_millis(200)
 }
 
-pub fn last_nonempty_snippet(s: &str, max_len: usize) -> String {
+/// Kürzt auf das rechte Ende (meist ist dort der interessante Teil).
+pub fn last_nonempty_snippet(s: &str, limit: usize) -> String {
     let t = s.trim();
-    if t.is_empty() { return String::new(); }
-    let mut snip = t.replace('\t', " ");
-    snip = snip.split_whitespace().collect::<Vec<_>>().join(" ");
-    if snip.len() > max_len { snip.truncate(max_len); }
-    snip
+    if t.is_empty() {
+        return String::new();
+    }
+    if t.len() <= limit {
+        return t.to_string();
+    }
+    // rechte Seite behalten
+    let take = limit.min(t.len());
+    t[t.len() - take..].to_string()
 }
 
-pub fn parse_percent(line: &str) -> Option<u32> {
-    // find "... 68% ..." anywhere
-    if let Some(pos) = line.find('%') {
-        let left = &line[..pos];
-        let digits: String = left.chars().rev().take_while(|c| c.is_ascii_digit()).collect();
-        if digits.is_empty() { return None; }
-        let rev = digits.chars().rev().collect::<String>();
-        if let Ok(v) = rev.parse::<u32>() { if v <= 100 { return Some(v); } }
+/// Findet eine Prozentzahl wie "68%" oder " 68 % ".
+pub fn parse_percent(s: &str) -> Option<f32> {
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            // rückwärts nach Ziffern + optionalem Punkt/Leerzeichen
+            let mut j = i;
+            // überspringe Leerzeichen links vom '%'
+            while j > 0 && (bytes[j - 1] as char).is_whitespace() {
+                j -= 1;
+            }
+            // sammle Ziffern und .
+            let mut k = j;
+            while k > 0 {
+                let c = bytes[k - 1] as char;
+                if c.is_ascii_digit() || c == '.' || c == ',' || c == ' ' {
+                    k -= 1;
+                } else {
+                    break;
+                }
+            }
+            let num = s[k..j].trim().replace(',', ".");
+            if let Ok(v) = num.parse::<f32>() {
+                if (0.0..=100.0).contains(&v) {
+                    return Some(v / 100.0);
+                }
+            }
+        }
+        i += 1;
     }
     None
 }
 
-pub fn parse_ratio_percent(line: &str) -> Option<u32> {
-    // matches e.g. "[17/45]" or "17/45" (loose)
-    let bytes = line.as_bytes();
-    let mut num = String::new();
-    let mut den = String::new();
-    let mut in_num = false;
-    let mut in_den = false;
-    for &b in bytes {
-        let c = b as char;
-        if !in_num && c.is_ascii_digit() {
-            in_num = true;
-            num.push(c);
-        } else if in_num && !in_den && c.is_ascii_digit() {
-            num.push(c);
-        } else if in_num && !in_den && c == '/' {
-            in_den = true;
-        } else if in_den && c.is_ascii_digit() {
-            den.push(c);
-        } else if in_den {
-            break;
+/// Findet Muster wie "[17/45]" (CMake, Ninja, MSBuild-ähnliche Ratio-Zeilen).
+pub fn parse_ratio_percent(s: &str) -> Option<f32> {
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'[' {
+            // parse n
+            let mut j = i + 1;
+            let mut n: u32 = 0;
+            let mut has_n = false;
+            while j < bytes.len() && (bytes[j] as char).is_ascii_digit() {
+                has_n = true;
+                n = n.saturating_mul(10).saturating_add((bytes[j] - b'0') as u32);
+                j += 1;
+            }
+            // slash
+            if has_n && j < bytes.len() && bytes[j] == b'/' {
+                j += 1;
+            } else {
+                i += 1;
+                continue;
+            }
+            // parse m
+            let mut m: u32 = 0;
+            let mut has_m = false;
+            while j < bytes.len() && (bytes[j] as char).is_ascii_digit() {
+                has_m = true;
+                m = m.saturating_mul(10).saturating_add((bytes[j] - b'0') as u32);
+                j += 1;
+            }
+            // closing ]
+            if has_m && j < bytes.len() && bytes[j] == b']' && m > 0 {
+                let pct = (n as f32 / m as f32).clamp(0.0, 1.0);
+                return Some(pct);
+            }
         }
+        i += 1;
     }
-    if num.is_empty() || den.is_empty() { return None; }
-    let n = num.parse::<u32>().ok()?;
-    let d = den.parse::<u32>().ok()?;
-    if d == 0 { return None; }
-    let pct = ((n as f64 / d as f64) * 100.0).floor() as u32;
-    if pct <= 100 { Some(pct) } else { Some(100) }
+    None
 }
 
-fn fmt_hms(mut secs: u64) -> String {
-    let h = secs / 3600; secs %= 3600;
-    let m = secs / 60;   let s = secs % 60;
-    if h > 0 { format!("{:02}:{:02}:{:02}", h, m, s) } else { format!("{:02}:{:02}", m, s) }
-}
-
-fn bar_string(cols: usize, pct: Option<u32>) -> String {
-    let width = cols.min(40).max(10);
-    let p = pct.unwrap_or(0).min(100);
-    let filled = ((p as usize * width) / 100).min(width);
-    let mut s = String::with_capacity(width + 2);
-    s.push('[');
-    for i in 0..width {
-        if i < filled { s.push('='); } else { s.push('-'); }
-    }
-    s.push(']');
-    s
-}
-
-fn spinner_char(idx: usize) -> char {
-    ['|','/','-','\\'][idx % 4]
-}
-
+/// Rendert eine einzelne, ephemere Statuszeile (inkl. ETA) und schreibt sie über `print_ephemeral`.
+/// `predicted_ms` stammt aus den Metriken – wir fusionieren es konservativ mit Builder-Fortschritt.
 pub fn render_and_print(p: &mut ProgressState, predicted_ms: u128) {
-    p.last_tick = Instant::now();
-
+    // 1) Prozent bestimmen (Builder-Signal vs. Zeit-Schätzung aus Metriken)
     let elapsed_ms = p.start.elapsed().as_millis() as u128;
     let time_pct = if predicted_ms > 0 {
-        let mut v = ((elapsed_ms as f64 / predicted_ms as f64) * 100.0).floor() as u32;
-        if v > 99 { v = 99; } // never claim 100% before done
-        Some(v)
-    } else { None };
-
-    let pct = match (p.best_builder_pct, time_pct) {
-        (Some(b), Some(t)) => Some(b.max(t)),
-        (Some(b), None)    => Some(b),
-        (None,    Some(t)) => Some(t),
-        (None,    None)    => None,
+        // Bis 99% steigen, 100% erst beim Abschluss.
+        ((elapsed_ms as f32) / (predicted_ms as f32)).clamp(0.0, 0.99)
+    } else {
+        0.0
+    };
+    let pct = match p.best_builder_pct {
+        Some(b) => if predicted_ms > 0 { b.max(time_pct) } else { b },
+        None => time_pct,
     };
 
+    // 2) ETA berechnen (simpel: (1-p)/p * elapsed), geschützt gegen 0
+    let eta = if pct > 0.0001 {
+        let rem = ((1.0 - pct) / pct) * (elapsed_ms as f32 / 1000.0);
+        rem.max(0.0)
+    } else {
+        // keine sinnvolle Schätzung – nur "…" anzeigen
+        -1.0
+    };
+
+    // 3) Spinner
+    const SPIN: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    p.spinner_ix = (p.spinner_ix + 1) % SPIN.len();
+    let spin = SPIN[p.spinner_ix];
+
+    // 4) Bar
     let cols = term_cols();
-    let spin = spinner_char(p.spinner_idx);
-    p.spinner_idx = (p.spinner_idx + 1) % 4;
+    let pct100 = (pct * 100.0).round() as i32;
+    let left = format!("[{}] {} {:>3}%", p.runtime_phase, spin, pct100);
+    let mid = " | ";
+    let eta_s = if eta >= 0.0 {
+        format!("ETA {:>4.0}s", eta)
+    } else {
+        "ETA  …s".to_string()
+    };
 
-    let elapsed = fmt_hms((elapsed_ms / 1000) as u64);
-    let eta = if predicted_ms > 0 && elapsed_ms < predicted_ms {
-        let remain = ((predicted_ms - elapsed_ms) / 1000) as u64;
-        fmt_hms(remain)
-    } else { "--:--".into() };
+    // Barbreite dynamisch: Platz nach links/mid/eta + 2 Klammern
+    let bar_room = cols.saturating_sub(left.len() + mid.len() + eta_s.len() + 2).clamp(10, 120);
+    let filled = ((bar_room as f32) * pct).round() as usize;
+    let rest = bar_room.saturating_sub(filled);
 
-    let pct_str = pct.map(|v| format!("{:>3}%", v)).unwrap_or("---%".into());
-    let bar = bar_string((cols / 3).max(10), pct);
-    let pred_s = if predicted_ms > 0 { (predicted_ms/1000) as u64 } else { 0 };
+    let bar = format!("[{}{}]", "█".repeat(filled), " ".repeat(rest));
 
-    // Compose line
-    let left = format!("[PROG] [{}] {} {}  eta={}  pred={}s  {}", p.runtime_phase.to_ascii_uppercase(), spin, elapsed, eta, pred_s, pct_str);
-    let mid  = format!(" {}", bar);
-    let mut room = cols.saturating_sub(left.len() + mid.len() + 1);
-    if room < 8 { room = 8; }
-    let mut snip = p.last_snippet.clone();
-    if snip.len() > room { snip.truncate(room); }
+    // 5) Letztes Snippet ggf. rechts anhängen, wenn noch Platz bleibt
+    let mut line = format!("{left}{mid}{eta_s} {bar}");
+    let remain = cols.saturating_sub(line.len());
+    if remain > 4 && !p.last_snippet.is_empty() {
+        // … und maximal 'remain' nutzen
+        let mut snip = p
+            .last_snippet
+            .replace('\r', "")
+            .replace('\n', " ");
+        if snip.len() > remain {
+            snip = format!("…{}", &snip[snip.len() - (remain - 1)..]);
+        }
+        line.push(' ');
+        line.push_str(&snip);
+    }
 
-    let line = format!("{}{} {}", left, mid, snip);
-    p.last_print_len = print_ephemeral(&line, p.last_print_len);
+    // Takt zurücksetzen und ausgeben
+    p.last_tick = Instant::now();
+    runner_term::print_ephemeral(&line);
 }
