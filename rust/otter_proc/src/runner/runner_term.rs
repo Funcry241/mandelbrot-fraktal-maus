@@ -50,14 +50,17 @@ pub fn color_enabled() -> bool {
 // ANSI Codes (nur verwenden, wenn color_enabled()).
 const RESET: &str = "\x1b[0m";
 const RED: &str = "\x1b[31m";
+const GREEN: &str = "\x1b[32m";
 const YELLOW: &str = "\x1b[33m";
 const BLUE: &str = "\x1b[34m";
 const MAGENTA: &str = "\x1b[35m";
 const CYAN: &str = "\x1b[36m";
+const BRIGHT_BLACK: &str = "\x1b[90m";
 
 fn paint(s: &str, code: &str) -> String {
     if color_enabled() { format!("{code}{s}{RESET}") } else { s.to_string() }
 }
+fn paint_dim(s: &str) -> String { paint(s, BRIGHT_BLACK) }
 
 fn tag_colored(s: &str) -> String {
     // L1: Tag-Farben — eigener String, keine temporären Borrows
@@ -128,4 +131,28 @@ pub fn term_cols() -> usize {
         }
     }
     120
+}
+
+/// Minimaler, farbiger Trailer im Stil „Variante A“.
+/// Beispiel:
+/// [RUST] DONE • OK (code=0) • 61.4s
+/// Optionales `extra` kann vom Aufrufer genutzt werden (z. B. „artifact=… • git: pushed … ✓“).
+pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
+    let tag = tag_colored("RUST");
+    let status = if ok { paint("OK", GREEN) } else { paint("FAIL", RED) };
+    let bullet = " • ";
+    let mut line = format!("{tag} DONE{bullet}{status} (code={code}){bullet}{:.1}s", secs);
+    if let Some(x) = extra {
+        if !x.trim().is_empty() {
+            line.push_str(bullet);
+            // Dimmen erlaubt unaufdringliche Zusatzelemente am Ende
+            if color_enabled() {
+                line.push_str(&paint_dim(x));
+            } else {
+                line.push_str(x);
+            }
+        }
+    }
+    let _ = writeln!(io::stdout(), "{line}");
+    let _ = io::stdout().flush();
 }

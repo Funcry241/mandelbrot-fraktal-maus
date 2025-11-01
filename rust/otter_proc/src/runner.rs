@@ -4,6 +4,7 @@
 ///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;
+use std::env;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -23,7 +24,7 @@ use runner_progress::{
     ProgressState, render_and_print, parse_percent, parse_ratio_percent,
     last_nonempty_snippet, progress_enabled, due
 };
-use runner_term::{enable_ansi, out_err, out_info, out_warn, end_ephemeral, sanitize_line};
+use runner_term::{enable_ansi, out_err, out_info, out_warn, end_ephemeral, sanitize_line, out_trailer_min};
 
 #[derive(Default)]
 pub struct RunResult { pub code: i32 }
@@ -64,6 +65,12 @@ fn detect_phase_and_sig(exe: &str, args: &[String]) -> PhaseDetect {
     };
 
     PhaseDetect { phase, sig }
+}
+
+/// OTTER_TRAILER toggle:
+///   "0" -> aus; "min" oder leer -> farbige Einzeile (Status/Code/Dauer)
+fn trailer_enabled() -> bool {
+    !matches!(env::var("OTTER_TRAILER"), Ok(v) if v.trim() == "0")
 }
 
 pub fn run_streamed_with_env(
@@ -238,14 +245,25 @@ pub fn run_streamed_with_env(
         if let Some(code) = exit_code {
             if readers_done {
                 let _ = end_ephemeral();
+
+                // Classic done line for logs
                 out_info("RUST", &format!(
                     "RUN phase={} done (elapsed={}s)",
                     pstate.runtime_phase,
                     pstate.start.elapsed().as_secs()
                 ));
+
+                // Persist metrics
                 let elapsed_ms = pstate.start.elapsed().as_millis() as u128;
                 metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
                 let _ = metrics.save(&workdir);
+
+                // Pretty colored trailer (Variant A, minimal)
+                if trailer_enabled() {
+                    let secs_f = (elapsed_ms as f32) / 1000.0;
+                    out_trailer_min(code == 0, code, secs_f, None);
+                }
+
                 return RunResult { code };
             }
         }
