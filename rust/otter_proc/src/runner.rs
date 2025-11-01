@@ -1,6 +1,6 @@
-///// Otter: Prozessstart, Streaming-Logs & ephemere Progress-Zeile (Spinner, ETA, % aus Metrics & Builder); ANSI-Farbe aktiv.
-///// Schneefuchs: Fehlercodes sauber weiterreichen; CWD optional; ENV-Overlay; .build_metrics zentral über build_metrics.rs (atomar, Seeding).
-///// Maus: Ruhig bei Output-Dauerfeuer, 1 Hz-Throttle; keine externen Crates; Metrics-Log nur 1× pro Prozess; Warn-/Error-Triage farbig; **Source-Tag farbig** (RUN/PROC/CMAKE/PS).
+///// Otter: Prozessstart, Streaming-Logs & tickende Progressbar (Spinner, %/ETA, EMA) – ANSI-Farbe.
+// ///// Schneefuchs: Fehlercodes sauber; CWD/ENV optional; Metrics via build_metrics.rs (atomar, Seeding).
+///// Maus: 1 Hz Ticker; ephemer bei Idle, persistent bei Output; keine externen Crates.
 ///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;
@@ -125,6 +125,19 @@ fn parse_percent(line: &str) -> Option<u32> {
     None
 }
 
+// ASCII progress bar
+fn progress_bar(pct: u32, width: usize) -> String {
+    let width = width.max(3);
+    let filled = ((pct as usize) * width) / 100;
+    let filled = filled.min(width);
+    let mut s = String::with_capacity(width + 2);
+    s.push('[');
+    for _ in 0..filled { s.push('#'); }
+    for _ in filled..width { s.push('-'); }
+    s.push(']');
+    s
+}
+
 struct PhaseDetect {
     phase: String,
     sig: String,
@@ -212,6 +225,12 @@ pub fn run_streamed_with_env(
     let phase_sig = detect_phase_and_sig(exe, args);
     out_info("RUN", &format!("exe=\"{}\" phase={} sig={}", exe, phase_sig.phase, phase_sig.sig));
 
+    // Predicted duration for current phase from metrics (log once per phase start)
+    let predicted_ms = metrics.get_last_ms(&phase_sig.sig, &phase_sig.phase).unwrap_or(0);
+    if predicted_ms > 0 {
+        println!("[RUNNER] predicted_total={}s phase={}", (predicted_ms / 1000) as u64, phase_sig.phase);
+    }
+
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => { out_err("RUN", &format!("spawn failed exe={} err={}", exe, e)); return RunResult { code: 1 }; }
@@ -224,15 +243,19 @@ pub fn run_streamed_with_env(
         Some(s) => BufReader::new(s), None => { out_err("RUN", "failed to take stderr"); return RunResult { code: 1 }; }
     };
 
-    // Predicted duration for current phase from metrics
-    let predicted_ms = metrics.get_last_ms(&phase_sig.sig, &phase_sig.phase).unwrap_or(0);
-
     // Progress state
+    const TICK: Duration = Duration::from_secs(1);
+    const RECENT_OUTPUT: Duration = Duration::from_millis(900);
+    const BAR_W: usize = 26;
+    const EMA_A: f32 = 0.25; // smoothing for pct/ETA
+
     let start = Instant::now();
     let mut last_tick = Instant::now();
+    let mut last_output = Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now);
     let mut last_snippet = String::new();
     let mut last_emitted_ephemeral = false;
     let mut best_builder_pct: Option<u32> = None;
+    let mut smooth_pct: Option<f32> = None;
     let spinner = ['|', '/', '-', '\\'];
     let mut spin_idx: usize = 0;
 
@@ -246,90 +269,138 @@ pub fn run_streamed_with_env(
     loop {
         let mut progressed = false;
 
+        // --- STDOUT ---
         out_buf.clear();
         if let Ok(n) = out_reader.read_line(&mut out_buf) {
             if n > 0 {
-                if last_emitted_ephemeral { print!("\r{:>120}\r", ""); let _ = std::io::stdout().flush(); last_emitted_ephemeral = false; }
-                if let Some(p) = parse_percent(&out_buf) { best_builder_pct = Some(best_builder_pct.map(|b| b.max(p)).unwrap_or(p)); }
-
-                // Trim CR/LF to avoid double-blank lines, then route through tag printers
+                if last_emitted_ephemeral {
+                    print!("\r{:>120}\r", ""); let _ = std::io::stdout().flush();
+                    last_emitted_ephemeral = false;
+                }
+                if let Some(p) = parse_percent(&out_buf) {
+                    best_builder_pct = Some(best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
+                }
                 let trimmed = out_buf.trim_end_matches(&['\r','\n'][..]);
                 match classify_line(trimmed) {
                     Sev::Err  => out_err (tag, trimmed),
                     Sev::Warn => out_warn(tag, trimmed),
                     Sev::Info => out_info(tag, trimmed),
                 }
-
                 last_snippet = last_nonempty_snippet(trimmed, 80);
                 progressed = true;
+                last_output = Instant::now();
             }
         }
 
+        // --- STDERR ---
         err_buf.clear();
         if let Ok(n) = err_reader.read_line(&mut err_buf) {
             if n > 0 {
-                if last_emitted_ephemeral { print!("\r{:>120}\r", ""); let _ = std::io::stdout().flush(); last_emitted_ephemeral = false; }
-                if let Some(p) = parse_percent(&err_buf) { best_builder_pct = Some(best_builder_pct.map(|b| b.max(p)).unwrap_or(p)); }
-
-                // Trim CR/LF to avoid double-blank lines, then route through tag printers
+                if last_emitted_ephemeral {
+                    print!("\r{:>120}\r", ""); let _ = std::io::stdout().flush();
+                    last_emitted_ephemeral = false;
+                }
+                if let Some(p) = parse_percent(&err_buf) {
+                    best_builder_pct = Some(best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
+                }
                 let trimmed = err_buf.trim_end_matches(&['\r','\n'][..]);
                 match classify_line(trimmed) {
                     Sev::Err  => out_err (tag, trimmed),
                     Sev::Warn => out_warn(tag, trimmed),
                     Sev::Info => out_info(tag, trimmed),
                 }
-
                 let snip = last_nonempty_snippet(trimmed, 80);
                 if !snip.is_empty() { last_snippet = snip; }
                 progressed = true;
+                last_output = Instant::now();
             }
         }
 
-        if !progressed {
-            if progress_enabled() && last_tick.elapsed() >= Duration::from_secs(1) {
-                last_tick = Instant::now();
-                let elapsed_ms = start.elapsed().as_millis() as u128;
+        // --- PROGRESS TICK (always once per second) ---
+        let now = Instant::now();
+        if progress_enabled() && now.duration_since(last_tick) >= TICK {
+            last_tick = now;
+            let elapsed_ms = start.elapsed().as_millis() as u128;
 
-                let time_pct = if predicted_ms > 0 {
-                    let mut p = ((elapsed_ms as f64 / predicted_ms as f64) * 100.0).floor() as u32;
-                    if p > 99 { p = 99; }
-                    Some(p)
-                } else { None };
+            // time-based pct from metrics if available
+            let time_pct = if predicted_ms > 0 {
+                let mut p = ((elapsed_ms as f64 / predicted_ms as f64) * 100.0).floor() as u32;
+                if p > 99 { p = 99; } // never claim 100 until done
+                Some(p)
+            } else { None };
 
-                let pct = match (best_builder_pct, time_pct) {
-                    (Some(b), Some(t)) => Some(b.max(t)),
-                    (Some(b), None)    => Some(b),
-                    (None,    Some(t)) => Some(t),
-                    (None,    None)    => None,
-                };
+            // raw combined pct
+            let raw_pct_opt = match (best_builder_pct, time_pct) {
+                (Some(b), Some(t)) => Some(b.max(t)),
+                (Some(b), None)    => Some(b),
+                (None,    Some(t)) => Some(t),
+                (None,    None)    => None,
+            };
 
-                let elapsed = fmt_hms((elapsed_ms / 1000) as u64);
-                let pct_str = pct.map(|v| format!("{:>3}%", v)).unwrap_or("---%".into());
-                let spin = spinner[spin_idx % spinner.len()]; spin_idx = (spin_idx + 1) % spinner.len();
-                let snippet = if last_snippet.is_empty() { "" } else { &last_snippet };
+            // EMA smoothing
+            if let Some(raw) = raw_pct_opt {
+                let r = raw as f32;
+                smooth_pct = Some(match smooth_pct {
+                    None => r,
+                    Some(prev) => prev + EMA_A * (r - prev),
+                }.clamp(0.0, 99.0));
+            }
 
-                print!("\r[PROG]  [{}] {}{} {}  pred={}s  {}  {}{}",
+            let shown_pct_u32 = smooth_pct.map(|v| v.floor() as u32).or(raw_pct_opt);
+            let pct_str = shown_pct_u32.map(|v| format!("{:>3}%", v)).unwrap_or("---%".into());
+            let bar = progress_bar(shown_pct_u32.unwrap_or(0), BAR_W);
+
+            let elapsed = fmt_hms((elapsed_ms / 1000) as u64);
+            let spin = spinner[spin_idx % spinner.len()]; spin_idx = (spin_idx + 1) % spinner.len();
+            let snippet = if last_snippet.is_empty() { "" } else { &last_snippet };
+            let pred_secs = if predicted_ms > 0 { (predicted_ms/1000) as u64 } else { 0 };
+
+            // If output was very recent, emit a *persistent* PROG line (newline),
+            // so motion is visible even while logs are flowing. Otherwise, ephemeral (\r…).
+            if progressed || now.duration_since(last_output) <= RECENT_OUTPUT {
+                if last_emitted_ephemeral {
+                    print!("\r{:>120}\r", ""); let _ = std::io::stdout().flush();
+                    last_emitted_ephemeral = false;
+                }
+                println!("[PROG]  [{}] {}{} {}  pred={}s  {}  {}  {}{}",
                     phase_sig.phase.to_ascii_uppercase(),
                     CYA, spin, elapsed,
-                    if predicted_ms > 0 { (predicted_ms/1000) as u64 } else { 0 },
-                    pct_str, snippet, RESET
+                    pred_secs,
+                    pct_str, bar, snippet, RESET
+                );
+            } else {
+                print!("\r[PROG]  [{}] {}{} {}  pred={}s  {}  {}  {}{}",
+                    phase_sig.phase.to_ascii_uppercase(),
+                    CYA, spin, elapsed,
+                    pred_secs,
+                    pct_str, bar, snippet, RESET
                 );
                 let _ = std::io::stdout().flush();
                 last_emitted_ephemeral = true;
             }
+        }
 
+        // --- Process completion / wait ---
+        if !progressed {
             match child.try_wait() {
                 Ok(Some(st)) => {
-                    if last_emitted_ephemeral { print!("\r{:>120}\r", ""); let _ = std::io::stdout().flush();
+                    // finalize ephemeral line
+                    if last_emitted_ephemeral {
+                        print!("\r{:>120}\r", ""); let _ = std::io::stdout().flush();
                         println!("[INFO]  [RUN] phase={} done (elapsed={}s)", phase_sig.phase, start.elapsed().as_secs());
                     }
+                    // update metrics with measured duration
                     let elapsed_ms = start.elapsed().as_millis() as u128;
                     metrics.upsert_phase_ms(&phase_sig.sig, &phase_sig.phase, elapsed_ms);
                     let _ = metrics.save(&workdir);
+
                     return RunResult { code: st.code().unwrap_or(1) };
                 }
                 Ok(None) => { std::thread::sleep(Duration::from_millis(10)); }
-                Err(e) => { out_err("RUN", &format!("wait failed: {}", e)); return RunResult { code: 1 }; }
+                Err(e) => {
+                    out_err("RUN", &format!("wait failed: {}", e));
+                    return RunResult { code: 1 };
+                }
             }
         }
     }
