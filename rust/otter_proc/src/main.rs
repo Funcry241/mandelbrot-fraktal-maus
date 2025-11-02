@@ -9,7 +9,7 @@ mod cli;
 mod commands;
 mod build_metrics; // Zentral: .build_metrics (ASCII), Seeding & atomisches Speichern
 mod runner;        // <<— NEU: für crate::runner in winenv.rs
-mod summary;       // <<— NEU: ASCII-Endblock-Formatter
+mod summary;       // <<— NEU: ASCII/ANSI Endblock-Formatter (mit Color)
 
 use clap::Parser;
 use cli::{Cli, Commands};
@@ -17,7 +17,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn find_artifact(root: &Path) -> Option<PathBuf> {
-    // Kandidaten wie im aktuellen Log geprüft
     let candidates = [
         "build/RelWithDebInfo/mandelbrot_otterdream.exe",
         "build/bin/RelWithDebInfo/mandelbrot_otterdream.exe",
@@ -47,6 +46,9 @@ fn git_short_hash(root: &Path) -> Option<String> {
 }
 
 fn main() {
+    // ANSI-Farben/VT aktivieren (fällt still auf Plain-ASCII zurück, falls nicht möglich)
+    summary::init_colors();
+
     let cli = Cli::parse();
     let root = cli.root.unwrap_or_else(|| std::env::current_dir().unwrap());
 
@@ -91,7 +93,7 @@ fn main() {
     let artifact = find_artifact(&root);
     let git_hash = git_short_hash(&root);
 
-    // Hübscher, stabiler ASCII-Endblock
+    // Hübscher, stabiler ASCII/ANSI-Endblock
     summary::print_end_summary(summary::EndSummary {
         success: true,
         exit_code: 0,
