@@ -98,13 +98,11 @@ fn detect_vcpkg_triplet(root: &Path) -> Option<String> {
     None
 }
 
-/// einfache, case-insensitive Prüfhelfer
 fn name_eq_ci(name: &str, pat: &str) -> bool { name.eq_ignore_ascii_case(pat) }
 fn name_has_ci(name: &str, needle: &str) -> bool {
     name.to_ascii_lowercase().contains(&needle.to_ascii_lowercase())
 }
 
-/// in (bin|debug/bin) DLLs einsammeln (glew/glfw)
 #[cfg(windows)]
 fn gather_vcpkg_dlls(root: &Path, triplet_opt: Option<String>) -> Vec<PathBuf> {
     let triplet = triplet_opt.or_else(|| env::var("OTTER_VCPKG_TRIPLET").ok())
@@ -132,12 +130,43 @@ fn gather_vcpkg_dlls(root: &Path, triplet_opt: Option<String>) -> Vec<PathBuf> {
     }
     out
 }
-
 #[cfg(not(windows))]
 fn gather_vcpkg_dlls(_root: &Path, _triplet_opt: Option<String>) -> Vec<PathBuf> { Vec::new() }
 
+/// Finde das Artefakt (EXE) auch ohne Log-Sniffing.
+/// Kandidaten: build/{cfg}/mandelbrot_otterdream.exe, build/bin/{cfg}/..., build/bin/..., build/...
+fn find_artifact_exe(root: &Path) -> Option<PathBuf> {
+    let build = root.join("build");
+    let cfgs = ["RelWithDebInfo", "Release", "Debug", "MinSizeRel"];
+
+    // harte Kandidaten
+    for cfg in &cfgs {
+        let c1 = build.join(cfg).join("mandelbrot_otterdream.exe");
+        if c1.exists() { return Some(c1); }
+        let c2 = build.join("bin").join(cfg).join("mandelbrot_otterdream.exe");
+        if c2.exists() { return Some(c2); }
+    }
+    let c3 = build.join("bin").join("mandelbrot_otterdream.exe");
+    if c3.exists() { return Some(c3); }
+    let c4 = build.join("mandelbrot_otterdream.exe");
+    if c4.exists() { return Some(c4); }
+
+    // weiche Suche (flach, keine teure Rekursion)
+    if let Ok(rd) = fs::read_dir(&build) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_file() {
+                if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
+                    if name_has_ci(name, "mandelbrot") && name_has_ci(name, ".exe") { return Some(p); }
+                    if name_has_ci(name, "otterdream") && name_has_ci(name, ".exe") { return Some(p); }
+                }
+            }
+        }
+    }
+    None
+}
+
 struct DistResult {
-    dist_dir: PathBuf,
     exe_name: String,
     copied_dlls: Vec<String>,
 }
@@ -166,13 +195,12 @@ fn copy_to_dist(artifact: &Path, root: &Path) -> std::io::Result<DistResult> {
         }
     }
 
-    Ok(DistResult { dist_dir: dist, exe_name, copied_dlls: copied })
+    Ok(DistResult { exe_name, copied_dlls: copied })
 }
 
-/// Aggregiert Artefakt- & Git-Infos aus Kindprozess-Logs für den hübschen Trailer.
+/// Aggregiert Git-Infos aus Kindprozess-Logs für den Trailer (Artefakt wird unabhängig gesucht).
 #[derive(Default)]
 struct TrailerAgg {
-    artifact: Option<String>,
     git_remote: Option<String>,
     git_branch: Option<String>,
     git_commit_short: Option<String>,
@@ -182,17 +210,6 @@ struct TrailerAgg {
 impl TrailerAgg {
     fn feed(&mut self, line: &str) -> bool /* suppress printing? */ {
         let l = line.trim();
-
-        // Artefakte
-        if let Some(idx) = l.find("[RUNNER] artifact:") {
-            if let Some(path) = l.get(idx + 19..).map(|s| s.trim()) {
-                if !path.is_empty() { self.artifact = Some(path.to_string()); }
-            }
-            return true; // leise sammeln, nicht doppelt ausgeben
-        }
-        if l.contains("[RUNNER] artifact-candidate:") {
-            return true; // Rauschen unterdrücken
-        }
 
         // AUTOGIT Start/Kommandos-Rauschen
         if l.starts_with("[AUTOGIT] start")
@@ -229,15 +246,15 @@ impl TrailerAgg {
             return true;
         }
 
-        // Commit-Zeile: "[main ba51fed] chore: update"
+        // Commit-Zeile: "[main fe52e68] chore: update"
         if l.starts_with("[main ") && l.contains(']') {
             if let Some(end) = l.find(']') {
-                let body = &l[1..end]; // main ba51fed
+                let body = &l[1..end]; // main fe52e68
                 let mut it = body.split_whitespace();
                 self.git_branch = it.next().map(|s| s.to_string());
                 self.git_commit_short = it.next().map(|s| s.to_string());
             }
-            return false; // darf sichtbar bleiben
+            return false; // nützlich, darf sichtbar bleiben
         }
 
         if l.starts_with("[AUTOGIT] done status=OK") {
@@ -255,13 +272,11 @@ impl TrailerAgg {
         false
     }
 
-    fn build_extra(&self) -> Option<String> {
+    fn build_extra(&self, dist_part: Option<&str>) -> Option<String> {
         let mut parts: Vec<String> = Vec::new();
 
-        if let Some(p) = &self.artifact {
-            let base = Path::new(p).file_name()
-                .and_then(|o| o.to_str()).unwrap_or(p);
-            parts.push(format!("artifact={}", base));
+        if let Some(dp) = dist_part {
+            if !dp.is_empty() { parts.push(dp.to_string()); }
         }
 
         if self.git_pushed_ok {
@@ -348,7 +363,7 @@ pub fn run_streamed_with_env(
 
     // Progress
     let mut pstate = ProgressState::new(&phase_sig.phase);
-    // Trailer-Aggregator
+    // Trailer-Aggregator (nur Git/Meta)
     let mut trailer = TrailerAgg::default();
 
     // Tag for child streams in logs
@@ -390,7 +405,7 @@ pub fn run_streamed_with_env(
     fn handle_line(pstate: &mut ProgressState, cleaned: &str, tag: &str, trailer: &mut TrailerAgg) {
         if cleaned.is_empty() { return; }
 
-        // Trailers sammeln / Rauschen ggf. unterdrücken
+        // Git/Meta sammeln / Rauschen ggf. unterdrücken
         if trailer.feed(cleaned) {
             return; // nichts ausgeben
         }
@@ -474,30 +489,22 @@ pub fn run_streamed_with_env(
                 metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
                 let _ = metrics.save(&workdir);
 
-                // Dist bundling (wenn Artefakt da und existent)
-                let mut extra_parts: Vec<String> = Vec::new();
-                if let Some(base_extra) = trailer.build_extra() {
-                    extra_parts.push(base_extra);
-                }
-                if let Some(ap) = trailer.artifact.as_ref() {
-                    let apath = Path::new(ap);
-                    if apath.exists() {
-                        match copy_to_dist(apath, &workdir) {
-                            Ok(dr) => {
-                                extra_parts.push(format!("dist={} (+{} DLLs)", dr.exe_name, dr.copied_dlls.len()));
-                            }
-                            Err(e) => {
-                                extra_parts.push(format!("dist=ERR({})", e));
-                            }
+                // Dist bundling (unabhängig vom Log: EXE direkt suchen)
+                let mut dist_part: Option<String> = None;
+                if code == 0 {
+                    if let Some(art) = find_artifact_exe(&workdir) {
+                        match copy_to_dist(&art, &workdir) {
+                            Ok(dr) => { dist_part = Some(format!("dist={} (+{} DLLs)", dr.exe_name, dr.copied_dlls.len())); }
+                            Err(e) => { dist_part = Some(format!("dist=ERR({})", e)); }
                         }
                     }
                 }
-                let extra = if extra_parts.is_empty() { None } else { Some(extra_parts.join(" • ")) };
 
                 // Hübsches Ende: farbiger Trailer + kompakte Extras
                 if trailer_enabled() {
                     let secs = (elapsed_ms as f32) / 1000.0;
                     let ok = code == 0;
+                    let extra = trailer.build_extra(dist_part.as_deref());
                     out_trailer_min(ok, code, secs, extra.as_deref());
                 } else {
                     out_info("RUST", &format!(
