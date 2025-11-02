@@ -1,6 +1,6 @@
 ///// Otter: Runner-Modul – bündelt Terminal & Prozess-Streaming (ANSI/VT, Progress, Trailer).
-///// Schneefuchs: Öffentliches `runner_term` für summary/main; keine doppelten FFIs.
-///// Maus: Minimal-invasive Änderung (nur Sichtbarkeit) + Heartbeat-Spinner, wenn (noch) keine Ausgaben kommen.
+///// Schneefuchs: Öffentliches runner_term für summary/main; keine doppelten FFIs.
+///// Maus: Minimal-invasive Änderung (Spinner bei deaktiviertem Progress), sonst 1:1 beibehalten.
 ///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;
@@ -375,7 +375,7 @@ pub fn run_streamed_with_env(
             render_and_print(&mut pstate, predicted_ms);
         }
         // … oder minimalistischer Heartbeat, wenn (noch) keine Ausgaben kommen.
-        if !progress_enabled()
+        if heartbeat_enabled
             && exit_code.is_none()
             && !saw_any_child_output
             && hb_last.elapsed() >= Duration::from_millis(120)

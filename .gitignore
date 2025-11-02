@@ -59,11 +59,9 @@ Desktop.ini
 !dist/**
 
 # ----------------------------------------------------------------------
-# Rust: ignore generic target trees globally, keep sources
+# Rust: ignore target trees (keep sources)
 target/
-!rust/
-!rust/otter_proc/
-!rust/otter_proc/**
+rust/otter_proc/target/
 
 # ----------------------------------------------------------------------
 # Project-specific
