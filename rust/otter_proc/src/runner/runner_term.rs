@@ -1,7 +1,7 @@
 ///// Otter: Terminal-Helfer – ANSI/VT + WinConsole-Fallback (PS 5.1-tauglich), **auto-on**.
 ///// Schneefuchs: Aktiviert VT auf stdout/stderr; Heuristiken (WT_SESSION/ANSICON/ConEmuANSI); kein doppeltes FFI anderswo.
 ///// Maus: Plain-ASCII nur mit OTTER_COLOR=0; Fallback färbt Tags **und** Warn/Fehlertext.
-///** Datei: rust/otter_proc/src/runner/runner_term.rs
+///// Datei: rust/otter_proc/src/runner/runner_term.rs
 
 use std::env;
 use std::io::{self, Write};
@@ -301,13 +301,23 @@ pub fn out_err(src: &str, msg: &str) {
 
 /// Ephemere Statuszeile zeichnen/aktualisieren (eine Zeile).
 pub fn print_ephemeral(s: &str) {
-    let _ = write!(io::stdout(), "\r{}\x1b[K", s);
+    if color_enabled() {
+        let _ = write!(io::stdout(), "\r{}\x1b[K", s);
+    } else {
+        // Ohne ANSI: kein \x1b[K senden (würde sichtbar), nur CR + Text.
+        let _ = write!(io::stdout(), "\r{}", s);
+    }
     let _ = io::stdout().flush();
 }
 
 /// Ephemere Zeile löschen.
 pub fn end_ephemeral() -> io::Result<()> {
-    write!(io::stdout(), "\r\x1b[K")?;
+    if color_enabled() {
+        write!(io::stdout(), "\r\x1b[K")?;
+    } else {
+        // Ohne ANSI: nur an den Zeilenanfang
+        write!(io::stdout(), "\r")?;
+    }
     io::stdout().flush()
 }
 
@@ -354,13 +364,12 @@ pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
     }
 
     if wincon::can_use() {
-        // Tag farbig, Rest plain bzw. farbig für WARN/ERR ist oben geregelt
+        // Tag farbig, Rest plain
         let (raw_tag, ttxt) = tag_text("RUST");
         wincon::print_tag_only(&ttxt, raw_tag);
         let status_plain = if ok { "OK" } else { "FAIL" };
-        let status = status_plain;
         let bullet = " • ";
-        let mut line = format!(" DONE{bullet}{status} (code={code}){bullet}{secs:.1}s");
+        let mut line = format!(" DONE{bullet}{status_plain} (code={code}){bullet}{secs:.1}s");
         if let Some(x) = extra {
             if !x.trim().is_empty() {
                 line.push_str(bullet);
@@ -375,9 +384,8 @@ pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
     // Plain
     let tag = "[RUST]";
     let status_plain = if ok { "OK" } else { "FAIL" };
-    let status = status_plain;
     let bullet = " • ";
-    let mut line = format!("{tag} DONE{bullet}{status} (code={code}){bullet}{secs:.1}s");
+    let mut line = format!("{tag} DONE{bullet}{status_plain} (code={code}){bullet}{secs:.1}s");
     if let Some(x) = extra {
         if !x.trim().is_empty() {
             line.push_str(bullet);
