@@ -1,6 +1,6 @@
 ///// Otter: Runner-Modul – bündelt Terminal & Prozess-Streaming (ANSI/VT, Progress, Trailer).
 ///// Schneefuchs: Öffentliches `runner_term` für summary/main; keine doppelten FFIs.
-///// Maus: Minimal-invasive Änderung (nur Sichtbarkeit), sonst 1:1 beibehalten.
+///// Maus: Minimal-invasive Änderung (nur Sichtbarkeit) + Heartbeat-Spinner, wenn (noch) keine Ausgaben kommen.
 ///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;
@@ -267,7 +267,7 @@ pub fn run_streamed_with_env(
     // Tag for child streams in logs
     let tag = if exe.eq_ignore_ascii_case("cmd") { "PS" } else { "PROC" };
 
-    // Non-blocking design: two reader threads feed a channel; main loop ticks UI every 200 ms.
+    // Non-blocking design: two reader threads feed a channel; main loop ticks UI.
     let (tx, rx) = mpsc::channel::<String>();
 
     // stdout reader
@@ -298,6 +298,14 @@ pub fn run_streamed_with_env(
         });
     }
     drop(tx); // main thread keeps only rx
+
+    // ---- Heartbeat/Spinner (falls zu Beginn keine Ausgaben kommen) -----------------
+    let heartbeat_enabled = !progress_enabled(); // Falls Progress-Renderer aus ist → Spinner aktivieren
+    let spinner: [char; 4] = ['-', '\\', '|', '/'];
+    let mut hb_idx: usize = 0;
+    let mut hb_last = Instant::now();
+    let mut saw_any_child_output = false;
+    // -------------------------------------------------------------------------------
 
     // Helper: processes one cleaned line (update progress + durable log)
     fn handle_line(pstate: &mut ProgressState, cleaned: &str, tag: &str, trailer: &mut TrailerAgg) {
@@ -349,6 +357,7 @@ pub fn run_streamed_with_env(
                 Ok(raw) => {
                     let cleaned = sanitize_line(&raw);
                     if !cleaned.is_empty() {
+                        saw_any_child_output = true; // mindestens eine Zeile gesehen
                         handle_line(&mut pstate, &cleaned, tag, &mut trailer);
                     }
                     drained_any = true;
@@ -361,9 +370,21 @@ pub fn run_streamed_with_env(
             }
         }
 
-        // Keep animation alive
+        // Keep animation alive (Renderer) …
         if progress_enabled() && due(&pstate) {
             render_and_print(&mut pstate, predicted_ms);
+        }
+        // … oder minimalistischer Heartbeat, wenn (noch) keine Ausgaben kommen.
+        if !progress_enabled()
+            && exit_code.is_none()
+            && !saw_any_child_output
+            && hb_last.elapsed() >= Duration::from_millis(120)
+        {
+            hb_idx = (hb_idx + 1) & 3;
+            let secs = pstate.start.elapsed().as_secs_f32();
+            let spin = spinner[hb_idx];
+            print_ephemeral(&format!("[{tag}] waiting for output… {spin} t={secs:.1}s"));
+            hb_last = Instant::now();
         }
 
         // Poll child exit

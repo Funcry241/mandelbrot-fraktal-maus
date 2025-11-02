@@ -1,12 +1,16 @@
 ##### Otter: Minimaler Runner-Crate für robuste Prozessausführung & Log-Filter.
-##### Schneefuchs: clap v4.5 (derive), Edition 2021, optionale Probe-Features (win-probe) standardmäßig aus.
-##### Maus: Windows-first; liefert Exitcode des Child-Prozesses durch; keine toten Warnungen im Default-Build.
+##### Schneefuchs: clap v4.5 (derive), Edition 2021; default-run fix; autobins aus für Kontrolle.
+##### Maus: Windows-first; saubere Vorgabe für `cargo run`; keine toten Warnungen im Default-Build.
 ##### Datei: rust/otter_proc/Cargo.toml
 
 [package]
 name = "otter_proc"
 version = "0.1.0"
 edition = "2021"
+# Wenn mehrere Binaries existieren, soll `cargo run` ohne --bin immer otter_proc starten:
+default-run = "otter_proc"
+# Keine automatischen Binaries aus src/bin nehmen – nur die unten definierten:
+autobins = false
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
@@ -21,3 +25,12 @@ opt-level = 3
 win-probe = []
 # Standard: keine Zusatzfeatures → sauberer, warnungsfreier Build
 default = []
+
+# --- Binärziele ---
+[[bin]]
+name = "otter_proc"
+path = "src/main.rs"
+
+[[bin]]
+name = "boot"
+path = "src/bin/boot.rs"
