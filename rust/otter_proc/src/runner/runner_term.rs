@@ -107,6 +107,15 @@ pub fn out_info_col(src: &str, msg: &str, color_code: &str) {
 }
 pub fn out_info_green(src: &str, msg: &str) { out_info_col(src, msg, GREEN); }
 
+/// Dezente (graue) Infozeile – für Listen/Zusatzdetails.
+pub fn out_info_dim(src: &str, msg: &str) {
+    let _ = end_ephemeral();
+    let t = tag_colored(src);
+    let m = paint_dim(msg.trim_end_matches('\n'));
+    let _ = writeln!(std::io::stdout(), "{} {}", t, m);
+    let _ = std::io::stdout().flush();
+}
+
 /// Ephemere Statuszeile zeichnen/aktualisieren (eine Zeile).
 pub fn print_ephemeral(s: &str) {
     let _ = write!(io::stdout(), "\r{}\x1b[K", s);

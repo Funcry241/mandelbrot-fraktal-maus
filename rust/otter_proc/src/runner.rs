@@ -27,7 +27,7 @@ use runner_progress::{
 };
 use runner_term::{
     enable_ansi, out_err, out_info, out_warn, end_ephemeral, sanitize_line,
-    out_trailer_min, print_ephemeral,
+    out_trailer_min, print_ephemeral, out_info_green, out_info_dim,
 };
 
 #[derive(Default)]
@@ -88,11 +88,9 @@ fn cmakecache_var(cache_txt: &str, name: &str) -> Option<String> {
     for raw in cache_txt.lines() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('#') { continue; }
-        // exakt am Zeilenanfang, danach muss ':' folgen
         if !line.starts_with(name) { continue; }
         let rest = &line[name.len()..];
         if !rest.starts_with(':') { continue; }
-        // erstes '=' trennt VALUE ab
         if let Some(eq_idx) = line.find('=') {
             let val = &line[eq_idx + 1..];
             return Some(val.trim().to_string());
@@ -241,7 +239,6 @@ fn copy_to_dist(artifact: &Path, root: &Path) -> std::io::Result<DistResult> {
     Ok(DistResult { exe_name, copied_dlls: copied })
 }
 
-/// Aggregiert Git-Infos aus Kindprozess-Logs (Artefakt-Zeilen & Candidates unterdrücken).
 #[derive(Default)]
 struct TrailerAgg {
     git_remote: Option<String>,
@@ -327,7 +324,7 @@ impl TrailerAgg {
         }
 
         if self.git_pushed_ok {
-            let mut s = String::from("git: pushed ✓");
+            let mut s = String::from("git: pushed");
             if let Some(b) = &self.git_branch {
                 s.push(' ');
                 s.push_str(b);
@@ -541,8 +538,19 @@ pub fn run_streamed_with_env(
                 if code == 0 && pstate.runtime_phase == "build" {
                     if let Some(art) = find_artifact_exe(&workdir) {
                         match copy_to_dist(&art, &workdir) {
-                            Ok(dr) => { dist_part = Some(format!("dist={} (+{} DLLs)", dr.exe_name, dr.copied_dlls.len())); }
-                            Err(e) => { dist_part = Some(format!("dist=ERR({})", e)); }
+                            Ok(dr) => {
+                                // 1) grüne, klare Erfolgszeile
+                                out_info_green("RUST", &format!("DIST {} (+{} DLLs)", dr.exe_name, dr.copied_dlls.len()));
+                                // 2) dezent die DLL-Liste (falls vorhanden)
+                                if !dr.copied_dlls.is_empty() {
+                                    out_info_dim("RUST", &format!("DLLs: {}", dr.copied_dlls.join(", ")));
+                                }
+                                dist_part = Some(format!("dist={} (+{} DLLs)", dr.exe_name, dr.copied_dlls.len()));
+                            }
+                            Err(e) => {
+                                out_warn("RUST", &format!("DIST failed: {}", e));
+                                dist_part = Some(format!("dist=ERR({})", e));
+                            }
                         }
                     }
                 }
