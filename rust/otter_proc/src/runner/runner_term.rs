@@ -1,20 +1,20 @@
-///// Otter: Terminal-Helfer – ANSI/VT plus WinConsole-Fallback für farbige Tags (robust, PS 5.1-tauglich).
-///// Schneefuchs: Aktiviert VT auf stdout/stderr; Heuristiken (WT_SESSION/ANSICON/ConEmuANSI); kein doppeltes FFI anderswo.
-///// Maus: Sauberer Plain-ASCII-Fallback; nur Tags werden im WinConsole-Pfad gefärbt (Text bleibt neutral).
-///// Datei: rust/otter_proc/src/runner/runner_term.rs
+///// Otter: Terminal-Helfer – ANSI/VT standardmäßig an; WinConsole-Fallback optional.
+///** Schneefuchs: Aktiviert VT (Windows) + Heuristiken; keine doppelten FFIs anderswo.
+///** Maus: Plain-ASCII bleibt per OTTER_COLOR=0 verfügbar; Fallback via OTTER_FORCE_WINCON.
+///** Datei: rust/otter_proc/src/runner/runner_term.rs
 
 use std::env;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // -----------------------------------------------------------------------------
-// Globales VT/ANSI-Flag – enable_ansi() setzt es, color_enabled() liest es.
+// Globales VT/ANSI-Flag – enable_ansi() versucht es zu aktivieren (Windows).
+// Farbe ist jetzt standardmäßig AN, unabhängig vom Flag (siehe color_enabled()).
 // -----------------------------------------------------------------------------
 static COLOR_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[inline]
 fn env_supports_vt() -> bool {
-    // Häufige Terminals/Layer unter Windows, die ANSI können
     if env::var_os("WT_SESSION").is_some() { return true; }                  // Windows Terminal
     if env::var_os("ANSICON").is_some() { return true; }                     // ANSICON
     if matches!(env::var("ConEmuANSI"), Ok(v) if v.eq_ignore_ascii_case("on")) { return true; } // ConEmu
@@ -22,8 +22,16 @@ fn env_supports_vt() -> bool {
     false
 }
 
+#[inline]
+fn env_force_wincon() -> bool {
+    matches!(env::var("OTTER_FORCE_WINCON"), Ok(v) if {
+        let t = v.trim().to_ascii_lowercase();
+        t == "1" || t == "on" || t == "true" || t == "yes"
+    })
+}
+
 /// Aktiviert ANSI/VT auf stdout/stderr (Windows) bzw. no-op (non-Windows).
-/// Gibt `true` zurück, wenn Farben sinnvoll nutzbar sind.
+/// Wir versuchen das Beste; Entscheidung für Farbe trifft color_enabled().
 pub fn enable_ansi() -> bool {
     #[cfg(not(windows))]
     {
@@ -60,32 +68,27 @@ pub fn enable_ansi() -> bool {
 
         let ok_out = try_enable(STD_OUTPUT_HANDLE);
         let ok_err = try_enable(STD_ERROR_HANDLE);
-        let ok_env = env_supports_vt();
-
-        let active = ok_out || ok_err || ok_env;
+        let active = ok_out || ok_err || env_supports_vt();
         COLOR_ACTIVE.store(active, Ordering::Relaxed);
         active
     }
 }
 
-/// Farben global aktiv?
-/// - `OTTER_COLOR=0` → aus
-/// - sonst: non-Windows immer true; Windows: true, wenn enable_ansi()/Heuristik Farbe ermöglicht.
+/// Farben **standardmäßig an**.
+/// - `OTTER_COLOR=0`  → alles aus (Plain-ASCII)
+/// - `OTTER_FORCE_WINCON=1` → ANSI aus, WinConsole-Tagfarbe an (Windows)
 pub fn color_enabled() -> bool {
     if matches!(env::var("OTTER_COLOR"), Ok(v) if v.trim() == "0") {
+        return false; // globaler Kill
+    }
+    // Fallback-Pfad explizit erzwingen (nur Tags farbig).
+    if env_force_wincon() {
         return false;
     }
-
-    #[cfg(not(windows))]
-    { return true; }
-
-    #[cfg(windows)]
-    {
-        if !COLOR_ACTIVE.load(Ordering::Relaxed) && env_supports_vt() {
-            COLOR_ACTIVE.store(true, Ordering::Relaxed);
-        }
-        COLOR_ACTIVE.load(Ordering::Relaxed)
-    }
+    // Default: Farbe AN – unabhängig davon, ob enable_ansi() Erfolg meldete.
+    // (Falls das Host-Terminal ANSI nicht versteht, sieht man ESC-Sequenzen – dann
+    // kann OTTER_FORCE_WINCON=1 gesetzt werden.)
+    true
 }
 
 // -----------------------------------------------------------------------------
@@ -133,7 +136,9 @@ mod wincon {
 
     #[inline]
     pub(super) fn can_use() -> bool {
-        if super::color_enabled() { return false; } // ANSI aktiv → kein Fallback nötig
+        // Wir nutzen WinConsole nur, wenn ANSI deaktiviert ist (color_enabled()==false).
+        // Damit bleibt der Fallback rein optional.
+        if super::color_enabled() { return false; }
         let h = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
         !h.is_null()
     }
@@ -316,7 +321,7 @@ pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
     if color_enabled() {
         let tag = tag_colored_ansi("RUST");
         let status_colored = if ok { paint("OK", GREEN) } else { paint("FAIL", RED) };
-        let status = status_colored; // für `{status}` Capture
+        let status = status_colored; // capture
         let bullet = " • ";
         let mut line = format!("{tag} DONE{bullet}{status} (code={code}){bullet}{secs:.1}s");
         if let Some(x) = extra {
@@ -335,7 +340,7 @@ pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
         let (raw_tag, ttxt) = tag_text("RUST");
         wincon::print_tag(&ttxt, raw_tag);
         let status_plain = if ok { "OK" } else { "FAIL" };
-        let status = status_plain; // für `{status}` Capture
+        let status = status_plain;
         let bullet = " • ";
         let mut line = format!(" DONE{bullet}{status} (code={code}){bullet}{secs:.1}s");
         if let Some(x) = extra {
@@ -352,7 +357,7 @@ pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
     // Plain
     let tag = "[RUST]";
     let status_plain = if ok { "OK" } else { "FAIL" };
-    let status = status_plain; // für `{status}` Capture
+    let status = status_plain;
     let bullet = " • ";
     let mut line = format!("{tag} DONE{bullet}{status} (code={code}){bullet}{secs:.1}s");
     if let Some(x) = extra {
