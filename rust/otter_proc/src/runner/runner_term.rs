@@ -1,7 +1,7 @@
-///// Otter: Terminal-Helfer – ANSI/VT + WinConsole-Fallback (PS 5.1-tauglich), auto-on wo möglich.
+///// Otter: Terminal-Helfer – ANSI/VT + WinConsole-Fallback (PS 5.1-tauglich), **auto-on**.
 ///// Schneefuchs: Aktiviert VT auf stdout/stderr; Heuristiken (WT_SESSION/ANSICON/ConEmuANSI); kein doppeltes FFI anderswo.
-///// Maus: Sauberer Plain-ASCII-Fallback (OTTER_COLOR=0); Fallback färbt Tags **und** Warn/Fehlertext.
-///// Datei: rust/otter_proc/src/runner/runner_term.rs
+///// Maus: Plain-ASCII nur mit OTTER_COLOR=0; Fallback färbt Tags **und** Warn/Fehlertext.
+///** Datei: rust/otter_proc/src/runner/runner_term.rs
 
 use std::env;
 use std::io::{self, Write};
@@ -21,14 +21,6 @@ fn env_supports_vt() -> bool {
     if matches!(env::var("ConEmuANSI"), Ok(v) if v.eq_ignore_ascii_case("on")) { return true; } // ConEmu
     if matches!(env::var("TERM"), Ok(v) if !v.is_empty() && v.to_ascii_lowercase() != "dumb") { return true; }
     false
-}
-
-#[inline]
-fn env_force_wincon() -> bool {
-    matches!(env::var("OTTER_FORCE_WINCON"), Ok(v) if {
-        let t = v.trim().to_ascii_lowercase();
-        t == "1" || t == "on" || t == "true" || t == "yes"
-    })
 }
 
 /// Aktiviert ANSI/VT auf stdout/stderr (Windows) bzw. no-op (non-Windows).
@@ -75,28 +67,19 @@ pub fn enable_ansi() -> bool {
     }
 }
 
-/// Farben **automatisch an**, aber realistisch:
+/// Farben **automatisch an**:
 /// - `OTTER_COLOR=0`  → global aus (Plain-ASCII)
-/// - `OTTER_FORCE_WINCON=1` → ANSI **aus**, WinConsole-Fallback an (Windows)
-/// - Windows: ANSI **nur**, wenn VT **wirklich aktiv** (enable_ansi() erfolgreich oder Heuristik)
-/// - Non-Windows: ANSI an
+/// - Sonst: **immer true** (wir emittieren ANSI-Codes); WinConsole-Fallback greift nur,
+///          wenn wir ANSI bewusst deaktivieren (OTTER_COLOR=0).
+///
+/// Hintergrund: In Windows Terminal / ConPTY ignoriert die Konsole `SetConsoleTextAttribute`,
+/// daher brauchen wir **ANSI by default**. Auf alten ConHosts sieht man dann ggf. ESC-Sequenzen
+/// – was hier akzeptiert ist, solange `OTTER_COLOR=0` existiert.
 pub fn color_enabled() -> bool {
     if matches!(env::var("OTTER_COLOR"), Ok(v) if v.trim() == "0") {
         return false; // globaler Kill
     }
-    if env_force_wincon() {
-        return false; // bewusst in den WinConsole-Fallback
-    }
-
-    #[cfg(not(windows))]
-    { return true; }
-
-    #[cfg(windows)]
-    {
-        // Nutze ANSI nur, wenn wir es **wirklich** können → sonst Fallback.
-        let vt_ok = COLOR_ACTIVE.load(Ordering::Relaxed) || env_supports_vt();
-        vt_ok
-    }
+    true // auto-on: immer ANSI emittieren
 }
 
 // -----------------------------------------------------------------------------
@@ -117,7 +100,7 @@ fn paint(s: &str, code: &str) -> String {
 fn paint_dim(s: &str) -> String { paint(s, BRIGHT_BLACK) }
 
 // -----------------------------------------------------------------------------
-// WinConsole-Fallback: färbt Tags **und** Warn/Fehlertext, wenn ANSI nicht geht.
+// WinConsole-Fallback (nur sinnvoll, wenn OTTER_COLOR=0 → ANSI aus).
 // -----------------------------------------------------------------------------
 #[cfg(windows)]
 mod wincon {
@@ -151,7 +134,7 @@ mod wincon {
 
     #[inline]
     pub(super) fn can_use() -> bool {
-        // WinConsole-Fallback nur, wenn ANSI NICHT genutzt wird.
+        // Fallback nur, wenn ANSI **deaktiviert** ist.
         if super::color_enabled() { return false; }
         let h = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
         !h.is_null()
