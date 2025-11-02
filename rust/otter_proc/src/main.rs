@@ -8,8 +8,8 @@ mod prockit;       // Runner-Helpers (Proc/Git/Guards)
 mod cli;
 mod commands;
 mod build_metrics; // Zentral: .build_metrics (ASCII), Seeding & atomisches Speichern
-mod runner;        // <<— NEU: für crate::runner in winenv.rs
-mod summary;       // <<— NEU: ASCII/ANSI Endblock-Formatter (mit Color)
+mod runner;        // für crate::runner::runner_term::{enable_ansi,color_enabled}
+mod summary;       // ASCII/ANSI Endblock-Formatter
 
 use clap::Parser;
 use cli::{Cli, Commands};
@@ -46,8 +46,8 @@ fn git_short_hash(root: &Path) -> Option<String> {
 }
 
 fn main() {
-    // ANSI-Farben/VT aktivieren (fällt still auf Plain-ASCII zurück, falls nicht möglich)
-    summary::init_colors();
+    // ANSI/VT einschalten (zentral, ohne doppeltes FFI). Fällt still zurück, falls nicht möglich.
+    crate::runner::runner_term::enable_ansi();
 
     let cli = Cli::parse();
     let root = cli.root.unwrap_or_else(|| std::env::current_dir().unwrap());
@@ -87,7 +87,7 @@ fn main() {
         autogit_ok = commands::autogit::run(&root, None, false, "origin", Some("main"), true).is_ok();
     }
 
-    // Fakten für die neue Abschluss-Zusammenfassung sammeln
+    // Fakten für die Abschlusszusammenfassung sammeln
     let end_ms = utils::epoch_ms();
     let elapsed_ms = end_ms.saturating_sub(start_ms);
     let artifact = find_artifact(&root);
