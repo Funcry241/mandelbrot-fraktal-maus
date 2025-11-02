@@ -1,20 +1,21 @@
-///// Otter: Terminal-Helfer – ANSI/VT standardmäßig an; WinConsole-Fallback optional.
-///** Schneefuchs: Aktiviert VT (Windows) + Heuristiken; keine doppelten FFIs anderswo.
-///** Maus: Plain-ASCII bleibt per OTTER_COLOR=0 verfügbar; Fallback via OTTER_FORCE_WINCON.
-///** Datei: rust/otter_proc/src/runner/runner_term.rs
+///// Otter: Terminal-Helfer – ANSI/VT + WinConsole-Fallback (PS 5.1-tauglich), auto-on wo möglich.
+///// Schneefuchs: Aktiviert VT auf stdout/stderr; Heuristiken (WT_SESSION/ANSICON/ConEmuANSI); kein doppeltes FFI anderswo.
+///// Maus: Sauberer Plain-ASCII-Fallback (OTTER_COLOR=0); Fallback färbt Tags **und** Warn/Fehlertext.
+///// Datei: rust/otter_proc/src/runner/runner_term.rs
 
 use std::env;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // -----------------------------------------------------------------------------
-// Globales VT/ANSI-Flag – enable_ansi() versucht es zu aktivieren (Windows).
-// Farbe ist jetzt standardmäßig AN, unabhängig vom Flag (siehe color_enabled()).
+// Globales VT/ANSI-Flag – enable_ansi() versucht es (Windows) zu aktivieren.
+// COLOR_ACTIVE signalisiert "VT wirklich aktiv" (nicht nur Wunsch).
 // -----------------------------------------------------------------------------
 static COLOR_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[inline]
 fn env_supports_vt() -> bool {
+    // Häufige Terminals/Layer unter Windows, die ANSI können
     if env::var_os("WT_SESSION").is_some() { return true; }                  // Windows Terminal
     if env::var_os("ANSICON").is_some() { return true; }                     // ANSICON
     if matches!(env::var("ConEmuANSI"), Ok(v) if v.eq_ignore_ascii_case("on")) { return true; } // ConEmu
@@ -31,7 +32,7 @@ fn env_force_wincon() -> bool {
 }
 
 /// Aktiviert ANSI/VT auf stdout/stderr (Windows) bzw. no-op (non-Windows).
-/// Wir versuchen das Beste; Entscheidung für Farbe trifft color_enabled().
+/// Gibt `true` zurück, wenn VT für diesen Prozess **aktiv** ist.
 pub fn enable_ansi() -> bool {
     #[cfg(not(windows))]
     {
@@ -68,27 +69,34 @@ pub fn enable_ansi() -> bool {
 
         let ok_out = try_enable(STD_OUTPUT_HANDLE);
         let ok_err = try_enable(STD_ERROR_HANDLE);
-        let active = ok_out || ok_err || env_supports_vt();
-        COLOR_ACTIVE.store(active, Ordering::Relaxed);
-        active
+        let vt_active = ok_out || ok_err || env_supports_vt();
+        COLOR_ACTIVE.store(vt_active, Ordering::Relaxed);
+        vt_active
     }
 }
 
-/// Farben **standardmäßig an**.
-/// - `OTTER_COLOR=0`  → alles aus (Plain-ASCII)
-/// - `OTTER_FORCE_WINCON=1` → ANSI aus, WinConsole-Tagfarbe an (Windows)
+/// Farben **automatisch an**, aber realistisch:
+/// - `OTTER_COLOR=0`  → global aus (Plain-ASCII)
+/// - `OTTER_FORCE_WINCON=1` → ANSI **aus**, WinConsole-Fallback an (Windows)
+/// - Windows: ANSI **nur**, wenn VT **wirklich aktiv** (enable_ansi() erfolgreich oder Heuristik)
+/// - Non-Windows: ANSI an
 pub fn color_enabled() -> bool {
     if matches!(env::var("OTTER_COLOR"), Ok(v) if v.trim() == "0") {
         return false; // globaler Kill
     }
-    // Fallback-Pfad explizit erzwingen (nur Tags farbig).
     if env_force_wincon() {
-        return false;
+        return false; // bewusst in den WinConsole-Fallback
     }
-    // Default: Farbe AN – unabhängig davon, ob enable_ansi() Erfolg meldete.
-    // (Falls das Host-Terminal ANSI nicht versteht, sieht man ESC-Sequenzen – dann
-    // kann OTTER_FORCE_WINCON=1 gesetzt werden.)
-    true
+
+    #[cfg(not(windows))]
+    { return true; }
+
+    #[cfg(windows)]
+    {
+        // Nutze ANSI nur, wenn wir es **wirklich** können → sonst Fallback.
+        let vt_ok = COLOR_ACTIVE.load(Ordering::Relaxed) || env_supports_vt();
+        vt_ok
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -109,7 +117,7 @@ fn paint(s: &str, code: &str) -> String {
 fn paint_dim(s: &str) -> String { paint(s, BRIGHT_BLACK) }
 
 // -----------------------------------------------------------------------------
-// WinConsole-Fallback: nur die Tags werden farbig, wenn ANSI nicht geht.
+// WinConsole-Fallback: färbt Tags **und** Warn/Fehlertext, wenn ANSI nicht geht.
 // -----------------------------------------------------------------------------
 #[cfg(windows)]
 mod wincon {
@@ -128,6 +136,13 @@ mod wincon {
     const FOREGROUND_RED:   WORD = 0x0004;
     const FOREGROUND_INTENSITY: WORD = 0x0008;
 
+    const COL_DEFAULT: WORD = 0x0007; // hellgrau auf schwarz
+    const COL_CYAN:    WORD = FOREGROUND_GREEN | FOREGROUND_BLUE  | FOREGROUND_INTENSITY;
+    const COL_MAGENTA: WORD = FOREGROUND_RED   | FOREGROUND_BLUE  | FOREGROUND_INTENSITY;
+    const COL_BLUE:    WORD = FOREGROUND_BLUE  | FOREGROUND_INTENSITY;
+    const COL_YELLOW:  WORD = FOREGROUND_RED   | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+    const COL_RED_BRI: WORD = FOREGROUND_RED   | FOREGROUND_INTENSITY;
+
     #[link(name = "kernel32")]
     extern "system" {
         fn GetStdHandle(nStdHandle: i32) -> HANDLE;
@@ -136,25 +151,24 @@ mod wincon {
 
     #[inline]
     pub(super) fn can_use() -> bool {
-        // Wir nutzen WinConsole nur, wenn ANSI deaktiviert ist (color_enabled()==false).
-        // Damit bleibt der Fallback rein optional.
+        // WinConsole-Fallback nur, wenn ANSI NICHT genutzt wird.
         if super::color_enabled() { return false; }
         let h = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
         !h.is_null()
     }
 
     #[inline]
-    pub(super) fn color_for_tag(tag: &str) -> WORD {
+    fn color_for_tag(tag: &str) -> WORD {
         match tag {
-            "PS"     => FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY,   // magenta-ish
-            "RUST"   => FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY, // cyan-ish
-            "PROC"   => FOREGROUND_BLUE | FOREGROUND_INTENSITY,                    // blau
-            "RUNNER" => FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY, // cyan-ish
-            _        => FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY, // default cyan-ish
+            "PS"     => COL_MAGENTA,
+            "RUST"   => COL_CYAN,
+            "PROC"   => COL_BLUE,
+            "RUNNER" => COL_CYAN,
+            _        => COL_CYAN,
         }
     }
 
-    pub(super) fn print_tag(tag_text: &str, tag: &str) {
+    pub(super) fn print_tag_only(tag_text: &str, tag: &str) {
         unsafe {
             let h = GetStdHandle(STD_OUTPUT_HANDLE);
             if h.is_null() {
@@ -165,16 +179,41 @@ mod wincon {
             let _ = SetConsoleTextAttribute(h, color_for_tag(tag));
             let _ = write!(io::stdout(), "{tag_text}");
             let _ = io::stdout().flush();
-            // Standard-Attribut zurück (hellgrau auf schwarz): 7
-            let _ = SetConsoleTextAttribute(h, 7);
+            let _ = SetConsoleTextAttribute(h, COL_DEFAULT);
         }
     }
+
+    pub(super) fn print_tag_and_msg(tag_text: &str, tag: &str, msg: &str, msg_color: WORD) {
+        unsafe {
+            let h = GetStdHandle(STD_OUTPUT_HANDLE);
+            if h.is_null() {
+                let _ = writeln!(io::stdout(), "{tag_text} {msg}");
+                let _ = io::stdout().flush();
+                return;
+            }
+            // Tag
+            let _ = SetConsoleTextAttribute(h, color_for_tag(tag));
+            let _ = write!(io::stdout(), "{tag_text}");
+            // Message
+            let _ = SetConsoleTextAttribute(h, msg_color);
+            let _ = writeln!(io::stdout(), " {msg}");
+            let _ = io::stdout().flush();
+            // Reset
+            let _ = SetConsoleTextAttribute(h, COL_DEFAULT);
+        }
+    }
+
+    pub(super) fn col_warn() -> WORD { COL_YELLOW }
+    pub(super) fn col_err () -> WORD { COL_RED_BRI }
 }
 
 #[cfg(not(windows))]
 mod wincon {
     pub(super) fn can_use() -> bool { false }
-    pub(super) fn print_tag(_tag_text: &str, _tag: &str) { /* no-op */ }
+    pub(super) fn print_tag_only(_tag_text: &str, _tag: &str) { /* no-op */ }
+    pub(super) fn print_tag_and_msg(_tag_text: &str, _tag: &str, _msg: &str, _msg_color: u16) { /* no-op */ }
+    pub(super) fn col_warn() -> u16 { 0 }
+    pub(super) fn col_err () -> u16 { 0 }
 }
 
 // -----------------------------------------------------------------------------
@@ -225,7 +264,7 @@ pub fn out_info(src: &str, msg: &str) {
     }
     if wincon::can_use() {
         let (raw_tag, ttxt) = tag_text(src);
-        wincon::print_tag(&ttxt, raw_tag);
+        wincon::print_tag_only(&ttxt, raw_tag);
         let _ = writeln!(io::stdout(), " {}", m);
         let _ = io::stdout().flush();
         return;
@@ -248,9 +287,7 @@ pub fn out_warn(src: &str, msg: &str) {
     }
     if wincon::can_use() {
         let (raw_tag, ttxt) = tag_text(src);
-        wincon::print_tag(&ttxt, raw_tag);
-        let _ = writeln!(io::stdout(), " {}", m);
-        let _ = io::stdout().flush();
+        wincon::print_tag_and_msg(&ttxt, raw_tag, m, wincon::col_warn());
         return;
     }
     let (_raw, ttxt) = tag_text(src);
@@ -271,9 +308,7 @@ pub fn out_err(src: &str, msg: &str) {
     }
     if wincon::can_use() {
         let (raw_tag, ttxt) = tag_text(src);
-        wincon::print_tag(&ttxt, raw_tag);
-        let _ = writeln!(io::stdout(), " {}", m);
-        let _ = io::stdout().flush();
+        wincon::print_tag_and_msg(&ttxt, raw_tag, m, wincon::col_err());
         return;
     }
     let (_raw, ttxt) = tag_text(src);
@@ -336,9 +371,9 @@ pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
     }
 
     if wincon::can_use() {
-        // Tag farbig, Rest plain
+        // Tag farbig, Rest plain bzw. farbig für WARN/ERR ist oben geregelt
         let (raw_tag, ttxt) = tag_text("RUST");
-        wincon::print_tag(&ttxt, raw_tag);
+        wincon::print_tag_only(&ttxt, raw_tag);
         let status_plain = if ok { "OK" } else { "FAIL" };
         let status = status_plain;
         let bullet = " • ";
