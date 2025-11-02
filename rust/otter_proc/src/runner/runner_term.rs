@@ -1,3 +1,8 @@
+///// Otter: Terminal-Helfer – ANSI-Farben & formattierte Tags für Logs.
+///** Schneefuchs: PS 5.1 kompatibel; nur benötigte Escape-Sequenzen.
+///** Maus: Deutlichere Farben – RUNNER nicht mehr „dim“, sondern gut sichtbar.
+///// Datei: rust/otter_proc/src/runner/runner_term.rs
+
 use std::env;
 use std::io::{self, Write};
 
@@ -75,11 +80,11 @@ fn tag_colored(src: &str) -> String {
         "PS"     => ("[PS]".to_string(), MAGENTA),
         "RUST"   => ("[RUST]".to_string(), CYAN),
         "PROC"   => ("[PROC]".to_string(), BLUE),
-        "RUNNER" => ("[RUNNER]".to_string(), BRIGHT_BLACK), // dezent
+        // vorher: BRIGHT_BLACK (zu dezent) → jetzt CYAN für gute Sichtbarkeit
+        "RUNNER" => ("[RUNNER]".to_string(), CYAN),
         other    => (format!("[{}]", other), CYAN),
     };
-    // Für RUNNER in Dim-Farbe, sonst normale Farbe
-    if s == "RUNNER" { paint_dim(&txt_owned) } else { paint(&txt_owned, col) }
+    if s == "RUNNER" { paint(&txt_owned, col) } else { paint(&txt_owned, col) }
 }
 
 pub fn out_info(src: &str, msg: &str) {
@@ -142,9 +147,6 @@ pub fn term_cols() -> usize {
 }
 
 /// Minimaler, farbiger Trailer im Stil „Variante A“.
-/// Beispiel:
-/// [RUST] DONE • OK (code=0) • 61.4s
-/// Optionales `extra` (z. B.: „artifact=… • git: pushed … ✓“).
 pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
     let tag = tag_colored("RUST");
     let status = if ok { paint("OK", GREEN) } else { paint("FAIL", RED) };

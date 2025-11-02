@@ -8,13 +8,31 @@ mod prockit;       // Runner-Helpers (Proc/Git/Guards)
 mod cli;
 mod commands;
 mod build_metrics; // Zentral: .build_metrics (ASCII), Seeding & atomisches Speichern
-mod runner;        // für crate::runner::runner_term::{enable_ansi,color_enabled}
+mod runner;        // für crate::runner::runner_term::{enable_ansi,color_enabled,out_info}
 mod summary;       // ASCII/ANSI Endblock-Formatter
 
 use clap::Parser;
 use cli::{Cli, Commands};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+fn fmt_exists(b: bool) -> String {
+    if crate::runner::runner_term::color_enabled() {
+        if b { "\x1b[32myes\x1b[0m".to_string() } else { "\x1b[33mno\x1b[0m".to_string() }
+    } else {
+        if b { "yes".to_string() } else { "no".to_string() }
+    }
+}
+
+fn log_candidate(root: &Path, rel: &str) -> (PathBuf, bool) {
+    let p = root.join(rel);
+    let exists = p.is_file();
+    crate::runner::runner_term::out_info(
+        "RUNNER",
+        &format!("artifact-candidate: {} exists={}", p.display(), fmt_exists(exists)),
+    );
+    (p, exists)
+}
 
 fn find_artifact(root: &Path) -> Option<PathBuf> {
     let candidates = [
@@ -24,8 +42,9 @@ fn find_artifact(root: &Path) -> Option<PathBuf> {
         "build/mandelbrot_otterdream.exe",
     ];
     for rel in candidates {
-        let p = root.join(rel);
-        if p.is_file() {
+        let (p, exists) = log_candidate(root, rel);
+        if exists {
+            crate::runner::runner_term::out_info("RUNNER", &format!("artifact: {}", p.display()));
             return Some(p);
         }
     }
@@ -57,7 +76,7 @@ fn main() {
 
     // Startzeit – deterministisch im Log
     let start_ms = utils::epoch_ms();
-    println!("[RUNNER] ts_ms={} root={}", start_ms, prockit::display_path(&root));
+    crate::runner::runner_term::out_info("RUNNER", &format!("ts_ms={} root={}", start_ms, prockit::display_path(&root)));
 
     // Jetzt cli.command konsumieren – danach nicht mehr verwenden.
     let res = match cli.command {
