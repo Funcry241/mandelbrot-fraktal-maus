@@ -1,14 +1,39 @@
-///// Otter: Terminal-Helfer – ANSI-Farben & formattierte Tags für Logs.
-///** Schneefuchs: PS 5.1 kompatibel; nur benötigte Escape-Sequenzen.
-///** Maus: Deutlichere Farben – RUNNER nicht mehr „dim“, sondern gut sichtbar.
+///// Otter: Terminal-Helfer – ANSI-Farben & formatierte Tags für Logs (robust, VT-aware).
+///// Schneefuchs: Aktiviert VT auf stdout/stderr; Heuristiken (WT_SESSION/ANSICON/ConEmuANSI); PS 5.1-tauglich.
+///// Maus: Fällt sauber auf Plain-ASCII zurück; ein globaler Schalter, kein doppeltes FFI.
 ///// Datei: rust/otter_proc/src/runner/runner_term.rs
 
 use std::env;
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+// -----------------------------------------------------------------------------
+// Globales VT/ANSI-Flag – wird in enable_ansi() gesetzt, color_enabled() liest es
+// -----------------------------------------------------------------------------
+static COLOR_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+#[inline]
+fn env_supports_vt() -> bool {
+    // Häufige Terminals/Layer unter Windows, die ANSI können
+    if env::var_os("WT_SESSION").is_some() { return true; }           // Windows Terminal
+    if env::var_os("ANSICON").is_some() { return true; }               // ANSICON
+    if matches!(env::var("ConEmuANSI"), Ok(v) if v.eq_ignore_ascii_case("on")) { return true; } // ConEmu
+    if matches!(env::var("TERM"), Ok(v) if !v.is_empty() && v.to_ascii_lowercase() != "dumb") { return true; }
+    false
+}
 
 /// Aktiviert ANSI-Sequenzen (Farben/Cursor) – ohne externe Crates.
-/// Auf Windows via direktem FFI zu kernel32; auf anderen Plattformen no-op.
-pub fn enable_ansi() {
+/// Auf Windows via direktem FFI zu kernel32; auf anderen Plattformen noop.
+/// Gibt `true` zurück, wenn Farbe sinnvoll genutzt werden kann.
+pub fn enable_ansi() -> bool {
+    // Nicht-Windows: i.d.R. immer ok
+    #[cfg(not(windows))]
+    {
+        COLOR_ACTIVE.store(true, Ordering::Relaxed);
+        return true;
+    }
+
+    // Windows: VT auf stdout/stderr aktivieren; bei Fehler Heuristiken anwenden
     #[cfg(windows)]
     unsafe {
         use std::ffi::c_void;
@@ -17,6 +42,7 @@ pub fn enable_ansi() {
         type BOOL  = i32;
 
         const STD_OUTPUT_HANDLE: i32 = -11; // (DWORD)-11
+        const STD_ERROR_HANDLE:  i32 = -12; // (DWORD)-12
         const ENABLE_VIRTUAL_TERMINAL_PROCESSING: DWORD = 0x0004;
 
         #[link(name = "kernel32")]
@@ -26,25 +52,51 @@ pub fn enable_ansi() {
             fn SetConsoleMode(hConsoleHandle: HANDLE, dwMode: DWORD) -> BOOL;
         }
 
-        let h = GetStdHandle(STD_OUTPUT_HANDLE);
-        if !h.is_null() {
+        unsafe fn try_enable(handle_id: i32) -> bool {
+            let h = GetStdHandle(handle_id);
+            if h.is_null() { return false; }
             let mut mode: DWORD = 0;
-            if GetConsoleMode(h, &mut mode) != 0 {
-                let _ = SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-            }
+            if GetConsoleMode(h, &mut mode) == 0 { return false; }
+            if (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0 { return true; } // schon aktiv
+            SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0
         }
+
+        let ok_out = try_enable(STD_OUTPUT_HANDLE);
+        let ok_err = try_enable(STD_ERROR_HANDLE);
+        let ok_env = env_supports_vt();
+
+        let active = ok_out || ok_err || ok_env;
+        COLOR_ACTIVE.store(active, Ordering::Relaxed);
+        active
     }
-    #[cfg(not(windows))]
-    { /* no-op */ }
 }
 
 /// Farben global aktiv?
-/// OTTER_COLOR=0 -> aus; alles andere -> an (Default).
+/// - `OTTER_COLOR=0` → aus
+/// - sonst: auf Nicht-Windows true; auf Windows true, wenn enable_ansi() Erfolg/Heuristik meldete
 pub fn color_enabled() -> bool {
-    !matches!(env::var("OTTER_COLOR"), Ok(v) if v.trim() == "0")
+    if matches!(env::var("OTTER_COLOR"), Ok(v) if v.trim() == "0") {
+        return false;
+    }
+
+    #[cfg(not(windows))]
+    { return true; }
+
+    #[cfg(windows)]
+    {
+        // Falls enable_ansi() noch nicht aufgerufen wurde, heuristisch entscheiden
+        if !COLOR_ACTIVE.load(Ordering::Relaxed) {
+            if env_supports_vt() {
+                COLOR_ACTIVE.store(true, Ordering::Relaxed);
+            }
+        }
+        COLOR_ACTIVE.load(Ordering::Relaxed)
+    }
 }
 
-// ANSI Codes (nur verwenden, wenn color_enabled()).
+// -----------------------------------------------------------------------------
+// ANSI Codes (nur verwenden, wenn color_enabled())
+// -----------------------------------------------------------------------------
 const RESET: &str = "\x1b[0m";
 const RED: &str = "\x1b[31m";
 const GREEN: &str = "\x1b[32m";
@@ -59,8 +111,9 @@ fn paint(s: &str, code: &str) -> String {
 }
 fn paint_dim(s: &str) -> String { paint(s, BRIGHT_BLACK) }
 
-/// Env-Schalter: RUNNER zusammen mit RUST taggen?
-/// - OTTER_RUNNER_STYLE=merge  ODER  OTTER_RUNNER_MERGE=1  → zusammenfassen
+// -----------------------------------------------------------------------------
+// Tag/Output-Utilities
+// -----------------------------------------------------------------------------
 fn runner_merge_enabled() -> bool {
     match env::var("OTTER_RUNNER_STYLE") {
         Ok(v) if v.trim().eq_ignore_ascii_case("merge") => return true,
@@ -69,7 +122,6 @@ fn runner_merge_enabled() -> bool {
     matches!(env::var("OTTER_RUNNER_MERGE"), Ok(v) if v.trim() == "1" || v.eq_ignore_ascii_case("on"))
 }
 
-/// Optionales Normalisieren von Tags (RUNNER→RUST je nach Env).
 fn normalize_tag(tag: &str) -> &str {
     if tag == "RUNNER" && runner_merge_enabled() { "RUST" } else { tag }
 }
@@ -80,11 +132,10 @@ fn tag_colored(src: &str) -> String {
         "PS"     => ("[PS]".to_string(), MAGENTA),
         "RUST"   => ("[RUST]".to_string(), CYAN),
         "PROC"   => ("[PROC]".to_string(), BLUE),
-        // vorher: BRIGHT_BLACK (zu dezent) → jetzt CYAN für gute Sichtbarkeit
-        "RUNNER" => ("[RUNNER]".to_string(), CYAN),
+        "RUNNER" => ("[RUNNER]".to_string(), CYAN), // bewusst deutlich
         other    => (format!("[{}]", other), CYAN),
     };
-    if s == "RUNNER" { paint(&txt_owned, col) } else { paint(&txt_owned, col) }
+    paint(&txt_owned, col)
 }
 
 pub fn out_info(src: &str, msg: &str) {
