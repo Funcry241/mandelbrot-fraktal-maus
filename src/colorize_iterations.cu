@@ -1,6 +1,6 @@
-///// Otter: Iteration→PBO colorizer – fine gradients via local iteration gradient (phase blend).
-///// Schneefuchs: Cosine palette, gamma-eased, deterministic; no API changes.
-/**  Maus: Interior stays dark with thin halo; stable & flicker-free; only this TU changed.  */
+///// Otter: Nacktmull – Iteration→PBO colorizer; 32×8 geometry; launch_bounds; identical visuals
+///// Schneefuchs: Single path; cosine palette; gamma-eased; deterministic; no API change; ASCII-only logs
+///// Maus: Inclusive-iter semantics preserved; interior stays dark with thin halo; only this TU adjusted
 ///// Datei: src/colorize_iterations.cu
 
 #include <cuda_runtime.h>
@@ -19,6 +19,8 @@ static __device__ __forceinline__ uchar4 pack_rgba(float r, float g, float b, fl
                        (unsigned char)(b * 255.0f + 0.5f),
                        (unsigned char)(a * 255.0f + 0.5f));
 }
+// integer max without pulling <algorithm> into this TU
+static __device__ __forceinline__ int i_max(int a, int b) { return a > b ? a : b; }
 
 // deterministic 32→[0,1) hash (PCG-ish mix; fixed, frame-stable)
 static __device__ __forceinline__ float hash01(uint32_t x){
@@ -50,7 +52,7 @@ static __device__ __forceinline__ uchar4 color_from_iter_ex(
 {
     if (maxIter <= 1) { const float v = 0.02f; return pack_rgba(v,v,v,1.0f); }
 
-    const int interiorEdge = max(0, maxIter - 1);
+    const int interiorEdge = i_max(0, maxIter - 1);
     const int haloWidth    = 6;
 
     // Innenbereich sehr dunkel
@@ -60,7 +62,7 @@ static __device__ __forceinline__ uchar4 color_from_iter_ex(
     }
 
     // Normierung mit leichter Entzerrung + Gradientenantail (sub-iter)
-    float t0 = ((float)it + 0.65f * grad01) / (float)max(interiorEdge, 1);
+    float t0 = ((float)it + 0.65f * grad01) / (float)i_max(interiorEdge, 1);
     t0 = clamp01(t0);
     float t  = powf(t0, 0.82f);
 
@@ -100,7 +102,8 @@ static __device__ __forceinline__ uchar4 color_from_iter_ex(
 }
 
 // ---------------------------------- kernel -----------------------------------
-__global__ void kColorizeIterationsToPBO(
+__global__ __launch_bounds__(Settings::MANDEL_BLOCK_X * Settings::MANDEL_BLOCK_Y, 2)
+void kColorizeIterationsToPBO(
     const uint16_t* __restrict__ d_it,
     uchar4*       __restrict__   d_out,
     int                          width,

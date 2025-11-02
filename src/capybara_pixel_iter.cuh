@@ -1,6 +1,6 @@
-///// Otter: Capybara pixel-iter - drop-in device helpers to compute Mandelbrot iterations with early Hi/Lo + classic continuation.
-///// Schneefuchs: Header-only; device-inline; ASCII one-liners via capy_*; no API break; defaults configurable via CAPY_* macros.
-///// Maus: Returns either just the iteration count or (iters, final z). Escape radius^2 kept at 4.0 for parity.
+///// Otter: Nacktmull – single-path classic continuation with warp-exit (no fast-math, no API change)
+///// Schneefuchs: Header-only; device-inline; one runtime path; ASCII-only; inclusive-iter semantics preserved
+///// Maus: Escape radius^2 = 4.0; returns iters; early Hi/Lo unchanged; no redundant fallbacks
 ///// Datei: src/capybara_pixel_iter.cuh
 
 #pragma once
@@ -20,6 +20,45 @@
 #define CAPY_D  inline
 #endif
 
+// ===== Nacktmull: single-path classic continuation with warp-exit =============
+// Schneefuchs: one loop for all threads; a warp leaves together when none remain active.
+// Note: Device-only body; host compiles remain parsable without providing an alternative runtime path.
+CAPY_D int capy_classic_continue(double2& z, const double2 cD, int it, const int maxIter)
+{
+#if defined(__CUDA_ARCH__)
+    const unsigned mask = __activemask();
+    bool active = (it < maxIter);
+
+    for (;;)
+    {
+        if (active)
+        {
+            const double x = z.x, y = z.y;
+            const double xx = x * x - y * y + cD.x;
+            const double yy = 2.0 * x * y + cD.y;
+            z.x = xx; z.y = yy;
+
+            // Inclusive iteration accounting (parity with original).
+            ++it;
+
+            // Escape / limit after performing this step.
+            const double r2 = xx * xx + yy * yy;
+            if (r2 > 4.0 || it >= maxIter)
+                active = false;
+        }
+
+        // Exit when no thread in the warp remains active.
+        const unsigned anyActive = __ballot_sync(mask, active);
+        if (anyActive == 0u) break;
+    }
+    return it;
+#else
+    // Host-only translation units should not rely on this device helper.
+    // Intentionally no alternative algorithm here to keep a single runtime path.
+    return it;
+#endif
+}
+
 // ----------------------------- Core compute (z=0) -----------------------------
 // Computes Mandelbrot iteration count for pixel (px,py) with center (cx,cy), steps (stepX,stepY).
 // Starts from z = 0, performs Capybara early iterations (if enabled) and continues classically.
@@ -38,15 +77,8 @@ CAPY_D int capy_compute_iters_from_zero(double cx, double cy,
     int it = capy_mandelbrot_early(z, cD, cHL, maxIter, gid);
     if (it >= maxIter) return it;
 
-    // If we already escaped in early phase, the classic loop will bail immediately
-    // Keep the classic continuation compact and branchless where possible
-    for (; it < maxIter; ++it) {
-        const double x = z.x, y = z.y;
-        const double xx = x * x - y * y + cD.x;
-        const double yy = 2.0 * x * y + cD.y;
-        z.x = xx; z.y = yy;
-        if (xx * xx + yy * yy > 4.0) { ++it; break; }
-    }
+    // Nacktmull: single-path classic continuation with warp-exit
+    it = capy_classic_continue(z, cD, it, maxIter);
     return it;
 }
 
@@ -72,16 +104,10 @@ CAPY_D int capy_compute_iters_from_z(double cx, double cy,
         if (done >= budget) return done; // reached maxIter within early phase
     }
 
-    // Classic continuation for the remainder
-    int i = 0;
-    for (; i + done < budget; ++i) {
-        const double x = z.x, y = z.y;
-        const double xx = x * x - y * y + cD.x;
-        const double yy = 2.0 * x * y + cD.y;
-        z.x = xx; z.y = yy;
-        if (xx * xx + yy * yy > 4.0) { ++i; break; }
-    }
-    return done + i;
+    // Nacktmull: continue via single-path helper
+    const int it_before = it0 + done;
+    const int it_after  = capy_classic_continue(z, cD, it_before, maxIter);
+    return (it_after - it0); // iterations added on top of it0
 }
 
 // ----------------------------- Convenience (with z) ---------------------------
@@ -102,14 +128,8 @@ CAPY_D int capy_compute_iters_and_z(double cx, double cy,
     int it = capy_mandelbrot_early(z, cD, cHL, maxIter, gid);
     if (it >= maxIter) { z_out = z; return it; }
 
-    // Classic continuation
-    for (; it < maxIter; ++it) {
-        const double x = z.x, y = z.y;
-        const double xx = x * x - y * y + cD.x;
-        const double yy = 2.0 * x * y + cD.y;
-        z.x = xx; z.y = yy;
-        if (xx * xx + yy * yy > 4.0) { ++it; break; }
-    }
+    // Nacktmull: single-path classic continuation with warp-exit
+    it = capy_classic_continue(z, cD, it, maxIter);
     z_out = z;
     return it;
 }

@@ -1,7 +1,6 @@
-///// Otter: Frame pipeline with double-authoritative zoom/offset, decoupled metrics (statsTileSize), HUD & FPS feed.
-///// Schneefuchs: MAUS header compliant; ASCII logging only; no std::cout/printf; includes via pch first; stable API.
-///// Maus: Compute → Metrics → Overlays → Zoom (one path); clear grid logs; no duplicate metrics builds.
-///** Fink: Interest stale-guard at frame start; PERF line cleaned (removed unused map).
+///// Otter: Nacktmull – frame pipeline with perf warm-up & rate-limit (no alt paths; deterministic)
+///// Schneefuchs: MAUS header compliant; ASCII logging only; pch first; stable API; Settings::PerfLog driven
+///// Maus: Compute → Metrics → Overlays → Zoom (single path); clear grid logs; no duplicate metrics builds
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
@@ -40,9 +39,8 @@ namespace {
     using Clock = std::chrono::high_resolution_clock;
     using msd   = std::chrono::duration<double, std::milli>;
 
-    constexpr int PERF_WARMUP_FRAMES = 30;
-    constexpr int PERF_LOG_EVERY     = 30;
-    constexpr int RING_LOG_EVERY     = 120;
+    // Nacktmull: cadence driven by Settings::PerfLog
+    constexpr int RING_LOG_EVERY = 120;
 
     // Removed g_mapMs (unused)
     static double g_mandMs = 0.0;
@@ -54,8 +52,9 @@ namespace {
 
     inline bool perfShouldLog(int frameIdx) {
         if constexpr (Settings::performanceLogging) {
-            if (frameIdx <= PERF_WARMUP_FRAMES) return false;
-            return (frameIdx % PERF_LOG_EVERY) == 0;
+            if (!Settings::PerfLog::enabled) return false;
+            if (frameIdx <= Settings::PerfLog::warmupFrames) return false;
+            return (frameIdx % Settings::PerfLog::everyN) == 0;
         } else {
             (void)frameIdx;
             return false;

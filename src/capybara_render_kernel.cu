@@ -1,7 +1,7 @@
-///// Otter: Mandelbrot render kernel using Capybara early Hi/Lo + classic continuation (fills d_iterations). Sweetspot: 32x16 blocks on SM80–SM90, dynamic Hi/Lo gating via kBaseStepThresh=8e-13 (maxIter-aware).
-///// Schneefuchs: API unverändert; ASCII-Logs; optionale CUDA-Event-Zeitmessung bei Settings::performanceLogging; identische Iterationszahlen, nur schnellerer Pfadwechsel.
-// ///// Maus: Zero information loss – Innenpunkte = maxIter; Hi/Lo nur bei feinem Pixelstep; Host/Device sauber getrennt. Deterministic logs, no fast-math switches.
-// ///// Datei: src/capybara_render_kernel.cu
+///// Otter: Nacktmull – Mandelbrot kernel (Capybara early Hi/Lo + classic), 32x8 blocks, exact cardioid/bulb, no info loss
+///// Schneefuchs: API unverändert; ASCII-Logs; optional CUDA-event timing; inclusive-iter semantics; no fast-math flags
+///// Maus: Single-path per phase (gating unverändert); Escape radius^2 = 4.0; deterministic; SM80–SM90 sweetspot tuning
+///// Datei: src/capybara_render_kernel.cu
 
 #include "pch.hpp"
 
@@ -23,9 +23,9 @@
 
 // ------------------------------ launch config ---------------------------------
 namespace {
-    // Sweetspot: 32x16 keeps 512 threads/block, good latency hiding on SM80+ given typical register pressure.
+    // Nacktmull sweetspot: 32x8 = 256 threads/block for SM80–SM90 (good occupancy vs. reg pressure, lower divergence).
     constexpr int BX = 32;
-    constexpr int BY = 16;
+    constexpr int BY = 8;
     static_assert(BX > 0 && BY > 0, "Block dimensions must be positive");
 
     // Base threshold for switching to Capybara Hi/Lo when pixel steps get very fine.
@@ -35,7 +35,7 @@ namespace {
     __device__ __forceinline__ double dyn_step_thresh(int maxIter) {
         // Conservative, step-wise schedule keeps results identical while improving perf across common maxIter.
         // Larger maxIter → engage Hi/Lo earlier (smaller threshold).
-        if (maxIter <= 1024)  return kBaseStepThresh * 2.0;   // shallow budgets → classic path longer
+        if (maxIter <= 1024)  return kBaseStepThresh * 2.0;   // shallow budgets → classic path länger
         if (maxIter <= 4096)  return kBaseStepThresh;         // default
         if (maxIter <= 16384) return kBaseStepThresh * 0.75;  // deeper budgets
         return kBaseStepThresh * 0.5;                         // very deep budgets
@@ -75,15 +75,15 @@ void mandelbrotKernel_capybara(
     double stepX, double stepY,
     int maxIter)
 {
-    const int px = blockIdx.x * blockDim.x + threadIdx.x;
-    const int py = blockIdx.y * blockDim.y + threadIdx.y;
+    const int px  = blockIdx.x * blockDim.x + threadIdx.x;
+    const int py  = blockIdx.y * blockDim.y + threadIdx.y;
     if (px >= w || py >= h) return;
 
     const int idx = py * w + px;
 
     // Map pixel -> complex plane (double). Keep it branch-free and deterministic.
-    const double x = cx + (static_cast<double>(px) - 0.5 * static_cast<double>(w)) * stepX;
-    const double y = cy + (static_cast<double>(py) - 0.5 * static_cast<double>(h)) * stepY;
+    const double x  = cx + (static_cast<double>(px) - 0.5 * static_cast<double>(w)) * stepX;
+    const double y  = cy + (static_cast<double>(py) - 0.5 * static_cast<double>(h)) * stepY;
     const double2 cD = make_double2(x, y);
 
     // 1) Analytic interior: exact membership → it = maxIter (no iterations needed)
@@ -138,7 +138,7 @@ extern "C" void launch_mandelbrot_capybara(
 {
     if (!d_it || w <= 0 || h <= 0 || maxIter < 0) {
         if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[CAPY] invalid-args w=%d h=%d maxIter=%d d_it=%p", w, h, maxIter, (void*)d_it);
+            LUCHS_LOG_HOST("[CAPY][NACKTMULL] invalid-args w=%d h=%d maxIter=%d d_it=%p", w, h, maxIter, (void*)d_it);
         }
         return;
     }
@@ -147,7 +147,7 @@ extern "C" void launch_mandelbrot_capybara(
     const dim3 grid((w + BX - 1) / BX, (h + BY - 1) / BY);
 
     if constexpr (Settings::debugLogging || Settings::performanceLogging) {
-        LUCHS_LOG_HOST("[CAPY] queued w=%d h=%d grid=%dx%d block=%dx%d maxIter=%d stream=%p",
+        LUCHS_LOG_HOST("[CAPY][NACKTMULL] queued w=%d h=%d grid=%dx%d block=%dx%d maxIter=%d stream=%p",
                        w, h, grid.x, grid.y, block.x, block.y, maxIter, (void*)stream);
     }
 
@@ -166,7 +166,7 @@ extern "C" void launch_mandelbrot_capybara(
         (void)cudaEventSynchronize(evStop);
         float ms = 0.0f;
         (void)cudaEventElapsedTime(&ms, evStart, evStop);
-        LUCHS_LOG_HOST("[CAPY][time] mand=%.3f ms (w=%d h=%d it=%d)", (double)ms, w, h, maxIter);
+        LUCHS_LOG_HOST("[CAPY][NACKTMULL][time] mand=%.3f ms (w=%d h=%d it=%d)", (double)ms, w, h, maxIter);
         (void)cudaEventDestroy(evStart);
         (void)cudaEventDestroy(evStop);
     }

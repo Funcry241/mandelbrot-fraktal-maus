@@ -1,6 +1,6 @@
-///// Otter: Early-Iter (Hi/Lo) z = z^2 + c with renorm + ASCII telemetry (Capybara).
-///// Schneefuchs: Header-only; device-inline; one final LUCHS_LOG_DEVICE per message; snprintf only for construction.
-///// Maus: Bridge-friendly: returns iters-done; fold-to-double helper for seamless handoff.
+///// Otter: Nacktmull – Early-Iter (Hi/Lo) with single-path warp-exit & renorm; ASCII telemetry intact
+///// Schneefuchs: Header-only; device-inline; one runtime path; inclusive-iter semantics; no fast-math
+///// Maus: Returns iterations performed; escape radius^2 = 4.0; fold-to-double handoff unchanged
 ///// Datei: src/capybara_ziter.cuh
 
 #pragma once
@@ -86,11 +86,7 @@ CAPY_HD void capy_square_add(CapyHiLo2& z, const CapyHiLo2& c)
     // rx = (xx - yy) + c.x
     {
         double main = (xx - yy);
-#if defined(__CUDA_ARCH__) || defined(__cpp_lib_fma) || (__cplusplus >= 201103L)
         double err  = (exx - eyy);
-#else
-        double err  = (exx - eyy);
-#endif
         // hi add with c.x.hi
         CapyHiLo s = capy_two_sum(main, c.x.hi);
         s.lo += err + c.x.lo;
@@ -102,11 +98,7 @@ CAPY_HD void capy_square_add(CapyHiLo2& z, const CapyHiLo2& c)
     // ry = 2*xy + c.y
     {
         double main = 2.0 * xy;
-#if defined(__CUDA_ARCH__) || defined(__cpp_lib_fma) || (__cplusplus >= 201103L)
         double err  = 2.0 * exy;
-#else
-        double err  = 2.0 * exy;
-#endif
         CapyHiLo s = capy_two_sum(main, c.y.hi);
         s.lo += err + c.y.lo;
         CapyHiLo t = capy_quick_two_sum(s.hi, s.lo);
@@ -116,31 +108,63 @@ CAPY_HD void capy_square_add(CapyHiLo2& z, const CapyHiLo2& c)
 }
 
 // --------------------- Early-Iter Loop with Renorm & Telemetry ----------------
+// Nacktmull: single-path warp-synchronous loop. Each active thread performs one
+// step per turn; a warp leaves together when no thread remains active.
+// Inclusive iteration semantics preserved (the escaping step counts).
 CAPY_D int capy_early_iterate(CapyHiLo2& z, const CapyHiLo2& c,
                               int earlyIters, uint32_t gid)
 {
 #if CAPY_ENABLED
+  #if defined(__CUDA_ARCH__)
     if (earlyIters <= 0) return 0;
-    int it = 0;
-    for (; it < earlyIters; ++it) {
-        capy_square_add(z, c);
 
-        // Optional per-step telemetry (rate-limited)
-        capy_log_step(gid, it, z.x.hi, z.y.hi);
+    int it = 0;                       // iterations performed by THIS thread
+    bool active = true;               // this thread still doing early steps
+    const unsigned mask = __activemask();
 
-        // Bailout test on hi parts (adequate in early regime)
-        double n2 = capy_norm2_hi(z);
-        if (n2 > 4.0) { ++it; break; } // count the step that escaped
+    for (;;)
+    {
+        if (active)
+        {
+            // One Mandelbrot step in Hi/Lo
+            capy_square_add(z, c);
 
-        // Renormalize if low parts grew comparatively large
-        bool r1 = capy_renorm_if_needed(z.x);
-        bool r2 = capy_renorm_if_needed(z.y);
-        if (r1 || r2) {
-            capy_log_renorm(gid, it, fabs(z.x.hi) + fabs(z.y.hi),
-                                   fabs(z.x.lo) + fabs(z.y.lo));
+            // Optional per-step telemetry (rate-limited)
+            capy_log_step(gid, it, z.x.hi, z.y.hi);
+
+            // Bailout check using hi components (adequate in early regime)
+            const double n2 = capy_norm2_hi(z);
+
+            // Inclusive iteration accounting: count the step we just executed
+            ++it;
+
+            // If escaped or budget exhausted, stop this thread; skip renorm on escape
+            if (n2 > 4.0 || it >= earlyIters)
+            {
+                active = false;
+            }
+            else
+            {
+                // Renormalize if low parts grew comparatively large
+                const bool r1 = capy_renorm_if_needed(z.x);
+                const bool r2 = capy_renorm_if_needed(z.y);
+                if (r1 || r2) {
+                    capy_log_renorm(gid, it - 1, fabs(z.x.hi) + fabs(z.y.hi),
+                                             fabs(z.x.lo) + fabs(z.y.lo));
+                }
+            }
         }
+
+        // If no thread in this warp remains active, the warp exits together.
+        const unsigned anyActive = __ballot_sync(mask, active);
+        if (anyActive == 0u) break;
     }
     return it;
+  #else
+    // Host-only TU: not executed; keep signature/ODR intact without alt runtime path.
+    (void)z; (void)c; (void)earlyIters; (void)gid;
+    return 0;
+  #endif
 #else
     (void)z; (void)c; (void)earlyIters; (void)gid;
     return 0;

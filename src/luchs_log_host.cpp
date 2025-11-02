@@ -1,6 +1,6 @@
-///// Otter: Konsistentes Format Host/Device; praezise Zeitstempel; ASCII-only.
-///// Schneefuchs: Thread-safe, /WX-fest; kein strncat; deterministisches Verhalten.
-///// Maus: Host-Logging; Debugger-Mirror optional; API: setMirrorToDebugger/flushLogs.
+///// Otter: Host logging – precise epoch-ms timestamps; deterministic; ASCII-only
+///// Schneefuchs: Thread-safe; /WX-safe; no strncat; optional Windows debugger mirror
+///// Maus: API: setMirrorToDebugger/flushLogs/logMessage; one implementation, no side effects
 ///// Datei: src/luchs_log_host.cpp
 
 #include "luchs_log_host.hpp"
@@ -71,7 +71,7 @@ namespace LuchsLogger {
             }
             va_end(a2);
 
-            // Safe newline append (kein strncat / keine „unsafe“ CRTs)
+            // Safe newline append
             size_t len = std::strlen(buf);
             if (len + 1 < sizeof(buf)) {
                 buf[len] = '\n';

@@ -2,6 +2,7 @@
 ##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; removed `-Xcompiler=/MT...` for CUDA TUs; keep compile warnings strict; duplicate-free defines.
 ##### Maus: Deterministic build; Arch=80/86/89/90; C++23 / CUDA20; separable compilation on; AppLocal-friendly link setup.
 ##### Datei: CMakeLists.txt
+
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
@@ -140,9 +141,9 @@ add_executable(mandelbrot_otterdream
 
 # ---------------------- Compile-Options --------------------
 if(MSVC)
-  # Einheitliche /MD (und /MDd) — Option A
+  # Einheitliche /MD (und /MDd) — richtige Generator-Expression
   set_property(TARGET mandelbrot_otterdream PROPERTY
-    MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
   # Host (C++): /EHsc ergänzt, damit C4530 nicht triggert (und /WX bleibt)
   target_compile_options(mandelbrot_otterdream PRIVATE
@@ -223,9 +224,6 @@ endif()
 
 # Windows: Host-Linker-Härtung + deterministisch (Host-Link)
 if(MSVC)
-  target_compile_options(mandelbrot_otterdream PRIVATE
-    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<COMPILE_LANGUAGE:CXX>>:/guard:cf>
-  )
   target_link_options(mandelbrot_otterdream PRIVATE
     $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO /OPT:REF /OPT:ICF>>
     $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>

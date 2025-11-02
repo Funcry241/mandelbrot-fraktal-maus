@@ -1,6 +1,6 @@
-///// Otter: Central config; every value documented (purpose, range, default).
-///// Schneefuchs: No hidden macros; single source of truth for flags.
-///// Maus: performanceLogging=1, ForceAlwaysZoom=1 baseline; ASCII-only logs.
+///// Otter: Central config – Nacktmull defaults consolidated; every value documented (purpose, range, default)
+///// Schneefuchs: No hidden macros; single source of truth for flags & cadences; ASCII-only policy
+///// Maus: performanceLogging=1, ForceAlwaysZoom=1 baseline; 32×8 blocks; no fast-math; deterministic logs
 ///// Datei: src/settings.hpp
 
 #pragma once
@@ -40,6 +40,16 @@ namespace Settings {
         inline constexpr bool header        = true;  // {false,true}
         inline constexpr bool includeCenter = true;  // {false,true}
     } // namespace ZoomLog
+
+    // --- PerfLog cadence (Nacktmull) -----------------------------------------
+    // Used by frame pipeline to rate-limit hot-path PERF lines and to define a warm-up window.
+    // These settings DO NOT alter computation; they only reduce log I/O variance.
+    namespace PerfLog {
+        inline constexpr bool enabled      = true;  // {false,true}
+        inline constexpr int  everyN       = 30;    // 10..240   | Default: 30 (every 30th frame)
+        inline constexpr int  warmupFrames = 80;    // 0..300    | Default: 80 (reduced logging during warm-up)
+        inline constexpr bool header       = true;  // {false,true}
+    } // namespace PerfLog
 
 // ============================== Framerate / VSync ============================
 
@@ -82,6 +92,9 @@ namespace Settings {
     inline constexpr int MANDEL_BLOCK_X = 32;   // threads in X (multiple of 32)
     inline constexpr int MANDEL_BLOCK_Y = 8;    // threads in Y
 
+    // Nacktmull note: render kernel TU sets its own launch_bounds for occupancy;
+    // MANDEL_BLOCK_* define the geometry for other launches (colorizer, heatmap).
+
 // ============================== Progressive / State ==========================
 
     // Progressive state toggle (used by RendererState).
@@ -114,7 +127,12 @@ static_assert(MIN_TILE_SIZE <= BASE_TILE_SIZE && BASE_TILE_SIZE <= MAX_TILE_SIZE
               "MIN_TILE_SIZE <= BASE_TILE_SIZE <= MAX_TILE_SIZE required");
 static_assert(Kolibri::desiredTilePx > 0, "desiredTilePx must be > 0");
 static_assert(MANDEL_BLOCK_X > 0 && MANDEL_BLOCK_Y > 0, "MANDEL_BLOCK dims must be > 0");
+static_assert((MANDEL_BLOCK_X % 32) == 0, "MANDEL_BLOCK_X must be a multiple of 32");
 static_assert(TargetBias::sigmaNdc > 0.0, "sigmaNdc must be > 0");
 static_assert(TargetBias::mix >= 0.0 && TargetBias::mix <= 1.0, "mix in [0,1]");
+// Cadence guards (purely for logging cadence configuration)
+static_assert(ZoomLog::everyN >= 1, "ZoomLog::everyN must be >= 1");
+static_assert(PerfLog::everyN >= 1, "PerfLog::everyN must be >= 1");
+static_assert(PerfLog::warmupFrames >= 0, "PerfLog::warmupFrames must be >= 0");
 
 } // namespace Settings

@@ -1,6 +1,6 @@
-///// Otter: Host-only Logging, klarer Vertrag; CUDA_CHECK integriert; deterministischer Fehlerpfad.
-///// Schneefuchs: Keine Header-Seiteneffekte; /WX-fest; ASCII-only; nur Deklarationen & Makros.
-///// Maus: Einheitliches Format; LUCHS_LOG_HOST faengt Datei/Zeile; keine versteckten Abhaengigkeiten.
+///// Otter: Host-only logging – single source for CUDA_CHECK (+ non-throwing variant); deterministic, ASCII-only
+///// Schneefuchs: Header has no side effects; /WX-safe; one macro home; captures file/line for every log
+///// Maus: Uniform format; optional Windows debugger mirror via impl; no hidden deps; stable API
 ///// Datei: src/luchs_log_host.hpp
 
 #pragma once
@@ -20,10 +20,15 @@ namespace LuchsLogger {
 }
 
 // Variadic convenience macro: captures call site file/line.
+#ifndef LUCHS_LOG_HOST
 #define LUCHS_LOG_HOST(...) ::LuchsLogger::logMessage(__FILE__, __LINE__, __VA_ARGS__)
+#endif
 
-// CUDA error check - ASCII-only & throws, no stderr side-effects.
-// Guarded to avoid redefinition if included multiple times.
+// -----------------------------------------------------------------------------
+// CUDA error checks – single canonical home
+// -----------------------------------------------------------------------------
+
+// Throwing check: logs ASCII detail and throws std::runtime_error on failure.
 #ifndef CUDA_CHECK
 #define CUDA_CHECK(expr)                                                           \
     do {                                                                           \
@@ -31,8 +36,21 @@ namespace LuchsLogger {
         if (err__ != cudaSuccess) {                                                \
             const char* _msg = ::cudaGetErrorString(err__);                        \
             if (!_msg) _msg = "<cudaGetErrorString=null>";                         \
-            LUCHS_LOG_HOST("[CUDA ERROR] %s failed -> %s", #expr, _msg);           \
+            LUCHS_LOG_HOST("[CUDA][ERR] %s -> rc=%d msg=%s", #expr, (int)err__, _msg); \
             throw std::runtime_error("CUDA failure: " #expr);                      \
+        }                                                                          \
+    } while (0)
+#endif
+
+// Non-throwing check: logs ASCII detail and continues (for hot paths / timing).
+#ifndef CUDA_CHECK_NT
+#define CUDA_CHECK_NT(expr)                                                        \
+    do {                                                                           \
+        cudaError_t err__ = (expr);                                                \
+        if (err__ != cudaSuccess) {                                                \
+            const char* _msg = ::cudaGetErrorString(err__);                        \
+            if (!_msg) _msg = "<cudaGetErrorString=null>";                         \
+            LUCHS_LOG_HOST("[CUDA][WARN] %s -> rc=%d msg=%s", #expr, (int)err__, _msg); \
         }                                                                          \
     } while (0)
 #endif
