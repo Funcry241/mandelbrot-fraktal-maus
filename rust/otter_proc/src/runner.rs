@@ -1,6 +1,6 @@
 ///// Otter: Runner-Modul – bündelt Terminal & Prozess-Streaming (ANSI/VT, Progress, Trailer).
 ///// Schneefuchs: Öffentliches `runner_term` für summary/main; keine doppelten FFIs.
-///** Maus: Minimal-invasive Änderung (nur Sichtbarkeit), sonst 1:1 beibehalten.
+///// Maus: Minimal-invasive Änderung (nur Sichtbarkeit), sonst 1:1 beibehalten.
 ///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;
