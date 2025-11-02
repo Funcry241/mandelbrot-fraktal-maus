@@ -1,7 +1,7 @@
 ///// Otter: Process runner with live progress (spinner, ETA, %, ratio merge); pretty trailer & dist bundling.
-/// //// Schneefuchs: No external crates; trims noise; smooth 200 ms animation; safe metrics persistence.
-/// //// Maus: Colors for tags ([RUST]/[PS]/[PROC]); ASCII bar; parses “68%” & “[17/45]”; Windows+POSIX.
-/// //// Datei: rust/otter_proc/src/runner.rs
+///// Schneefuchs: No external crates; trims noise; smooth 200 ms animation; safe metrics persistence; robust CMakeCache parsing.
+///// Maus: Colors for tags ([RUST]/[PS]/[PROC]); ASCII bar; parses “68%” & “[17/45]”; Windows+POSIX.
+///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;
 use std::env;
@@ -83,16 +83,62 @@ fn trailer_enabled() -> bool {
     }
 }
 
-/// Triplet aus CMake-Cache lesen (falls vorhanden)
-fn detect_vcpkg_triplet(root: &Path) -> Option<String> {
+/// CMakeCache-Zeile robust parsen: NAME:TYPE=VALUE  →  Some(VALUE)
+fn cmakecache_var(cache_txt: &str, name: &str) -> Option<String> {
+    for raw in cache_txt.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        // exakt am Zeilenanfang, danach muss ':' folgen
+        if !line.starts_with(name) { continue; }
+        let rest = &line[name.len()..];
+        if !rest.starts_with(':') { continue; }
+        // erstes '=' trennt VALUE ab
+        if let Some(eq_idx) = line.find('=') {
+            let val = &line[eq_idx + 1..];
+            return Some(val.trim().to_string());
+        }
+    }
+    None
+}
+
+/// vcpkg installed dir (Manifest & Classic) erkennen – best effort, ohne Crash.
+fn detect_vcpkg_installed_dir(root: &Path) -> Option<PathBuf> {
+    // 1) env
+    if let Ok(p) = env::var("VCPKG_INSTALLED_DIR") {
+        let pb = PathBuf::from(p);
+        if pb.exists() { return Some(pb); }
+    }
+    // 2) CMakeCache
     let cache = root.join("build").join("CMakeCache.txt");
-    let Ok(text) = fs::read_to_string(&cache) else { return None; };
-    for line in text.lines() {
-        if line.contains("VCPKG_TARGET_TRIPLET") {
-            if let Some(eq) = line.find('=') {
-                let trip = line[eq+1..].trim();
-                if !trip.is_empty() { return Some(trip.to_string()); }
-            }
+    if let Ok(text) = fs::read_to_string(&cache) {
+        if let Some(p) = cmakecache_var(&text, "VCPKG_INSTALLED_DIR") {
+            let pb = PathBuf::from(p);
+            if pb.exists() { return Some(pb); }
+        }
+        if let Some(p) = cmakecache_var(&text, "VCPKG_MANIFEST_DIR") {
+            let pb = PathBuf::from(p).join("vcpkg_installed");
+            if pb.exists() { return Some(pb); }
+        }
+    }
+    // 3) manifest default at repo root
+    let man = root.join("vcpkg_installed");
+    if man.exists() { return Some(man); }
+    // 4) classic submodule layout
+    let classic = root.join("vcpkg").join("installed");
+    if classic.exists() { return Some(classic); }
+    None
+}
+
+fn detect_vcpkg_triplet(root: &Path) -> Option<String> {
+    if let Ok(v) = env::var("VCPKG_TARGET_TRIPLET") {
+        let t = v.trim();
+        if !t.is_empty() { return Some(t.to_string()); }
+    }
+    let cache = root.join("build").join("CMakeCache.txt");
+    if let Ok(text) = fs::read_to_string(&cache) {
+        if let Some(t) = cmakecache_var(&text, "VCPKG_TARGET_TRIPLET") {
+            let tt = t.trim();
+            if !tt.is_empty() { return Some(tt.to_string()); }
         }
     }
     None
@@ -104,26 +150,28 @@ fn name_has_ci(name: &str, needle: &str) -> bool {
 }
 
 #[cfg(windows)]
-fn gather_vcpkg_dlls(root: &Path, triplet_opt: Option<String>) -> Vec<PathBuf> {
-    let triplet = triplet_opt.or_else(|| env::var("OTTER_VCPKG_TRIPLET").ok())
-        .unwrap_or_else(|| "x64-windows".to_string());
-    let base = root.join("vcpkg").join("installed").join(&triplet);
-    let candidates = [ base.join("bin"), base.join("debug").join("bin") ];
+fn gather_vcpkg_dlls(root: &Path) -> Vec<PathBuf> {
+    let installed = detect_vcpkg_installed_dir(root)
+        .unwrap_or_else(|| root.join("vcpkg_installed")); // best-effort
+    let triplet = detect_vcpkg_triplet(root).unwrap_or_else(|| "x64-windows".to_string());
+
+    let candidates = [
+        installed.join(&triplet).join("bin"),
+        installed.join(&triplet).join("debug").join("bin"),
+    ];
 
     let mut out = Vec::new();
     for dir in candidates.iter() {
         let Ok(rd) = fs::read_dir(dir) else { continue; };
-        for e in rd {
-            if let Ok(ent) = e {
-                let p = ent.path();
-                if p.extension().and_then(|s| s.to_str())
-                    .map(|s| s.eq_ignore_ascii_case("dll")).unwrap_or(false)
-                {
-                    let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                    // gezielt minimal halten: glew/glfw
-                    if name_eq_ci(fname, "glew32.dll") || name_has_ci(fname, "glfw") {
-                        out.push(p);
-                    }
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|s| s.to_str())
+                .map(|s| s.eq_ignore_ascii_case("dll")).unwrap_or(false)
+            {
+                let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                // minimal runtime set: glew + glfw (falls dynamisch)
+                if name_eq_ci(fname, "glew32.dll") || name_has_ci(fname, "glfw") {
+                    out.push(p);
                 }
             }
         }
@@ -131,15 +179,13 @@ fn gather_vcpkg_dlls(root: &Path, triplet_opt: Option<String>) -> Vec<PathBuf> {
     out
 }
 #[cfg(not(windows))]
-fn gather_vcpkg_dlls(_root: &Path, _triplet_opt: Option<String>) -> Vec<PathBuf> { Vec::new() }
+fn gather_vcpkg_dlls(_root: &Path) -> Vec<PathBuf> { Vec::new() }
 
-/// Finde das Artefakt (EXE) auch ohne Log-Sniffing.
-/// Kandidaten: build/{cfg}/mandelbrot_otterdream.exe, build/bin/{cfg}/..., build/bin/..., build/...
+/// Finde das Artefakt (EXE) ohne Log-Sniffing.
 fn find_artifact_exe(root: &Path) -> Option<PathBuf> {
     let build = root.join("build");
     let cfgs = ["RelWithDebInfo", "Release", "Debug", "MinSizeRel"];
 
-    // harte Kandidaten
     for cfg in &cfgs {
         let c1 = build.join(cfg).join("mandelbrot_otterdream.exe");
         if c1.exists() { return Some(c1); }
@@ -151,7 +197,6 @@ fn find_artifact_exe(root: &Path) -> Option<PathBuf> {
     let c4 = build.join("mandelbrot_otterdream.exe");
     if c4.exists() { return Some(c4); }
 
-    // weiche Suche (flach, keine teure Rekursion)
     if let Ok(rd) = fs::read_dir(&build) {
         for e in rd.flatten() {
             let p = e.path();
@@ -185,9 +230,7 @@ fn copy_to_dist(artifact: &Path, root: &Path) -> std::io::Result<DistResult> {
     let mut copied: Vec<String> = Vec::new();
     #[cfg(windows)]
     {
-        let triplet = detect_vcpkg_triplet(root);
-        let dlls = gather_vcpkg_dlls(root, triplet);
-        for dll in dlls {
+        for dll in gather_vcpkg_dlls(root) {
             if let Some(fname) = dll.file_name().and_then(|s| s.to_str()) {
                 let _ = fs::copy(&dll, dist.join(fname))?;
                 copied.push(fname.to_string());
@@ -198,7 +241,7 @@ fn copy_to_dist(artifact: &Path, root: &Path) -> std::io::Result<DistResult> {
     Ok(DistResult { exe_name, copied_dlls: copied })
 }
 
-/// Aggregiert Git-Infos aus Kindprozess-Logs für den Trailer (Artefakt wird unabhängig gesucht).
+/// Aggregiert Git-Infos aus Kindprozess-Logs (Artefakt-Zeilen & Candidates unterdrücken).
 #[derive(Default)]
 struct TrailerAgg {
     git_remote: Option<String>,
@@ -210,6 +253,10 @@ struct TrailerAgg {
 impl TrailerAgg {
     fn feed(&mut self, line: &str) -> bool /* suppress printing? */ {
         let l = line.trim();
+
+        // RUNNER artifact spam reduzieren
+        if l.starts_with("[RUNNER] artifact-candidate:") { return true; }
+        if l.starts_with("[RUNNER] artifact:") { return true; }
 
         // AUTOGIT Start/Kommandos-Rauschen
         if l.starts_with("[AUTOGIT] start")
@@ -363,7 +410,7 @@ pub fn run_streamed_with_env(
 
     // Progress
     let mut pstate = ProgressState::new(&phase_sig.phase);
-    // Trailer-Aggregator (nur Git/Meta)
+    // Trailer-Aggregator
     let mut trailer = TrailerAgg::default();
 
     // Tag for child streams in logs
@@ -489,9 +536,9 @@ pub fn run_streamed_with_env(
                 metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
                 let _ = metrics.save(&workdir);
 
-                // Dist bundling (unabhängig vom Log: EXE direkt suchen)
+                // Dist bundling nur nach echtem Build
                 let mut dist_part: Option<String> = None;
-                if code == 0 {
+                if code == 0 && pstate.runtime_phase == "build" {
                     if let Some(art) = find_artifact_exe(&workdir) {
                         match copy_to_dist(&art, &workdir) {
                             Ok(dr) => { dist_part = Some(format!("dist={} (+{} DLLs)", dr.exe_name, dr.copied_dlls.len())); }
