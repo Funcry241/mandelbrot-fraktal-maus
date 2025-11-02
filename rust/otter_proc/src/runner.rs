@@ -1,10 +1,11 @@
-///// Otter: Process runner with live progress (spinner, ETA, %, ratio merge); pretty tags.
-///// Schneefuchs: No external crates; trims blank lines; smooth 200 ms animation; saves metrics safely.
-///// Maus: Colors for source ([RUST]/[PS]); ASCII bar; parses both “68%” and “[17/45]”; Windows+POSIX.
+///// Otter: Process runner with live progress (spinner, ETA, %, ratio merge); pretty tags; copies artifact to dist.
+///// Schneefuchs: No external crates; trims blank lines; smooth 200 ms animation; saves metrics safely; robust dist copy.
+///// Maus: Colors for source ([RUST]/[PS]); ASCII bar; parses both “68%” and “[17/45]”; Windows+POSIX; vcpkg DLL sweep.
 ///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -26,7 +27,7 @@ use runner_progress::{
 };
 use runner_term::{
     enable_ansi, out_err, out_info, out_warn, end_ephemeral, sanitize_line,
-    out_trailer_min, print_ephemeral, out_info_col, out_info_green,
+    out_trailer_min, print_ephemeral,
 };
 
 #[derive(Default)]
@@ -98,16 +99,17 @@ impl TrailerAgg {
 
         // Artefakte
         if let Some(idx) = l.find("[RUNNER] artifact:") {
+            // Format: "[RUNNER] artifact: C:\...\mandelbrot_otterdream.exe"
             if let Some(path) = l.get(idx + 19..).map(|s| s.trim()) {
                 if !path.is_empty() { self.artifact = Some(path.to_string()); }
             }
-            return true;
+            return true; // leise sammeln, nicht doppelt ausgeben
         }
         if l.contains("[RUNNER] artifact-candidate:") {
-            return true;
+            return true; // Rauschen unterdrücken
         }
 
-        // AUTOGIT Rauschen
+        // AUTOGIT Start/Kommandos-Rauschen
         if l.starts_with("[AUTOGIT] start")
             || l.starts_with("[AUTOGIT][RUN] git")
             || l.starts_with("Enumerating objects:")
@@ -121,7 +123,7 @@ impl TrailerAgg {
             return true;
         }
 
-        // Protected-Branch Hinweise
+        // Bypassed/Protected-Branch-Hinweise merken, aber nicht spammen
         if l.starts_with("remote: Bypassed rule violations")
             || l.contains("Cannot update this protected ref")
         {
@@ -132,33 +134,39 @@ impl TrailerAgg {
         // Push-Ziel / Remote (z. B. "To https://...  main -> main")
         if l.starts_with("To ") {
             self.git_pushed_ok = true;
+            // branch heuristisch ziehen
             if let Some(pos) = l.rfind("->") {
                 let tail = &l[pos+2..].trim();
                 if !tail.is_empty() { self.git_branch = Some(tail.to_string()); }
             }
+            // remote
             if let Some(space) = l.find(' ') {
                 self.git_remote = Some(l[3..space].trim().to_string());
             }
             return true;
         }
 
-        // Commit-Zeile in Klammern: "[<branch> <shortsha>] ..."
-        if l.starts_with('[') && l.contains(']') {
+        // Commit-Zeile: "[main fe52e68] chore: update"
+        if l.starts_with("[main ") && l.contains(']') {
+            // Branch + short SHA
             if let Some(end) = l.find(']') {
-                let body = &l[1..end]; // z. B. "main ba51fed"
+                let body = &l[1..end]; // main fe52e68
                 let mut it = body.split_whitespace();
-                if let Some(br) = it.next() { if !br.is_empty() { self.git_branch = Some(br.to_string()); } }
-                if let Some(sh) = it.next() { if !sh.is_empty() { self.git_commit_short = Some(sh.to_string()); } }
+                self.git_branch = it.next().map(|s| s.to_string());
+                self.git_commit_short = it.next().map(|s| s.to_string());
             }
-            return false; // commit-Zeile sichtbar lassen
+            return false; // darf sichtbar bleiben, ist oft nützlich
         }
 
+        // Abschluss von AUTOGIT
         if l.starts_with("[AUTOGIT] done status=OK") {
             self.git_pushed_ok = true;
             return true;
         }
 
+        // branch 'main' set up to track 'origin/main'.
         if l.starts_with("branch '") && l.contains(" set up to track ") {
+            // branch extrahieren
             let name = l.trim_start_matches("branch '")
                 .split('\'').next().unwrap_or("").trim();
             if !name.is_empty() { self.git_branch = Some(name.to_string()); }
@@ -179,14 +187,57 @@ impl TrailerAgg {
 
         if self.git_pushed_ok {
             let mut s = String::from("git: pushed ✓");
-            if let Some(b) = &self.git_branch { s.push(' '); s.push_str(b); }
-            if let Some(c) = &self.git_commit_short { s.push_str(" @"); s.push_str(c); }
-            if self.git_rules_bypassed { s.push_str(" (rules)"); }
+            if let Some(b) = &self.git_branch {
+                s.push(' ');
+                s.push_str(b);
+            }
+            if let Some(c) = &self.git_commit_short {
+                s.push_str(" @");
+                s.push_str(c);
+            }
+            if self.git_rules_bypassed {
+                s.push_str(" (rules)");
+            }
             parts.push(s);
         }
 
         if parts.is_empty() { None } else { Some(parts.join(" • ")) }
     }
+}
+
+/// Kopiert Artefakt und optionale vcpkg-DLLs nach <root>/dist.
+/// Gibt kurze Status-Snippets für den Trailer zurück (z. B. "dist: exe+glew32.dll").
+fn copy_to_dist(artifact: &Path, root: &Path) -> std::io::Result<Vec<String>> {
+    let dist = root.join("dist");
+    fs::create_dir_all(&dist)?;
+
+    // EXE
+    let exe_name = artifact.file_name().and_then(|s| s.to_str()).unwrap_or("app.exe");
+    let dest_exe = dist.join(exe_name);
+    fs::copy(artifact, &dest_exe)?;
+
+    // vcpkg-DLLs (optional, falls dynamisch)
+    let triplet = env::var("OTTER_VCPKG_TRIPLET").unwrap_or_else(|_| "x64-windows".to_string());
+    let vcpkg_bin = root.join("vcpkg").join("installed").join(&triplet).join("bin");
+    let maybe_dlls = ["glew32.dll", "glfw3.dll"];
+    let mut copied: Vec<&str> = Vec::new();
+    for dll in &maybe_dlls {
+        let src = vcpkg_bin.join(dll);
+        if src.is_file() {
+            let dst = dist.join(dll);
+            // copy kann fehlschlagen, wenn schreibgeschützt – dann wird überschrieben
+            let _ = fs::copy(&src, &dst)?;
+            copied.push(dll);
+        }
+    }
+
+    let mut snippets: Vec<String> = Vec::new();
+    if copied.is_empty() {
+        snippets.push("dist: exe".to_string());
+    } else {
+        snippets.push(format!("dist: exe+{}", copied.join("+")));
+    }
+    Ok(snippets)
 }
 
 pub fn run_streamed_with_env(
@@ -205,7 +256,7 @@ pub fn run_streamed_with_env(
     // Sofortiger Start-Heartbeat, damit der Beginn nie „stuck“ wirkt.
     print_ephemeral("[proc] starting...");
 
-    // Metrics einmalig ausgeben
+    // Metrics: load or seed, log only once per process
     let (mut metrics, metrics_file, seed_src) = BuildMetrics::load_or_seed(&workdir);
     if !METRICS_PRINTED_ONCE.swap(true, Ordering::SeqCst) {
         out_info("RUST", &format!("metrics={}", metrics_file.display()));
@@ -214,7 +265,7 @@ pub fn run_streamed_with_env(
         }
     }
 
-    // Child starten
+    // Spawn child
     let mut cmd = Command::new(exe);
     cmd.args(args)
         .stdin(Stdio::null())
@@ -228,7 +279,7 @@ pub fn run_streamed_with_env(
     let phase_sig = detect_phase_and_sig(exe, args);
     out_info("RUST", &format!("RUN exe=\"{}\" phase={} sig={}", exe, phase_sig.phase, phase_sig.sig));
 
-    // Spawn-Latenz messen
+    // Spawn-Latenz messen (z. B. Smartscreen/AV)
     let t_spawn0 = Instant::now();
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -257,10 +308,10 @@ pub fn run_streamed_with_env(
     // Trailer-Aggregator
     let mut trailer = TrailerAgg::default();
 
-    // Tag für Kind-Streams
+    // Tag for child streams in logs
     let tag = if exe.eq_ignore_ascii_case("cmd") { "PS" } else { "PROC" };
 
-    // Zwei Leser-Threads → Channel; UI tickt alle 200 ms
+    // Non-blocking design: two reader threads feed a channel; main loop ticks UI every 200 ms.
     let (tx, rx) = mpsc::channel::<String>();
 
     // stdout reader
@@ -292,30 +343,13 @@ pub fn run_streamed_with_env(
     }
     drop(tx); // main thread keeps only rx
 
-    // Helper: verarbeitet eine Zeile (Progress + hübsche Ausgabe)
+    // Helper: processes one cleaned line (update progress + durable log)
     fn handle_line(pstate: &mut ProgressState, cleaned: &str, tag: &str, trailer: &mut TrailerAgg) {
         if cleaned.is_empty() { return; }
 
-        // Schönfärben: Build-Finish erkennt und einfärben
-        if let Some(pos) = cleaned.find("Build finished (code=") {
-            // Versuche code=… zu parsen
-            let rest = &cleaned[pos + "Build finished (code=".len()..];
-            if let Some(end) = rest.find(')') {
-                let code_str = &rest[..end];
-                if let Ok(n) = code_str.parse::<i32>() {
-                    if n == 0 {
-                        out_info_green(tag, cleaned);
-                    } else {
-                        out_info_col(tag, cleaned, "\x1b[31m"); // rot
-                    }
-                    return;
-                }
-            }
-        }
-
-        // Trailer sammeln / Rauschen unterdrücken
+        // Trailers sammeln / Rauschen ggf. unterdrücken
         if trailer.feed(cleaned) {
-            return;
+            return; // nichts ausgeben
         }
 
         // Progress aus den Inhalten schätzen
@@ -343,7 +377,7 @@ pub fn run_streamed_with_env(
     let mut readers_done = false;
     let mut exit_code: Option<i32> = None;
 
-    // Initiale Ephemeral oder Startzeile
+    // Initial ephemeral or start line
     if progress_enabled() {
         render_and_print(&mut pstate, predicted_ms);
     } else {
@@ -352,7 +386,7 @@ pub fn run_streamed_with_env(
     }
 
     loop {
-        // Vorliegende Zeilen abräumen
+        // Drain currently available lines
         let mut drained_any = false;
         loop {
             match rx.try_recv() {
@@ -371,12 +405,12 @@ pub fn run_streamed_with_env(
             }
         }
 
-        // Animation am Leben halten
+        // Keep animation alive
         if progress_enabled() && due(&pstate) {
             render_and_print(&mut pstate, predicted_ms);
         }
 
-        // Child-Exit pollen
+        // Poll child exit
         match child.try_wait() {
             Ok(Some(st)) => { exit_code = Some(st.code().unwrap_or(1)); }
             Ok(None) => {}
@@ -387,7 +421,7 @@ pub fn run_streamed_with_env(
             }
         }
 
-        // Fertig wenn: child beendet UND alle Reader fertig
+        // Finish condition: child exited AND all readers done
         if let Some(code) = exit_code {
             if readers_done {
                 let _ = end_ephemeral();
@@ -397,11 +431,26 @@ pub fn run_streamed_with_env(
                 metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
                 let _ = metrics.save(&workdir);
 
+                // DIST-Kopie (wenn Artefakt erkannt)
+                let mut extra_parts: Vec<String> = Vec::new();
+                if let Some(s) = trailer.build_extra() {
+                    extra_parts.push(s);
+                }
+                if let Some(art) = &trailer.artifact {
+                    let root = env::var("OTTER_ROOT")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|_| workdir.clone());
+                    match copy_to_dist(Path::new(art), &root) {
+                        Ok(mut v) => { extra_parts.append(&mut v); }
+                        Err(e) => { out_warn("RUST", &format!("dist-copy failed: {}", e)); }
+                    }
+                }
+
                 // Hübsches Ende: farbiger Trailer + kompakte Extras
                 if trailer_enabled() {
                     let secs = (elapsed_ms as f32) / 1000.0;
                     let ok = code == 0;
-                    let extra = trailer.build_extra();
+                    let extra = if extra_parts.is_empty() { None } else { Some(extra_parts.join(" • ")) };
                     out_trailer_min(ok, code, secs, extra.as_deref());
                 } else {
                     out_info("RUST", &format!(
