@@ -9,10 +9,13 @@ build/
 build-*/
 
 # ----------------------------------------------------------------------
-# vcpkg work dirs & caches (local only)
-vcpkg/
+# vcpkg work dirs & caches (local only) — keep vcpkg.json tracked
 vcpkg_installed/
-vcpkg_cache/
+vcpkg_downloads/
+vcpkg_buildtrees/
+vcpkg_packages/
+!vcpkg.json
+!vcpkg-configuration.json
 
 # ----------------------------------------------------------------------
 # VS / IDE metadata
@@ -41,6 +44,7 @@ compile_commands.json
 *~
 Thumbs.db
 Desktop.ini
+.DS_Store
 
 # ----------------------------------------------------------------------
 # Compiled artifacts (we stage selected ones into /dist)
@@ -62,6 +66,8 @@ Desktop.ini
 # Rust: ignore target trees (keep sources)
 target/
 rust/otter_proc/target/
+# If you ever want to pin the runner binary (not recommended), unignore it explicitly:
+# !rust/otter_proc/target/release/otter_proc.exe
 
 # ----------------------------------------------------------------------
 # Project-specific

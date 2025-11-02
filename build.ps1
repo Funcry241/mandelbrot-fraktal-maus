@@ -1,57 +1,59 @@
-##### Otter: Ultra-thin wrapper — Cargo runs the Rust orchestrator; no PS “magie”.
-##### Schneefuchs: PS 5.1-safe; clean exit-code pass-through; strict paths; colored end line.
-##### Maus: One-line ASCII steps; deterministic; fail fast if cargo/runner fails.
+##### Otter: Forwarder – /branch (delegiert an Rust) oder /build (delegiert an Rust).
+##### Schneefuchs: PS 5.1-safe; keine Git-Logik mehr in PS; saubere Exitcodes; ASCII-Logs.
+##### Maus: Minimal & deterministisch; akzeptiert / oder -; Branchname fix "wupp".
 ##### Datei: .\build.ps1
-
-param(
-  [ValidateSet('Debug','Release','RelWithDebInfo','MinSizeRel')]
-  [string]$Configuration = 'RelWithDebInfo'
-)
 
 $ErrorActionPreference = 'Stop'
 
-# repo root (robust, PS 5.1-safe)
-$root = if ($PSScriptRoot) { $PSScriptRoot } elseif ($PSCommandPath) { Split-Path -Path $PSCommandPath -Parent } else { (Get-Location).Path }
-$root = (Resolve-Path -LiteralPath $root).Path
+function Info([string]$m){ Write-Host "[PS] $m" }
+function Err ([string]$m){ Write-Host "[PS] [ERR] $m" -ForegroundColor Red; exit 1 }
 
-# runner path
+# Repo-Root (Ordner des Skripts)
+$root = $PSScriptRoot
+if (-not $root) {
+  if ($PSCommandPath) { $root = Split-Path -Path $PSCommandPath -Parent } else { $root = (Get-Location).Path }
+}
+try { $root = (Resolve-Path -LiteralPath $root).Path } catch { Err "Root nicht gefunden" }
+
+# Mode aus Args: /branch oder /build
+$mode = ''
+foreach ($a in $args) {
+  $al = ($a + '').ToLower()
+  if ($al -eq '/branch' -or $al -eq '-branch') { $mode = 'branch' }
+  if ($al -eq '/build'  -or $al -eq '-build')  { $mode = 'build'  }
+}
+if ($mode -eq '') { Err "Nutze:  .\build.ps1 /branch   oder   .\build.ps1 /build" }
+
+# cargo vorhanden?
+$cargo = Get-Command cargo -ErrorAction SilentlyContinue
+if (-not $cargo) { Err "'cargo' nicht im PATH" }
+
+# Runner-Ordner
 $runnerDir = Join-Path $root 'rust\otter_proc'
+if (-not (Test-Path -LiteralPath $runnerDir)) { Err "Runner-Verzeichnis fehlt: $runnerDir" }
 
-Write-Host "[PS] [INFO] === Build (Cargo-run) started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ==="
-
-# preflight: cargo present?
-$cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
-if (-not $cargoCmd) {
-  Write-Host "[PS] [ERR] 'cargo' not found in PATH" -ForegroundColor Red
-  exit 88
-}
-
-# preflight: runner dir present?
-if (-not (Test-Path -LiteralPath $runnerDir)) {
-  Write-Host "[PS] [ERR] Runner directory missing: $runnerDir" -ForegroundColor Red
-  exit 87
-}
-
-# optional: also provide OTTER_ROOT for runner convenience
+# Gemeinsame ENV
 $env:OTTER_ROOT = $root
-
-Write-Host "[PS] [INFO] [STEP] cargo run --release -- --root $root full --cfg $Configuration"
 
 Push-Location -LiteralPath $runnerDir
 try {
-  & cargo run --release -- '--root' $root 'full' '--cfg' $Configuration
+  if ($mode -eq 'branch') {
+    # Rust-Branchmodus via ENV
+    $env:OTTER_OP     = 'branch'
+    $env:OTTER_BRANCH = 'wupp'
+    Info "[STEP] cargo run --release    (OTTER_OP=branch OTTER_BRANCH=wupp)"
+    & cargo run --release --
+  } else {
+    # Full-Build + Autogit (Branch autodetect)
+    Remove-Item Env:OTTER_OP -ErrorAction SilentlyContinue
+    Info "[STEP] cargo run --release -- --root $root full --cfg RelWithDebInfo"
+    & cargo run --release -- '--root' $root 'full' '--cfg' 'RelWithDebInfo'
+  }
   $code = $LASTEXITCODE
-}
-finally {
+} finally {
   Pop-Location
 }
 
-if ($code -ne 0) {
-  Write-Host "[PS] [ERR] cargo run failed (code=$code)" -ForegroundColor Red
-  Write-Host "[PS] [INFO] === Build finished (code=$code) ===" -ForegroundColor Red
-  exit $code
-}
-
-# Success trailer in green (PS 5.1-safe)
-Write-Host "[PS] [INFO] === Build finished (code=0) ===" -ForegroundColor Green
+if ($code -ne 0) { Err "cargo run fehlgeschlagen (code=$code)" }
+Info "OK (code=0)"
 exit 0

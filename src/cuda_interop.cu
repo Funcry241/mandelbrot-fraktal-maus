@@ -13,9 +13,9 @@
 #include "hermelin_buffer.hpp"
 #include "bear_CudaPBOResource.hpp"
 #include "colorize_iterations.cuh"
-#include "capybara_frame_pipeline.cuh"  // inline capy_render(...)
-#include "capybara_mapping.cuh"         // capy_pixel_steps_from_zoom_scale(...)
-#include "heatmap_metrics.hpp"          // HeatmapMetrics::buildGPU
+#include "capybara_frame_pipeline.cuh"
+#include "capybara_mapping.cuh"    // capy_pixel_steps_from_zoom_scale(...)
+#include "heatmap_metrics.hpp"     // HeatmapMetrics::buildGPU
 
 #include <vector>
 #include <stdexcept>
@@ -100,8 +100,6 @@ bool precheckCudaRuntime() noexcept {
         }
         return false;
     }
-    // Prefer more L1 for our access pattern (no effect on results).
-    (void)cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
     return true;
 }
 
