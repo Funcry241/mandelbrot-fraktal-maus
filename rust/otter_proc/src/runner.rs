@@ -1,11 +1,5 @@
-///// Otter: Process runner with live progress (spinner, ETA, %, ratio merge); pretty trailer & dist bundling.
-///// Schneefuchs: No external crates; trims noise; smooth 200 ms animation; safe metrics persistence; robust CMakeCache parsing.
-///// Maus: Colors for tags ([RUST]/[PS]/[PROC]); ASCII bar; parses “68%” & “[17/45]”; Windows+POSIX.
-///// Datei: rust/otter_proc/src/runner.rs
-
 use std::collections::HashMap;
 use std::env;
-use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -27,7 +21,7 @@ use runner_progress::{
 };
 use runner_term::{
     enable_ansi, out_err, out_info, out_warn, end_ephemeral, sanitize_line,
-    out_trailer_min, print_ephemeral, out_info_green, out_info_dim,
+    out_trailer_min, print_ephemeral,
 };
 
 #[derive(Default)]
@@ -72,7 +66,7 @@ fn detect_phase_and_sig(exe: &str, args: &[String]) -> PhaseDetect {
 }
 
 /// Trailer standardmäßig **an**.
-/// Nur wenn OTTER_TRAILER=0|off|no gesetzt ist, wird er unterdrückt.
+/// Nur wenn OTTER_TRAILER=0|off gesetzt ist, wird er unterdrückt.
 fn trailer_enabled() -> bool {
     match env::var("OTTER_TRAILER") {
         Ok(v) => {
@@ -83,164 +77,10 @@ fn trailer_enabled() -> bool {
     }
 }
 
-/// CMakeCache-Zeile robust parsen: NAME:TYPE=VALUE  →  Some(VALUE)
-fn cmakecache_var(cache_txt: &str, name: &str) -> Option<String> {
-    for raw in cache_txt.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') { continue; }
-        if !line.starts_with(name) { continue; }
-        let rest = &line[name.len()..];
-        if !rest.starts_with(':') { continue; }
-        if let Some(eq_idx) = line.find('=') {
-            let val = &line[eq_idx + 1..];
-            return Some(val.trim().to_string());
-        }
-    }
-    None
-}
-
-/// vcpkg installed dir (Manifest & Classic) erkennen – best effort, ohne Crash.
-fn detect_vcpkg_installed_dir(root: &Path) -> Option<PathBuf> {
-    // 1) env
-    if let Ok(p) = env::var("VCPKG_INSTALLED_DIR") {
-        let pb = PathBuf::from(p);
-        if pb.exists() { return Some(pb); }
-    }
-    // 2) CMakeCache
-    let cache = root.join("build").join("CMakeCache.txt");
-    if let Ok(text) = fs::read_to_string(&cache) {
-        if let Some(p) = cmakecache_var(&text, "VCPKG_INSTALLED_DIR") {
-            let pb = PathBuf::from(p);
-            if pb.exists() { return Some(pb); }
-        }
-        if let Some(p) = cmakecache_var(&text, "VCPKG_MANIFEST_DIR") {
-            let pb = PathBuf::from(p).join("vcpkg_installed");
-            if pb.exists() { return Some(pb); }
-        }
-    }
-    // 3) manifest default at repo root
-    let man = root.join("vcpkg_installed");
-    if man.exists() { return Some(man); }
-    // 4) classic submodule layout
-    let classic = root.join("vcpkg").join("installed");
-    if classic.exists() { return Some(classic); }
-    None
-}
-
-fn detect_vcpkg_triplet(root: &Path) -> Option<String> {
-    if let Ok(v) = env::var("VCPKG_TARGET_TRIPLET") {
-        let t = v.trim();
-        if !t.is_empty() { return Some(t.to_string()); }
-    }
-    let cache = root.join("build").join("CMakeCache.txt");
-    if let Ok(text) = fs::read_to_string(&cache) {
-        if let Some(t) = cmakecache_var(&text, "VCPKG_TARGET_TRIPLET") {
-            let tt = t.trim();
-            if !tt.is_empty() { return Some(tt.to_string()); }
-        }
-    }
-    None
-}
-
-fn name_eq_ci(name: &str, pat: &str) -> bool { name.eq_ignore_ascii_case(pat) }
-fn name_has_ci(name: &str, needle: &str) -> bool {
-    name.to_ascii_lowercase().contains(&needle.to_ascii_lowercase())
-}
-
-#[cfg(windows)]
-fn gather_vcpkg_dlls(root: &Path) -> Vec<PathBuf> {
-    let installed = detect_vcpkg_installed_dir(root)
-        .unwrap_or_else(|| root.join("vcpkg_installed")); // best-effort
-    let triplet = detect_vcpkg_triplet(root).unwrap_or_else(|| "x64-windows".to_string());
-
-    let candidates = [
-        installed.join(&triplet).join("bin"),
-        installed.join(&triplet).join("debug").join("bin"),
-    ];
-
-    let mut out = Vec::new();
-    for dir in candidates.iter() {
-        let Ok(rd) = fs::read_dir(dir) else { continue; };
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.extension().and_then(|s| s.to_str())
-                .map(|s| s.eq_ignore_ascii_case("dll")).unwrap_or(false)
-            {
-                let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                // minimal runtime set: glew + glfw (falls dynamisch)
-                if name_eq_ci(fname, "glew32.dll") || name_has_ci(fname, "glfw") {
-                    out.push(p);
-                }
-            }
-        }
-    }
-    out
-}
-#[cfg(not(windows))]
-fn gather_vcpkg_dlls(_root: &Path) -> Vec<PathBuf> { Vec::new() }
-
-/// Finde das Artefakt (EXE) ohne Log-Sniffing.
-fn find_artifact_exe(root: &Path) -> Option<PathBuf> {
-    let build = root.join("build");
-    let cfgs = ["RelWithDebInfo", "Release", "Debug", "MinSizeRel"];
-
-    for cfg in &cfgs {
-        let c1 = build.join(cfg).join("mandelbrot_otterdream.exe");
-        if c1.exists() { return Some(c1); }
-        let c2 = build.join("bin").join(cfg).join("mandelbrot_otterdream.exe");
-        if c2.exists() { return Some(c2); }
-    }
-    let c3 = build.join("bin").join("mandelbrot_otterdream.exe");
-    if c3.exists() { return Some(c3); }
-    let c4 = build.join("mandelbrot_otterdream.exe");
-    if c4.exists() { return Some(c4); }
-
-    if let Ok(rd) = fs::read_dir(&build) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.is_file() {
-                if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
-                    if name_has_ci(name, "mandelbrot") && name_has_ci(name, ".exe") { return Some(p); }
-                    if name_has_ci(name, "otterdream") && name_has_ci(name, ".exe") { return Some(p); }
-                }
-            }
-        }
-    }
-    None
-}
-
-struct DistResult {
-    exe_name: String,
-    copied_dlls: Vec<String>,
-}
-
-/// Kopiert EXE → dist und sammelt passende DLLs (Windows)
-fn copy_to_dist(artifact: &Path, root: &Path) -> std::io::Result<DistResult> {
-    let dist = root.join("dist");
-    fs::create_dir_all(&dist)?;
-
-    // EXE kopieren
-    let exe_name = artifact.file_name().and_then(|s| s.to_str()).unwrap_or("app.exe").to_string();
-    let dest_exe = dist.join(&exe_name);
-    fs::copy(artifact, &dest_exe)?;
-
-    // DLLs sammeln (Windows) und kopieren
-    let mut copied: Vec<String> = Vec::new();
-    #[cfg(windows)]
-    {
-        for dll in gather_vcpkg_dlls(root) {
-            if let Some(fname) = dll.file_name().and_then(|s| s.to_str()) {
-                let _ = fs::copy(&dll, dist.join(fname))?;
-                copied.push(fname.to_string());
-            }
-        }
-    }
-
-    Ok(DistResult { exe_name, copied_dlls: copied })
-}
-
+/// Aggregiert Artefakt- & Git-Infos aus Kindprozess-Logs für den hübschen Trailer.
 #[derive(Default)]
 struct TrailerAgg {
+    artifact: Option<String>,
     git_remote: Option<String>,
     git_branch: Option<String>,
     git_commit_short: Option<String>,
@@ -251,9 +91,16 @@ impl TrailerAgg {
     fn feed(&mut self, line: &str) -> bool /* suppress printing? */ {
         let l = line.trim();
 
-        // RUNNER artifact spam reduzieren
-        if l.starts_with("[RUNNER] artifact-candidate:") { return true; }
-        if l.starts_with("[RUNNER] artifact:") { return true; }
+        // Artefakte
+        if let Some(idx) = l.find("[RUNNER] artifact:") {
+            if let Some(path) = l.get(idx + 19..).map(|s| s.trim()) {
+                if !path.is_empty() { self.artifact = Some(path.to_string()); }
+            }
+            return true; // leise sammeln
+        }
+        if l.contains("[RUNNER] artifact-candidate:") {
+            return true; // Rauschen unterdrücken
+        }
 
         // AUTOGIT Start/Kommandos-Rauschen
         if l.starts_with("[AUTOGIT] start")
@@ -269,7 +116,6 @@ impl TrailerAgg {
             return true;
         }
 
-        // Bypassed/Protected-Branch-Hinweise merken, aber nicht spammen
         if l.starts_with("remote: Bypassed rule violations")
             || l.contains("Cannot update this protected ref")
         {
@@ -277,7 +123,7 @@ impl TrailerAgg {
             return true;
         }
 
-        // Push-Ziel / Remote (z. B. "To https://...  main -> main")
+        // Push-Ziel / Remote
         if l.starts_with("To ") {
             self.git_pushed_ok = true;
             if let Some(pos) = l.rfind("->") {
@@ -290,15 +136,15 @@ impl TrailerAgg {
             return true;
         }
 
-        // Commit-Zeile: "[main fe52e68] chore: update"
+        // Commit-Zeile: "[main abc1234] ..."
         if l.starts_with("[main ") && l.contains(']') {
             if let Some(end) = l.find(']') {
-                let body = &l[1..end]; // main fe52e68
+                let body = &l[1..end]; // "main abc1234"
                 let mut it = body.split_whitespace();
                 self.git_branch = it.next().map(|s| s.to_string());
                 self.git_commit_short = it.next().map(|s| s.to_string());
             }
-            return false; // nützlich, darf sichtbar bleiben
+            return false; // nützlich sichtbar
         }
 
         if l.starts_with("[AUTOGIT] done status=OK") {
@@ -316,15 +162,17 @@ impl TrailerAgg {
         false
     }
 
-    fn build_extra(&self, dist_part: Option<&str>) -> Option<String> {
+    fn build_extra(&self) -> Option<String> {
         let mut parts: Vec<String> = Vec::new();
 
-        if let Some(dp) = dist_part {
-            if !dp.is_empty() { parts.push(dp.to_string()); }
+        if let Some(p) = &self.artifact {
+            let base = Path::new(p).file_name()
+                .and_then(|o| o.to_str()).unwrap_or(p);
+            parts.push(format!("artifact={}", base));
         }
 
         if self.git_pushed_ok {
-            let mut s = String::from("git: pushed");
+            let mut s = String::from("git: pushed ✓");
             if let Some(b) = &self.git_branch {
                 s.push(' ');
                 s.push_str(b);
@@ -386,7 +234,7 @@ pub fn run_streamed_with_env(
     let t_spawn0 = Instant::now();
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) => { let _ = end_ephemeral(); out_err("RUST", &format!("spawn failed exe={} err={}", exe, e)); return RunResult { code: 1 }; }
+        Err(e) => { out_err("RUST", &format!("spawn failed exe={} err={}", exe, e)); return RunResult { code: 1 }; }
     };
     let spawn_ms = t_spawn0.elapsed().as_millis();
     if spawn_ms > 400 {
@@ -396,17 +244,18 @@ pub fn run_streamed_with_env(
 
     let stdout = match child.stdout.take() {
         Some(s) => s,
-        None => { let _ = end_ephemeral(); out_err("RUST", "failed to take stdout"); return RunResult { code: 1 }; }
+        None => { out_err("RUST", "failed to take stdout"); return RunResult { code: 1 }; }
     };
     let stderr = match child.stderr.take() {
         Some(s) => s,
-        None => { let _ = end_ephemeral(); out_err("RUST", "failed to take stderr"); return RunResult { code: 1 }; }
+        None => { out_err("RUST", "failed to take stderr"); return RunResult { code: 1 }; }
     };
 
     let predicted_ms = metrics.get_last_ms(&phase_sig.sig, &phase_sig.phase).unwrap_or(0);
 
     // Progress
     let mut pstate = ProgressState::new(&phase_sig.phase);
+
     // Trailer-Aggregator
     let mut trailer = TrailerAgg::default();
 
@@ -449,7 +298,7 @@ pub fn run_streamed_with_env(
     fn handle_line(pstate: &mut ProgressState, cleaned: &str, tag: &str, trailer: &mut TrailerAgg) {
         if cleaned.is_empty() { return; }
 
-        // Git/Meta sammeln / Rauschen ggf. unterdrücken
+        // Trailers sammeln / Rauschen ggf. unterdrücken
         if trailer.feed(cleaned) {
             return; // nichts ausgeben
         }
@@ -533,33 +382,11 @@ pub fn run_streamed_with_env(
                 metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
                 let _ = metrics.save(&workdir);
 
-                // Dist bundling nur nach echtem Build
-                let mut dist_part: Option<String> = None;
-                if code == 0 && pstate.runtime_phase == "build" {
-                    if let Some(art) = find_artifact_exe(&workdir) {
-                        match copy_to_dist(&art, &workdir) {
-                            Ok(dr) => {
-                                // 1) grüne, klare Erfolgszeile
-                                out_info_green("RUST", &format!("DIST {} (+{} DLLs)", dr.exe_name, dr.copied_dlls.len()));
-                                // 2) dezent die DLL-Liste (falls vorhanden)
-                                if !dr.copied_dlls.is_empty() {
-                                    out_info_dim("RUST", &format!("DLLs: {}", dr.copied_dlls.join(", ")));
-                                }
-                                dist_part = Some(format!("dist={} (+{} DLLs)", dr.exe_name, dr.copied_dlls.len()));
-                            }
-                            Err(e) => {
-                                out_warn("RUST", &format!("DIST failed: {}", e));
-                                dist_part = Some(format!("dist=ERR({})", e));
-                            }
-                        }
-                    }
-                }
-
                 // Hübsches Ende: farbiger Trailer + kompakte Extras
                 if trailer_enabled() {
                     let secs = (elapsed_ms as f32) / 1000.0;
                     let ok = code == 0;
-                    let extra = trailer.build_extra(dist_part.as_deref());
+                    let extra = trailer.build_extra();
                     out_trailer_min(ok, code, secs, extra.as_deref());
                 } else {
                     out_info("RUST", &format!(

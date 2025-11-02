@@ -1,7 +1,7 @@
 ///// Otter: Terminal helpers (ANSI enable, pretty tags, ephemeral line, sanitize).
 ///// Schneefuchs: No external crates; Windows FFI zu kernel32; trims banner noise.
 ///// Maus: Termbreite aus $COLUMNS (Fallback 120); ASCII-only; ruhiges Verhalten auf Nicht-TTY.
-///// Datei: rust/otter_proc/src/runner_term.rs
+///// Datei: rust/otter_proc/src/runner/runner_term.rs
 
 use std::env;
 use std::io::{self, Write};
@@ -11,7 +11,6 @@ use std::io::{self, Write};
 pub fn enable_ansi() {
     #[cfg(windows)]
     unsafe {
-        // Minimaler FFI-Sockel, keine winapi/windows-Crates.
         use std::ffi::c_void;
         type HANDLE = *mut c_void;
         type DWORD = u32;
@@ -36,9 +35,7 @@ pub fn enable_ansi() {
         }
     }
     #[cfg(not(windows))]
-    {
-        // nix zu tun
-    }
+    { /* no-op */ }
 }
 
 /// Farben global aktiv?
@@ -62,15 +59,32 @@ fn paint(s: &str, code: &str) -> String {
 }
 fn paint_dim(s: &str) -> String { paint(s, BRIGHT_BLACK) }
 
-fn tag_colored(s: &str) -> String {
-    // L1: Tag-Farben — eigener String, keine temporären Borrows
+/// Env-Schalter: RUNNER zusammen mit RUST taggen?
+/// - OTTER_RUNNER_STYLE=merge  ODER  OTTER_RUNNER_MERGE=1  → zusammenfassen
+fn runner_merge_enabled() -> bool {
+    match env::var("OTTER_RUNNER_STYLE") {
+        Ok(v) if v.trim().eq_ignore_ascii_case("merge") => return true,
+        _ => {}
+    }
+    matches!(env::var("OTTER_RUNNER_MERGE"), Ok(v) if v.trim() == "1" || v.eq_ignore_ascii_case("on"))
+}
+
+/// Optionales Normalisieren von Tags (RUNNER→RUST je nach Env).
+fn normalize_tag(tag: &str) -> &str {
+    if tag == "RUNNER" && runner_merge_enabled() { "RUST" } else { tag }
+}
+
+fn tag_colored(src: &str) -> String {
+    let s = normalize_tag(src);
     let (txt_owned, col) = match s {
-        "PS"   => ("[PS]".to_string(), MAGENTA),
-        "RUST" => ("[RUST]".to_string(), CYAN),
-        "PROC" => ("[PROC]".to_string(), BLUE),
-        other  => (format!("[{}]", other), CYAN),
+        "PS"     => ("[PS]".to_string(), MAGENTA),
+        "RUST"   => ("[RUST]".to_string(), CYAN),
+        "PROC"   => ("[PROC]".to_string(), BLUE),
+        "RUNNER" => ("[RUNNER]".to_string(), BRIGHT_BLACK), // dezent
+        other    => (format!("[{}]", other), CYAN),
     };
-    paint(&txt_owned, col)
+    // Für RUNNER in Dim-Farbe, sonst normale Farbe
+    if s == "RUNNER" { paint_dim(&txt_owned) } else { paint(&txt_owned, col) }
 }
 
 pub fn out_info(src: &str, msg: &str) {
@@ -97,25 +111,6 @@ pub fn out_err(src: &str, msg: &str) {
     let _ = io::stdout().flush();
 }
 
-/// Wie `out_info`, aber komplett eingefärbt (z. B. für OK/FAIL-Zeilen).
-pub fn out_info_col(src: &str, msg: &str, color_code: &str) {
-    let _ = end_ephemeral();
-    let t = tag_colored(src);
-    let m = paint(msg.trim_end_matches('\n'), color_code);
-    let _ = writeln!(io::stdout(), "{} {}", t, m);
-    let _ = io::stdout().flush();
-}
-pub fn out_info_green(src: &str, msg: &str) { out_info_col(src, msg, GREEN); }
-
-/// Dezente (graue) Infozeile – für Listen/Zusatzdetails.
-pub fn out_info_dim(src: &str, msg: &str) {
-    let _ = end_ephemeral();
-    let t = tag_colored(src);
-    let m = paint_dim(msg.trim_end_matches('\n'));
-    let _ = writeln!(std::io::stdout(), "{} {}", t, m);
-    let _ = std::io::stdout().flush();
-}
-
 /// Ephemere Statuszeile zeichnen/aktualisieren (eine Zeile).
 pub fn print_ephemeral(s: &str) {
     let _ = write!(io::stdout(), "\r{}\x1b[K", s);
@@ -130,7 +125,6 @@ pub fn end_ephemeral() -> io::Result<()> {
 
 /// Sanfte Bereinigung: CR entfernen, leere Zeilen verwerfen, etwas Rauschen eindampfen.
 pub fn sanitize_line(s: &str) -> String {
-    // zwei kurze, besitzende Schritte vermeiden temporäre Borrow-Lifetime-Probleme
     let step1 = s.replace('\r', "");
     let step2 = step1.trim_end_matches('\n').trim();
     if step2.is_empty() {
@@ -155,7 +149,7 @@ pub fn term_cols() -> usize {
 /// Minimaler, farbiger Trailer im Stil „Variante A“.
 /// Beispiel:
 /// [RUST] DONE • OK (code=0) • 61.4s
-/// Optionales `extra` kann vom Aufrufer genutzt werden (z. B. „artifact=… • git: pushed … ✓“).
+/// Optionales `extra` (z. B.: „artifact=… • git: pushed … ✓“).
 pub fn out_trailer_min(ok: bool, code: i32, secs: f32, extra: Option<&str>) {
     let tag = tag_colored("RUST");
     let status = if ok { paint("OK", GREEN) } else { paint("FAIL", RED) };
