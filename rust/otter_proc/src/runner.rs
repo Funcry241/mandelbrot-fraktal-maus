@@ -1,5 +1,5 @@
 ///// Otter: Process runner with live progress (spinner, ETA, %, ratio merge); pretty tags; copies artifact to dist.
-///// Schneefuchs: No external crates; trims blank lines; smooth 200 ms animation; saves metrics safely; robust dist copy.
+///// Schneefuchs: No external crates; trims blank lines; smooth 200 ms animation; saves metrics safely; robust dist copy & artifact fallback.
 ///// Maus: Colors for source ([RUST]/[PS]); ASCII bar; parses both “68%” and “[17/45]”; Windows+POSIX; vcpkg DLL sweep.
 ///// Datei: rust/otter_proc/src/runner.rs
 
@@ -27,7 +27,7 @@ use runner_progress::{
 };
 use runner_term::{
     enable_ansi, out_err, out_info, out_warn, end_ephemeral, sanitize_line,
-    out_trailer_min, print_ephemeral,
+    out_trailer_min, print_ephemeral, out_info_green,
 };
 
 #[derive(Default)]
@@ -205,39 +205,62 @@ impl TrailerAgg {
     }
 }
 
+/// Ergebnis der DIST-Kopie.
+struct DistResult {
+    dist_dir: PathBuf,
+    exe_name: String,
+    copied_dlls: Vec<String>,
+}
+
 /// Kopiert Artefakt und optionale vcpkg-DLLs nach <root>/dist.
-/// Gibt kurze Status-Snippets für den Trailer zurück (z. B. "dist: exe+glew32.dll").
-fn copy_to_dist(artifact: &Path, root: &Path) -> std::io::Result<Vec<String>> {
+fn copy_to_dist(artifact: &Path, root: &Path) -> std::io::Result<DistResult> {
     let dist = root.join("dist");
     fs::create_dir_all(&dist)?;
 
     // EXE
-    let exe_name = artifact.file_name().and_then(|s| s.to_str()).unwrap_or("app.exe");
-    let dest_exe = dist.join(exe_name);
+    let exe_name = artifact.file_name().and_then(|s| s.to_str()).unwrap_or("app.exe").to_string();
+    let dest_exe = dist.join(&exe_name);
     fs::copy(artifact, &dest_exe)?;
 
-    // vcpkg-DLLs (optional, falls dynamisch)
-    let triplet = env::var("OTTER_VCPKG_TRIPLET").unwrap_or_else(|_| "x64-windows".to_string());
-    let vcpkg_bin = root.join("vcpkg").join("installed").join(&triplet).join("bin");
-    let maybe_dlls = ["glew32.dll", "glfw3.dll"];
-    let mut copied: Vec<&str> = Vec::new();
-    for dll in &maybe_dlls {
-        let src = vcpkg_bin.join(dll);
-        if src.is_file() {
-            let dst = dist.join(dll);
-            // copy kann fehlschlagen, wenn schreibgeschützt – dann wird überschrieben
-            let _ = fs::copy(&src, &dst)?;
-            copied.push(dll);
+    // vcpkg-DLLs (optional, falls dynamisch, Windows)
+    let mut copied: Vec<String> = Vec::new();
+    #[cfg(windows)]
+    {
+        let triplet = env::var("OTTER_VCPKG_TRIPLET").unwrap_or_else(|_| "x64-windows".to_string());
+        let vcpkg_bin = root.join("vcpkg").join("installed").join(&triplet).join("bin");
+        for dll in &["glew32.dll", "glfw3.dll"] {
+            let src = vcpkg_bin.join(dll);
+            if src.is_file() {
+                let dst = dist.join(dll);
+                let _ = fs::copy(&src, &dst)?;
+                copied.push((*dll).to_string());
+            }
         }
     }
 
-    let mut snippets: Vec<String> = Vec::new();
-    if copied.is_empty() {
-        snippets.push("dist: exe".to_string());
-    } else {
-        snippets.push(format!("dist: exe+{}", copied.join("+")));
+    Ok(DistResult { dist_dir: dist, exe_name, copied_dlls: copied })
+}
+
+/// Fallback: Artefakt selbst finden, falls es nicht aus Logs bekannt ist.
+fn find_artifact(root: &Path) -> Option<PathBuf> {
+    if let Ok(explicit) = env::var("OTTER_ARTIFACT") {
+        let p = PathBuf::from(explicit);
+        if p.is_file() { return Some(p); }
     }
-    Ok(snippets)
+    let name = env::var("OTTER_ARTIFACT_NAME").ok().unwrap_or_else(|| {
+        #[cfg(windows)] { "mandelbrot_otterdream.exe".to_string() }
+        #[cfg(not(windows))] { "mandelbrot_otterdream".to_string() }
+    });
+    let candidates = &[
+        root.join("build").join("RelWithDebInfo").join(&name),
+        root.join("build").join("bin").join("RelWithDebInfo").join(&name),
+        root.join("build").join("bin").join(&name),
+        root.join("build").join(&name),
+    ];
+    for c in candidates {
+        if c.is_file() { return Some(c.clone()); }
+    }
+    None
 }
 
 pub fn run_streamed_with_env(
@@ -431,19 +454,45 @@ pub fn run_streamed_with_env(
                 metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
                 let _ = metrics.save(&workdir);
 
-                // DIST-Kopie (wenn Artefakt erkannt)
+                // DIST-Kopie (Artefakt aus Logs ODER Fallback-Suche)
                 let mut extra_parts: Vec<String> = Vec::new();
-                if let Some(s) = trailer.build_extra() {
-                    extra_parts.push(s);
+                if let Some(s) = trailer.build_extra() { extra_parts.push(s); }
+
+                let root = env::var("OTTER_ROOT")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| workdir.clone());
+
+                // 1) Artefakt aus Logs
+                let mut art_path: Option<PathBuf> =
+                    trailer.artifact.as_ref().map(|s| PathBuf::from(s));
+
+                // 2) Fallback: selbst finden
+                if art_path.is_none() {
+                    art_path = find_artifact(&root);
                 }
-                if let Some(art) = &trailer.artifact {
-                    let root = env::var("OTTER_ROOT")
-                        .map(PathBuf::from)
-                        .unwrap_or_else(|_| workdir.clone());
-                    match copy_to_dist(Path::new(art), &root) {
-                        Ok(mut v) => { extra_parts.append(&mut v); }
-                        Err(e) => { out_warn("RUST", &format!("dist-copy failed: {}", e)); }
+
+                if let Some(art) = art_path {
+                    match copy_to_dist(&art, &root) {
+                        Ok(report) => {
+                            // hübsche, grüne Infozeile + Trailer-Snippet
+                            let dll_count = report.copied_dlls.len();
+                            let exe_path = report.dist_dir.join(&report.exe_name);
+                            out_info_green("RUST", &format!(
+                                "DIST  {}  (+{} DLL{})",
+                                exe_path.display(), dll_count, if dll_count == 1 { "" } else { "s" }
+                            ));
+                            if dll_count == 0 {
+                                extra_parts.push("dist: exe".to_string());
+                            } else {
+                                extra_parts.push(format!("dist: exe+{}", report.copied_dlls.join("+")));
+                            }
+                        }
+                        Err(e) => {
+                            out_warn("RUST", &format!("dist-copy failed: {}", e));
+                        }
                     }
+                } else {
+                    out_warn("RUST", "no artifact found for dist copy");
                 }
 
                 // Hübsches Ende: farbiger Trailer + kompakte Extras
