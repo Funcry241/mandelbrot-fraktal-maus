@@ -19,9 +19,11 @@
 *.glsl    text eol=lf
 *.vert    text eol=lf
 *.frag    text eol=lf
+*.comp    text eol=lf
 *.cmake   text eol=lf
 CMakeLists.txt      text eol=lf
 CMakePresets.json   text eol=lf
+Makefile            text eol=lf
 rust/**/*.rs        text eol=lf
 Cargo.toml          text eol=lf
 Cargo.lock          text eol=lf
@@ -39,6 +41,7 @@ Cargo.lock          text eol=lf
 # Docs / config
 *.md      text eol=lf
 *.txt     text eol=lf
+*.csv     text eol=lf
 LICENSE   text eol=lf
 *.json    text eol=lf
 *.jsonc   text eol=lf
