@@ -1,12 +1,10 @@
-///// Otter: Branch-Orchestrator – Build → packe relevante Quellen (ZIP) → Autogit Push → Summary.
-///// Schneefuchs: Pack nur unter Windows (PowerShell Compress-Archive), robustes Filtering; keine Extra-Crates.
-///// Maus: ASCII-Logs, env-Overrides (OTTER_*), keine Magie; Default-Branch „wupp“.
+///// Otter: Branch-Orchestrator – Build → packe relevante Quellen (ZIP, Rust) → Autogit Push → Summary.
+///// Schneefuchs: Reines Rust-Packaging (zip crate); robuste Logs; keine PowerShell-Abhängigkeit mehr.
+///// Maus: ASCII-Logs, env-Overrides (OTTER_*), keine Magie; Default-Branch „wupp“; ZIP-Pfad in Summary-Notes.
 ///// Datei: rust/otter_proc/src/ops_branch.rs
 
 use std::ffi::OsStr;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::Path;
 
 use crate::artifact::find_artifact;
 use crate::commands;
@@ -28,126 +26,8 @@ fn current_branch_or_default(root: &Path) -> String {
         .unwrap_or_else(|| "wupp".to_string())
 }
 
-#[cfg(windows)]
-fn powershell_exe() -> &'static str { "powershell.exe" }
-#[cfg(not(windows))]
-fn powershell_exe() -> &'static str { "pwsh" } // Fallback (wird unten dennoch mit Err quittiert)
-
-/// Packe relevante Projektdateien als ZIP in ./dist.
-/// – keine Build- oder Cache-Verzeichnisse
-/// – gängige Quell-/Build-Inputs (Rust/CUDA/CMake/JSON/PS1/BAT/GLSL)
-#[cfg(windows)]
-fn pack_sources_with_powershell(project_root: &Path) -> io::Result<PathBuf> {
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let root = project_root.canonicalize().unwrap_or_else(|_| project_root.to_path_buf());
-    let dist = root.join("dist");
-    let _ = fs::create_dir_all(&dist);
-
-    // Zeitstempel (YYYYMMDD_HHMMSS)
-    let ts = {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        // simple UTC-ish formatting ohne chrono
-        // (YYYYMMDD_HHMMSS) aus UNIX Sekunden
-        // wir lassen PowerShell die hübsche Formatierung übernehmen → liefert den finalen Pfad zurück
-        now.to_string()
-    };
-
-    // Temporäres PS-Skript schreiben
-    let script = r#"$ErrorActionPreference='Stop'
-param([string]$Root)
-
-$root = Resolve-Path -LiteralPath $Root
-$dest = Join-Path $root 'dist'
-New-Item -ItemType Directory -Force -Path $dest | Out-Null
-
-$ts = Get-Date -Format 'yyyyMMdd_HHmmss'
-$zip = Join-Path $dest ("otter_sources_{0}.zip" -f $ts)
-
-# Einschluss nach Endung / Namen
-$inclExt = @(
-  '.rs','.toml','.lock',
-  '.cu','.cuh','.c','.cpp','.cxx','.hpp','.h','.inl',
-  '.cmake','.glsl','.vert','.frag','.comp','.geom',
-  '.json','.md','.ps1','.bat'
-)
-$inclNames = @(
-  'CMakeLists.txt','CMakePresets.json','CTestConfig.cmake',
-  '.gitignore','.editorconfig','vcpkg.json','vcpkg-configuration.json'
-)
-
-# Ausschluss-Verzeichnisse (Teilpfade)
-$exDirs = @(
-  '\build','\build-','\dist',
-  '\vcpkg','\vcpkg_installed','\vcpkg_downloads','\vcpkg_buildtrees','\vcpkg_packages','\vcpkg_cache',
-  '\target','\rust\otter_proc\target',
-  '\.git','\.vs','\.vscode'
-)
-
-$files = Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
-  $p = $_.FullName
-  foreach($ex in $exDirs){ if($p -like ('*'+$ex+'*')){ return $false } }
-
-  $ext = [System.IO.Path]::GetExtension($p).ToLower()
-  if($inclExt -contains $ext){ return $true }
-  if($inclNames -contains $_.Name){ return $true }
-  return $false
-}
-
-if(-not $files -or $files.Count -eq 0){
-  throw 'No files matched for packaging.'
-}
-
-Compress-Archive -Path ($files | Select-Object -Expand FullName) -DestinationPath $zip -CompressionLevel Optimal -Force
-Write-Output $zip
-"#;
-
-    // Tempfile anlegen
-    let mut tmp = std::env::temp_dir();
-    tmp.push(format!("otter_pack_{}.ps1", ts));
-    std::fs::write(&tmp, script)?;
-
-    // PowerShell starten
-    let output = Command::new(powershell_exe())
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy","Bypass",
-            "-File", tmp.to_string_lossy().as_ref(),
-            "-Root", root.to_string_lossy().as_ref(),
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .output()?;
-
-    // Tempfile aufräumen (best effort)
-    let _ = std::fs::remove_file(&tmp);
-
-    if !output.status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, "pack (PowerShell) failed"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if stdout.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::Other, "pack produced no output path"));
-    }
-    Ok(PathBuf::from(stdout))
-}
-
-#[cfg(not(windows))]
-fn pack_sources_with_powershell(_project_root: &Path) -> io::Result<PathBuf> {
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        "pack only supported on Windows (PowerShell Compress-Archive)",
-    ))
-}
-
 /// Öffentlicher Einstieg für den Branch-Pfad.
-/// Ablauf: Build (Full) → Pack → Autogit push → Summary.
+/// Ablauf: Build (Full) → Pack (Rust) → Autogit push → Summary.
 /// Rückgabe: Prozess-Exitcode.
 pub fn exec(root: &Path) -> i32 {
     runner_term::enable_ansi();
@@ -198,8 +78,8 @@ pub fn exec(root: &Path) -> i32 {
         return code_build;
     }
 
-    // 2) Quellen packen (nur Windows)
-    let zip_path = match pack_sources_with_powershell(root) {
+    // 2) Quellen packen (Rust, kein PowerShell)
+    let zip_path = match commands::pack::run(root, None, false) {
         Ok(p) => {
             crate::runner::runner_term::out_info("RUNNER",
                 &format!("packed sources: {}", p.display()));

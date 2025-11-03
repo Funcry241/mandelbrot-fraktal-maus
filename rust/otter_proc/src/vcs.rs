@@ -2,6 +2,7 @@
 ///// Schneefuchs: Nur std::process::Command; ASCII-stabil; keine Seiteneffekte außer Git.
 ///// Maus: pub(crate); minimal, deterministisch; -q für leise Checkouts.
 ///// Datei: rust/otter_proc/src/vcs.rs
+#![allow(dead_code)]
 
 use std::path::Path;
 use std::process::Command;

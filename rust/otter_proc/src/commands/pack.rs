@@ -1,10 +1,10 @@
-///// Otter: Packt Quellen in ZIP (Rust/CUDA/C/C++/CMake/TOML/JSON/Shader/Skripte) – Excludes wie PS-Skript; Statistik je Typ.
-///// Schneefuchs: Deterministische Sortierung; Windows-freundliche Pfade → / im ZIP; .vscode Whitelist.
-///// Maus: ASCII-Logs via runner_term; Default-Ziel out/exports/OtterSources_yyyyMMdd_HHmm.zip.
-///// Datei: rust/otter_proc/src/commands/pack.rs
+///// Otter: Packt Quellen in ZIP (Rust/CUDA/C/C++/CMake/TOML/JSON/Shader/Skripte) – Excludes wie vcpkg/.vscode-Whitelist aktiv.
+/// //// Schneefuchs: Deterministische Sortierung; Windows-freundliche Pfade → / im ZIP; kein PowerShell.
+/// //// Maus: ASCII-Logs via runner_term; Default-Ziel out/exports/OtterSources_yyyyMMdd_HHmm.zip; Rückgabe des ZIP-Pfads.
+/// //// Datei: rust/otter_proc/src/commands/pack.rs
 
 use std::fs::{self, File};
-use std::io::{self, Write, BufWriter};
+use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
@@ -13,7 +13,7 @@ use zip::CompressionMethod;
 
 use chrono::Local;
 
-use crate::runner::runner_term::{out_info, out_err};
+use crate::runner::runner_term::out_info;
 
 fn rel_path(root: &Path, p: &Path) -> Option<String> {
     let rp = p.strip_prefix(root).ok()?;
@@ -36,16 +36,18 @@ fn default_zip_path(root: &Path) -> PathBuf {
 fn is_excluded_dir(rel: &str, include_dist: bool) -> bool {
     let r = rel.to_ascii_lowercase();
 
+    // dist/ optional
     if !include_dist && r.starts_with("dist/") { return true; }
 
+    // Wuchtige/irrelevante Bäume strikt ausschließen
     let dir_prefixes = [
+        "vcpkg/",                         // <— neu: kompletter vendor-ordner raus
+        "vcpkg_installed/", "vcpkg_downloads/", "vcpkg_buildtrees/", "vcpkg_packages/", "vcpkg_cache/",
         "build/", "build-",
         "out/",
-        "target/",
-        "rust/otter_proc/target/",
-        "vcpkg_installed/", "vcpkg_downloads/", "vcpkg_buildtrees/", "vcpkg_packages/", "vcpkg_cache/",
+        "target/", "rust/otter_proc/target/",
         ".git/", ".vs/", ".idea/",
-        ".vscode/",
+        // KEIN .vscode/ hier — Whitelist greift im File-Filter
     ];
     for d in &dir_prefixes {
         if r.starts_with(d) { return true; }
@@ -56,7 +58,7 @@ fn is_excluded_dir(rel: &str, include_dist: bool) -> bool {
 fn is_excluded_file(rel: &str) -> bool {
     let r = rel.to_ascii_lowercase();
 
-    // .vscode Whitelist
+    // .vscode-Whitelist: nur diese beiden Dateien mitnehmen
     if r.starts_with(".vscode/") {
         if r == ".vscode/c_cpp_properties.json" || r == ".vscode/settings.json" {
             // whitelisted
@@ -100,8 +102,8 @@ fn bump_counts(c: &mut Counts, rel: &str) {
 }
 
 /// Entry point: pack all relevant sources into a ZIP.
-/// Returns: 0 on success; 1 on error.
-pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<i32> {
+/// Returns: Ok(PathBuf to ZIP) on success.
+pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<PathBuf> {
     let out_path = out.map(|p| p.to_path_buf()).unwrap_or_else(|| default_zip_path(root));
     out_info("ZIP", &format!("root={}", root.display()));
     out_info("ZIP", &format!("zip={}", out_path.display()));
@@ -137,14 +139,14 @@ pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<i3
     let mut added: u64 = 0;
 
     for (abs, rel) in &files {
-        // Ensure directory entry exists implicitly by ZIP writer (no-ops for nested).
         zip.start_file(rel, opts)?;
         let mut f = File::open(abs)?;
         std::io::copy(&mut f, &mut zip)?;
         added += 1;
         bump_counts(&mut counts, rel);
     }
-    zip.finish()?.into_inner()?; // flush + close
+    // flush + close
+    zip.finish()?.into_inner()?; 
 
     // Summary
     out_info("ZIP", &format!("files={}", added));
@@ -160,5 +162,5 @@ pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<i3
     out_info("ZIP", &format!("Other  = {}", counts.other));
     out_info("ZIP", "done.");
 
-    Ok(0)
+    Ok(out_path)
 }
