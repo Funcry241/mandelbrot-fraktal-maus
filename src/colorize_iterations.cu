@@ -1,6 +1,6 @@
-///// Otter: Nacktmull – Iteration→PBO colorizer; 32×8 geometry; launch_bounds; identical visuals
-///// Schneefuchs: Single path; cosine palette; gamma-eased; deterministic; no API change; ASCII-only logs
-///// Maus: Inclusive-iter semantics preserved; interior stays dark with thin halo; only this TU adjusted
+///// Otter: Nacktmull – Stage-1 richer palette + micro-contrast; perf-safe; no API change
+///// Schneefuchs: Cosine palette w/ grad+hash phase; sqrt-mix bias; branch-light halo; ASCII-only
+///// Maus: Interior dark, thinner flats; deterministic; only this TU adjusted
 ///// Datei: src/colorize_iterations.cu
 
 #include <cuda_runtime.h>
@@ -12,6 +12,7 @@
 
 // ----------------------------- tiny math helpers ------------------------------
 static __device__ __forceinline__ float clamp01(float x) { return x < 0.f ? 0.f : (x > 1.f ? 1.f : x); }
+static __device__ __forceinline__ float lerpf(float a, float b, float t){ return a + t * (b - a); }
 static __device__ __forceinline__ uchar4 pack_rgba(float r, float g, float b, float a=1.0f) {
     r = clamp01(r); g = clamp01(g); b = clamp01(b); a = clamp01(a);
     return make_uchar4((unsigned char)(r * 255.0f + 0.5f),
@@ -42,11 +43,24 @@ static __device__ __forceinline__ float3 cosine_palette(float t, float3 a, float
 
 // ---------------------------- tunables (band smoothing) -----------------------
 static __constant__ float kPHASE_GRAD = 0.12f; // Anteil Phase aus lokalem Gradienten (0.08..0.18)
-static __constant__ float kPHASE_HASH = 0.03f; // geringe, statische Pixelphase gegen Restbanding
+static __constant__ float kPHASE_HASH = 0.025f; // sehr kleine, statische Pixelphase gegen Restbanding
+static __constant__ float kV_GAIN     = 0.06f;  // Mikro-Kontrast über Value (0..~0.08)
+static __constant__ float kGRAD_NORM  = 1.0f / 6.0f; // empirische Normierung des Gradienten
+static __constant__ float kBIAS_MIX   = 0.35f;  // Mischung Richtung sqrt(x) ~ „gamma 0.82“ Ersatz
+static __constant__ float kCYCLES     = 3.20f;  // leichte Erhöhung für feinere Farbwechsel
+
+// schnelle Länge ≈ sqrt(x^2+y^2) (max + 0.375*min) — spart sqrtf
+static __device__ __forceinline__ float fast_len2(float ax, float ay){
+    ax = fabsf(ax); ay = fabsf(ay);
+    const float m = fmaxf(ax, ay);
+    const float n = fminf(ax, ay);
+    return m + 0.375f * n;
+}
 
 // -------------------------------- palette map --------------------------------
 // Innen bleibt dunkel; außen Cosine-Palette. Bänder werden über eine
 // phasenstabile, ortsgebundene Verschiebung (Gradient+Hash) geglättet.
+// Zusätzlich: sehr sanfter Mikro-Kontrast (Value-Gain) abhängig vom Gradienten.
 static __device__ __forceinline__ uchar4 color_from_iter_ex(
     uint16_t it, int maxIter, int idxLinear, float grad01)
 {
@@ -61,28 +75,25 @@ static __device__ __forceinline__ uchar4 color_from_iter_ex(
         return pack_rgba(v,v,v,1.0f);
     }
 
-    // Normierung mit leichter Entzerrung + Gradientenantail (sub-iter)
+    // Normierung; „Bias“ via sqrt-Mischung statt powf → günstiger und weich
     float t0 = ((float)it + 0.65f * grad01) / (float)i_max(interiorEdge, 1);
     t0 = clamp01(t0);
-    float t  = powf(t0, 0.82f);
-
-    // Mehr Varianz ohne harte Bänder, Zyklen über 0..1
-    const float cycles = 2.90f;
+    float t  = lerpf(t0, sqrtf(t0), kBIAS_MIX); // ~ x^0.82
 
     // Phasenverschiebung: lokal (Gradient) + minimale statische Pixelphase
     const float phi = kPHASE_GRAD * grad01
                     + kPHASE_HASH * (hash01((uint32_t)(idxLinear * 747796405u)) - 0.5f);
-    float k = t * cycles + phi; k -= floorf(k);
+    float k = t * kCYCLES + phi; k -= floorf(k);
 
-    // Cosine-Palette-Parameter (fein abgestimmt)
+    // Cosine-Palette-Parameter (leicht variiert für mehr Tonvielfalt)
     const float3 A = make_float3(0.52f, 0.46f, 0.50f);
     const float3 B = make_float3(0.48f, 0.42f, 0.46f);
     const float3 C = make_float3(1.00f, 1.00f, 1.00f);
-    const float3 D = make_float3(0.00f, 0.18f, 0.38f);
+    const float3 D = make_float3(0.02f, 0.20f, 0.40f);
 
     float3 col = cosine_palette(k, A, B, C, D);
 
-    // Heller Saum kurz vor innen
+    // Heller Saum kurz vor innen (branch-light: nur eine kleine Bedingung)
     const int toEdge = interiorEdge - (int)it; // 1..haloWidth
     if (toEdge > 0 && toEdge <= haloWidth) {
         const float s = (float)(haloWidth - toEdge + 1) / (float)haloWidth; // 0..1
@@ -92,11 +103,13 @@ static __device__ __forceinline__ uchar4 color_from_iter_ex(
         col.z = clamp01(col.z + boost);
     }
 
-    // leichte Gamma auf Value für knackigere Lichter
-    const float gamma = 0.92f;
-    col.x = powf(col.x, gamma);
-    col.y = powf(col.y, gamma);
-    col.z = powf(col.z, gamma);
+    // Mikro-Kontrast: Value-Gain als S-Kurve von grad01 (keine teuren powf)
+    // curve = g*(2-g) hebt kleine Gradienten leicht an, bremst große → stabil
+    const float curve = grad01 * (2.0f - grad01);
+    const float vGain = 1.0f + kV_GAIN * (curve - 0.5f); // symmetrisch um 1.0
+    col.x = clamp01(col.x * vGain);
+    col.y = clamp01(col.y * vGain);
+    col.z = clamp01(col.z * vGain);
 
     return pack_rgba(col.x, col.y, col.z, 1.0f);
 }
@@ -125,10 +138,12 @@ void kColorizeIterationsToPBO(
 
     const float gx = (float)((int)itR - (int)it);
     const float gy = (float)((int)itD - (int)it);
-    float grad = sqrtf(gx*gx + gy*gy);
+
+    // schnelle Länge statt sqrtf(gx*gx+gy*gy)
+    float grad = fast_len2(gx, gy);
 
     // auf 0..1 normieren (empirisch, verhindert Übersteuerung)
-    float grad01 = grad * (1.0f / 6.0f);
+    float grad01 = grad * kGRAD_NORM;
     if (grad01 > 1.0f) grad01 = 1.0f;
 
     d_out[idx] = color_from_iter_ex(it, maxIter, idx, grad01);
