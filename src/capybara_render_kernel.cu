@@ -23,21 +23,21 @@
 
 // ------------------------------ launch config ---------------------------------
 namespace {
-    // Nacktmull sweetspot: 32x8 = 256 threads/block for SM80–SM90
+    // Nacktmull sweetspot: 32x8 = 256 threads/block for SM80–SM90 (good occupancy vs. reg pressure, lower divergence).
     constexpr int BX = 32;
     constexpr int BY = 8;
     static_assert(BX > 0 && BY > 0, "Block dimensions must be positive");
 
     // Threshold for switching to Capybara Hi/Lo when pixel steps get very fine.
-    // Host-side copy (so wir NICHT pro Thread prüfen müssen).
+    // Host-side evaluation so we do NOT branch per-thread in the kernels.
     constexpr double kBaseStepThresh = 8e-13;
 
-    __host__ __device__ __forceinline__ double dyn_step_thresh_host(int maxIter) {
-        // Identisch zur bisherigen Heuristik – nur hostfähig
-        if (maxIter <= 1024)  return kBaseStepThresh * 2.0;
-        if (maxIter <= 4096)  return kBaseStepThresh;
-        if (maxIter <= 16384) return kBaseStepThresh * 0.75;
-        return kBaseStepThresh * 0.5;
+    static inline double dyn_step_thresh_host(int maxIter) {
+        // Identisch zur bisherigen device-Heuristik – nur hostfähig.
+        if (maxIter <= 1024)  return kBaseStepThresh * 2.0;   // shallow budgets → classic path länger
+        if (maxIter <= 4096)  return kBaseStepThresh;         // default
+        if (maxIter <= 16384) return kBaseStepThresh * 0.75;  // deeper budgets
+        return kBaseStepThresh * 0.5;                         // very deep budgets
     }
 }
 
@@ -65,7 +65,7 @@ static __device__ __forceinline__ bool in_cardioid_or_bulb(double2 c) {
 }
 
 // ------------------------------ classic kernel --------------------------------
-// Reiner Classic-Pfad (double), keine Gating-Branches mehr im Kernel.
+// Reiner Classic-Pfad (double), keine Mode-Gating-Branches im Kernel.
 __global__ __launch_bounds__(BX * BY, 2)
 void mandelbrotKernel_classic(
     uint16_t* __restrict__ d_it,
@@ -80,18 +80,18 @@ void mandelbrotKernel_classic(
 
     const int idx = py * w + px;
 
-    // Map pixel -> complex plane (double), branch-free.
+    // Map pixel -> complex plane (double). Branch-free.
     const double x  = cx + (static_cast<double>(px) - 0.5 * static_cast<double>(w)) * stepX;
     const double y  = cy + (static_cast<double>(py) - 0.5 * static_cast<double>(h)) * stepY;
     const double2 cD = make_double2(x, y);
 
-    // Analytic interior → it = maxIter
+    // 1) Analytic interior: exact membership → it = maxIter (keine Iterationen)
     if (in_cardioid_or_bulb(cD)) {
         d_it[idx] = clamp_u16_from_int(maxIter);
         return;
     }
 
-    // Classic escape-time, inclusive semantics (z after update, then radius check, then +1 on escape)
+    // 2) Classic escape-time, inclusive semantics (z nach Update prüfen; +1 beim Escape)
     double zx = 0.0, zy = 0.0;
     int it = 0;
     #pragma unroll 1
@@ -106,7 +106,7 @@ void mandelbrotKernel_classic(
 }
 
 // ------------------------------- deep kernel ----------------------------------
-// Deep-Path: Capybara early Hi/Lo + classic continuation.
+// Deep-Path: Capybara early Hi/Lo + classic continuation (identische Iterationszahlen wie Classic).
 __global__ __launch_bounds__(BX * BY, 2)
 void mandelbrotKernel_capybara_deep(
     uint16_t* __restrict__ d_it,
@@ -119,7 +119,7 @@ void mandelbrotKernel_capybara_deep(
     const int py  = blockIdx.y * blockDim.y + threadIdx.y;
     if (px >= w || py >= h) return;
 
-    const int idx = py * w * 1 + px; // keep row-major
+    const int idx = py * w + px;
 
     // Map pixel -> complex plane (double).
     const double x  = cx + (static_cast<double>(px) - 0.5 * static_cast<double>(w)) * stepX;
@@ -132,7 +132,7 @@ void mandelbrotKernel_capybara_deep(
         return;
     }
 
-    // Deep zoom path (Hi/Lo + continuation); returns inclusive iteration count
+    // Deep zoom path (Hi/Lo + continuation); inclusive iteration count.
     const int iters = capy_compute_iters_from_zero(cx, cy, stepX, stepY, px, py, w, h, maxIter);
     d_it[idx] = clamp_u16_from_int(iters);
 }
@@ -161,8 +161,10 @@ extern "C" void launch_mandelbrot_capybara(
     const dim3 block(BX, BY);
     const dim3 grid((w + BX - 1) / BX, (h + BY - 1) / BY);
 
-    // Host-side gating: EINMAL pro Frame entscheiden
-    const double m = fabs(stepX) > fabs(stepY) ? fabs(stepX) : fabs(stepY);
+    // Host-side gating: EINMAL pro Frame entscheiden (keine per-thread Mode-Branches)
+    const double ax = fabs(stepX);
+    const double ay = fabs(stepY);
+    const double m  = (ax > ay ? ax : ay);
     const double kThresh = dyn_step_thresh_host(maxIter);
     const bool useClassic = (m > kThresh);
 
@@ -172,7 +174,7 @@ extern "C" void launch_mandelbrot_capybara(
                        useClassic ? "classic" : "deep", (void*)stream);
     }
 
-    // Optional CUDA event timing
+    // Optional CUDA event timing (visible when Settings::performanceLogging == true)
     cudaEvent_t evStart = nullptr, evStop = nullptr;
     if constexpr (Settings::performanceLogging) {
         (void)cudaEventCreateWithFlags(&evStart, cudaEventDefault);
