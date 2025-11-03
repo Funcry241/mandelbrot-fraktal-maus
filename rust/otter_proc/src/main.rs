@@ -1,6 +1,6 @@
 ///// Otter: Mini-Entrypoint – delegiert (full/clean/autogit) + ENV-Zweimodus OTTER_OP=branch|build.
-///// Schneefuchs: /branch committet & pusht jetzt (autogit) – “wupp” als Default-Branch; ASCII-Logs.
-///// Maus: Null-Magie, deterministisch; remote=origin; Build-Mode pusht nach erfolgreichem Full.
+///// Schneefuchs: /branch committet & pusht jetzt (autogit) und baut anschließend; “wupp” Default-Branch.
+///// Maus: Null-Magie, deterministisch; remote=origin; /build pusht nach erfolgreichem Full; ASCII-Logs.
 ///// Datei: rust/otter_proc/src/main.rs
 
 mod utils;         // minimales Helfer-Modul (epoch_ms)
@@ -132,8 +132,7 @@ fn git_checkout_existing(root: &Path, name: &str) -> anyhow::Result<()> {
 }
 
 // ----------------------------- branch op (ENV) --------------------------------
-// Neu: Nach Branch-Checkout führt der Runner ein Autogit (add/commit/push -u) aus,
-// damit „/branch“ IMMER hochlädt – wie gewünscht.
+// Neu: Nach Branch-Checkout führt der Runner ein Autogit (add/commit/push -u) aus.
 fn branch_mode_run(root: &Path) -> anyhow::Result<bool> {
     use crate::runner::runner_term::out_info;
 
@@ -174,30 +173,81 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap());
 
-    // --- Früher Ausstieg für OTTER_OP=branch (keine Clap-Args nötig) ----------
+    // --- Früher ENV-Pfad: OTTER_OP=branch → Branch+Build (Dev/unstable) -------
     if let Ok(op) = std::env::var("OTTER_OP") {
         if op.eq_ignore_ascii_case("branch") {
-            match branch_mode_run(&root) {
+            // 1) Branch-Checkout & Push
+            let pushed_ok = match branch_mode_run(&root) {
                 Err(e) => {
                     eprintln!("[ERROR] {}", e);
-                    std::process::exit(1);
-                }
-                Ok(pushed_ok) => {
-                    let b = git_current_branch(&root).unwrap_or_else(|| "?".into());
                     summary::print_end_summary(summary::EndSummary {
-                        success: true,
-                        exit_code: 0,
+                        success: false,
+                        exit_code: 1,
                         started_ms: utils::epoch_ms(),
                         elapsed_ms: 0,
                         artifact_path: None,
                         commit_short: git_short_hash(&root),
-                        commit_branch: Some(format!("origin/{}", b)),
-                        autogit_pushed: pushed_ok,
+                        commit_branch: git_current_branch(&root).map(|b| format!("origin/{}", b)),
+                        autogit_pushed: false,
                         notes: vec!["branch-mode".to_string()],
                     });
-                    return;
+                    std::process::exit(1);
                 }
-            }
+                Ok(ok) => ok,
+            };
+
+            // 2) Build starten (identisch zur Full-Pipeline, Dev/unstable)
+            let start_ms = utils::epoch_ms();
+            crate::runner::runner_term::out_info(
+                "BUILD",
+                "start channel=dev (RelWithDebInfo, presets=default)",
+            );
+            let build_rc = match commands::full::run(
+                &root,
+                "RelWithDebInfo",
+                None,   // configure_preset -> default (z. B. windows-msvc)
+                None,   // build_preset     -> default (z. B. windows-build)
+                None,   // parallel
+            ) {
+                Ok(code) => code,
+                Err(e) => {
+                    eprintln!("[ERROR] {}", e);
+                    // Fehler-Summary mit Null-Artefakt
+                    let end_ms = utils::epoch_ms();
+                    summary::print_end_summary(summary::EndSummary {
+                        success: false,
+                        exit_code: 1,
+                        started_ms: start_ms,
+                        elapsed_ms: end_ms.saturating_sub(start_ms),
+                        artifact_path: None,
+                        commit_short: git_short_hash(&root),
+                        commit_branch: git_current_branch(&root).map(|b| format!("origin/{}", b)),
+                        autogit_pushed: pushed_ok,
+                        notes: vec!["branch+build".to_string()],
+                    });
+                    std::process::exit(1);
+                }
+            };
+
+            let end_ms = utils::epoch_ms();
+            let artifact = find_artifact(&root);
+            let branch = git_current_branch(&root).unwrap_or_else(|| "wupp".to_string());
+            let hash = git_short_hash(&root);
+            let success = build_rc == 0;
+
+            summary::print_end_summary(summary::EndSummary {
+                success,
+                exit_code: build_rc,
+                started_ms: start_ms,
+                elapsed_ms: end_ms.saturating_sub(start_ms),
+                artifact_path: artifact.map(|p| p.to_string_lossy().to_string()),
+                commit_short: hash,
+                commit_branch: Some(format!("origin/{}", branch)),
+                autogit_pushed: pushed_ok,
+                notes: vec!["branch+build".to_string()],
+            });
+
+            std::process::exit(build_rc);
         }
     }
 
