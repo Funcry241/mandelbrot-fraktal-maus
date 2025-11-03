@@ -1,6 +1,6 @@
-///// Otter: Branch-Orchestrator – Build → packe relevante Quellen (ZIP, Rust) → Autogit Push → Summary.
-///// Schneefuchs: Reines Rust-Packaging (zip crate); robuste Logs; keine PowerShell-Abhängigkeit mehr.
-///// Maus: ASCII-Logs, env-Overrides (OTTER_*), keine Magie; Default-Branch „wupp“; ZIP-Pfad in Summary-Notes.
+///// Otter: Branch-Orchestrator – Build → ZIP (Rust) → Autogit → Summary → magenta HINT zum Starten.
+///// Schneefuchs: Keine PowerShell; deterministisches Packaging; sauberes Logging; Windows-Run-Hinweis am Ende.
+///// Maus: ASCII-Logs, OTTER_* Overrides, Default-Branch „wupp“, zwei pinke [HINT]-Zeilen nach der Summary.
 ///// Datei: rust/otter_proc/src/ops_branch.rs
 
 use std::ffi::OsStr;
@@ -27,7 +27,7 @@ fn current_branch_or_default(root: &Path) -> String {
 }
 
 /// Öffentlicher Einstieg für den Branch-Pfad.
-/// Ablauf: Build (Full) → Pack (Rust) → Autogit push → Summary.
+/// Ablauf: Build (Full) → Pack (Rust) → Autogit push → Summary (+ magenta HINT).
 /// Rückgabe: Prozess-Exitcode.
 pub fn exec(root: &Path) -> i32 {
     runner_term::enable_ansi();
@@ -41,18 +41,17 @@ pub fn exec(root: &Path) -> i32 {
 
     crate::runner::runner_term::out_info(
         "RUNNER",
-        &format!("branch-mode start ts_ms={} root={} cfg={} branch={}",
-                 start_ms, crate::prockit::display_path(root), cfg, br),
+        &format!(
+            "branch-mode start ts_ms={} root={} cfg={} branch={}",
+            start_ms,
+            crate::prockit::display_path(root),
+            cfg,
+            br
+        ),
     );
 
     // 1) Full Build fahren
-    let build_rc = commands::full::run(
-        root,
-        &cfg,
-        cp.as_deref(),
-        bp.as_deref(),
-        par,
-    );
+    let build_rc = commands::full::run(root, &cfg, cp.as_deref(), bp.as_deref(), par);
     let (ok_build, code_build) = match build_rc {
         Ok(code) => (code == 0, code),
         Err(e) => {
@@ -63,13 +62,13 @@ pub fn exec(root: &Path) -> i32 {
     if !ok_build {
         // Früh zusammenfassen (Build fehlgeschlagen)
         let end_ms = epoch_ms();
-        let artifact = find_artifact(root);
+        let artifact_str = find_artifact(root).as_ref().map(|p| p.to_string_lossy().to_string());
         summary::print_end_summary(summary::EndSummary {
             success: false,
             exit_code: code_build,
             started_ms: start_ms,
             elapsed_ms: end_ms.saturating_sub(start_ms),
-            artifact_path: artifact.map(|p| p.to_string_lossy().to_string()),
+            artifact_path: artifact_str,
             commit_short: crate::vcs::git_short_hash(root),
             commit_branch: Some(format!("origin/{}", br)),
             autogit_pushed: false,
@@ -78,34 +77,35 @@ pub fn exec(root: &Path) -> i32 {
         return code_build;
     }
 
-    // 2) Quellen packen (Rust, kein PowerShell)
+    // 2) Quellen packen (Rust, ohne PowerShell)
     let zip_path = match commands::pack::run(root, None, false) {
         Ok(p) => {
-            crate::runner::runner_term::out_info("RUNNER",
-                &format!("packed sources: {}", p.display()));
+            crate::runner::runner_term::out_info("RUNNER", &format!("packed sources: {}", p.display()));
             Some(p)
         }
         Err(e) => {
-            crate::runner::runner_term::out_warn("RUNNER",
-                &format!("packing skipped/failed: {}", e));
+            crate::runner::runner_term::out_warn("RUNNER", &format!("packing skipped/failed: {}", e));
             None
         }
     };
 
     // 3) Autogit push (auch wenn Pack scheitert — Build war OK)
-    let mut autogit_ok = false;
     let msg = if let Some(z) = &zip_path {
-        format!("chore: branch build + pack ({})", z.file_name().and_then(OsStr::to_str).unwrap_or("zip"))
+        format!(
+            "chore: branch build + pack ({})",
+            z.file_name().and_then(OsStr::to_str).unwrap_or("zip")
+        )
     } else {
         "chore: branch build".to_string()
     };
-    if commands::autogit::run(root, Some(msg), false, "origin", Some(&br), true).unwrap_or(1) == 0 {
-        autogit_ok = true;
-    }
+    let autogit_ok = commands::autogit::run(root, Some(msg), false, "origin", Some(&br), true)
+        .unwrap_or(1)
+        == 0;
 
     // 4) Abschluss-Summary
     let end_ms = epoch_ms();
-    let artifact = find_artifact(root);
+    let artifact_path = find_artifact(root);
+    let artifact_str = artifact_path.as_ref().map(|p| p.to_string_lossy().to_string());
     let mut notes = Vec::new();
     if let Some(z) = &zip_path {
         notes.push(format!("sources_zip={}", z.display()));
@@ -116,12 +116,26 @@ pub fn exec(root: &Path) -> i32 {
         exit_code: 0,
         started_ms: start_ms,
         elapsed_ms: end_ms.saturating_sub(start_ms),
-        artifact_path: artifact.map(|p| p.to_string_lossy().to_string()),
+        artifact_path: artifact_str.clone(),
         commit_short: crate::vcs::git_short_hash(root),
         commit_branch: Some(format!("origin/{}", br)),
         autogit_pushed: autogit_ok,
         notes,
     });
+
+    // 5) Magenta HINT (wie starten)
+    let magenta = "\x1b[95m";
+    let reset = "\x1b[0m";
+    let exe_hint = artifact_str.unwrap_or_else(|| ".\\build\\mandelbrot_otterdream.exe".to_string());
+
+    println!("{}[HINT] Run now:{}", magenta, reset);
+    println!(
+        "{}[HINT] $env:Path=\"{}\\vcpkg_installed\\x64-windows\\bin;$env:Path\"; {}{}",
+        magenta,
+        crate::prockit::display_path(root),
+        exe_hint,
+        reset
+    );
 
     0
 }
