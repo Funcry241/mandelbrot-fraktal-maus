@@ -1,7 +1,7 @@
 ///// Otter: Simple git automation (add/commit/push) with HTTPS fallback + self-heal for embedded repos (vcpkg).
 ///// Schneefuchs: ASCII-only logs; robust exits (0=OK, 1=issues); CRLF/advice suppressed per-call.
 ///// Maus: Auto-detect current branch; fallback “wupp”; ensure upstream; never track vcpkg/_installed/_cache.
-// ///// Datei: rust/otter_proc/src/commands/autogit.rs
+///// Datei: rust/otter_proc/src/commands/autogit.rs
 
 use std::io;
 use std::path::Path;

@@ -8,6 +8,7 @@ use std::io::{self, Read};
 use std::path::Path;
 
 use crate::commands::winenv;
+use crate::build_metrics::BuildMetrics;
 
 /// Normalisiert Pfade für einen robusten Vergleich:
 /// - entfernt führendes \\?\ oder //?/
@@ -54,14 +55,17 @@ fn ensure_cache_matches_source(project_root: &Path, _configure_preset: &str) -> 
 
     if let Some(cache) = cache_src {
         if cache != curr {
-            println!("[RUNNER][WARN] CMake cache source mismatch");
-            println!("  cache={}", cache);
-            println!("  curr ={}", curr);
-            println!("  -> removing {}", build_dir.display());
+            println!(
+                "[RUNNER][CMAKE] cache source mismatch: from={} → to={} (clean build dir)",
+                cache, curr
+            );
             let _ = fs::remove_dir_all(&build_dir);
         }
     } else {
-        println!("[RUNNER][WARN] CMake cache lacks CMAKE_HOME_DIRECTORY -> removing {}", build_dir.display());
+        println!(
+            "[RUNNER][CMAKE] cache lacks CMAKE_HOME_DIRECTORY (clean build dir): {}",
+            build_dir.display()
+        );
         let _ = fs::remove_dir_all(&build_dir);
     }
 
@@ -79,6 +83,9 @@ pub fn run(
 ) -> io::Result<i32> {
     let cfg_preset = configure_preset.unwrap_or("windows-msvc");
     let bld_preset = build_preset.unwrap_or("windows-build");
+
+    // Seed/ensure metrics structures exist (no-op if already present)
+    let _ = BuildMetrics::load_or_seed(root);
 
     // Vor dem Lauf: Cache gegen Source-Root absichern (mit UNC/Case-Normalisierung)
     ensure_cache_matches_source(root, cfg_preset)?;

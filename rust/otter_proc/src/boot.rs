@@ -73,7 +73,7 @@ fn main() {
     #[cfg(not(windows))]
     let exe = "target/release/otter_proc";
 
-    println!("[BOOT] launching {exe} …");
+    println!("[BOOT] launching {}", exe);
     let status = Command::new(exe)
         .args(pass_args)
         .stdout(Stdio::inherit())

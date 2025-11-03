@@ -1,6 +1,6 @@
 ##### Otter: Minimaler Runner-Crate für robuste Prozessausführung & Log-Filter.
-##### Schneefuchs: clap v4.5 (derive), Edition 2021; default-run fix; autobins aus für Kontrolle.
-##### Maus: Windows-first; saubere Vorgabe für `cargo run`; keine toten Warnungen im Default-Build.
+##### Schneefuchs: clap v4.5 (derive), Edition 2021; default-run fix; autobins aus; Zip via zip + walkdir.
+##### Maus: Windows-first; saubere Vorgabe für cargo run; keine toten Warnungen im Default-Build.
 ##### Datei: rust/otter_proc/Cargo.toml
 
 [package]
@@ -15,6 +15,9 @@ autobins = false
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 anyhow = "1"
+walkdir = "2.5"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [profile.release]
 codegen-units = 1

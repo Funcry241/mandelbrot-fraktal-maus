@@ -11,243 +11,32 @@ mod build_metrics; // Zentral: .build_metrics (ASCII), Seeding & atomisches Spei
 mod runner;        // für crate::runner::runner_term::{enable_ansi,color_enabled,out_info}
 mod summary;       // ASCII/ANSI Endblock-Formatter
 
+// neu
+mod vcs;           // Git-Utilities (quiet checkout etc.)
+mod artifact;      // Artefakt-Suche (build/… -> exe)
+mod ops_branch;    // /branch-Orchestrierung (Checkout→Build→Pack→Push→Summary)
+
 use clap::Parser;
 use cli::{Cli, Commands};
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 
-// ------------------------------- helpers --------------------------------------
-
-fn fmt_exists(b: bool) -> String {
-    if crate::runner::runner_term::color_enabled() {
-        if b { "\x1b[32myes\x1b[0m".to_string() } else { "\x1b[33mno\x1b[0m".to_string() }
-    } else {
-        if b { "yes".to_string() } else { "no".to_string() }
-    }
-}
-
-fn log_candidate(root: &Path, rel: &str) -> (PathBuf, bool) {
-    let p = root.join(rel);
-    let exists = p.is_file();
-    crate::runner::runner_term::out_info(
-        "RUNNER",
-        &format!("artifact-candidate: {} exists={}", p.display(), fmt_exists(exists)),
-    );
-    (p, exists)
-}
-
-fn find_artifact(root: &Path) -> Option<PathBuf> {
-    let candidates = [
-        "build/RelWithDebInfo/mandelbrot_otterdream.exe",
-        "build/bin/RelWithDebInfo/mandelbrot_otterdream.exe",
-        "build/bin/mandelbrot_otterdream.exe",
-        "build/mandelbrot_otterdream.exe",
-    ];
-    for rel in candidates {
-        let (p, exists) = log_candidate(root, rel);
-        if exists {
-            crate::runner::runner_term::out_info("RUNNER", &format!("artifact: {}", p.display()));
-            return Some(p);
-        }
-    }
-    None
-}
-
-fn git_short_hash(root: &Path) -> Option<String> {
-    let root_s = root.to_str()?;
-    let out = Command::new("git")
-        .args(["-C", root_s, "rev-parse", "--short", "HEAD"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
-}
-
-fn git_current_branch(root: &Path) -> Option<String> {
-    let root_s = root.to_str()?;
-    let out = Command::new("git")
-        .args(["-C", root_s, "rev-parse", "--abbrev-ref", "HEAD"])
-        .output()
-        .ok()?;
-    if !out.status.success() { return None; }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s == "HEAD" || s.is_empty() { None } else { Some(s) }
-}
-
-fn git_is_repo(root: &Path) -> bool {
-    let root_s = match root.to_str() { Some(s) => s, None => return false };
-    Command::new("git")
-        .args(["-C", root_s, "rev-parse", "--is-inside-work-tree"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-fn git_local_branch_exists(root: &Path, name: &str) -> bool {
-    let root_s = match root.to_str() { Some(s) => s, None => return false };
-    Command::new("git")
-        .args(["-C", root_s, "show-ref", "--verify", "--quiet", &format!("refs/heads/{}", name)])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-fn git_remote_branch_exists(root: &Path, remote: &str, name: &str) -> bool {
-    let root_s = match root.to_str() { Some(s) => s, None => return false };
-    Command::new("git")
-        .args(["-C", root_s, "ls-remote", "--exit-code", "--heads", remote, name])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-fn git_checkout_new_local(root: &Path, name: &str) -> anyhow::Result<()> {
-    let root_s = root.to_str().ok_or_else(|| anyhow::anyhow!("bad path"))?;
-    let st = Command::new("git").args(["-C", root_s, "checkout", "-b", name]).status()?;
-    if !st.success() {
-        anyhow::bail!("git checkout -b {} failed", name);
-    }
-    Ok(())
-}
-
-fn git_checkout_from_remote(root: &Path, remote: &str, name: &str) -> anyhow::Result<()> {
-    let root_s = root.to_str().ok_or_else(|| anyhow::anyhow!("bad path"))?;
-    let st = Command::new("git").args(["-C", root_s, "checkout", "-b", name, &format!("{}/{}", remote, name)]).status()?;
-    if !st.success() {
-        anyhow::bail!("git checkout -b {} {}/{} failed", name, remote, name);
-    }
-    Ok(())
-}
-
-fn git_checkout_existing(root: &Path, name: &str) -> anyhow::Result<()> {
-    let root_s = root.to_str().ok_or_else(|| anyhow::anyhow!("bad path"))?;
-    let st = Command::new("git").args(["-C", root_s, "checkout", name]).status()?;
-    if !st.success() {
-        anyhow::bail!("git checkout {} failed", name);
-    }
-    Ok(())
-}
-
-// ----------------------------- branch op (ENV) --------------------------------
-// Neu: Nach Branch-Checkout führt der Runner ein Autogit (add/commit/push -u) aus.
-fn branch_mode_run(root: &Path) -> anyhow::Result<bool> {
-    use crate::runner::runner_term::out_info;
-
-    let remote = "origin";
-    let name = std::env::var("OTTER_BRANCH").unwrap_or_else(|_| "wupp".to_string());
-
-    if !git_is_repo(root) {
-        anyhow::bail!("Not a Git repository: {}", prockit::display_path(root));
-    }
-
-    out_info("BRANCH", &format!("target='{}' remote='{}'", name, remote));
-
-    if git_local_branch_exists(root, &name) {
-        out_info("BRANCH", &format!("checkout local {}", name));
-        git_checkout_existing(root, &name)?;
-    } else if git_remote_branch_exists(root, remote, &name) {
-        out_info("BRANCH", &format!("create from {}/{}", remote, name));
-        git_checkout_from_remote(root, remote, &name)?;
-    } else {
-        out_info("BRANCH", &format!("create new {}", name));
-        git_checkout_new_local(root, &name)?;
-    }
-
-    // Autogit erledigt add/commit und (falls kein Upstream) push -u.
-    let pushed_ok = commands::autogit::run(root, None, false, remote, Some(&name), true).unwrap_or(1) == 0;
-    out_info("BRANCH", if pushed_ok { "upload done" } else { "upload had issues" });
-    Ok(pushed_ok)
-}
-
-// ---------------------------------- main --------------------------------------
+use crate::artifact::find_artifact;
+use crate::runner::runner_term;
+use crate::vcs::{git_current_branch, git_short_hash};
 
 fn main() {
-    // ANSI/VT einschalten (zentral, ohne doppeltes FFI). Fällt still zurück, falls nicht möglich.
-    crate::runner::runner_term::enable_ansi();
+    // ANSI/VT einschalten (zentral). Fällt still zurück, falls nicht möglich.
+    runner::runner_term::enable_ansi();
 
     // Root früh bestimmen (ENV bevorzugt, damit /branch minimal bleibt)
     let root: PathBuf = std::env::var_os("OTTER_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap());
 
-    // --- Früher ENV-Pfad: OTTER_OP=branch → Branch+Build (Dev/unstable) -------
+    // --- ENV-Pfad: OTTER_OP=branch → Branch+Build (Dev/unstable) via ops_branch ---
     if let Ok(op) = std::env::var("OTTER_OP") {
         if op.eq_ignore_ascii_case("branch") {
-            // 1) Branch-Checkout & Push
-            let pushed_ok = match branch_mode_run(&root) {
-                Err(e) => {
-                    eprintln!("[ERROR] {}", e);
-                    summary::print_end_summary(summary::EndSummary {
-                        success: false,
-                        exit_code: 1,
-                        started_ms: utils::epoch_ms(),
-                        elapsed_ms: 0,
-                        artifact_path: None,
-                        commit_short: git_short_hash(&root),
-                        commit_branch: git_current_branch(&root).map(|b| format!("origin/{}", b)),
-                        autogit_pushed: false,
-                        notes: vec!["branch-mode".to_string()],
-                    });
-                    std::process::exit(1);
-                }
-                Ok(ok) => ok,
-            };
-
-            // 2) Build starten (identisch zur Full-Pipeline, Dev/unstable)
-            let start_ms = utils::epoch_ms();
-            crate::runner::runner_term::out_info(
-                "BUILD",
-                "start channel=dev (RelWithDebInfo, presets=default)",
-            );
-            let build_rc = match commands::full::run(
-                &root,
-                "RelWithDebInfo",
-                None,   // configure_preset -> default (z. B. windows-msvc)
-                None,   // build_preset     -> default (z. B. windows-build)
-                None,   // parallel
-            ) {
-                Ok(code) => code,
-                Err(e) => {
-                    eprintln!("[ERROR] {}", e);
-                    // Fehler-Summary mit Null-Artefakt
-                    let end_ms = utils::epoch_ms();
-                    summary::print_end_summary(summary::EndSummary {
-                        success: false,
-                        exit_code: 1,
-                        started_ms: start_ms,
-                        elapsed_ms: end_ms.saturating_sub(start_ms),
-                        artifact_path: None,
-                        commit_short: git_short_hash(&root),
-                        commit_branch: git_current_branch(&root).map(|b| format!("origin/{}", b)),
-                        autogit_pushed: pushed_ok,
-                        notes: vec!["branch+build".to_string()],
-                    });
-                    std::process::exit(1);
-                }
-            };
-
-            let end_ms = utils::epoch_ms();
-            let artifact = find_artifact(&root);
-            let branch = git_current_branch(&root).unwrap_or_else(|| "wupp".to_string());
-            let hash = git_short_hash(&root);
-            let success = build_rc == 0;
-
-            summary::print_end_summary(summary::EndSummary {
-                success,
-                exit_code: build_rc,
-                started_ms: start_ms,
-                elapsed_ms: end_ms.saturating_sub(start_ms),
-                artifact_path: artifact.map(|p| p.to_string_lossy().to_string()),
-                commit_short: hash,
-                commit_branch: Some(format!("origin/{}", branch)),
-                autogit_pushed: pushed_ok,
-                notes: vec!["branch+build".to_string()],
-            });
-
-            std::process::exit(build_rc);
+            std::process::exit(ops_branch::exec(&root));
         }
     }
 
@@ -261,18 +50,61 @@ fn main() {
 
     // Startzeit – deterministisch im Log
     let start_ms = utils::epoch_ms();
-    crate::runner::runner_term::out_info("RUNNER", &format!("ts_ms={} root={}", start_ms, prockit::display_path(&root)));
+    runner_term::out_info(
+        "RUNNER",
+        &format!("ts_ms={} root={}", start_ms, prockit::display_path(&root)),
+    );
 
     // Jetzt cli.command konsumieren – danach nicht mehr verwenden.
     let res = match cli.command {
         Commands::Full { cfg, configure_preset, build_preset, parallel } => {
-            commands::full::run(
+            let rc = commands::full::run(
                 &root,
                 &cfg,
                 configure_preset.as_deref(),
                 build_preset.as_deref(),
                 parallel,
-            )
+            );
+
+            // Nach erfolgreichem Full: Metrics-Run schreiben (Stable)
+            if let Ok(code) = rc {
+                let end_ms = utils::epoch_ms();
+                let artifact = find_artifact(&root);
+                let branch = git_current_branch(&root)
+                    .or_else(|| std::env::var("OTTER_BRANCH").ok())
+                    .unwrap_or_else(|| "wupp".to_string());
+                let hash = git_short_hash(&root);
+                let success = code == 0;
+
+                // Metrics laden (panic-sicher) und erweiterten Run schreiben
+                if let Ok((m, _, _)) =
+                    std::panic::catch_unwind(|| build_metrics::BuildMetrics::load_or_seed(&root))
+                {
+                    let _ = build_metrics::write_extended_run(
+                        &root,
+                        build_metrics::RunSummary {
+                            op: "build",
+                            channel: "stable",
+                            ts_ms: start_ms,
+                            elapsed_ms: end_ms.saturating_sub(start_ms),
+                            success,
+                            exit_code: code,
+                            root: &root,
+                            branch: &branch,
+                            commit: hash.as_deref(),
+                            cfg: &cfg,
+                            preset_cfg: configure_preset.as_deref().unwrap_or("windows-msvc"),
+                            preset_build: build_preset.as_deref().unwrap_or("windows-build"),
+                            artifact: artifact.as_deref(),
+                        },
+                        // Phasen aus Metrics
+                        &m.snapshot(),
+                        None,
+                    );
+                }
+            }
+
+            rc
         }
         Commands::Clean { dry_run, hard, extra } =>
             commands::clean::run(&root, dry_run, hard, &extra),
@@ -280,18 +112,22 @@ fn main() {
             commands::autogit::run(&root, message, allow_empty, &remote, branch.as_deref(), auto_https_fallback),
     };
 
-    if let Err(e) = res {
-        eprintln!("[ERROR] {}", e);
-        std::process::exit(1);
-    }
+    // Fehlerfall: sofort beenden
+    let (run_ok, run_code) = match res {
+        Ok(code) => (code == 0, code),
+        Err(e) => {
+            eprintln!("[ERROR] {}", e);
+            std::process::exit(1);
+        }
+    };
 
-    // Erfolgreicher Durchlauf – optionaler Autogit bei Full.
-    let mut autogit_ok = true;
+    // Erfolgreicher Durchlauf – optionaler Autogit bei Full und nur bei Erfolg.
+    let mut autogit_ok = false;
     let curr_branch = git_current_branch(&root)
         .or_else(|| std::env::var("OTTER_BRANCH").ok())
         .unwrap_or_else(|| "wupp".to_string());
 
-    if auto_commit_after {
+    if auto_commit_after && run_ok {
         autogit_ok = commands::autogit::run(&root, None, false, "origin", Some(&curr_branch), true).is_ok();
     }
 
@@ -301,10 +137,10 @@ fn main() {
     let artifact = find_artifact(&root);
     let git_hash = git_short_hash(&root);
 
-    // Hübscher, stabiler ASCII/ANSI-Endblock
+    // Hübscher, stabiler ASCII/ANSI-Endblock (zeigt realen Exitcode/Status)
     summary::print_end_summary(summary::EndSummary {
-        success: true,
-        exit_code: 0,
+        success: run_ok,
+        exit_code: run_code,
         started_ms: start_ms,
         elapsed_ms,
         artifact_path: artifact.map(|p| p.to_string_lossy().to_string()),

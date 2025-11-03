@@ -1,7 +1,7 @@
 ///// Otter: Cleans build artifacts; safe by default; returns 0 on success.
-/// //// Schneefuchs: ASCII-only logs; guards against paths escaping project root.
-/// ///// Maus: Supports --dry-run, --hard, and extra relative paths.
-/// ///// Datei: rust/otter_proc/src/commands/clean.rs
+///// Schneefuchs: ASCII-only logs; guards against paths escaping project root.
+///// Maus: Supports --dry-run, --hard, and extra relative paths.
+///// Datei: rust/otter_proc/src/commands/clean.rs
 
 use std::fs;
 use std::io;

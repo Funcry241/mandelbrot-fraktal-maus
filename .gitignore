@@ -1,4 +1,4 @@
-##### Otter: Keep /dist tracked; ignore build/vcpkg caches; Rust runner target ignored except exe pinned by path rule if desired.
+##### Otter: Keep /dist tracked; ignore build/vcpkg caches; Rust runner target ignored; optionally ignore /vcpkg vendor dir.
 ##### Schneefuchs: Specific rules after general ones; Windows-friendly; no surprises.
 ##### Maus: Minimal, readable; comments explain intent.
 ##### Datei: .gitignore
@@ -14,14 +14,23 @@ vcpkg_installed/
 vcpkg_downloads/
 vcpkg_buildtrees/
 vcpkg_packages/
+vcpkg_cache/
 !vcpkg.json
 !vcpkg-configuration.json
+
+# ----------------------------------------------------------------------
+# Vendor repo directories kept out of Git by default
+# NOTE: If /vcpkg is a submodule, .gitmodules/.git will track it explicitly;
+#       this ignore entry does not break an existing submodule.
+vcpkg/
 
 # ----------------------------------------------------------------------
 # VS / IDE metadata
 *.suo
 *.user
 *.VC.db
+*.VC.opendb
+ipch/
 .vscode/*
 !.vscode/c_cpp_properties.json
 !.vscode/settings.json
@@ -32,6 +41,7 @@ vcpkg_packages/
 # CMake generator files
 CMakeFiles/
 CMakeCache.txt
+CMakeUserPresets.json
 cmake_install.cmake
 Makefile
 compile_commands.json
@@ -79,3 +89,8 @@ wupp.txt
 *.zip
 *.7z
 OtterDream_Project.zip
+# …but keep any archives produced under /dist (pack step, release bundles):
+!dist/*.zip
+!dist/**/*.zip
+!dist/*.7z
+!dist/**/*.7z
