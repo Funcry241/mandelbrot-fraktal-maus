@@ -1,5 +1,5 @@
 ///// Otter: Rullmolder Step 2 - blunt zoom + gentle nudge toward Interest (dt-invariant).
-///** Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts (no ref-casts).
+///// Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts (no ref-casts).
 ///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF]/[ZLEASH].
 ///// Fink: Zoom-korrekte Pan-Umrechnung (px→world per pixelScale/zoom) gegen Überschwinger.
 ///// Dachs: Quickfix B+ - Axis-weighted Leash (X stärker), weniger Seitwärtsdrift.
@@ -28,10 +28,21 @@
 
 namespace ZoomLogic {
 
-// --- tiny helpers ------------------------------------------------------------
+// --- tiny helpers (fast math; no transcentals in hot-path) -------------------
 
 static inline float get_dt_seconds(const FrameContext& fc) noexcept {
     return (fc.deltaSeconds > 0.0f) ? fc.deltaSeconds : (1.0f / 60.0f);
+}
+
+// exp(x) with |x| << 1  →  1 + x + x²/2 (error O(x³)); dt≈1/60 → x≈0.003.. ok
+static inline double exp_fast2(double x) noexcept {
+    return 1.0 + x * (1.0 + 0.5 * x);
+}
+
+// 1 - exp(-a)  Padé(1,1) ~ a / (1 + a/2), stable & clampable for a≥0
+static inline double one_minus_expm_fast(double a) noexcept {
+    const double d = 1.0 + 0.5 * a;
+    return (d > 0.0) ? (a / d) : 0.0;
 }
 
 static inline double blunt_zoom_rate_per_sec() noexcept {
@@ -40,7 +51,7 @@ static inline double blunt_zoom_rate_per_sec() noexcept {
 
 // Gentle nudge tunables
 struct NudgeCfg {
-    double gainPerSec      = 0.95;
+    double gainPerSec      = 0.95;  // controls alpha (PAN response)
     double deadzoneNdc     = 0.12;
     double maxPxPerFrame   = 8.0;
     double yScale          = 0.95;
@@ -55,11 +66,23 @@ struct AxisLeashCfg {
 };
 static constexpr AxisLeashCfg kLeash{};
 
+// Phase A: Early-Locality Cap (öffnet weich von R0→1.0; nur in diesem TU)
+struct StartLeashCfg {
+    bool   enabled     = true;
+    double R0          = 0.18; // initial max |ndc| radius
+    double openSeconds = 1.8;  // Zeit bis volle Öffnung
+    // Replaces pow(t,e) with cubic ease (no transcendentals)
+    // t' = t^2 * (3 - 2t)  ~ smoothstep
+    bool   cubicEase   = true;
+};
+static constexpr StartLeashCfg kStartLeash{};
+
 // --- local telemetry state ---------------------------------------------------
 
 struct ZLogState {
     uint64_t frame = 0;
     bool     headerPrinted = false;
+    double   sinceStartSec = 0.0; // akkumulierte Laufzeit für Early-Locality-Cap
 };
 static ZLogState zls;
 
@@ -82,6 +105,34 @@ ZoomResult evaluateTarget(const std::vector<float>& /*entropy*/,
     return zr;
 }
 
+// --- small, inlinable helpers (avoid lambdas) --------------------------------
+
+static inline double applyDeadzone(double v, double dz) noexcept {
+    const double a = (v >= 0.0) ? v : -v;
+    if (a <= dz) return 0.0;
+    const double t = (a >= 1.0) ? 1.0 : (a - dz) / (1.0 - dz);
+    return (v < 0.0) ? -t : t;
+}
+
+static inline double smooth01(double x, double a, double b) noexcept {
+    if (x <= a) return 0.0;
+    if (x >= b) return 1.0;
+    const double t = (x - a) / (b - a);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+static inline double leashAxis(double a, double s, double e, double minF) noexcept {
+    const double r = (a >= 0.0) ? a : -a;
+    const double f = 1.0 - smooth01(r, s, e);
+    return (f < minF) ? minF : f;
+}
+
+static inline double clamp_abs(double v, double cap) noexcept {
+    if (v >  cap) return cap;
+    if (v < -cap) return -cap;
+    return v;
+}
+
 // --- core --------------------------------------------------------------------
 
 static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
@@ -95,10 +146,15 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     const float  dt   = get_dt_seconds(frameCtx);
     const double rate = blunt_zoom_rate_per_sec();
 
+    // Laufzeit fürs weiche Öffnen des Early-Locality-Caps
+    zls.sinceStartSec += static_cast<double>(dt);
+
     using ZoomT = std::remove_cv_t<std::remove_reference_t<decltype(RS_ZOOM(rs))>>;
     const ZoomT  z0  = static_cast<ZoomT>(RS_ZOOM(rs));
     const double ldz = rate * static_cast<double>(dt);
-    const double g   = std::exp(ldz);
+
+    // Fast exp: g = exp(ldz) ≈ 1 + ldz + 0.5*ldz^2 (dt-robust, no transcendentals)
+    const double g   = exp_fast2(ldz);
     const ZoomT  z1  = static_cast<ZoomT>(static_cast<double>(z0) * g);
     RS_ZOOM(rs) = z1;
 
@@ -114,26 +170,35 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         const double ndcX_raw = rs.interest.ndcX;
         const double ndcY_raw = rs.interest.ndcY;
 
-        auto applyDeadzone = [](double v, double dz)->double {
-            const double a = std::abs(v);
-            if (a <= dz) return 0.0;
-            const double t = std::min(1.0, (a - dz) / (1.0 - dz));
-            return (v < 0.0) ? -t : t;
-        };
         double ndcX = applyDeadzone(ndcX_raw, kNudge.deadzoneNdc);
         double ndcY = applyDeadzone(ndcY_raw, kNudge.deadzoneNdc);
 
+        // ---- Phase A: Early-Locality Cap (öffnet weich von R0 → 1.0) --------
+        if (kStartLeash.enabled) {
+            const double T = (kStartLeash.openSeconds > 0.0) ? kStartLeash.openSeconds : 0.0;
+            double t = (T > 0.0) ? std::min(1.0, zls.sinceStartSec / T) : 1.0;
+            // cubic ease (no std::pow)
+            if (kStartLeash.cubicEase) t = t * t * (3.0 - 2.0 * t);
+
+            const double R0   = std::clamp(kStartLeash.R0, 0.0, 1.0);
+            const double Rcap = R0 + (1.0 - R0) * t;
+            const double r2   = ndcX*ndcX + ndcY*ndcY;
+            const double R2   = Rcap * Rcap;
+            if (r2 > R2 && r2 > 1e-16) {
+                const double invR = Rcap / std::sqrt(r2);
+                ndcX *= invR;
+                ndcY *= invR;
+                if constexpr (Settings::ZoomLog::enabled) {
+                    if (emitEveryN) {
+                        LUCHS_LOG_HOST("[ZLEASH] f=%llu earlyLocality R=%.3f ndc'=(%.3f,%.3f)",
+                                       (unsigned long long)zls.frame, Rcap, ndcX, ndcY);
+                    }
+                }
+            }
+        }
+        // ---------------------------------------------------------------------
+
         // ---- Axis-weighted radial leash (B+) ----
-        auto smooth01 = [](double x, double a, double b)->double{
-            if (x <= a) return 0.0;
-            if (x >= b) return 1.0;
-            const double t = (x - a) / (b - a);
-            return t*t*(3.0 - 2.0*t);
-        };
-        auto leashAxis = [&](double a, double s, double e, double minF)->double{
-            const double r = std::abs(a);
-            return std::max(minF, 1.0 - smooth01(r, s, e));
-        };
         const double leashX = leashAxis(ndcX, kLeash.xStart, kLeash.xStop, kLeash.xMin);
         const double leashY = leashAxis(ndcY, kLeash.yStart, kLeash.yStop, kLeash.yMin);
         ndcX *= leashX;
@@ -145,7 +210,6 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                                (unsigned long long)zls.frame, leashX, leashY, ndcX, ndcY);
             }
         }
-        // -----------------------------------------
 
         const bool hitDZ_X = (std::abs(ndcX_raw) <= kNudge.deadzoneNdc);
         const bool hitDZ_Y = (std::abs(ndcY_raw) <= kNudge.deadzoneNdc);
@@ -153,31 +217,30 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         if (ndcX != 0.0 || ndcY != 0.0) {
             const double s = std::max(kNudge.strengthFloor, std::min(1.0, rs.interest.strength));
 
-            const double dx_px_goal = ndcX * 0.5 * static_cast<double>(rs.width);
-            const double dy_px_goal = ndcY * 0.5 * static_cast<double>(rs.height);
+            // pixel goals
+            const double halfW = 0.5 * static_cast<double>(rs.width);
+            const double halfH = 0.5 * static_cast<double>(rs.height);
+            const double dx_px_goal = ndcX * halfW;
+            const double dy_px_goal = ndcY * halfH;
 
-            const double alpha = 1.0 - std::exp(-(kNudge.gainPerSec * s) * static_cast<double>(dt));
+            // alpha ≈ 1 - exp(-k*s*dt)  →  Padé(1,1)
+            const double a = kNudge.gainPerSec * s * static_cast<double>(dt);
+            const double alpha = std::min(1.0, std::max(0.0, one_minus_expm_fast(a)));
 
-            const double step_px_x_raw = dx_px_goal * alpha;
-            const double step_px_y_raw = dy_px_goal * alpha * kNudge.yScale;
+            // per-frame caps
+            double step_px_x = clamp_abs(dx_px_goal * alpha, kNudge.maxPxPerFrame);
+            double step_px_y = clamp_abs(dy_px_goal * alpha * kNudge.yScale, kNudge.maxPxPerFrame);
 
-            auto cap = [](double v, double cap)->double {
-                if (v >  cap) return cap;
-                if (v < -cap) return -cap;
-                return v;
-            };
-            double step_px_x = cap(step_px_x_raw, kNudge.maxPxPerFrame);
-            double step_px_y = cap(step_px_y_raw, kNudge.maxPxPerFrame);
-
-            const bool hitCAP_X = (step_px_x != step_px_x_raw);
-            const bool hitCAP_Y = (step_px_y != step_px_y_raw);
+            const bool hitCAP_X = (step_px_x != dx_px_goal * alpha);
+            const bool hitCAP_Y = (step_px_y != dy_px_goal * alpha * kNudge.yScale);
 
             const double psx = static_cast<double>(rs.pixelScale.x);
             const double psy = static_cast<double>(rs.pixelScale.y);
             const bool scaleZero = (psx == 0.0 && psy == 0.0);
 
             if (!scaleZero) {
-                const double invZ = (RS_ZOOM(rs) != 0.0) ? (1.0 / static_cast<double>(RS_ZOOM(rs))) : 0.0;
+                const double z = static_cast<double>(RS_ZOOM(rs));
+                const double invZ = (z != 0.0) ? (1.0 / z) : 0.0;
                 const double dWorldX = step_px_x * psx * invZ;
                 const double dWorldY = step_px_y * psy * invZ;
 
