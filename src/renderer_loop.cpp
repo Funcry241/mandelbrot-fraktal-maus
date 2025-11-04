@@ -29,7 +29,7 @@ namespace {
         double delta = now - state.lastTime;
         if (delta < 0.0) delta = 0.0;
         // Angleichen an FramePipeline: clamp auf >= 1 ms für stabile Ableitungen/FPS
-        state.deltaTime = static_cast<float>(delta < 0.001 ? 0.001 : delta);
+        state.deltaTime = static_cast<float>(delta < 0.001 ? 0.001f : static_cast<float>(delta));
         state.lastTime  = now;
         state.frameCount++; // 1-based after first frame
     }
@@ -98,6 +98,14 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     AxolotelHUD::noteKeyPress(key, mods);
 
     switch (key) {
+        case GLFW_KEY_A: { // toggle Axolotel on/off
+            const bool newEnabled = !AxolotelHUD::isEnabled();
+            AxolotelHUD::setEnabled(newEnabled);
+            if constexpr (Settings::performanceLogging) {
+                LUCHS_LOG_HOST("[AXO] toggle enabled=%d", newEnabled ? 1 : 0);
+            }
+            break;
+        }
         case GLFW_KEY_H:
             HeatmapOverlay::toggle(*state);
             break;

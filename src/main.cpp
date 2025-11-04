@@ -10,6 +10,7 @@
 #include "renderer_state.hpp"
 #include "cuda_interop.hpp"
 #include "luchs_log_host.hpp"
+#include "axolotel_hud.hpp" // Axolotel explicit shutdown
 
 #include <chrono>
 #include <cstdlib>
@@ -73,6 +74,9 @@ int main()
             LUCHS_LOG_HOST("[FRAME] swap=%.2fms total=%.2fms", swapMs, totalMs);
         }
     }
+
+    // Axolotel: explicit GL cleanup while context is still alive
+    AxolotelHUD::shutdown();
 
     LUCHS_LOG_HOST("[EXIT] Clean shutdown");
     return EXIT_SUCCESS;

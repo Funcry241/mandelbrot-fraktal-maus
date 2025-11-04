@@ -2,6 +2,7 @@
 ///// Schneefuchs: GLSL 430 core; uniform-only (no textures); monotonic clamps; gamma-aware; ASCII identifiers.
 ///// Maus: Pulses: vec4(x,y,t0,type), units normalized; FS sums soft SDF arcs+rings; idle breath on alpha.
 ///// Datei: src/axolotel_shaders.hpp
+
 #pragma once
 
 namespace AxolotelShaders

@@ -172,6 +172,7 @@ void shutdown(){
     if (g.prog) { glDeleteProgram(g.prog); g.prog = 0; }
     if (g.vao)  { glDeleteVertexArrays(1, &g.vao); g.vao = 0; }
     sCount = 0;
+    sEnabled = false; // ensure disabled state after teardown
 }
 
 void setEnabled(bool enabled){ sEnabled = enabled; }
