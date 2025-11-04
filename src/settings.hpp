@@ -29,7 +29,7 @@ namespace Settings {
     inline constexpr bool debugLogging  = false;
 
     // Condensed [PERF] logs along the frame pipeline. Default: true
-    inline constexpr bool performanceLogging = false;
+    inline constexpr bool performanceLogging = true;
 
     // --- ZoomLog --------------------------------------------------------------
     // Foundation telemetry for all zoom stages (S1..Sn). Compact, ASCII-only.
