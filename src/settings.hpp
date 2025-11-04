@@ -36,7 +36,7 @@ namespace Settings {
 
     // Compact [PERF] lines along the frame pipeline (timings, FPS, ring).
     // Range: {false, true} | Default: true
-    inline constexpr bool performanceLogging = true;
+    inline constexpr bool performanceLogging = false;
 
     // --- ZoomLog --------------------------------------------------------------
     // Telemetry for zoom stages (S1..Sn). Rate-limited, optional header.
