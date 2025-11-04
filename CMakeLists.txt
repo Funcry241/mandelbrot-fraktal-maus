@@ -139,6 +139,7 @@ add_executable(mandelbrot_otterdream
   src/heatmap_metrics.cu
   # Axolotel HUD (WOW overlay)
   src/axolotel_hud.cpp
+  src/axolotel_coupler.cpp
 )
 
 # ---------------------- Compile-Options --------------------

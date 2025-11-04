@@ -12,6 +12,7 @@
 #include "renderer_state.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
+#include "axolotel_coupler.hpp" // << Axolotel Zoom-Coupler (boost multiplier)
 
 #include <vector>
 #include <cmath>
@@ -190,7 +191,11 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     zls.frame++;
 
     const float  dt   = get_dt_seconds(frameCtx);
-    const double rate = blunt_zoom_rate_per_sec();
+
+    // Base zoom rate and Axolotel coupler boost (multiplier ≥ 1.0)
+    double       rate = blunt_zoom_rate_per_sec();
+    const float  cplBoost = AxolotelCoupler::boost(); // smoothed; cheap
+    rate *= static_cast<double>(cplBoost);
 
     // Laufzeit fürs Startverhalten
     zls.sinceStartSec += static_cast<double>(dt);
@@ -226,6 +231,8 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
 
     using ZoomT = std::remove_cv_t<std::remove_reference_t<decltype(RS_ZOOM(rs))>>;
     const ZoomT  z0  = static_cast<ZoomT>(RS_ZOOM(rs));
+
+    // Effective per-frame logarithmic delta with coupler boost
     const double ldz = rate * static_cast<double>(dt);
 
     // Fast exp: g = exp(ldz) ≈ 1 + ldz + 0.5*ldz^2 (dt-robust, no transcendentals)
@@ -433,15 +440,15 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             if (Settings::ZoomLog::includeCenter) {
                 const double cx = static_cast<double>(RS_OFFSET_X(rs));
                 const double cy = static_cast<double>(RS_OFFSET_Y(rs));
-                LUCHS_LOG_HOST("[ZLOG][S2] f=%llu dt_ms=%.3f z0=%.6f z1=%.6f g=%.6f rps=%.6f ldz=%.6f cx=%.9f cy=%.9f",
+                LUCHS_LOG_HOST("[ZLOG][S2] f=%llu dt_ms=%.3f z0=%.6f z1=%.6f g=%.6f rps=%.6f ldz=%.6f cpl=%.3f cx=%.9f cy=%.9f",
                                (unsigned long long)zls.frame, dt_ms,
                                static_cast<double>(z0), static_cast<double>(z1),
-                               g, rate, ldz, cx, cy);
+                               g, rate, ldz, static_cast<double>(cplBoost), cx, cy);
             } else {
-                LUCHS_LOG_HOST("[ZLOG][S2] f=%llu dt_ms=%.3f z0=%.6f z1=%.6f g=%.6f rps=%.6f ldz=%.6f",
+                LUCHS_LOG_HOST("[ZLOG][S2] f=%llu dt_ms=%.3f z0=%.6f z1=%.6f g=%.6f rps=%.6f ldz=%.6f cpl=%.3f",
                                (unsigned long long)zls.frame, dt_ms,
                                static_cast<double>(z0), static_cast<double>(z1),
-                               g, rate, ldz);
+                               g, rate, ldz, static_cast<double>(cplBoost));
             }
 
             if (rs.interest.valid) {

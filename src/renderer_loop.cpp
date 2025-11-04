@@ -1,4 +1,4 @@
-///// Otter: Main loop; Silk-Lite motion + frame budget pacing; Axolotel key-pulse on every key press.
+///// Otter: Main loop; Silk-Lite motion + frame budget pacing; Axolotel key-pulse + Zoom-Coupler tick.
 ///// Schneefuchs: Device/host logs separated; flush on CUDA error paths; ASCII-only.
 ///// Maus: Warm-up freeze; fixed cadence for stats; one line per event.
 ///// Datei: src/renderer_loop.cpp
@@ -14,21 +14,21 @@
 #include "frame_limiter.hpp"         // pace::FrameLimiter
 #include "frame_capture.hpp"         // async single-shot 100th-frame capture
 #include "warzenschwein_overlay.hpp" // WarzenschweinOverlay::toggle()
-#include "axolotel_hud.hpp"
+#include "axolotel_hud.hpp"          // pulse feedback on keys
+#include "axolotel_coupler.hpp"      // per-frame tick() -> boost()
 #include <cuda_runtime_api.h>        // cudaPeekAtLastError
 
 namespace RendererLoop {
 
 namespace {
-    // Halte die Kadenz für Loop-Logs/Flush identisch zur PERF-Kadenz in frame_pipeline.cpp
-    // (dort: constexpr int PERF_LOG_EVERY = 30;)
+    // Keep cadence identical to PERF cadence in frame_pipeline.cpp (constexpr int PERF_LOG_EVERY = 30;)
     constexpr int PERF_LOG_EVERY = 30;
 
     inline void beginFrameLocal(RendererState& state) {
         const double now = glfwGetTime();
         double delta = now - state.lastTime;
         if (delta < 0.0) delta = 0.0;
-        // Angleichen an FramePipeline: clamp auf >= 1 ms für stabile Ableitungen/FPS
+        // Clamp to >= 1 ms for stable derivatives/FPS
         state.deltaTime = static_cast<float>(delta < 0.001 ? 0.001f : static_cast<float>(delta));
         state.lastTime  = now;
         state.frameCount++; // 1-based after first frame
@@ -55,6 +55,9 @@ namespace {
 void renderFrame_impl(RendererState& state) {
     initVSyncOnce();
     beginFrameLocal(state);
+
+    // Axolotel Zoom-Coupler: update smoothed boost once per frame
+    AxolotelCoupler::tick(state.deltaTime);
 
     // Full frame pipeline (CUDA -> Upload -> Draw -> Overlays -> PERF)
     FramePipeline::execute(state);
@@ -94,13 +97,15 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     auto* state = static_cast<RendererState*>(glfwGetWindowUserPointer(window));
     if (!state) return;
 
-    // Axolotel: jede Taste erzeugt einen sichtbaren Pulse im HUD (WOW-Feedback)
+    // Axolotel: every key press generates a visible pulse in the HUD (WOW feedback)
     AxolotelHUD::noteKeyPress(key, mods);
 
     switch (key) {
         case GLFW_KEY_A: { // toggle Axolotel on/off
             const bool newEnabled = !AxolotelHUD::isEnabled();
             AxolotelHUD::setEnabled(newEnabled);
+            // keep coupler aligned with HUD master
+            AxolotelCoupler::setEnabled(newEnabled);
             if constexpr (Settings::performanceLogging) {
                 LUCHS_LOG_HOST("[AXO] toggle enabled=%d", newEnabled ? 1 : 0);
             }
