@@ -45,23 +45,47 @@ mod vtcolor {
 #[cfg(not(windows))]
 mod vtcolor { pub fn enable_ansi_colors() {} }
 
-// ----------------------- Colorizer (ASCII-only, no deps) ---------------------
+// ----------------------- Dezent-Colorizer (ASCII-only, no deps) --------------
 fn colorize_autogit(line: &str) -> String {
-    const R: &str = "\x1b[31m";   // red
-    const Y: &str = "\x1b[33m";   // yellow
-    const G: &str = "\x1b[32m";   // green
-    const C: &str = "\x1b[36m";   // cyan
-    const B: &str = "\x1b[34m";   // blue
-    const DIM: &str = "\x1b[90m"; // grey
+    const CYAN:  &str = "\x1b[36m";
+    const YELL:  &str = "\x1b[33m";
+    const RED:   &str = "\x1b[31m";
+    const GREEN: &str = "\x1b[32m";
+    const DIM:   &str = "\x1b[90m";
     const RESET: &str = "\x1b[0m";
 
-    let lower = line.to_ascii_lowercase();
+    // helper: nur das Tag einfärben, Rest unverändert
+    fn paint_tag(tag: &str, color: &str, rest: &str) -> String {
+        format!("{color}{tag}{RESET}{rest}", color=color, tag=tag, rest=rest, RESET="\x1b[0m")
+    }
 
-    // Tags zuerst (präzise)
-    if line.starts_with("[AUTOGIT][RUN]") { return format!("{Y}{line}{RESET}"); }
-    if line.starts_with("[AUTOGIT]")      { return format!("{C}{line}{RESET}"); }
+    // Häufige AUTOGIT-Formen: färbe NUR die Tags
+    if let Some(rest) = line.strip_prefix("[AUTOGIT][RUN]") {
+        return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[RUN]", YELL, rest));
+    }
+    if let Some(rest) = line.strip_prefix("[AUTOGIT][ERR]") {
+        return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[ERR]", RED, rest));
+    }
+    if let Some(rest) = line.strip_prefix("[AUTOGIT][WARN]") {
+        return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[WARN]", YELL, rest));
+    }
+    if let Some(rest) = line.strip_prefix("[AUTOGIT][INFO]") {
+        // INFO dezent grau
+        return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[INFO]", DIM, rest));
+    }
+    if let Some(rest) = line.strip_prefix("[AUTOGIT]") {
+        return paint_tag("[AUTOGIT]", CYAN, rest);
+    }
 
-    // Git noise → dim
+    // Abschlusszeile: „status=OK“ / „status=WITH_ERRORS“ dezent färben
+    if line.contains("status=OK") {
+        return line.replace("status=OK", &format!("status={}OK{}", GREEN, RESET));
+    }
+    if line.contains("status=WITH_ERRORS") {
+        return line.replace("status=WITH_ERRORS", &format!("status={}WITH_ERRORS{}", RED, RESET));
+    }
+
+    // Git-Noise wahlweise leicht dimmen (Enumerating/Counting/...); sonst unverändert
     if line.starts_with("Enumerating objects:")
         || line.starts_with("Counting objects:")
         || line.starts_with("Compressing objects:")
@@ -69,25 +93,10 @@ fn colorize_autogit(line: &str) -> String {
         || line.starts_with("remote:")
         || line.starts_with("To ")
         || line.starts_with("Total ")
-    { return format!("{DIM}{line}{RESET}"); }
-
-    // Fehler/Warnungen/Erfolg
-    if lower.contains("error:") || lower.contains("[err]") || lower.contains(" failed") {
-        return format!("{R}{line}{RESET}");
-    }
-    if lower.contains("warning:") || lower.contains("[warn]") {
-        return format!("{Y}{line}{RESET}");
-    }
-    if lower.contains(" ok") || lower.contains(" done") || lower.contains("success") || lower.contains("completed") {
-        return format!("{G}{line}{RESET}");
+    {
+        return format!("{DIM}{line}{RESET}");
     }
 
-    // Aktionen (z. B. rm 'vcpkg', branch …)
-    if lower.starts_with("rm '") || lower.starts_with("branch '") {
-        return format!("{B}{line}{RESET}");
-    }
-
-    // Standard: unverändert
     line.to_string()
 }
 
@@ -99,8 +108,7 @@ fn logc<S: AsRef<str>>(s: S) {
 // -----------------------------------------------------------------------------
 
 fn run_cmd_in(root: &Path, program: &str, args: &[&str]) -> io::Result<i32> {
-    // Für git-Befehle je Aufruf Konfigs setzen, um CRLF→LF-Warnungen und
-    // "embedded repo" Hinweise zu vermeiden. Zusätzlich: Farbe aktivieren.
+    // Für git-Befehle je Aufruf Konfigs setzen (keine Git-Farbexplosion).
     let is_git = program == "git";
     let mut full_args: Vec<&str> = Vec::new();
     if is_git {
@@ -108,7 +116,7 @@ fn run_cmd_in(root: &Path, program: &str, args: &[&str]) -> io::Result<i32> {
             "-c", "core.safecrlf=false",
             "-c", "core.autocrlf=input",
             "-c", "advice.addEmbeddedRepo=false",
-            "-c", "color.ui=always",
+            // bewusst KEIN "color.ui=always" → nur unsere Tags sind farbig
         ]);
     }
     full_args.extend_from_slice(args);
