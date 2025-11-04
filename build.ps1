@@ -1,12 +1,12 @@
 ##### Otter: Three modes — (no args)=local build (no git), /build=build+upload, /branch=branch op.
-##### Schneefuchs: PS 5.1-safe; English help (-h | -? | /h | /?); ASCII logs; clean exit codes.
+##### Schneefuchs: PS 5.1-safe; English help (-h | -? | /h | /?); ASCII logs; clean exit codes; neutral tag.
 ##### Maus: Minimal & deterministic; accepts / or -; default branch name "wupp".
 ##### Datei: .\build.ps1
 
 $ErrorActionPreference = 'Stop'
 
-function Info([string]$m){ Write-Host "[PS] $m" }
-function Err ([string]$m){ Write-Host "[PS] [ERR] $m" -ForegroundColor Red; exit 1 }
+function Info([string]$m){ Write-Host "[RUN] $m" }
+function Err ([string]$m){ Write-Host "[RUN] [ERR] $m" -ForegroundColor Red; exit 1 }
 
 function Show-Help {
   Write-Host @"

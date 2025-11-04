@@ -1,5 +1,5 @@
 ##### Otter: Modern build (no PS-magic) — dynamic CRT (/MD), dynamic GLEW, CUDA13 guard, Ninja response files, clean target props; Axolotel-HUD sources added.
-##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; removed `-Xcompiler=/MT...` for CUDA TUs; keep compile warnings strict; duplicate-free defines; no GLEW_STATIC; sources list includes axolotel_hud.cpp.
+##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; removed -Xcompiler=/MT... for CUDA TUs; keep compile warnings strict; duplicate-free defines; no GLEW_STATIC; sources list includes axolotel_hud.cpp.
 ##### Maus: Deterministic build; Arch=80/86/89/90; C++23 / CUDA20; separable compilation on; AppLocal-friendly link setup.
 ##### Datei: CMakeLists.txt
 
@@ -210,11 +210,12 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
 )
 
 # ---------------------- Link -------------------------------
+# NOTE (Schneefuchs): Keine explizite cudart_static hier – sie kommt bereits über
+#   CUDA_RUNTIME_LIBRARY=Static. Doppel-Eintrag im Linkerlog wird so verhindert.
 target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
   ${GLEW_TARGET}
   glfw
-  CUDA::cudart_static
   $<$<TARGET_EXISTS:CUDA::cudadevrt>:CUDA::cudadevrt>
   Threads::Threads
 )

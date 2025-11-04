@@ -1,45 +1,63 @@
-///// Otter: Artefakt-Suche – Kandidaten scannen & melden, ein konsistenter Fundort-Log.
-///// Schneefuchs: Farbige yes/no bei ANSI; keine I/O-Seiteneffekte außer Logs.
-///// Maus: pub(crate); minimal; identische Kandidatenreihenfolge wie zuvor.
+///// Otter: Artifact locator — deterministic search order; prefers build/ app-local; quiet, parseable logs.
+///// Schneefuchs: Restores fmt_exists + find_artifact; generic fmt_exists accepts bool *or* &Path; no external deps.
+///// Maus: Cross-platform exe basename; emits "[RUNNER] artifact-candidate: … exists=yes|no" and final "[RUNNER] artifact: …".
 ///// Datei: rust/otter_proc/src/artifact.rs
-#![deny(warnings)]
 
 use std::path::{Path, PathBuf};
 
-/// "yes"/"no" ggf. farbig, abhängig von ANSI-Fähigkeit.
-pub(crate) fn fmt_exists(b: bool) -> String {
-    if crate::runner::runner_term::color_enabled() {
-        if b { "\x1b[32myes\x1b[0m".to_string() } else { "\x1b[33mno\x1b[0m".to_string() }
-    } else {
-        if b { "yes".to_string() } else { "no".to_string() }
+/// Tiny trait so `fmt_exists` can take either a `bool` **or** a `&Path`.
+trait ExistsLike {
+    fn exists_bool(self) -> bool;
+}
+impl ExistsLike for bool {
+    #[inline] fn exists_bool(self) -> bool { self }
+}
+impl<'a> ExistsLike for &'a Path {
+    #[inline] fn exists_bool(self) -> bool { self.exists() }
+}
+impl<'a> ExistsLike for &'a PathBuf {
+    #[inline] fn exists_bool(self) -> bool { self.as_path().exists() }
+}
+
+/// Returns `"yes"` or `"no"` — matches call sites like:
+/// `format!("artifact-candidate: {} exists={}", p.display(), fmt_exists(exists))`
+#[inline]
+pub fn fmt_exists<E: ExistsLike>(e: E) -> &'static str {
+    if e.exists_bool() { "yes" } else { "no" }
+}
+
+#[inline]
+fn exe_basename() -> &'static str {
+    if cfg!(windows) { "mandelbrot_otterdream.exe" } else { "mandelbrot_otterdream" }
+}
+
+/// Candidate list in priority order (app-local first).
+pub fn artifact_candidates(root: &Path) -> Vec<PathBuf> {
+    let exe = exe_basename();
+    let b = root.join("build");
+
+    let mut v = Vec::with_capacity(8);
+    // Highest priority: flat app-local in build/
+    v.push(b.join(exe));
+    // Next: build/bin/
+    v.push(b.join("bin").join(exe));
+
+    // Common multi-config layouts
+    for cfg in ["RelWithDebInfo", "Release", "Debug"] {
+        v.push(b.join(cfg).join(exe));
+        v.push(b.join("bin").join(cfg).join(exe));
     }
+    v
 }
 
-/// Kandidat loggen und Existenz prüfen.
-pub(crate) fn log_candidate(root: &Path, rel: &str) -> (PathBuf, bool) {
-    let p = root.join(rel);
-    let exists = p.is_file();
-    crate::runner::runner_term::out_info(
-        "RUNNER",
-        &format!("artifact-candidate: {} exists={}", p.display(), fmt_exists(exists)),
-    );
-    (p, exists)
-}
-
-/// Artefakt anhand üblicher Build-Pfade finden (erste Übereinstimmung gewinnt).
-pub(crate) fn find_artifact(root: &Path) -> Option<PathBuf> {
-    // Reihenfolge beibehalten, um Log- und Suchverhalten stabil zu halten.
-    let candidates = [
-        "build/RelWithDebInfo/mandelbrot_otterdream.exe",
-        "build/bin/RelWithDebInfo/mandelbrot_otterdream.exe",
-        "build/bin/mandelbrot_otterdream.exe",
-        "build/mandelbrot_otterdream.exe",
-    ];
-    for rel in candidates {
-        let (p, exists) = log_candidate(root, rel);
-        if exists {
-            crate::runner::runner_term::out_info("RUNNER", &format!("artifact: {}", p.display()));
-            return Some(p);
+/// Scans candidates and emits compact log lines consumed by the runner UI.
+/// Returns the first existing artifact path.
+pub fn find_artifact(root: &Path) -> Option<PathBuf> {
+    for cand in artifact_candidates(root) {
+        println!("[RUNNER] artifact-candidate: {} exists={}", cand.display(), fmt_exists(&cand));
+        if cand.exists() {
+            println!("[RUNNER] artifact: {}", cand.display());
+            return Some(cand);
         }
     }
     None
