@@ -28,7 +28,7 @@
 
 namespace ZoomLogic {
 
-// --- tiny helpers (fast math; no transcentals in hot-path) -------------------
+// --- tiny helpers (fast math; no transcendentals in hot-path) ----------------
 
 static inline float get_dt_seconds(const FrameContext& fc) noexcept {
     return (fc.deltaSeconds > 0.0f) ? fc.deltaSeconds : (1.0f / 60.0f);
@@ -67,17 +67,16 @@ struct AxisLeashCfg {
 static constexpr AxisLeashCfg kLeash{};
 
 // Phase A: Early-Locality Cap (öffnet weich von R0→1.0; nur in diesem TU)
+// (etwas aggressiver als zuvor, um „Spalt“-Einfangung früh zu dämpfen)
 struct StartLeashCfg {
     bool   enabled     = true;
-    double R0          = 0.18; // initial max |ndc| radius
-    double openSeconds = 1.8;  // Zeit bis volle Öffnung
-    // Replaces pow(t,e) with cubic ease (no transcendentals)
-    // t' = t^2 * (3 - 2t)  ~ smoothstep
-    bool   cubicEase   = true;
+    double R0          = 0.12; // vorher 0.18 → stärkeres frühes Zentrieren
+    double openSeconds = 2.4;  // vorher 1.8  → länger sanft geöffnet
+    bool   cubicEase   = true; // t' = t^2*(3-2t)
 };
 static constexpr StartLeashCfg kStartLeash{};
 
-// --- experimental: run-seeded start jitter + early angle bias ----------------
+// --- experimental: run-seeded start jitter + early deflection ----------------
 // (keine Settings-Änderungen; reiner TU-Scoped Versuch)
 struct XorShift32 {
     uint32_t s;
@@ -91,8 +90,11 @@ struct StartNoise {
     bool     seeded        = false;
     bool     jitterDone    = false;
     uint32_t seed          = 0;
-    double   angleBiasRad  = 0.0;   // +/- ~7°
-    double   angleDurSec   = 1.4;   // fade-out Dauer
+    double   angleBiasRad  = 0.0;   // +/- ~18°
+    double   angleDurSec   = 2.2;   // fade-out Dauer
+    int      deflectSign   = +1;    // +/- 1
+    double   deflectMax    = 0.12;  // max orthogonale NDC-Deflektion
+    double   deflectDurSec = 2.0;   // Dauer der Deflektion
     XorShift32 rng{0};
 };
 static StartNoise sNoise;
@@ -106,14 +108,16 @@ static void ensure_seed_once() noexcept {
     if (!sNoise.seed) sNoise.seed = 0x9E3779B9u;
     sNoise.rng.s = sNoise.seed;
 
-    // Winkel ±7° → Rad
+    // Winkel ±18° → Rad
     const double degToRad = 0.017453292519943295;
-    const double a = (sNoise.rng.u01() * 2.0 - 1.0) * (7.0 * degToRad);
+    const double a = (sNoise.rng.u01() * 2.0 - 1.0) * (18.0 * degToRad);
     sNoise.angleBiasRad = a;
+    sNoise.deflectSign  = (sNoise.rng.u01() < 0.5f) ? -1 : +1;
 
     if constexpr (Settings::ZoomLog::enabled) {
-        LUCHS_LOG_HOST("[ZSEED] runSeed=0x%08X angleBias=%.3f deg dur=%.2fs",
-                       (unsigned)sNoise.seed, a / degToRad, sNoise.angleDurSec);
+        LUCHS_LOG_HOST("[ZSEED] runSeed=0x%08X angleBias=%.3f deg deflectSign=%+d durA=%.2fs durD=%.2fs",
+                       (unsigned)sNoise.seed, a / degToRad, sNoise.deflectSign,
+                       sNoise.angleDurSec, sNoise.deflectDurSec);
     }
     sNoise.seeded = true;
 }
@@ -194,8 +198,8 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     if (zls.frame == 1) {
         ensure_seed_once();
 
-        // Jitterradius in Pixel (6..18), zufälliger Winkel
-        const double rpx   = 6.0 + 12.0 * (double)sNoise.rng.u01();
+        // Jitterradius in Pixel (14..32), zufälliger Winkel → spürbarer Startversatz
+        const double rpx   = 14.0 + 18.0 * (double)sNoise.rng.u01();
         const double phi   = 6.283185307179586 * (double)sNoise.rng.u01();
         const double jx_px = rpx * std::cos(phi);
         const double jy_px = rpx * std::sin(phi);
@@ -240,7 +244,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         const double ndcX_raw0 = rs.interest.ndcX;
         const double ndcY_raw0 = rs.interest.ndcY;
 
-        // Early angle bias (kleine Rotation; fadet in ~1.4 s auf 0)
+        // Early angle bias (stärker als zuvor; ±18°, fadet in ~2.2 s auf 0)
         double ndcX_in = ndcX_raw0, ndcY_in = ndcY_raw0;
         if (sNoise.seeded && sNoise.angleBiasRad != 0.0 && sNoise.angleDurSec > 0.0) {
             const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.angleDurSec), 0.0, 1.0);
@@ -259,6 +263,29 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             }
         }
 
+        // Orthogonale Deflektion (seitlicher „Schubs“) – stark, aber ausfaded
+        if (sNoise.seeded && sNoise.deflectMax > 0.0 && sNoise.deflectDurSec > 0.0) {
+            const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.deflectDurSec), 0.0, 1.0);
+            if (t > 0.0) {
+                const double r2 = ndcX_in*ndcX_in + ndcY_in*ndcY_in;
+                if (r2 > 1e-16) {
+                    const double invLen = 1.0 / std::sqrt(r2);
+                    const double ox = -ndcY_in * invLen; // 90° links
+                    const double oy =  ndcX_in * invLen;
+                    const double amp = sNoise.deflectMax * t;
+                    ndcX_in += (double)sNoise.deflectSign * amp * ox;
+                    ndcY_in += (double)sNoise.deflectSign * amp * oy;
+
+                    if constexpr (Settings::ZoomLog::enabled) {
+                        if (emitEveryN) {
+                            LUCHS_LOG_HOST("[ZDEF] f=%llu fade=%.2f amp=%.3f sign=%+d ndcDef=(%.3f,%.3f)",
+                                           (unsigned long long)zls.frame, t, amp, sNoise.deflectSign, ndcX_in, ndcY_in);
+                        }
+                    }
+                }
+            }
+        }
+
         double ndcX = applyDeadzone(ndcX_in, kNudge.deadzoneNdc);
         double ndcY = applyDeadzone(ndcY_in, kNudge.deadzoneNdc);
 
@@ -266,7 +293,6 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         if (kStartLeash.enabled) {
             const double T = (kStartLeash.openSeconds > 0.0) ? kStartLeash.openSeconds : 0.0;
             double t = (T > 0.0) ? std::min(1.0, zls.sinceStartSec / T) : 1.0;
-            // cubic ease (no std::pow)
             if (kStartLeash.cubicEase) t = t * t * (3.0 - 2.0 * t);
 
             const double R0   = std::clamp(kStartLeash.R0, 0.0, 1.0);
