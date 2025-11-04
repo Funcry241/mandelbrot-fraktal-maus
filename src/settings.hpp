@@ -6,131 +6,220 @@
 #pragma once
 
 // ============================================================================
-// Central project settings – fully documented (only active/used switches).
-// Policy: All runtime LOG/DEBUG output must be English and ASCII-only.
-// No hidden semantics. Values are stable and compile-time constant.
+// Central project settings – only active switches live here.
+// All runtime logs must be English, ASCII-only.
+// Tip: Prefer small, deliberate changes and measure. Keep headers/sources in sync.
 // ============================================================================
 
 namespace Settings {
 
 // ============================== Zoom / Planner ===============================
+// Controls the auto-zoom planner’s global behavior.
 
-    // Forces continuous zoom, independent of entropy/contrast signals.
+    // Force continuous zoom regardless of entropy/contrast signals.
+    // Use when exploring or for demos to avoid stalls.
     // Range: {false, true} | Default: true
     inline constexpr bool   ForceAlwaysZoom = true;
 
-    // After (re-)targeting, freeze direction for this time for stability.
-    // Range: 0.2 .. 2.0 (seconds) | Default: 1.0
+    // After a new target is chosen, keep direction fixed for stability.
+    // Higher values = fewer direction flips but slower reaction.
+    // Range: 0.2 .. 2.0 seconds | Default: 1.0
     inline constexpr double warmUpFreezeSeconds = 1.0;
 
 // ============================== Logging / Perf ===============================
+// Toggle targeted debug and compact perf logs. These do not change math;
+// they only affect I/O and timing jitter from printing.
 
-    // Targeted debug/diagnostic output (host/device). Default: false
+    // Verbose diagnostics (host/device). Keep off for clean benchmarks.
+    // Range: {false, true} | Default: false
     inline constexpr bool debugLogging  = false;
 
-    // Condensed [PERF] logs along the frame pipeline. Default: true
+    // Compact [PERF] lines along the frame pipeline (timings, FPS, ring).
+    // Range: {false, true} | Default: true
     inline constexpr bool performanceLogging = true;
 
     // --- ZoomLog --------------------------------------------------------------
-    // Foundation telemetry for all zoom stages (S1..Sn). Compact, ASCII-only.
-    // One optional header line plus a rate-limited data line.
+    // Telemetry for zoom stages (S1..Sn). Rate-limited, optional header.
     namespace ZoomLog {
-        inline constexpr bool enabled       = true;  // {false,true}
-        inline constexpr int  everyN        = 16;    // 1..120
-        inline constexpr bool header        = true;  // {false,true}
-        inline constexpr bool includeCenter = true;  // {false,true}
+        // Emit zoom telemetry lines.
+        // Range: {false, true} | Default: true
+        inline constexpr bool enabled       = true;
+
+        // Emit every Nth frame (1 = every frame). Larger N reduces log noise.
+        // Range: 1 .. 120 | Default: 16
+        inline constexpr int  everyN        = 16;
+
+        // Print a single header explaining columns on first emission.
+        // Range: {false, true} | Default: true
+        inline constexpr bool header        = true;
+
+        // Include current complex center in the log line (useful for replay).
+        // Range: {false, true} | Default: true
+        inline constexpr bool includeCenter = true;
     } // namespace ZoomLog
 
     // --- PerfLog cadence (Nacktmull) -----------------------------------------
-    // Used by frame pipeline to rate-limit hot-path PERF lines and to define a warm-up window.
-    // These settings DO NOT alter computation; they only reduce log I/O variance.
+    // Rate-limits hot-path [PERF] lines and defines a warm-up window.
+    // Does not affect computation; reduces I/O variance.
     namespace PerfLog {
-        inline constexpr bool enabled      = true;  // {false,true}
-        inline constexpr int  everyN       = 30;    // 10..240   | Default: 30 (every 30th frame)
-        inline constexpr int  warmupFrames = 80;    // 0..300    | Default: 80 (reduced logging during warm-up)
-        inline constexpr bool header       = true;  // {false,true}
+        // Enable [PERF] lines.
+        // Range: {false, true} | Default: true
+        inline constexpr bool enabled      = true;
+
+        // Emit every Nth frame after warm-up (1 = every frame).
+        // Range: 10 .. 240 | Default: 30
+        inline constexpr int  everyN       = 30;
+
+        // Suppress perf logs during first frames to avoid cold-start noise.
+        // Range: 0 .. 300 | Default: 80
+        inline constexpr int  warmupFrames = 80;
+
+        // Emit a single header explaining columns on first emission.
+        // Range: {false, true} | Default: true
+        inline constexpr bool header       = true;
     } // namespace PerfLog
 
 // ============================== Framerate / VSync ============================
+// Frame pacing. Prefer VSync for visual stability; cap for headroom.
 
-    inline constexpr bool capFramerate = true; // {false,true}
-    inline constexpr int  capTargetFps = 60;   // 30..240
-    inline constexpr bool preferVSync  = true; // {false,true}
+    // Hard cap in the main loop. Keep <= monitor refresh when preferVSync=true.
+    // Range: {false, true} | Default: true
+    inline constexpr bool capFramerate = true;
+
+    // Target FPS when capFramerate=true.
+    // Range: 30 .. 240 | Default: 60
+    inline constexpr int  capTargetFps = 60;
+
+    // Ask GL for VSync; driver may override. Turn off for raw perf tests.
+    // Range: {false, true} | Default: true
+    inline constexpr bool preferVSync  = true;
 
 // ============================== Interop / Upload =============================
+// PBO ring for GL upload. Larger rings reduce stalls but use more VRAM.
 
-    inline constexpr int pboRingSize = 8;      // 3..12
+    // Number of PBOs in the ring buffer.
+    // Range: 3 .. 12 | Default: 8
+    inline constexpr int pboRingSize = 8;
 
 // ============================== Overlays / HUD ===============================
+// Visual diagnostics on top of the fractal output.
 
-    inline constexpr bool  heatmapOverlayEnabled       = true;   // {false,true}
-    inline constexpr bool  warzenschweinOverlayEnabled = true;   // {false,true}
-    inline constexpr float hudPixelSize                = 0.0025f;// 0.0015..0.004
+    // Heatmap overlay (entropy/contrast tiles).
+    // Range: {false, true} | Default: true
+    inline constexpr bool  heatmapOverlayEnabled       = true;
+
+    // Warzenschwein HUD text (stats + status).
+    // Range: {false, true} | Default: true
+    inline constexpr bool  warzenschweinOverlayEnabled = true;
+
+    // Text size in NDC; larger = bigger glyphs.
+    // Range: 0.0015 .. 0.004 | Default: 0.0025
+    inline constexpr float hudPixelSize                = 0.0025f;
 
 // ============================== Start / Window ===============================
+// Initial window size/position and view parameters.
 
-    inline constexpr int   width      = 1024;  // px
-    inline constexpr int   height     = 768;   // px
-    inline constexpr int   windowPosX = 100;   // px
-    inline constexpr int   windowPosY = 100;   // px
+    // Window resolution (pixels).
+    inline constexpr int   width      = 1024;
+    inline constexpr int   height     = 768;
 
+    // Initial window position (pixels).
+    inline constexpr int   windowPosX = 100;
+    inline constexpr int   windowPosY = 100;
+
+    // Initial view in complex plane.
     inline constexpr float initialZoom    = 1.5f;
     inline constexpr float initialOffsetX = 0.0f;
     inline constexpr float initialOffsetY = 0.0f;
 
 // ============================== Iterations / Tiles ===========================
+// Iteration budget and compute tile size clamps.
 
-    inline constexpr int INITIAL_ITERATIONS = 100;    // 50..400
-    inline constexpr int MAX_ITERATIONS_CAP = 50000;  // 10k..200k
+    // Starting iteration budget; may ramp with zoom.
+    // Range: 50 .. 400 | Default: 100
+    inline constexpr int INITIAL_ITERATIONS = 100;
 
-    inline constexpr int BASE_TILE_SIZE = 32;         // MIN<=BASE<=MAX
+    // Absolute ceiling for iteration budget (safety).
+    // Range: 10000 .. 200000 | Default: 50000
+    inline constexpr int MAX_ITERATIONS_CAP = 50000;
+
+    // Tile size baseline and clamps for compute kernels.
+    // Constraint: MIN <= BASE <= MAX
+    // Typical: 8..64 depending on zoom and occupancy.
+    inline constexpr int BASE_TILE_SIZE = 32;
     inline constexpr int MIN_TILE_SIZE  = 8;
     inline constexpr int MAX_TILE_SIZE  = 64;
 
 // ============================== Mandelbrot Kernel ============================
-// Used by colorizer and other CUDA launches for thread block geometry.
-    inline constexpr int MANDEL_BLOCK_X = 32;   // threads in X (multiple of 32)
-    inline constexpr int MANDEL_BLOCK_Y = 8;    // threads in Y
+// Thread block geometry used by colorizer/metrics (render TU may override
+// via __launch_bounds__). Keep X a multiple of 32 for warp alignment.
 
-    // Nacktmull note: render kernel TU sets its own launch_bounds for occupancy;
-    // MANDEL_BLOCK_* define the geometry for other launches (colorizer, heatmap).
+    // Threads in X (must be multiple of 32).
+    inline constexpr int MANDEL_BLOCK_X = 32;
+
+    // Threads in Y.
+    inline constexpr int MANDEL_BLOCK_Y = 8;
+
+    // Note: The render kernel translation unit can set its own launch_bounds
+    // for occupancy. MANDEL_BLOCK_* is the shared default for other launches.
 
 // ============================== Progressive / State ==========================
+// Persistent state across frames (resume iterations, etc.).
 
-    // Progressive state toggle (used by RendererState).
+    // Toggle progressive renderer features in RendererState.
+    // Range: {false, true} | Default: true
     inline constexpr bool progressiveEnabled = true;
 
-// ============================== Kolibri/Grid =================================
-// Screen-constant analysis grid (independent of zoom).
-// frame_pipeline computes tileSizePx from window size.
-// -----------------------------------------------------------------------------
+// ============================== Kolibri / Grid ===============================
+// Screen-constant analysis grid independent of zoom. The frame pipeline
+// picks tile size in pixels from window size for overlays/metrics.
+
 namespace Kolibri {
-    inline constexpr bool gridScreenConstant = true; // {false,true}
-    inline constexpr int  desiredTilePx      = 28;   // 20..40
+    // Keep analysis grid constant in screen space (pixels) instead of world space.
+    // Range: {false, true} | Default: true
+    inline constexpr bool gridScreenConstant = true;
+
+    // Desired tile size for the screen-constant grid (pixels).
+    // Range: 20 .. 40 | Default: 28
+    inline constexpr int  desiredTilePx      = 28;
+
+    // Cadence gate: rebuild heatmap metrics every N frames.
+    // 1 = every frame (max responsiveness), 3 = balanced default, 5/8 = heavy scenes.
+    // Range: 1 .. 16 | Default: 3
+    inline constexpr int  metricsEveryN      = 3;
 } // namespace Kolibri
 
 // ============================== Target Bias ==================================
-// Prefer nearer targets on screen (center-weighted scoring in overlay).
+// Center-weighted scoring for interest selection in overlays.
 // score_biased = raw * ((1 - mix) + mix * exp(-r_ndc^2 / sigmaNdc^2))
-// r_ndc is distance in NDC from screen center; smaller sigma ⇒ stronger bias.
-// -----------------------------------------------------------------------------
+// Smaller sigma ⇒ stronger center bias; mix blends raw vs. biased.
+
 namespace TargetBias {
-    inline constexpr bool   enabled  = true;  // {false,true} | Default: true
-    inline constexpr double sigmaNdc = 0.65;  // 0.3..1.2     | Default: 0.65
-    inline constexpr double mix      = 0.35;  // 0..1         | Default: 0.35
+    // Enable bias toward the screen center.
+    // Range: {false, true} | Default: true
+    inline constexpr bool   enabled  = true;
+
+    // Width of the Gaussian in NDC; smaller = tighter center pull.
+    // Range: 0.3 .. 1.2 | Default: 0.65
+    inline constexpr double sigmaNdc = 0.65;
+
+    // Blend factor between raw and biased score.
+    // Range: 0 .. 1 | Default: 0.35
+    inline constexpr double mix      = 0.35;
 } // namespace TargetBias
 
 // ============================== Sanity checks ================================
+// Guard obvious configuration errors at compile time.
 
 static_assert(pboRingSize > 0, "pboRingSize must be > 0");
 static_assert(MIN_TILE_SIZE <= BASE_TILE_SIZE && BASE_TILE_SIZE <= MAX_TILE_SIZE,
               "MIN_TILE_SIZE <= BASE_TILE_SIZE <= MAX_TILE_SIZE required");
 static_assert(Kolibri::desiredTilePx > 0, "desiredTilePx must be > 0");
+static_assert(Kolibri::metricsEveryN >= 1, "metricsEveryN must be >= 1");
 static_assert(MANDEL_BLOCK_X > 0 && MANDEL_BLOCK_Y > 0, "MANDEL_BLOCK dims must be > 0");
 static_assert((MANDEL_BLOCK_X % 32) == 0, "MANDEL_BLOCK_X must be a multiple of 32");
 static_assert(TargetBias::sigmaNdc > 0.0, "sigmaNdc must be > 0");
 static_assert(TargetBias::mix >= 0.0 && TargetBias::mix <= 1.0, "mix in [0,1]");
-// Cadence guards (purely for logging cadence configuration)
 static_assert(ZoomLog::everyN >= 1, "ZoomLog::everyN must be >= 1");
 static_assert(PerfLog::everyN >= 1, "PerfLog::everyN must be >= 1");
 static_assert(PerfLog::warmupFrames >= 0, "PerfLog::warmupFrames must be >= 0");

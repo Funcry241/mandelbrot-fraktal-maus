@@ -1,6 +1,6 @@
-///// Otter: Nacktmull – frame pipeline mit draw-lag-1; perf warm-up & rate-limit
+///// Otter: Nacktmull – frame pipeline mit Metrics-Cadence; perf warm-up & rate-limit
 ///// Schneefuchs: MAUS-Header; ASCII-Logs; pch first; Settings::PerfLog-gesteuert; Ring-Logs stabil
-///// Maus: Compute → Metrics → Overlays → Zoom; Upload auf Upload-Tex; Draw auf Draw-Tex
+///// Maus: Compute → Metrics → Overlays → Zoom; Single-Texture (kompatibel zu aktuellem RendererState)
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
@@ -11,6 +11,7 @@
 #include <cuda_runtime.h>  // CUDA event timing
 
 #include "capybara_mapping.cuh" // computeTileSizeFromZoom(...)
+#include "renderer_state.hpp"   // <- für kPboRingSize (static_assert)
 #include "renderer_resources.hpp"
 #include "renderer_pipeline.hpp"
 #include "cuda_interop.hpp"
@@ -39,7 +40,6 @@ namespace {
     using Clock = std::chrono::high_resolution_clock;
     using msd   = std::chrono::duration<double, std::milli>;
 
-    // Nacktmull: cadence driven by Settings::PerfLog
     constexpr int RING_LOG_EVERY = 120;
 
     static double g_mandMs = 0.0;
@@ -71,7 +71,6 @@ namespace {
         double dt = (s_prevNow > 0.0) ? (now - s_prevNow) : (1.0 / 60.0);
         s_prevNow = now;
 
-        // clamp dt (gegen Hänger/Breakpoints)
         if (dt < 1.0/300.0) dt = 1.0/300.0;
         if (dt > 1.0/15.0)  dt = 1.0/15.0;
 
@@ -114,11 +113,19 @@ namespace {
         LUCHS_LOG_HOST("[HM][FALLBACK] generated N=%zu tiles=%dx%d tilePx=%d", N, tx, ty, px);
     }
 
-    // ---------------------- Metrics EINMAL pro Frame ------------------------
+    // ---------------------- Metrics EINMAL pro N Frames ------------------------
     static void ensureAnalysisMetrics(FrameContext& fctx, RendererState& state)
     {
         const int statsPx = std::max(1,
             (Settings::Kolibri::gridScreenConstant ? Settings::Kolibri::desiredTilePx : fctx.tileSize));
+
+        // Cadence-Throttle: baue nur alle N Frames (N>=1). Bei Skip bleiben Host-Daten erhalten.
+        if (Settings::Kolibri::metricsEveryN > 1 && (g_frame % Settings::Kolibri::metricsEveryN) != 0) {
+            fctx.statsTileSize = statsPx;
+            fctx.entropy       = state.h_entropy;
+            fctx.contrast      = state.h_contrast;
+            return;
+        }
 
         bool ok = false;
         if constexpr (Settings::performanceLogging) {
@@ -145,7 +152,6 @@ namespace {
             ensureHeatmapHostData(state, fctx.width, fctx.height, statsPx);
         }
 
-        // In den FrameContext spiegeln (Decoupling!)
         fctx.statsTileSize = statsPx;
         fctx.entropy       = state.h_entropy;
         fctx.contrast      = state.h_contrast;
@@ -168,7 +174,6 @@ namespace {
                            fctx.tileSize, fctx.maxIterations, (double)fctx.zoom);
         }
 
-        // Render mit autoritativen Double-Offsets
         if constexpr (Settings::performanceLogging) {
             cudaEvent_t evStart = nullptr, evStop = nullptr;
             (void)cudaEventCreateWithFlags(&evStart, cudaEventDefault);
@@ -192,11 +197,11 @@ namespace {
             LUCHS_LOG_HOST("[PIPE] compute end");
         }
 
-        // Upload → aktuelle Upload-Textur
+        // Upload → Single-Texture (kompatibel zu aktuellem RendererState)
         const auto t0 = Clock::now();
         if (!state.skipUploadThisFrame) {
             OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(),
-                                              state.currentUploadTex().id(),
+                                              state.tex.id(),
                                               fctx.width, fctx.height);
             if (state.pboFence[state.pboIndex]) { glDeleteSync(state.pboFence[state.pboIndex]); state.pboFence[state.pboIndex]=0; }
             state.pboFence[state.pboIndex] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -211,17 +216,14 @@ namespace {
             }
         }
 
-        // 🔁 Saubere PBO-Ring-Disziplin: immer weiterschalten
+        // 🔁 PBO-Ring weiterschalten
         state.advancePboRing();
 
         const auto tUploadEnd = Clock::now();
         g_texMs = std::chrono::duration_cast<msd>(tUploadEnd - t0).count();
 
-        // Draw → die vorherige (fertige) Draw-Textur
-        RendererPipeline::drawFullscreenQuad(state.currentDrawTex().id());
-
-        // Nach dem Draw: Upload-Textur wird zur neuen Draw-Textur
-        state.advanceTexRingAfterDraw();
+        // Draw auf die (einzige) Textur
+        RendererPipeline::drawFullscreenQuad(state.tex.id());
     }
 
     // ------------------------------- Overlays ------------------------------------
@@ -235,9 +237,6 @@ namespace {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         const auto tOv0 = Clock::now();
-
-        // Overlays lesen (falls noetig) die Draw-Textur (ID direkt weiterreichen)
-        const unsigned drawTexId = state.currentDrawTex().id();
 
         if (state.heatmapOverlayEnabled) {
             const int overlayTilePx = std::max(1, (fctx.statsTileSize > 0 ? fctx.statsTileSize : fctx.tileSize));
@@ -254,7 +253,7 @@ namespace {
 
             HeatmapOverlay::drawOverlay(state.h_entropy, state.h_contrast,
                                         fctx.width, fctx.height, overlayTilePx,
-                                        drawTexId, state);
+                                        state.tex.id(), state);
         }
 
         if constexpr (Settings::warzenschweinOverlayEnabled) {
@@ -299,10 +298,8 @@ void execute(RendererState& state) {
 
     beginFrameLocal();
 
-    // Interest zu Framebeginn invalidieren – wird vom HeatmapOverlay bei Bedarf gesetzt
     state.interest.valid = false;
 
-    // ---- Autoritative Double-Werte aus dem RendererState ----
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
     g_ctx.maxIterations = state.maxIterations;
@@ -311,7 +308,6 @@ void execute(RendererState& state) {
     g_ctx.newOffsetD    = g_ctx.offsetD;
     g_ctx.syncFloatFromDouble();
 
-    // Compute-Raster (Kernel)
     g_ctx.tileSize = chooseComputeTileSize(g_ctx.zoom);
 
     if constexpr (Settings::Kolibri::gridScreenConstant) {
@@ -334,21 +330,14 @@ void execute(RendererState& state) {
         }
     }
 
-    // ---- Render (CUDA) ----
     computeCudaFrame(g_ctx, state);
-
-    // ---- Analysis-Metrics (einmal, decoupled) ----
     ensureAnalysisMetrics(g_ctx, state);
-
-    // ---- Overlays (nutzen die vorliegenden Metrics) ----
     drawOverlays(state, g_ctx);
 
-    // ---- Zoom (ein Pfad: ZoomLogic schreibt direkt in RendererState) ----
     if (!CudaInterop::getPauseZoom()) {
         ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, /*dtOverrideSeconds*/ 0.0f);
     }
 
-    // Spiegel zurück in den Context (für HUD/Nächsten Frame)
     g_ctx.offsetD = { state.center.x, state.center.y };
     g_ctx.zoomD   = state.zoom;
     g_ctx.syncFloatFromDouble();
@@ -357,7 +346,6 @@ void execute(RendererState& state) {
     g_totMs = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
     state.lastTimings.frameTotalMs = g_totMs;
 
-    // HUD: FPS Meter füttern
     FpsMeter::updateCoreMs(g_totMs);
 
     if (perfShouldLog(g_frame)) {
@@ -371,7 +359,7 @@ void execute(RendererState& state) {
         const float c0 = state.h_contrast.empty() ? 0.f : state.h_contrast[0];
         const int   ringIx = state.pboIndex;
         const unsigned pbo = state.currentPBO().id();
-        const unsigned tex = state.currentDrawTex().id();
+        const unsigned tex = state.tex.id();
 
         char line[512];
         const int n = std::snprintf(
