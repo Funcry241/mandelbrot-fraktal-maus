@@ -15,6 +15,23 @@ use chrono::Local;
 
 use crate::runner::runner_term::out_info;
 
+// ---------- verbosity ---------------------------------------------------------
+
+fn is_verbose() -> bool {
+    // OTTER_PACK_VERBOSE=1|true|yes|verbose  OR  OTTER_PACK_LOG=verbose
+    // Alles andere → compact one-line summary.
+    use std::env;
+    if let Ok(v) = env::var("OTTER_PACK_VERBOSE") {
+        let s = v.to_ascii_lowercase();
+        return s == "1" || s == "true" || s == "yes" || s == "verbose";
+    }
+    if let Ok(v) = env::var("OTTER_PACK_LOG") {
+        let s = v.to_ascii_lowercase();
+        return s == "verbose";
+    }
+    false
+}
+
 fn rel_path(root: &Path, p: &Path) -> Option<String> {
     let rp = p.strip_prefix(root).ok()?;
     let s = rp.to_string_lossy().replace('\\', "/");
@@ -41,7 +58,7 @@ fn is_excluded_dir(rel: &str, include_dist: bool) -> bool {
 
     // Wuchtige/irrelevante Bäume strikt ausschließen
     let dir_prefixes = [
-        "vcpkg/",                         // <— neu: kompletter vendor-ordner raus
+        "vcpkg/",                         // kompletter vendor-ordner raus
         "vcpkg_installed/", "vcpkg_downloads/", "vcpkg_buildtrees/", "vcpkg_packages/", "vcpkg_cache/",
         "build/", "build-",
         "out/",
@@ -104,13 +121,14 @@ fn bump_counts(c: &mut Counts, rel: &str) {
 /// Entry point: pack all relevant sources into a ZIP.
 /// Returns: Ok(PathBuf to ZIP) on success.
 pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<PathBuf> {
+    let verbose = is_verbose();
+
     let out_path = out.map(|p| p.to_path_buf()).unwrap_or_else(|| default_zip_path(root));
-    out_info("ZIP", &format!("root={}", root.display()));
-    out_info("ZIP", &format!("zip={}", out_path.display()));
-    if !include_dist {
-        out_info("ZIP", "include-dist=no");
-    } else {
-        out_info("ZIP", "include-dist=YES");
+
+    if verbose {
+        out_info("ZIP", &format!("root={}", root.display()));
+        out_info("ZIP", &format!("zip={}", out_path.display()));
+        if !include_dist { out_info("ZIP", "include-dist=no"); } else { out_info("ZIP", "include-dist=YES"); }
     }
 
     ensure_parent_dirs(&out_path)?;
@@ -148,19 +166,35 @@ pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<Pa
     // flush + close
     zip.finish()?.into_inner()?; 
 
-    // Summary
-    out_info("ZIP", &format!("files={}", added));
-    out_info("ZIP", &format!("Rust   = {}", counts.rust_));
-    out_info("ZIP", &format!("CUDA   = {}", counts.cuda));
-    out_info("ZIP", &format!("C/C++  = C={} CXX={} Headers={}", counts.c, counts.cxx, counts.hdr));
-    out_info("ZIP", &format!("CMake  = {}", counts.cmake));
-    out_info("ZIP", &format!("TOML   = {}", counts.toml));
-    out_info("ZIP", &format!("JSON   = {}", counts.json));
-    out_info("ZIP", &format!("GLSL   = {}", counts.glsl));
-    out_info("ZIP", &format!("Scripts= {}", counts.scripts));
-    out_info("ZIP", &format!("Docs   = {}", counts.docs));
-    out_info("ZIP", &format!("Other  = {}", counts.other));
-    out_info("ZIP", "done.");
+    // Output
+    if verbose {
+        out_info("ZIP", &format!("files={}", added));
+        out_info("ZIP", &format!("Rust   = {}", counts.rust_));
+        out_info("ZIP", &format!("CUDA   = {}", counts.cuda));
+        out_info("ZIP", &format!("C/C++  = C={} CXX={} Headers={}", counts.c, counts.cxx, counts.hdr));
+        out_info("ZIP", &format!("CMake  = {}", counts.cmake));
+        out_info("ZIP", &format!("TOML   = {}", counts.toml));
+        out_info("ZIP", &format!("JSON   = {}", counts.json));
+        out_info("ZIP", &format!("GLSL   = {}", counts.glsl));
+        out_info("ZIP", &format!("Scripts= {}", counts.scripts));
+        out_info("ZIP", &format!("Docs   = {}", counts.docs));
+        out_info("ZIP", &format!("Other  = {}", counts.other));
+        out_info("ZIP", "done.");
+    } else {
+        // Eine kompakte, einzelne Zusammenfassungszeile
+        out_info(
+            "PACK",
+            &format!(
+                "zip={} files={} Rust={} CUDA={} C={} CXX={} Headers={} CMake={} TOML={} JSON={} GLSL={} Scripts={} Docs={} Other={} include-dist={}",
+                out_path.display(),
+                added,
+                counts.rust_, counts.cuda, counts.c, counts.cxx, counts.hdr,
+                counts.cmake, counts.toml, counts.json, counts.glsl,
+                counts.scripts, counts.docs, counts.other,
+                if include_dist { "YES" } else { "no" }
+            ),
+        );
+    }
 
     Ok(out_path)
 }
