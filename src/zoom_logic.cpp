@@ -77,6 +77,47 @@ struct StartLeashCfg {
 };
 static constexpr StartLeashCfg kStartLeash{};
 
+// --- experimental: run-seeded start jitter + early angle bias ----------------
+// (keine Settings-Änderungen; reiner TU-Scoped Versuch)
+struct XorShift32 {
+    uint32_t s;
+    uint32_t next() noexcept {
+        if (!s) s = 0xA3C59AC3u;
+        s ^= s << 13; s ^= s >> 17; s ^= s << 5; return s;
+    }
+    float u01() noexcept { return (next() >> 8) * (1.0f / 16777216.0f); } // [0,1)
+};
+struct StartNoise {
+    bool     seeded        = false;
+    bool     jitterDone    = false;
+    uint32_t seed          = 0;
+    double   angleBiasRad  = 0.0;   // +/- ~7°
+    double   angleDurSec   = 1.4;   // fade-out Dauer
+    XorShift32 rng{0};
+};
+static StartNoise sNoise;
+
+static void ensure_seed_once() noexcept {
+    if (sNoise.seeded) return;
+    const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    uint64_t mix = static_cast<uint64_t>(now) ^ 0x9E3779B97f4a7c15ULL;
+    mix ^= (mix >> 33);
+    sNoise.seed = static_cast<uint32_t>(mix ^ (mix >> 32));
+    if (!sNoise.seed) sNoise.seed = 0x9E3779B9u;
+    sNoise.rng.s = sNoise.seed;
+
+    // Winkel ±7° → Rad
+    const double degToRad = 0.017453292519943295;
+    const double a = (sNoise.rng.u01() * 2.0 - 1.0) * (7.0 * degToRad);
+    sNoise.angleBiasRad = a;
+
+    if constexpr (Settings::ZoomLog::enabled) {
+        LUCHS_LOG_HOST("[ZSEED] runSeed=0x%08X angleBias=%.3f deg dur=%.2fs",
+                       (unsigned)sNoise.seed, a / degToRad, sNoise.angleDurSec);
+    }
+    sNoise.seeded = true;
+}
+
 // --- local telemetry state ---------------------------------------------------
 
 struct ZLogState {
@@ -149,6 +190,35 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     // Laufzeit fürs weiche Öffnen des Early-Locality-Caps
     zls.sinceStartSec += static_cast<double>(dt);
 
+    // einmalig: Seed + Startjitter (px→world / zoom)
+    if (zls.frame == 1) {
+        ensure_seed_once();
+
+        // Jitterradius in Pixel (6..18), zufälliger Winkel
+        const double rpx   = 6.0 + 12.0 * (double)sNoise.rng.u01();
+        const double phi   = 6.283185307179586 * (double)sNoise.rng.u01();
+        const double jx_px = rpx * std::cos(phi);
+        const double jy_px = rpx * std::sin(phi);
+
+        const double psx = static_cast<double>(rs.pixelScale.x);
+        const double psy = static_cast<double>(rs.pixelScale.y);
+        const double z   = static_cast<double>(RS_ZOOM(rs));
+        const bool   ok  = (psx != 0.0 || psy != 0.0) && (z != 0.0);
+
+        if (ok) {
+            const double invZ = 1.0 / z;
+            const double dWorldX = jx_px * psx * invZ;
+            const double dWorldY = jy_px * psy * invZ;
+            RS_OFFSET_X(rs) += dWorldX;
+            RS_OFFSET_Y(rs) += dWorldY;
+            sNoise.jitterDone = true;
+            if constexpr (Settings::ZoomLog::enabled) {
+                LUCHS_LOG_HOST("[ZJIT] seed=0x%08X rpx=%.2f phi=%.2f dWorld=(%.9f,%.9f) invZ=%.6g",
+                               (unsigned)sNoise.seed, rpx, phi, dWorldX, dWorldY, invZ);
+            }
+        }
+    }
+
     using ZoomT = std::remove_cv_t<std::remove_reference_t<decltype(RS_ZOOM(rs))>>;
     const ZoomT  z0  = static_cast<ZoomT>(RS_ZOOM(rs));
     const double ldz = rate * static_cast<double>(dt);
@@ -167,11 +237,30 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     if (rs.interest.valid && rs.width > 0 && rs.height > 0) {
         [[maybe_unused]] const auto tPanStart = Clock::now();
 
-        const double ndcX_raw = rs.interest.ndcX;
-        const double ndcY_raw = rs.interest.ndcY;
+        const double ndcX_raw0 = rs.interest.ndcX;
+        const double ndcY_raw0 = rs.interest.ndcY;
 
-        double ndcX = applyDeadzone(ndcX_raw, kNudge.deadzoneNdc);
-        double ndcY = applyDeadzone(ndcY_raw, kNudge.deadzoneNdc);
+        // Early angle bias (kleine Rotation; fadet in ~1.4 s auf 0)
+        double ndcX_in = ndcX_raw0, ndcY_in = ndcY_raw0;
+        if (sNoise.seeded && sNoise.angleBiasRad != 0.0 && sNoise.angleDurSec > 0.0) {
+            const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.angleDurSec), 0.0, 1.0);
+            if (t > 0.0) {
+                const double ang = sNoise.angleBiasRad * t;
+                const double c = std::cos(ang), s = std::sin(ang);
+                const double rx = ndcX_in * c - ndcY_in * s;
+                const double ry = ndcX_in * s + ndcY_in * c;
+                ndcX_in = rx; ndcY_in = ry;
+                if constexpr (Settings::ZoomLog::enabled) {
+                    if (emitEveryN) {
+                        LUCHS_LOG_HOST("[ZANGL] f=%llu fade=%.2f ang=%.3f ndcRot=(%.3f,%.3f)",
+                                       (unsigned long long)zls.frame, t, ang, ndcX_in, ndcY_in);
+                    }
+                }
+            }
+        }
+
+        double ndcX = applyDeadzone(ndcX_in, kNudge.deadzoneNdc);
+        double ndcY = applyDeadzone(ndcY_in, kNudge.deadzoneNdc);
 
         // ---- Phase A: Early-Locality Cap (öffnet weich von R0 → 1.0) --------
         if (kStartLeash.enabled) {
@@ -211,8 +300,8 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             }
         }
 
-        const bool hitDZ_X = (std::abs(ndcX_raw) <= kNudge.deadzoneNdc);
-        const bool hitDZ_Y = (std::abs(ndcY_raw) <= kNudge.deadzoneNdc);
+        const bool hitDZ_X = (std::abs(ndcX_in) <= kNudge.deadzoneNdc);
+        const bool hitDZ_Y = (std::abs(ndcY_in) <= kNudge.deadzoneNdc);
 
         if (ndcX != 0.0 || ndcY != 0.0) {
             const double s = std::max(kNudge.strengthFloor, std::min(1.0, rs.interest.strength));
@@ -258,7 +347,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                         LUCHS_LOG_HOST("[ZPAN1] f=%llu ndc=(%.4f,%.4f) a=%.3f s=%.2f "
                                        "goal_px=(%.2f,%.2f) step_px=(%.2f,%.2f) dWorld=(%.9f,%.9f) invZ=%.6g flags=0x%02X",
                                        (unsigned long long)zls.frame,
-                                       ndcX_raw, ndcY_raw, alpha, s,
+                                       ndcX_in, ndcY_in, alpha, s,
                                        dx_px_goal, dy_px_goal, step_px_x, step_px_y,
                                        dWorldX, dWorldY, invZ, flags);
                     }
