@@ -7,9 +7,100 @@ use std::io;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+// ------------------------ ANSI / VT Enable (Windows) -------------------------
+#[cfg(windows)]
+#[allow(non_snake_case)]
+mod vtcolor {
+    type HANDLE = *mut core::ffi::c_void;
+    type BOOL = i32;
+    type DWORD = u32;
+
+    const STD_OUTPUT_HANDLE: i32 = -11;
+    const STD_ERROR_HANDLE:  i32 = -12;
+    const ENABLE_PROCESSED_OUTPUT: DWORD = 0x0001;
+    const ENABLE_VIRTUAL_TERMINAL_PROCESSING: DWORD = 0x0004;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetStdHandle(nStdHandle: i32) -> HANDLE;
+        fn GetConsoleMode(hConsoleHandle: HANDLE, lpMode: *mut DWORD) -> BOOL;
+        fn SetConsoleMode(hConsoleHandle: HANDLE, dwMode: DWORD) -> BOOL;
+    }
+
+    pub fn enable_ansi_colors() {
+        unsafe fn set(std_handle: i32) {
+            let h = GetStdHandle(std_handle);
+            if h.is_null() { return; }
+            let mut mode: DWORD = 0;
+            if GetConsoleMode(h, &mut mode) == 0 { return; }
+            let new_mode = mode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+            let _ = SetConsoleMode(h, new_mode);
+        }
+        unsafe {
+            set(STD_OUTPUT_HANDLE);
+            set(STD_ERROR_HANDLE);
+        }
+    }
+}
+#[cfg(not(windows))]
+mod vtcolor { pub fn enable_ansi_colors() {} }
+
+// ----------------------- Colorizer (ASCII-only, no deps) ---------------------
+fn colorize_autogit(line: &str) -> String {
+    const R: &str = "\x1b[31m";   // red
+    const Y: &str = "\x1b[33m";   // yellow
+    const G: &str = "\x1b[32m";   // green
+    const C: &str = "\x1b[36m";   // cyan
+    const B: &str = "\x1b[34m";   // blue
+    const DIM: &str = "\x1b[90m"; // grey
+    const RESET: &str = "\x1b[0m";
+
+    let lower = line.to_ascii_lowercase();
+
+    // Tags zuerst (präzise)
+    if line.starts_with("[AUTOGIT][RUN]") { return format!("{Y}{line}{RESET}"); }
+    if line.starts_with("[AUTOGIT]")      { return format!("{C}{line}{RESET}"); }
+
+    // Git noise → dim
+    if line.starts_with("Enumerating objects:")
+        || line.starts_with("Counting objects:")
+        || line.starts_with("Compressing objects:")
+        || line.starts_with("Writing objects:")
+        || line.starts_with("remote:")
+        || line.starts_with("To ")
+        || line.starts_with("Total ")
+    { return format!("{DIM}{line}{RESET}"); }
+
+    // Fehler/Warnungen/Erfolg
+    if lower.contains("error:") || lower.contains("[err]") || lower.contains(" failed") {
+        return format!("{R}{line}{RESET}");
+    }
+    if lower.contains("warning:") || lower.contains("[warn]") {
+        return format!("{Y}{line}{RESET}");
+    }
+    if lower.contains(" ok") || lower.contains(" done") || lower.contains("success") || lower.contains("completed") {
+        return format!("{G}{line}{RESET}");
+    }
+
+    // Aktionen (z. B. rm 'vcpkg', branch …)
+    if lower.starts_with("rm '") || lower.starts_with("branch '") {
+        return format!("{B}{line}{RESET}");
+    }
+
+    // Standard: unverändert
+    line.to_string()
+}
+
+#[inline]
+fn logc<S: AsRef<str>>(s: S) {
+    println!("{}", colorize_autogit(s.as_ref()));
+}
+
+// -----------------------------------------------------------------------------
+
 fn run_cmd_in(root: &Path, program: &str, args: &[&str]) -> io::Result<i32> {
     // Für git-Befehle je Aufruf Konfigs setzen, um CRLF→LF-Warnungen und
-    // "embedded repo" Hinweise zu vermeiden.
+    // "embedded repo" Hinweise zu vermeiden. Zusätzlich: Farbe aktivieren.
     let is_git = program == "git";
     let mut full_args: Vec<&str> = Vec::new();
     if is_git {
@@ -17,11 +108,12 @@ fn run_cmd_in(root: &Path, program: &str, args: &[&str]) -> io::Result<i32> {
             "-c", "core.safecrlf=false",
             "-c", "core.autocrlf=input",
             "-c", "advice.addEmbeddedRepo=false",
+            "-c", "color.ui=always",
         ]);
     }
     full_args.extend_from_slice(args);
 
-    println!("[AUTOGIT][RUN] {} {}", program, full_args.join(" "));
+    logc(format!("[AUTOGIT][RUN] {} {}", program, full_args.join(" ")));
     let status = Command::new(program)
         .args(&full_args)
         .current_dir(root)
@@ -46,7 +138,7 @@ fn git_exists() -> bool {
 fn ensure_repo(root: &Path) -> io::Result<()> {
     let dotgit = root.join(".git");
     if !dotgit.exists() {
-        println!("[AUTOGIT] no .git found — init new repo");
+        logc("[AUTOGIT] no .git found — init new repo");
         let code = run_cmd_in(root, "git", &["init"])?;
         if code != 0 {
             return Err(io::Error::new(io::ErrorKind::Other, "git init failed"));
@@ -168,10 +260,10 @@ fn purge_embedded_paths(root: &Path, paths: &[&str]) -> io::Result<()> {
     // 1) remove tracked gitlinks (already in index as mode 160000)
     for p in paths {
         if is_gitlink_tracked(root, p) {
-            println!("[AUTOGIT] remove tracked gitlink from index: {}", p);
+            logc(format!("[AUTOGIT] remove tracked gitlink from index: {}", p));
             let rc = run_cmd_in(root, "git", &["rm", "--cached", "-r", p])?;
             if rc != 0 {
-                println!("[AUTOGIT][WARN] git rm --cached failed for {}", p);
+                logc(format!("[AUTOGIT][WARN] git rm --cached failed for {}", p));
             }
         }
     }
@@ -187,7 +279,7 @@ fn purge_embedded_paths(root: &Path, paths: &[&str]) -> io::Result<()> {
         args.extend(to_unstage.iter().copied());
         let _ = run_cmd_in(root, "git", &args)?;
         for p in to_unstage {
-            println!("[AUTOGIT] unstage embedded repo path: {}", p);
+            logc(format!("[AUTOGIT] unstage embedded repo path: {}", p));
         }
     }
     Ok(())
@@ -203,6 +295,9 @@ pub fn run(
     branch: Option<&str>,
     auto_https_fallback: bool,
 ) -> io::Result<i32> {
+    // ANSI aktivieren (Windows)
+    vtcolor::enable_ansi_colors();
+
     let commit_msg = message.unwrap_or_else(|| "chore: update".to_string());
 
     // Branch ableiten: explizit > aktuell > "wupp" (Default für Branch-Modus/Detached HEAD)
@@ -211,10 +306,10 @@ pub fn run(
         .or_else(|| current_branch(root))
         .unwrap_or_else(|| "wupp".to_string());
 
-    println!(
+    logc(format!(
         "[AUTOGIT] start root={} msg=\"{}\" allow_empty={} remote={} branch={} https_fallback={}",
         root.display(), commit_msg, allow_empty, remote, target_branch, auto_https_fallback
-    );
+    ));
 
     if !git_exists() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "git not found on PATH"));
@@ -230,13 +325,13 @@ pub fn run(
     let mut errs = 0usize;
 
     if run_cmd_in(root, "git", &["add", "-A"])? != 0 {
-        println!("[AUTOGIT][ERR] git add failed");
+        logc("[AUTOGIT][ERR] git add failed");
         errs += 1;
     }
 
     // Niemals vcpkg/vcpkg_installed/vcpkg_cache einchecken (auch nicht als Gitlink)
     if let Err(e) = purge_embedded_paths(root, &["vcpkg", "vcpkg_installed", "vcpkg_cache"]) {
-        println!("[AUTOGIT][WARN] purge_embedded_paths error: {}", e);
+        logc(format!("[AUTOGIT][WARN] purge_embedded_paths error: {}", e));
     }
 
     let mut commit_args = vec!["commit", "-m", &commit_msg];
@@ -245,10 +340,10 @@ pub fn run(
     }
     let code_commit = run_cmd_in(root, "git", &commit_args)?;
     if code_commit != 0 {
-        println!(
+        logc(format!(
             "[AUTOGIT][INFO] git commit returned code {} (possibly nothing to commit)",
             code_commit
-        );
+        ));
     }
 
     // 3) Push (Upstream setzen, falls noch keiner existiert); optional HTTPS-Fallback
@@ -267,7 +362,7 @@ pub fn run(
     if code_push == 0 {
         pushed = true;
     } else if auto_https_fallback {
-        println!("[AUTOGIT][WARN] initial push failed; trying HTTPS fallback…");
+        logc("[AUTOGIT][WARN] initial push failed; trying HTTPS fallback…");
         if let Some(old) = remote_get_url(root, remote) {
             if let Some(https_url) = ssh_to_https(&old) {
                 let su = run_cmd_in(root, "git", &["remote", "set-url", remote, &https_url])?;
@@ -276,24 +371,24 @@ pub fn run(
                     let code_push2 = do_push(remote, &target_branch)?;
                     pushed = code_push2 == 0;
                 } else {
-                    println!("[AUTOGIT][WARN] failed to set remote URL to HTTPS");
+                    logc("[AUTOGIT][WARN] failed to set remote URL to HTTPS");
                 }
             } else {
-                println!("[AUTOGIT][WARN] remote is not SSH github.com; skip fallback");
+                logc("[AUTOGIT][WARN] remote is not SSH github.com; skip fallback");
             }
         } else {
-            println!("[AUTOGIT][WARN] failed to query remote URL for fallback");
+            logc("[AUTOGIT][WARN] failed to query remote URL for fallback");
         }
     }
 
     if !pushed {
-        println!("[AUTOGIT][ERR] push did not succeed (https_fallback_tried={})", tried_https);
+        logc(format!("[AUTOGIT][ERR] push did not succeed (https_fallback_tried={})", tried_https));
         errs += 1;
     }
 
-    println!(
+    logc(format!(
         "[AUTOGIT] done status={}",
         if errs == 0 { "OK" } else { "WITH_ERRORS" }
-    );
+    ));
     Ok(if errs == 0 { 0 } else { 1 })
 }
