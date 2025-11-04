@@ -1,6 +1,6 @@
-///// Otter: Zaunkönig [ZK] – PBO-Fences & saubere Ring-Disziplin; Header schlank, keine PCH; Capybara Single-Path.
-///// Schneefuchs: EC/Wrapper entfernt – Felder als Legacy markiert; GLsync vorwärts deklariert; /WX-fest; State entkoppelt.
-///// Maus: Klare Flags (pboFence, skipUploadThisFrame); tileSize explizit; Progressive (z,it) mit Cooldown; ASCII-only.
+///// Otter: Zaunkönig [ZK] – PBO-Fences & Ring-Disziplin; Tex-Ring (draw-lag-1); Capybara Single-Path
+///// Schneefuchs: EC/Wrapper entfernt – Header schlank; GLsync fwd-decl; /WX-fest; State entkoppelt
+///// Maus: Klare Flags (pboFence, skipUploadThisFrame); tileSize explizit; ASCII-only Logs
 ///// Datei: src/renderer_state.hpp
 
 #pragma once
@@ -48,15 +48,13 @@ public:
     float  deltaTime = 0.0f;
 
     // 🧩 Analyse/Overlay (Host) - EC-Pfad aktuell deaktiviert.
-    // Diese Felder bleiben als Legacy-Placeholder erhalten, damit optionale Overlays/HUD kompilieren.
     int                 lastTileSize = 0;
-    std::vector<float>  h_entropy;         // legacy/overlay (leer im aktiven Pfad)
-    std::vector<float>  h_contrast;        // legacy/overlay (leer im aktiven Pfad)
+    std::vector<float>  h_entropy;         // legacy/overlay
+    std::vector<float>  h_contrast;        // legacy/overlay
     bool                h_entropyPinned  = false; // legacy/no-op
     bool                h_contrastPinned = false; // legacy/no-op
 
     // 🔗 GPU-Puffer (RAII)
-    // Iterationspuffer ist aktiv; EC-Puffer bleiben als Legacy-Platzhalter erhalten (No-Op im aktiven Pfad).
     Hermelin::CudaDeviceBuffer d_iterations; // uint16_t[width*height]
     Hermelin::CudaDeviceBuffer d_entropy;    // float[numTiles]   (legacy/overlay)
     Hermelin::CudaDeviceBuffer d_contrast;   // float[numTiles]   (legacy/overlay)
@@ -67,9 +65,7 @@ public:
     bool                       progressiveEnabled = true;
     int                        progressiveCooldownFrames = 0;
 
-    // 🎥 OpenGL-Zielpuffer (Interop via CUDA) mit RAII
-    // Spiegel von Settings::pboRingSize (numerisch, um Header entkoppelt zu halten).
-    // Konsistenz wird in TU(s) via static_assert geprüft.
+    // 🎥 OpenGL-Zielpuffer (Interop via CUDA) – PBO-Ring
     static constexpr int kPboRingSize = 8; // <- an Settings::pboRingSize angleichen
 
     std::array<Hermelin::GLBuffer, kPboRingSize> pboRing{};
@@ -77,9 +73,29 @@ public:
     inline Hermelin::GLBuffer&       currentPBO()       { return pboRing[pboIndex]; }
     inline const Hermelin::GLBuffer& currentPBO() const { return pboRing[pboIndex]; }
     inline void advancePboRing() { pboIndex = (pboIndex + 1) % kPboRingSize; }
+
+    // 🖼️ Texture-Ring für draw-lag-1
+    static constexpr int kTexRingSize = 3;
+    std::array<Hermelin::GLBuffer, kTexRingSize> texRing{};
+    int texUploadIndex = 0; // hier wird in diesem Frame hochgeladen
+    int texDrawIndex   = 0; // diese Textur wird in diesem Frame gezeichnet
+
+    inline Hermelin::GLBuffer&       currentUploadTex()       { return texRing[texUploadIndex]; }
+    inline const Hermelin::GLBuffer& currentUploadTex() const { return texRing[texUploadIndex]; }
+    inline Hermelin::GLBuffer&       currentDrawTex()         { return texRing[texDrawIndex]; }
+    inline const Hermelin::GLBuffer& currentDrawTex()   const { return texRing[texDrawIndex]; }
+
+    inline void advanceTexRingAfterDraw() {
+        // Nach dem Draw wird die frisch befüllte Upload-Textur zur Draw-Textur für den nächsten Frame,
+        // und der Upload-Index wandert weiter.
+        texDrawIndex   = texUploadIndex;
+        texUploadIndex = (texUploadIndex + 1) % kTexRingSize;
+    }
+
+    // ⚠️ Legacy-Einzeltextur (kompatibel gehalten, wird nicht aktiv benutzt)
     Hermelin::GLBuffer tex;
 
-    // 🔒 [ZK] GL-Fences je Slot
+    // 🔒 [ZK] GL-Fences je PBO-Slot
     std::array<GLsync, kPboRingSize> pboFence{}; // nullptr = kein Fence gesetzt
     bool skipUploadThisFrame = false;
 
@@ -114,10 +130,8 @@ public:
     cudaStream_t copyStream   = nullptr;
 
     // 🎯 CUDA Events zur asynchronen Verkettung
-    // evEcDone wurde früher für EC benutzt; im Render-only Pfad wird es nach dem Rendern aufgezeichnet,
-    // damit nachgelagerte Stufen (optional) warten können.
     cudaEvent_t  evEcDone   = nullptr;
-    cudaEvent_t  evCopyDone = nullptr; // optional: D->H-Transfers fertig (derzeit kaum genutzt)
+    cudaEvent_t  evCopyDone = nullptr;
 
     // ⏱️ Timings – CUDA + HOST konsolidiert
     struct CudaPhaseTimings {
@@ -145,14 +159,14 @@ public:
 
 private:
     // Stream-/Event-Lifecycle
-    void createCudaStreamsIfNeeded();         // legt renderStream/copyStream non-blocking an
-    void destroyCudaStreamsIfAny() noexcept;  // zerstört beide, setzt auf nullptr
-    void createCudaEventsIfNeeded();          // legt evEcDone/evCopyDone (DisableTiming) an
-    void destroyCudaEventsIfAny() noexcept;   // zerstört Events, setzt auf nullptr
+    void createCudaStreamsIfNeeded();
+    void destroyCudaStreamsIfAny() noexcept;
+    void createCudaEventsIfNeeded();
+    void destroyCudaEventsIfAny() noexcept;
 
     // Legacy-No-Op Hooks (EC deaktiviert)
-    void ensureHostPinnedForAnalysis();       // no-op
-    void unpinHostAnalysisIfAny() noexcept;   // no-op
+    void ensureHostPinnedForAnalysis();
+    void unpinHostAnalysisIfAny() noexcept;
 };
 
 #if defined(_MSC_VER)

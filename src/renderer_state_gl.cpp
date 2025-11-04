@@ -1,6 +1,6 @@
-///// Otter: Split – GL-Fences, PBO-Ring, Resize, Reset & Dtor; saubere Ring-Disziplin.
-///// Schneefuchs: EC-Pfade entfernt (keine Host-Mirror/Pinning mehr); GLsync-Abräumung zentral; /WX-fest.
-///// Maus: PixelScale-Recompute lokal; Events/Streams via CUDA-TU; Logs ASCII-only; unter 300 Zeilen.
+///// Otter: Split – GL-Fences, PBO- & TEX-Ring; Resize/Reset & Dtor; draw-lag-1 vorbereitet
+///// Schneefuchs: EC-Pfade entfernt; GLsync-Abräumung zentral; DSA-freundliche PixelStore-Policy
+///// Maus: PixelScale zoomfrei/isotrop; ASCII-Logs; kompakt
 ///// Datei: src/renderer_state_gl.cpp
 
 #include "pch.hpp"
@@ -18,12 +18,11 @@
 
 namespace {
 // ----- PixelScale (GL-Seite nutzt Reset/Resize) --------------------------------
-// Korrektur: PixelScale ist **zoomfrei** und **isotrop** (x==y). Das Seitenverhältnis
-// entsteht automatisch über width/height in den Pixel-Offsets. Kein ar-Scaling hier.
+// Zoomfrei & isotrop (x==y). Seitenverhältnis ergibt sich aus width/height bei Pixel-Offsets.
 inline void recomputePixelScale(RendererState& rs) noexcept {
     const double sy = (rs.height > 0) ? (2.0 / static_cast<double>(rs.height)) : 2.0;
     rs.pixelScale.y = sy;
-    rs.pixelScale.x = sy; // isotrop; kein ar, kein 1/zoom
+    rs.pixelScale.x = sy;
 }
 
 inline void clearPboFences(RendererState& rs) noexcept {
@@ -38,10 +37,11 @@ inline void clearPboFences(RendererState& rs) noexcept {
 
 RendererState::~RendererState() {
     clearPboFences(*this);
-    // GL: Ring + Texture freigeben (falls noch vorhanden)
+    // GL: PBO-Ring + Textur-Ring freigeben
     CudaInterop::unregisterAllPBOs();
     for (auto& b : pboRing) { b.free(); }
-    tex.free();
+    for (auto& t : texRing) { t.free(); }
+    tex.free(); // legacy (id==0, falls nie verwendet)
 
     // CUDA: Streams/Events
     destroyCudaEventsIfAny();
@@ -84,6 +84,10 @@ void RendererState::reset() {
     std::fill(ringUse.begin(), ringUse.end(), 0u);
     ringSkip = 0;
 
+    // Texture-Ring-Indizes
+    texUploadIndex = 0;
+    texDrawIndex   = (kTexRingSize + texUploadIndex - 1) % kTexRingSize; // initial draw-lag-1
+
     lastTimings = CudaPhaseTimings{};
     lastTimings.resetHostFrame();
 
@@ -112,11 +116,18 @@ void RendererState::resize(int newWidth, int newHeight) {
     CudaInterop::unregisterAllPBOs();
 
     for (auto& b : pboRing) { b.free(); }
-    tex.free();
+    for (auto& t : texRing) { t.free(); }
+    tex.free(); // legacy
 
     // Apply new size
     width  = newWidth;
     height = newHeight;
+
+    // DSA-freundliche, deterministische PixelStore-Policy einmal setzen
+    glPixelStorei(GL_UNPACK_ALIGNMENT,   1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH,  0);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS,   0);
 
     // Recreate GL side
     OpenGLUtils::setGLResourceContext("resize");
@@ -128,7 +139,10 @@ void RendererState::resize(int newWidth, int newHeight) {
     std::fill(pboFence.begin(), pboFence.end(), (GLsync)0);
     skipUploadThisFrame = false;
 
-    tex = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
+    for (auto& t : texRing) {
+        t = Hermelin::GLBuffer(OpenGLUtils::createTexture(width, height));
+    }
+    // Legacy-Einzeltextur bleibt 0 (ungültig), um Doppel-Frees zu vermeiden.
 
     // Dynamisch alle PBO-IDs sammeln und registrieren (Ringgröße = kPboRingSize)
     {
@@ -155,7 +169,12 @@ void RendererState::resize(int newWidth, int newHeight) {
     std::fill(ringUse.begin(), ringUse.end(), 0u);
     ringSkip = 0;
 
+    // Texture-Ring-Indizes resetten (draw-lag-1)
+    texUploadIndex = 0;
+    texDrawIndex   = (kTexRingSize + texUploadIndex - 1) % kTexRingSize;
+
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[RESIZE] %d x %d buffers reallocated", width, height);
+        LUCHS_LOG_HOST("[RESIZE] %d x %d buffers reallocated (PBO=%d TEX=%d)",
+                       width, height, (int)kPboRingSize, (int)kTexRingSize);
     }
 }

@@ -1,6 +1,6 @@
-///// Otter: OpenGL PBO interop – single Capybara render core; deterministic map→render→colorize with timed logs
-///// Schneefuchs: No GL forward-decls; numeric CUDA rc codes; perf events only when enabled; no duplicate paths
-///// Maus: Pause toggle stays central; heatmap metrics delegated; legacy overloads forward to one core
+///// Otter: OpenGL PBO interop – fence-aware map; single Capybara core; deterministic logs
+///// Schneefuchs: Ring-Slotwahl mit GLsync; numeric CUDA rc; Events nur bei PerfLog; keine Dup-Pfade
+///// Maus: Skip statt Blockieren bei Sättigung; klare [ZK]-Logs; Heatmap bleibt delegiert
 ///// Datei: src/cuda_interop.cu
 
 #include "pch.hpp"
@@ -150,10 +150,46 @@ void logCudaDeviceContext(const char* tag) noexcept {
                    (tag?tag:"-"), rt, drv, dev, name, ccM, ccN, mp, smpb);
 }
 
+// ------------------------------ fence-aware PBO slotwahl ------------------------------
+static int choose_free_pbo_index(RendererState& state) {
+    // Start beim gewünschten Index; nacheinander Slots prüfen.
+    const int N = RendererState::kPboRingSize;
+    int start = (state.pboIndex >= 0 && state.pboIndex < N) ? state.pboIndex : 0;
+
+    for (int k = 0; k < N; ++k) {
+        const int ix = (start + k) % N;
+        GLsync f = state.pboFence[ix];
+        if (!f) {
+            // Kein Fence -> Slot ist frei
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ZK][PBO] pick free slot=%d (no fence)", ix);
+            }
+            return ix;
+        }
+        // Non-blocking prüfen
+        const GLenum st = glClientWaitSync(f, 0, 0);
+        if (st == GL_ALREADY_SIGNALED || st == GL_CONDITION_SATISFIED) {
+            // Fertig – Fence aufräumen
+            glDeleteSync(f);
+            state.pboFence[ix] = 0;
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[ZK][PBO] pick slot=%d (fence signaled)", ix);
+            }
+            return ix;
+        }
+        // TIMEOUT_EXPIRED / WAIT_FAILED -> Slot busy, weiter prüfen
+    }
+    // Alle Slots busy → lieber Frame überspringen statt blockieren
+    if constexpr (Settings::debugLogging) {
+        LUCHS_LOG_HOST("[ZK][PBO][SAT] ring saturated – skip upload this frame");
+    }
+    return -1;
+}
+
 // ------------------------------ single render core ------------------------------
 /*
-   Nacktmull: one authoritative core that maps the current PBO, runs capy_render,
-   then colorizes into the mapped memory. Both public overloads forward here.
+   Nacktmull: one authoritative core that maps the current (fence-free) PBO,
+   runs capy_render, then colorizes into the mapped memory.
 */
 static void render_to_pbo_core(RendererState& state,
                                int width, int height,
@@ -175,25 +211,34 @@ static void render_to_pbo_core(RendererState& state,
 
     (void)cudaGetLastError(); // clear sticky
 
+    // 0) Zaunkönig: fence-aware Slotwahl
+    const int freeIx = choose_free_pbo_index(state);
+    if (freeIx < 0) {
+        state.skipUploadThisFrame = true;
+        return; // Keine Compute/Colorize, um Stalls zu vermeiden
+    }
+    // Auf den tatsächlich nutzbaren Slot umstellen
+    state.pboIndex = freeIx;
+
     // 1) map current PBO slot
     const size_t needBytes = size_t(width) * size_t(height) * sizeof(uchar4);
-    const int ix = (state.pboIndex >= 0 && state.pboIndex < (int)s_pboResources.size()) ? state.pboIndex : 0;
 
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[PBO][MAP] try ring=%d need=%zu", ix, (size_t)needBytes);
+        LUCHS_LOG_HOST("[PBO][MAP] try ring=%d need=%zu", state.pboIndex, (size_t)needBytes);
     }
 
-    MapGuard map(&s_pboResources[ix]);
+    MapGuard map(&s_pboResources[state.pboIndex]);
 
     if (!map.ptr) {
         const auto rcMap = cudaGetLastError();
-        LUCHS_LOG_HOST("[PBO][MAP][ERR] null ptr ring=%d need=%zu rc=%d", ix, (size_t)needBytes, (int)rcMap);
+        LUCHS_LOG_HOST("[PBO][MAP][ERR] null ptr ring=%d need=%zu rc=%d", state.pboIndex, (size_t)needBytes, (int)rcMap);
         LuchsLogger::flushDeviceLogToHost(0);
         state.skipUploadThisFrame = true;
         return;
     }
     if (map.bytes < needBytes) {
-        LUCHS_LOG_HOST("[PBO][MAP][ERR] size mismatch ring=%d got=%zu need=%zu", ix, (size_t)map.bytes, (size_t)needBytes);
+        LUCHS_LOG_HOST("[PBO][MAP][ERR] size mismatch ring=%d got=%zu need=%zu",
+                       state.pboIndex, (size_t)map.bytes, (size_t)needBytes);
         LuchsLogger::flushDeviceLogToHost(0);
         state.skipUploadThisFrame = true;
         return;
@@ -204,7 +249,6 @@ static void render_to_pbo_core(RendererState& state,
     }
 
     // 2) capybara render (iterations)
-    // PixelScale ist zoomfrei & isotrop (x==y); Zoom fließt in die Schrittweite.
     const double sx = (double)state.pixelScale.x;
     const double sy = (double)state.pixelScale.y;
     double stepX = 0.0, stepY = 0.0;
@@ -282,7 +326,6 @@ void renderCudaFrame(
     cudaStream_t renderStream
 ){
     (void)d_iterations; // authoritative buffer lives in RendererState
-    // Legacy out-params deterministisch spiegeln (auch wenn ungenutzt)
     shouldZoom = false;
     newOffsetX = offsetX;
     newOffsetY = offsetY;

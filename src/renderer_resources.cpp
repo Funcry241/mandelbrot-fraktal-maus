@@ -1,6 +1,6 @@
-///// Otter: Immutable Texture-Storage; deterministischer Upload; sauberes PixelStore-Handling.
-///// Schneefuchs: State sichern/wiederherstellen; klare Fehlerpfade; ASCII-Logs.
-///// Maus: OpenGL PBO/Texture Utils – robuste Init/Upload-Reihenfolge; keine versteckten Seiteneffekte.
+///// Otter: Immutable Texture-Storage; deterministischer Upload; DSA bevorzugt; weniger Roundtrips
+///// Schneefuchs: Kein per-Frame PixelStore-Save/Restore im DSA-Pfad; klare Fehlerpfade; ASCII-Logs
+///// Maus: PBO/Texture Utils – robuste Init/Upload-Reihenfolge; keine versteckten Seiteneffekte
 ///// Datei: src/renderer_resources.cpp
 
 #include "pch.hpp"
@@ -212,24 +212,11 @@ void updateTextureFromPBO(unsigned int pboU, unsigned int texU, int width, int h
     const bool haveDSA = (GLEW_ARB_direct_state_access != 0);
 #endif
 
-    // State sichern (wir ändern nur UNPACK/PBO + PixelStore)
+    // Quelle: gebundener UNPACK-PBO – nur kurzzeitig binden; PixelStore
+    // Policy wurde bei Resize/Init einmalig gesetzt (UNPACK_ALIGNMENT=1 etc.).
     GLint prevPBO = 0;
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevPBO);
-
-    GLint prevAlign=0, prevRowLen=0, prevSkipPix=0, prevSkipRows=0;
-    glGetIntegerv(GL_UNPACK_ALIGNMENT,    &prevAlign);
-    glGetIntegerv(GL_UNPACK_ROW_LENGTH,   &prevRowLen);
-    glGetIntegerv(GL_UNPACK_SKIP_PIXELS,  &prevSkipPix);
-    glGetIntegerv(GL_UNPACK_SKIP_ROWS,    &prevSkipRows);
-
-    // Quelle: gebundener UNPACK-PBO
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-
-    // Deterministisches PixelStore-Setup
-    glPixelStorei(GL_UNPACK_ALIGNMENT,   1);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH,  0);
-    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-    glPixelStorei(GL_UNPACK_SKIP_ROWS,   0);
 
 #if defined(GL_VERSION_4_3)
     if (GLEW_VERSION_4_3 || GLEW_ARB_invalidate_subdata) {
@@ -238,7 +225,7 @@ void updateTextureFromPBO(unsigned int pboU, unsigned int texU, int width, int h
 #endif
 
     if (haveDSA) {
-        // DSA: kein Textur-Bind nötig; weniger GL-Globalstate, schnellerer Pfad
+        // DSA: kein Textur-Bind nötig; kein per-Frame PixelStore-Save/Restore
         glTextureSubImage2D(tex, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
         if constexpr (Settings::debugLogging) {
@@ -251,7 +238,7 @@ void updateTextureFromPBO(unsigned int pboU, unsigned int texU, int width, int h
             }
         }
     } else {
-        // Fallback: Bind/Unbind-Pfad – Texturbindung kurzzeitig ändern, danach sauber restaurieren
+        // Fallback: Bind/Unbind-Pfad – minimaler State-Touch
         GLint prevActiveTex = 0, prevTex0 = 0;
         glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
         glActiveTexture(GL_TEXTURE0);
@@ -278,11 +265,7 @@ void updateTextureFromPBO(unsigned int pboU, unsigned int texU, int width, int h
         glActiveTexture(static_cast<GLenum>(prevActiveTex));
     }
 
-    // PixelStore & UNPACK-PBO restaurieren (keine Seiteneffekte)
-    glPixelStorei(GL_UNPACK_ALIGNMENT,   prevAlign);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH,  prevRowLen);
-    glPixelStorei(GL_UNPACK_SKIP_PIXELS, prevSkipPix);
-    glPixelStorei(GL_UNPACK_SKIP_ROWS,   prevSkipRows);
+    // UNPACK-PBO restaurieren
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(prevPBO));
 }
 

@@ -1,6 +1,6 @@
-///// Otter: Nacktmull – frame pipeline with perf warm-up & rate-limit (no alt paths; deterministic)
-///// Schneefuchs: MAUS header compliant; ASCII logging only; pch first; stable API; Settings::PerfLog driven
-///// Maus: Compute → Metrics → Overlays → Zoom (single path); clear grid logs; no duplicate metrics builds
+///// Otter: Nacktmull – frame pipeline mit draw-lag-1; perf warm-up & rate-limit
+///// Schneefuchs: MAUS-Header; ASCII-Logs; pch first; Settings::PerfLog-gesteuert; Ring-Logs stabil
+///// Maus: Compute → Metrics → Overlays → Zoom; Upload auf Upload-Tex; Draw auf Draw-Tex
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
@@ -42,7 +42,6 @@ namespace {
     // Nacktmull: cadence driven by Settings::PerfLog
     constexpr int RING_LOG_EVERY = 120;
 
-    // Removed g_mapMs (unused)
     static double g_mandMs = 0.0;
     static double g_entMs  = 0.0;
     static double g_conMs  = 0.0;
@@ -193,9 +192,12 @@ namespace {
             LUCHS_LOG_HOST("[PIPE] compute end");
         }
 
+        // Upload → aktuelle Upload-Textur
         const auto t0 = Clock::now();
         if (!state.skipUploadThisFrame) {
-            OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(), state.tex.id(), fctx.width, fctx.height);
+            OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(),
+                                              state.currentUploadTex().id(),
+                                              fctx.width, fctx.height);
             if (state.pboFence[state.pboIndex]) { glDeleteSync(state.pboFence[state.pboIndex]); state.pboFence[state.pboIndex]=0; }
             state.pboFence[state.pboIndex] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
             if constexpr (Settings::debugLogging) {
@@ -209,13 +211,17 @@ namespace {
             }
         }
 
-        // 🔁 Saubere Ring-Disziplin: immer weiterschalten
+        // 🔁 Saubere PBO-Ring-Disziplin: immer weiterschalten
         state.advancePboRing();
 
         const auto tUploadEnd = Clock::now();
         g_texMs = std::chrono::duration_cast<msd>(tUploadEnd - t0).count();
 
-        RendererPipeline::drawFullscreenQuad(state.tex.id());
+        // Draw → die vorherige (fertige) Draw-Textur
+        RendererPipeline::drawFullscreenQuad(state.currentDrawTex().id());
+
+        // Nach dem Draw: Upload-Textur wird zur neuen Draw-Textur
+        state.advanceTexRingAfterDraw();
     }
 
     // ------------------------------- Overlays ------------------------------------
@@ -230,6 +236,9 @@ namespace {
 
         const auto tOv0 = Clock::now();
 
+        // Overlays lesen (falls noetig) die Draw-Textur (ID direkt weiterreichen)
+        const unsigned drawTexId = state.currentDrawTex().id();
+
         if (state.heatmapOverlayEnabled) {
             const int overlayTilePx = std::max(1, (fctx.statsTileSize > 0 ? fctx.statsTileSize : fctx.tileSize));
 
@@ -243,10 +252,9 @@ namespace {
                                overlayTilePx, ovTx, ovTy, compPx, compTx, compTy, fctx.width, fctx.height);
             }
 
-            // Overlay zeichnet mit bereits vorliegenden Host-Metriken
             HeatmapOverlay::drawOverlay(state.h_entropy, state.h_contrast,
                                         fctx.width, fctx.height, overlayTilePx,
-                                        state.tex.id(), state);
+                                        drawTexId, state);
         }
 
         if constexpr (Settings::warzenschweinOverlayEnabled) {
@@ -298,10 +306,10 @@ void execute(RendererState& state) {
     g_ctx.width         = state.width;
     g_ctx.height        = state.height;
     g_ctx.maxIterations = state.maxIterations;
-    g_ctx.zoomD         = state.zoom;                       // double: Quelle der Wahrheit
+    g_ctx.zoomD         = state.zoom;
     g_ctx.offsetD       = { state.center.x, state.center.y };
-    g_ctx.newOffsetD    = g_ctx.offsetD;                   // Start bei aktuellem Center
-    g_ctx.syncFloatFromDouble();                           // Float-Spiegel aktualisieren
+    g_ctx.newOffsetD    = g_ctx.offsetD;
+    g_ctx.syncFloatFromDouble();
 
     // Compute-Raster (Kernel)
     g_ctx.tileSize = chooseComputeTileSize(g_ctx.zoom);
@@ -317,7 +325,7 @@ void execute(RendererState& state) {
                 const int ovTx = (g_ctx.width  + px - 1) / px;
                 const int ovTy = (g_ctx.height + px - 1) / px;
                 const int cTx  = (g_ctx.width  + ts - 1) / ts;
-                const int cTy  = (g_ctx.height + ts - 1) / ts;
+                const int cTy  = (g_ctx.height  + ts - 1) / ts;
 
                 LUCHS_LOG_HOST("[GRID] overlayPx=%d overlay=%dx%d computePx=%d tiles=%dx%d res=%dx%d",
                                px, ovTx, ovTy, ts, cTx, cTy, g_ctx.width, g_ctx.height);
@@ -363,7 +371,7 @@ void execute(RendererState& state) {
         const float c0 = state.h_contrast.empty() ? 0.f : state.h_contrast[0];
         const int   ringIx = state.pboIndex;
         const unsigned pbo = state.currentPBO().id();
-        const unsigned tex = state.tex.id();
+        const unsigned tex = state.currentDrawTex().id();
 
         char line[512];
         const int n = std::snprintf(
