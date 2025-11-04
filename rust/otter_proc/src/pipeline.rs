@@ -1,6 +1,6 @@
 ///// Otter: Build-Pipeline für probe/configure/build/stage – CMake-Aufrufe mit PATH/ENV-Overlay.
-/// ///// Schneefuchs: Saubere Fehlerweitergabe (PipelineError), ASCII-Logs, vorsichtiger Hard-Clean mit Cache-Heimatprüfung.
-/// ///// Maus: Minimal mut; keine toten Imports; deterministisch & kompakt – Warning „unused_mut“ beseitigt.
+////// Schneefuchs: Saubere Fehlerweitergabe (PipelineError), ASCII-Logs, vorsichtiger Hard-Clean mit Cache-Heimatprüfung.
+////// Maus: Minimal mut; keine toten Imports; deterministisch & kompakt – Warning „unused_mut“ beseitigt.
 ///// Datei: rust/otter_proc/src/pipeline.rs
 
 use std::fs::{self, File};

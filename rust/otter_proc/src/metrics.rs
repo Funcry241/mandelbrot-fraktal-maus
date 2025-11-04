@@ -1,7 +1,7 @@
 ///// Otter: Zentraler Metrics-Helper — Profil/Plan/Events + History/Baseline; nicht-fatal, ASCII-only.
-/// ///// Schneefuchs: Kein serde; einfache JSON-Strings; robuste Datei-I/O; UTF-8 lossy; umkehr via Vec<String>. 
-/// ///// Maus: Legt Verzeichnisse lazy an; Dateien: build_profile.json, progress_plan.json, progress.jsonl, *_history.txt, *_baseline_*.txt.
-/// ///// Datei: rust/otter_proc/src/metrics.rs
+////// Schneefuchs: Kein serde; einfache JSON-Strings; robuste Datei-I/O; UTF-8 lossy; umkehr via Vec<String>. 
+////// Maus: Legt Verzeichnisse lazy an; Dateien: build_profile.json, progress_plan.json, progress.jsonl, *_history.txt, *_baseline_*.txt.
+////// Datei: rust/otter_proc/src/metrics.rs
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};

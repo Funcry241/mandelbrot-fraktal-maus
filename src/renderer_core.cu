@@ -1,4 +1,4 @@
-///// Otter: Renderer-Core – GL init + window; enables filtered KHR_debug (noisy severities off); no zoom logic here.
+///// Otter: Renderer-Core – GL init + window; enables filtered KHR_debug (noisy severities off); Axolotel-HUD init.
 ///// Schneefuchs: Strict CUDA/GL separation; deterministic ASCII logs; resources clearly owned; duplicate resize removed.
 ///// Maus: Progressive cooldown + Tatze 7 soft-invalidate on view jumps (post-pipeline, no memset).
 ///// Datei: src/renderer_core.cu
@@ -14,6 +14,7 @@
 #include "cuda_interop.hpp"
 #include "frame_pipeline.hpp"
 #include "settings.hpp"
+#include "axolotel_hud.hpp"
 
 #include <stdexcept>
 
@@ -121,9 +122,9 @@ bool Renderer::initGL() {
 
     // Prepare GPU pipeline (shaders, programs, etc.)
     RendererPipeline::init();
+    AxolotelHUD::init(); // WOW overlay (additive top layer)
 
     // One-time creation/registration of GL targets (Texture + PBO ring)
-    // Uses RendererState::resize to setup GL + register PBOs with CUDA.
     state.resize(state.width, state.height);
 
     // Allocate device buffers (independent of GL; tile size is a safe base)
@@ -137,7 +138,6 @@ bool Renderer::shouldClose() const {
 }
 
 void Renderer::resize(int newW, int newH) {
-    // GLFW-Callback ruft das; Größe und alle GL/CUDA-Ressourcen werden im State gehandhabt
     state.resize(newW, newH);
 }
 

@@ -1,6 +1,6 @@
-///// Otter: Nacktmull – frame pipeline mit draw-lag-1; perf warm-up & rate-limit; VISUAL FALLBACK: render always full-res
-///// Schneefuchs: MAUS-Header; ASCII-Logs; pch first; Settings::PerfLog-gesteuert; Ring-Logs stabil
-///// Maus: Compute → Metrics → Overlays → Zoom; Upload auf Upload-Tex; Draw auf Draw-Tex
+///// Otter: Nacktmull — frame pipeline with Axolotel Coupler; draw-lag-1; perf warm-up; VISUAL FALLBACK removed (keeps compute tile).
+///// Schneefuchs: ASCII logs; pch first; small, deterministic diff; Stats forced next frame when E>0.
+///// Maus: Compute → Metrics → Overlays → Axolotel → Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex.
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
@@ -24,6 +24,7 @@
 #include "zoom_logic.hpp"
 #include "common.hpp"
 #include "fps_meter.hpp"
+#include "axolotel_hud.hpp" // ✨ Axolotel WOW-HUD (additive, on key-pulse)
 
 #include <vector_types.h>
 #include <vector_functions.h>
@@ -40,7 +41,9 @@ namespace {
     using msd   = std::chrono::duration<double, std::milli>;
 
     // Nacktmull: cadence driven by Settings::PerfLog
-    constexpr int RING_LOG_EVERY = 120;
+    constexpr int   RING_LOG_EVERY     = 120;
+    constexpr float AXO_ZOOM_BOOST_PCT = 0.15f;  // β: +15% dt at E=1
+    static   bool   g_forceMetricsNext  = false; // eager metrics trigger
 
     static double g_mandMs = 0.0;
     static double g_entMs  = 0.0;
@@ -115,15 +118,20 @@ namespace {
     }
 
     // ---------------------- Metrics EINMAL pro Frame ------------------------
-    // Nacktmull: Cadence-Guard – berechne nur jede N-te Frame; sonst reuse.
+    // Nacktmull: Cadence-Guard – berechne nur jede N-te Frame; sonst reuse. Eager trigger via g_forceMetricsNext.
     static void ensureAnalysisMetrics(FrameContext& fctx, RendererState& state)
     {
         const int statsPx = std::max(1,
             (Settings::Kolibri::gridScreenConstant ? Settings::Kolibri::desiredTilePx : fctx.tileSize));
 
         const bool needBootstrap = state.h_entropy.empty() || state.h_contrast.empty();
+
+        bool forceNow = g_forceMetricsNext;
+        if (forceNow) g_forceMetricsNext = false;
+
         const bool shouldCompute =
             needBootstrap ||
+            forceNow ||
             ((g_frame % Settings::StatsCadence::heatmapEveryN) == 0);
 
         if (!shouldCompute) {
@@ -191,9 +199,8 @@ namespace {
                            fctx.tileSize, fctx.maxIterations, (double)fctx.zoom);
         }
 
-        // VISUAL FALLBACK:
+        // Keep the computed tile size (no unconditional full-res fallback).
         FrameContext fctxRender = fctx;
-        fctxRender.tileSize = 1;
 
         if constexpr (Settings::performanceLogging) {
             cudaEvent_t evStart = nullptr, evStop = nullptr;
@@ -289,6 +296,9 @@ namespace {
             WarzenschweinOverlay::drawOverlay(fctx.zoom);
         }
 
+        // ✨ Axolotel: additive Glow-Pulse als Top-Layer (sichtbar nach jedem Key-Pulse)
+        AxolotelHUD::draw(fctx.width, fctx.height, glfwGetTime());
+
         const auto tOv1 = Clock::now();
         g_ovlMs = std::chrono::duration_cast<msd>(tOv1 - tOv0).count();
         state.lastTimings.overlaysMs = g_ovlMs;
@@ -369,9 +379,21 @@ void execute(RendererState& state) {
     // ---- Overlays (nutzen die vorliegenden Metrics) ----
     drawOverlays(state, g_ctx);
 
+    // ---- Axolotel Coupler → Zoom (ein Pfad: dt-Scaling) -------------------
+    float E = AxolotelHUD::activityEnergy(); // 0..1 from live pulses
+    float dtScaled = g_ctx.deltaSeconds;
+    if (E > 0.0f) {
+        dtScaled = g_ctx.deltaSeconds * (1.0f + AXO_ZOOM_BOOST_PCT * std::clamp(E, 0.0f, 1.0f));
+        g_forceMetricsNext = true; // eager metrics next frame for snappy overlays
+        if constexpr (Settings::performanceLogging) {
+            const float pct = (dtScaled / std::max(1e-6f, g_ctx.deltaSeconds) - 1.0f) * 100.0f;
+            LUCHS_LOG_HOST("[AXO][COUPLER] E=%.3f dt=%.4f -> %.4f (+%.1f%%)", E, g_ctx.deltaSeconds, dtScaled, pct);
+        }
+    }
+
     // ---- Zoom (ein Pfad: ZoomLogic schreibt direkt in RendererState) ----
     if (!CudaInterop::getPauseZoom()) {
-        ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, /*dtOverrideSeconds*/ 0.0f);
+        ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, /*dtOverrideSeconds*/ dtScaled);
     }
 
     // Spiegel zurück in den Context (für HUD/Nächsten Frame)

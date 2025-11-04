@@ -1,5 +1,5 @@
-##### Otter: Modern build (no PS-magic) — dynamic CRT (/MD), dynamic GLEW, CUDA13 guard, Ninja response files, clean target props.
-##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; removed `-Xcompiler=/MT...` for CUDA TUs; keep compile warnings strict; duplicate-free defines.
+##### Otter: Modern build (no PS-magic) — dynamic CRT (/MD), dynamic GLEW, CUDA13 guard, Ninja response files, clean target props; Axolotel-HUD sources added.
+##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; removed `-Xcompiler=/MT...` for CUDA TUs; keep compile warnings strict; duplicate-free defines; no GLEW_STATIC; sources list includes axolotel_hud.cpp.
 ##### Maus: Deterministic build; Arch=80/86/89/90; C++23 / CUDA20; separable compilation on; AppLocal-friendly link setup.
 ##### Datei: CMakeLists.txt
 
@@ -137,6 +137,8 @@ add_executable(mandelbrot_otterdream
   src/renderer_state_cuda.cpp
   src/renderer_state_gl.cpp
   src/heatmap_metrics.cu
+  # Axolotel HUD (WOW overlay)
+  src/axolotel_hud.cpp
 )
 
 # ---------------------- Compile-Options --------------------
@@ -155,7 +157,6 @@ if(MSVC)
       -Xcompiler=/Zc:__cplusplus
       -Xcompiler=/EHsc
       -Xcompiler=/wd4505
-      -Xcompiler=/Brepro
     >
   )
 else()

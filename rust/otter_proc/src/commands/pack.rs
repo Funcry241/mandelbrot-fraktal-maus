@@ -1,7 +1,7 @@
 ///// Otter: Packt Quellen in ZIP (Rust/CUDA/C/C++/CMake/TOML/JSON/Shader/Skripte) – Excludes wie vcpkg/.vscode-Whitelist aktiv.
-/// //// Schneefuchs: Deterministische Sortierung; Windows-freundliche Pfade → / im ZIP; kein PowerShell.
-/// //// Maus: ASCII-Logs via runner_term; Default-Ziel out/exports/OtterSources_yyyyMMdd_HHmm.zip; Rückgabe des ZIP-Pfads.
-/// //// Datei: rust/otter_proc/src/commands/pack.rs
+///// Schneefuchs: Deterministische Sortierung; Windows-freundliche Pfade → / im ZIP; kein PowerShell.
+///// Maus: ASCII-Logs via runner_term; Default-Ziel out/exports/OtterSources_yyyyMMdd_HHmm.zip; Rückgabe des ZIP-Pfads.
+///// Datei: rust/otter_proc/src/commands/pack.rs
 
 use std::fs::{self, File};
 use std::io::{self, BufWriter};

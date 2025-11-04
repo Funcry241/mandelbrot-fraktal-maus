@@ -1,5 +1,5 @@
-///// Otter: Main loop; Silk-Lite motion + frame budget pacing.
-///// Schneefuchs: Device/host logs separated; flush on CUDA error paths.
+///// Otter: Main loop; Silk-Lite motion + frame budget pacing; Axolotel key-pulse on every key press.
+///// Schneefuchs: Device/host logs separated; flush on CUDA error paths; ASCII-only.
 ///// Maus: Warm-up freeze; fixed cadence for stats; one line per event.
 ///// Datei: src/renderer_loop.cpp
 
@@ -14,6 +14,7 @@
 #include "frame_limiter.hpp"         // pace::FrameLimiter
 #include "frame_capture.hpp"         // async single-shot 100th-frame capture
 #include "warzenschwein_overlay.hpp" // WarzenschweinOverlay::toggle()
+#include "axolotel_hud.hpp"
 #include <cuda_runtime_api.h>        // cudaPeekAtLastError
 
 namespace RendererLoop {
@@ -92,6 +93,9 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 
     auto* state = static_cast<RendererState*>(glfwGetWindowUserPointer(window));
     if (!state) return;
+
+    // Axolotel: jede Taste erzeugt einen sichtbaren Pulse im HUD (WOW-Feedback)
+    AxolotelHUD::noteKeyPress(key, mods);
 
     switch (key) {
         case GLFW_KEY_H:
