@@ -1,12 +1,12 @@
-///// Otter: Artifact locator — deterministic search order; prefers build/ app-local; quiet, parseable logs.
-///// Schneefuchs: Restores fmt_exists + find_artifact; generic fmt_exists accepts bool *or* &Path; no external deps.
-///// Maus: Cross-platform exe basename; emits "[RUNNER] artifact-candidate: … exists=yes|no" and final "[RUNNER] artifact: …".
+///// Otter: Artifact locator with deterministic search order and clean log lines.
+///// Schneefuchs: Makes ExistsLike + fmt_exists pub(crate) to satisfy private-bounds lint.
+///// Maus: Cross-platform exe name; emits [RUNNER] artifact-candidate and final [RUNNER] artifact.
 ///// Datei: rust/otter_proc/src/artifact.rs
 
 use std::path::{Path, PathBuf};
 
 /// Tiny trait so `fmt_exists` can take either a `bool` **or** a `&Path`.
-trait ExistsLike {
+pub(crate) trait ExistsLike {
     fn exists_bool(self) -> bool;
 }
 impl ExistsLike for bool {
@@ -22,7 +22,7 @@ impl<'a> ExistsLike for &'a PathBuf {
 /// Returns `"yes"` or `"no"` — matches call sites like:
 /// `format!("artifact-candidate: {} exists={}", p.display(), fmt_exists(exists))`
 #[inline]
-pub fn fmt_exists<E: ExistsLike>(e: E) -> &'static str {
+pub(crate) fn fmt_exists<E: ExistsLike>(e: E) -> &'static str {
     if e.exists_bool() { "yes" } else { "no" }
 }
 
@@ -32,7 +32,7 @@ fn exe_basename() -> &'static str {
 }
 
 /// Candidate list in priority order (app-local first).
-pub fn artifact_candidates(root: &Path) -> Vec<PathBuf> {
+pub(crate) fn artifact_candidates(root: &Path) -> Vec<PathBuf> {
     let exe = exe_basename();
     let b = root.join("build");
 
