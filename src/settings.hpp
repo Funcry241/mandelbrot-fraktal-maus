@@ -67,12 +67,12 @@ namespace Settings {
         inline constexpr bool enabled      = true;
 
         // Emit every Nth frame after warm-up (1 = every frame).
-        // Range: 10 .. 240 | Default: 30
-        inline constexpr int  everyN       = 30;
+        // Range: 10 .. 240 | Default: 20
+        inline constexpr int  everyN       = 20;
 
         // Suppress perf logs during first frames to avoid cold-start noise.
-        // Range: 0 .. 300 | Default: 80
-        inline constexpr int  warmupFrames = 80;
+        // Range: 0 .. 300 | Default: 60
+        inline constexpr int  warmupFrames = 60;
 
         // Emit a single header explaining columns on first emission.
         // Range: {false, true} | Default: true
@@ -183,11 +183,19 @@ namespace Kolibri {
     // Range: 20 .. 40 | Default: 28
     inline constexpr int  desiredTilePx      = 28;
 
-    // Cadence gate: rebuild heatmap metrics every N frames.
-    // 1 = every frame (max responsiveness), 3 = balanced default, 5/8 = heavy scenes.
-    // Range: 1 .. 16 | Default: 3
-    inline constexpr int  metricsEveryN      = 3;
+    // NOTE: legacy Kolibri::metricsEveryN removed (moved to StatsCadence).
 } // namespace Kolibri
+
+// ============================== Stats Cadence ================================
+// Rate-limit for analysis metrics (entropy/contrast) to save time without
+// changing visuals. Compute metrics only every Nth frame; reuse the last
+// results in between.
+namespace StatsCadence {
+    // Compute heatmap metrics every Nth frame.
+    // 1 = every frame; 3 = balanced default; larger = lighter load.
+    // Range: 1 .. 16 | Default: 3
+    inline constexpr int heatmapEveryN = 3;
+} // namespace StatsCadence
 
 // ============================== Target Bias ==================================
 // Center-weighted scoring for interest selection in overlays.
@@ -215,7 +223,7 @@ static_assert(pboRingSize > 0, "pboRingSize must be > 0");
 static_assert(MIN_TILE_SIZE <= BASE_TILE_SIZE && BASE_TILE_SIZE <= MAX_TILE_SIZE,
               "MIN_TILE_SIZE <= BASE_TILE_SIZE <= MAX_TILE_SIZE required");
 static_assert(Kolibri::desiredTilePx > 0, "desiredTilePx must be > 0");
-static_assert(Kolibri::metricsEveryN >= 1, "metricsEveryN must be >= 1");
+static_assert(StatsCadence::heatmapEveryN >= 1, "StatsCadence::heatmapEveryN must be >= 1");
 static_assert(MANDEL_BLOCK_X > 0 && MANDEL_BLOCK_Y > 0, "MANDEL_BLOCK dims must be > 0");
 static_assert((MANDEL_BLOCK_X % 32) == 0, "MANDEL_BLOCK_X must be a multiple of 32");
 static_assert(TargetBias::sigmaNdc > 0.0, "sigmaNdc must be > 0");

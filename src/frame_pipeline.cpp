@@ -115,10 +115,33 @@ namespace {
     }
 
     // ---------------------- Metrics EINMAL pro Frame ------------------------
+    // Nacktmull: Cadence-Guard – berechne nur jede N-te Frame; sonst reuse.
     static void ensureAnalysisMetrics(FrameContext& fctx, RendererState& state)
     {
         const int statsPx = std::max(1,
             (Settings::Kolibri::gridScreenConstant ? Settings::Kolibri::desiredTilePx : fctx.tileSize));
+
+        const bool needBootstrap = state.h_entropy.empty() || state.h_contrast.empty();
+        const bool shouldCompute =
+            needBootstrap ||
+            ((g_frame % Settings::StatsCadence::heatmapEveryN) == 0);
+
+        if (!shouldCompute) {
+            // No device work, no host syncs: reuse last metrics verbatim.
+            fctx.statsTileSize = statsPx;
+            fctx.entropy       = state.h_entropy;
+            fctx.contrast      = state.h_contrast;
+
+            if constexpr (Settings::performanceLogging) {
+                g_entMs = 0.0;
+                g_conMs = 0.0;
+            }
+            if constexpr (Settings::debugLogging) {
+                LUCHS_LOG_HOST("[HM][SKIP] reuse metrics frame=%d everyN=%d",
+                               g_frame, Settings::StatsCadence::heatmapEveryN);
+            }
+            return;
+        }
 
         bool ok = false;
         if constexpr (Settings::performanceLogging) {
@@ -169,13 +192,9 @@ namespace {
         }
 
         // VISUAL FALLBACK:
-        // Einige Renderpfade nutzen fctx.tileSize als Downsample-Faktor.
-        // Wir reichen deshalb für das eigentliche Fraktal-Rendern einen
-        // lokalen Context mit tileSize=1 durch (volle Auflösung).
         FrameContext fctxRender = fctx;
         fctxRender.tileSize = 1;
 
-        // Render mit autoritativen Double-Offsets
         if constexpr (Settings::performanceLogging) {
             cudaEvent_t evStart = nullptr, evStop = nullptr;
             (void)cudaEventCreateWithFlags(&evStart, cudaEventDefault);
@@ -344,7 +363,7 @@ void execute(RendererState& state) {
     // ---- Render (CUDA) ----
     computeCudaFrame(g_ctx, state);
 
-    // ---- Analysis-Metrics (einmal, decoupled) ----
+    // ---- Analysis-Metrics (Cadence-Guard) ----
     ensureAnalysisMetrics(g_ctx, state);
 
     // ---- Overlays (nutzen die vorliegenden Metrics) ----
