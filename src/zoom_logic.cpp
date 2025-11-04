@@ -1,8 +1,6 @@
 ///// Otter: Rullmolder Step 2 - blunt zoom + gentle nudge toward Interest (dt-invariant).
 ///// Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts (no ref-casts).
-///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF]/[ZLEASH].
-///// Fink: Zoom-korrekte Pan-Umrechnung (px→world per pixelScale/zoom) gegen Überschwinger.
-///// Dachs: Quickfix B+ - Axis-weighted Leash (X stärker), weniger Seitwärtsdrift.
+///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF]/[ZLEASH]/[ZJIT]/[ZANGL]/[ZDEF]/[ZPILOT].
 ///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
@@ -49,12 +47,12 @@ static inline double blunt_zoom_rate_per_sec() noexcept {
     return 0.20; // +20%/s
 }
 
-// Gentle nudge tunables
+// Gentle nudge tunables (slightly stronger to ensure visible effect)
 struct NudgeCfg {
-    double gainPerSec      = 0.95;  // controls alpha (PAN response)
-    double deadzoneNdc     = 0.12;
-    double maxPxPerFrame   = 8.0;
-    double yScale          = 0.95;
+    double gainPerSec      = 1.30;  // ↑ from 0.95 → quicker response
+    double deadzoneNdc     = 0.10;  // ↓ from 0.12 → eher aus der DZ raus
+    double maxPxPerFrame   = 16.0;  // ↑ from 8.0  → größere Schritte möglich
+    double yScale          = 0.94;
     double strengthFloor   = 0.30;
 };
 static constexpr NudgeCfg kNudge{};
@@ -67,16 +65,16 @@ struct AxisLeashCfg {
 static constexpr AxisLeashCfg kLeash{};
 
 // Phase A: Early-Locality Cap (öffnet weich von R0→1.0; nur in diesem TU)
-// (etwas aggressiver als zuvor, um „Spalt“-Einfangung früh zu dämpfen)
+// (etwas offener, damit seitliche Ausweichbewegungen Platz haben)
 struct StartLeashCfg {
     bool   enabled     = true;
-    double R0          = 0.12; // vorher 0.18 → stärkeres frühes Zentrieren
-    double openSeconds = 2.4;  // vorher 1.8  → länger sanft geöffnet
+    double R0          = 0.22; // anfänglicher Max-Radius in |ndc|
+    double openSeconds = 2.4;  // Zeit bis volle Öffnung
     bool   cubicEase   = true; // t' = t^2*(3-2t)
 };
 static constexpr StartLeashCfg kStartLeash{};
 
-// --- experimental: run-seeded start jitter + early deflection ----------------
+// --- experimental: run-seeded jitter + early deflection + pilot-kick ---------
 // (keine Settings-Änderungen; reiner TU-Scoped Versuch)
 struct XorShift32 {
     uint32_t s;
@@ -90,11 +88,14 @@ struct StartNoise {
     bool     seeded        = false;
     bool     jitterDone    = false;
     uint32_t seed          = 0;
-    double   angleBiasRad  = 0.0;   // +/- ~18°
+    double   angleBiasRad  = 0.0;   // +/- ~24°
     double   angleDurSec   = 2.2;   // fade-out Dauer
     int      deflectSign   = +1;    // +/- 1
-    double   deflectMax    = 0.12;  // max orthogonale NDC-Deflektion
-    double   deflectDurSec = 2.0;   // Dauer der Deflektion
+    double   deflectMax    = 0.22;  // max orthogonale NDC-Deflektion (stärker)
+    double   deflectDurSec = 2.6;   // länger wirksam
+    // Pilot: zusätzlicher px-Impuls orthogonal od. seed-basiert
+    double   pilotMaxPx    = 18.0;  // direkt in Pixel
+    double   pilotDurSec   = 1.6;   // kurzer, kräftiger Antritt
     XorShift32 rng{0};
 };
 static StartNoise sNoise;
@@ -108,16 +109,16 @@ static void ensure_seed_once() noexcept {
     if (!sNoise.seed) sNoise.seed = 0x9E3779B9u;
     sNoise.rng.s = sNoise.seed;
 
-    // Winkel ±18° → Rad
+    // Winkel ±24° → Rad
     const double degToRad = 0.017453292519943295;
-    const double a = (sNoise.rng.u01() * 2.0 - 1.0) * (18.0 * degToRad);
+    const double a = (sNoise.rng.u01() * 2.0 - 1.0) * (24.0 * degToRad);
     sNoise.angleBiasRad = a;
     sNoise.deflectSign  = (sNoise.rng.u01() < 0.5f) ? -1 : +1;
 
     if constexpr (Settings::ZoomLog::enabled) {
-        LUCHS_LOG_HOST("[ZSEED] runSeed=0x%08X angleBias=%.3f deg deflectSign=%+d durA=%.2fs durD=%.2fs",
+        LUCHS_LOG_HOST("[ZSEED] runSeed=0x%08X angleBias=%.3f deg deflectSign=%+d durA=%.2fs durD=%.2fs pilot=%.1fpx/%.1fs",
                        (unsigned)sNoise.seed, a / degToRad, sNoise.deflectSign,
-                       sNoise.angleDurSec, sNoise.deflectDurSec);
+                       sNoise.angleDurSec, sNoise.deflectDurSec, sNoise.pilotMaxPx, sNoise.pilotDurSec);
     }
     sNoise.seeded = true;
 }
@@ -127,7 +128,7 @@ static void ensure_seed_once() noexcept {
 struct ZLogState {
     uint64_t frame = 0;
     bool     headerPrinted = false;
-    double   sinceStartSec = 0.0; // akkumulierte Laufzeit für Early-Locality-Cap
+    double   sinceStartSec = 0.0; // akkumulierte Laufzeit für Start-Phasen
 };
 static ZLogState zls;
 
@@ -191,15 +192,15 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     const float  dt   = get_dt_seconds(frameCtx);
     const double rate = blunt_zoom_rate_per_sec();
 
-    // Laufzeit fürs weiche Öffnen des Early-Locality-Caps
+    // Laufzeit fürs Startverhalten
     zls.sinceStartSec += static_cast<double>(dt);
 
     // einmalig: Seed + Startjitter (px→world / zoom)
     if (zls.frame == 1) {
         ensure_seed_once();
 
-        // Jitterradius in Pixel (14..32), zufälliger Winkel → spürbarer Startversatz
-        const double rpx   = 14.0 + 18.0 * (double)sNoise.rng.u01();
+        // Jitterradius in Pixel (22..46), zufälliger Winkel → spürbarer Startversatz
+        const double rpx   = 22.0 + 24.0 * (double)sNoise.rng.u01();
         const double phi   = 6.283185307179586 * (double)sNoise.rng.u01();
         const double jx_px = rpx * std::cos(phi);
         const double jy_px = rpx * std::sin(phi);
@@ -244,7 +245,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         const double ndcX_raw0 = rs.interest.ndcX;
         const double ndcY_raw0 = rs.interest.ndcY;
 
-        // Early angle bias (stärker als zuvor; ±18°, fadet in ~2.2 s auf 0)
+        // Early angle bias (±24°, fadet in ~2.2 s auf 0)
         double ndcX_in = ndcX_raw0, ndcY_in = ndcY_raw0;
         if (sNoise.seeded && sNoise.angleBiasRad != 0.0 && sNoise.angleDurSec > 0.0) {
             const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.angleDurSec), 0.0, 1.0);
@@ -286,6 +287,40 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             }
         }
 
+        // Pilot-Kick: garantierter kurzer Seitenimpuls IN PIXELS (unabhängig von DZ),
+        // wirkt selbst wenn |ndc| klein ist; Richtung orthogonal zu ndc oder seed-basiert
+        double pilot_px_x = 0.0, pilot_px_y = 0.0;
+        if (sNoise.seeded && sNoise.pilotMaxPx > 0.0 && sNoise.pilotDurSec > 0.0) {
+            const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.pilotDurSec), 0.0, 1.0);
+            if (t > 0.0) {
+                // Easing (cubic) → kräftig am Anfang, sanft auslaufend
+                const double f = t * t * (3.0 - 2.0 * t);
+                const double ampPx = sNoise.pilotMaxPx * f;
+
+                double ox = 0.0, oy = 0.0;
+                const double r2 = ndcX_in*ndcX_in + ndcY_in*ndcY_in;
+                if (r2 > 1e-12) {
+                    const double invLen = 1.0 / std::sqrt(r2);
+                    ox = -ndcY_in * invLen; // 90°
+                    oy =  ndcX_in * invLen;
+                } else {
+                    // Seed-basierte feste Richtung, falls ndc≈0
+                    const double phi = 6.283185307179586 * (double)sNoise.rng.u01();
+                    ox = std::cos(phi); oy = std::sin(phi);
+                }
+                pilot_px_x = (double)sNoise.deflectSign * ampPx * ox;
+                pilot_px_y = (double)sNoise.deflectSign * ampPx * oy;
+
+                if constexpr (Settings::ZoomLog::enabled) {
+                    if (emitEveryN) {
+                        LUCHS_LOG_HOST("[ZPILOT] f=%llu fade=%.2f ampPx=%.2f dir=(%.3f,%.3f) pilotPx=(%.2f,%.2f)",
+                                       (unsigned long long)zls.frame, t, ampPx, ox, oy, pilot_px_x, pilot_px_y);
+                    }
+                }
+            }
+        }
+
+        // Deadzone und Leashes auf den (ggf. rotierten/deflektierten) NDC anwenden
         double ndcX = applyDeadzone(ndcX_in, kNudge.deadzoneNdc);
         double ndcY = applyDeadzone(ndcY_in, kNudge.deadzoneNdc);
 
@@ -329,14 +364,14 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         const bool hitDZ_X = (std::abs(ndcX_in) <= kNudge.deadzoneNdc);
         const bool hitDZ_Y = (std::abs(ndcY_in) <= kNudge.deadzoneNdc);
 
-        if (ndcX != 0.0 || ndcY != 0.0) {
+        if (ndcX != 0.0 || ndcY != 0.0 || (pilot_px_x != 0.0 || pilot_px_y != 0.0)) {
             const double s = std::max(kNudge.strengthFloor, std::min(1.0, rs.interest.strength));
 
-            // pixel goals
+            // pixel goals (aus NDC) + Pilot-Kick in px
             const double halfW = 0.5 * static_cast<double>(rs.width);
             const double halfH = 0.5 * static_cast<double>(rs.height);
-            const double dx_px_goal = ndcX * halfW;
-            const double dy_px_goal = ndcY * halfH;
+            double dx_px_goal = ndcX * halfW + pilot_px_x;
+            double dy_px_goal = ndcY * halfH + pilot_px_y;
 
             // alpha ≈ 1 - exp(-k*s*dt)  →  Padé(1,1)
             const double a = kNudge.gainPerSec * s * static_cast<double>(dt);
