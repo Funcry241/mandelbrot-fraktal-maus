@@ -125,7 +125,6 @@ mindmap
 - `src/luchs_log_host.cpp` / `src/luchs_log_host.hpp`
 
 ### Other
-- `src/frame_capture.cpp` / `src/frame_capture.hpp`
 - `src/heatmap_utils.hpp`
 - `src/warzenschwein_fontdata.hpp`
 - `src/zoom_logic.cpp` / `src/zoom_logic.hpp`

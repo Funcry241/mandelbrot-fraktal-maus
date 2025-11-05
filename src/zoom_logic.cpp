@@ -1,6 +1,6 @@
-///// Otter: Rullmolder Step 2 - blunt zoom + gentle nudge toward Interest (dt-invariant).
-///// Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts (no ref-casts).
-///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF]/[ZLEASH]/[ZJIT]/[ZANGL]/[ZDEF]/[ZPILOT]/[ZKEY].
+///// Otter: Rullmolder Step 2 - blunt zoom + gentle nudge toward Interest (dt-invariant); sub-pixel clamp to kill jitter.
+///// Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts (no ref-casts); [ZPERF] cadence-respecting.
+///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF]/[ZLEASH]/[ZJIT]/[ZANGL]/[ZDEF]/[ZPILOT]/[ZKEY]/[CAP].
 ///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
@@ -460,6 +460,19 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
 
             const bool hitCAP_X = (step_px_x != dx_px_goal * alpha);
             const bool hitCAP_Y = (step_px_y != dy_px_goal * alpha * kNudge.yScale);
+
+            // ----- Dachs Phase 3: Sub-pixel clamp (kill micro-jitter) -----
+            if (std::abs(step_px_x) < 1.0) step_px_x = 0.0;
+            if (std::abs(step_px_y) < 1.0) step_px_y = 0.0;
+            if constexpr (Settings::ZoomLog::enabled) {
+                static double s_lastCapLog = 0.0;
+                const double now = glfwGetTime();
+                if ((std::abs(step_px_x) == 0.0 || std::abs(step_px_y) == 0.0) && (now - s_lastCapLog) > 1.0) {
+                    LUCHS_LOG_HOST("[CAP] subpx");
+                    s_lastCapLog = now;
+                }
+            }
+            // ----------------------------------------------------------------
 
             const double psx = static_cast<double>(rs.pixelScale.x);
             const double psy = static_cast<double>(rs.pixelScale.y);

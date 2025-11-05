@@ -1,50 +1,57 @@
-///// Otter: Public API for Silk-Lite auto-pan/zoom with robust drift fallback.
-///// Schneefuchs: Header bleibt schlank; Forward-Decls statt schwerer Includes; /WX-fest.
-///// Maus: Keine float2-Felder in Public-API-Strukturen (vermeidet MSVC C4324); ASCII-only.
+///// Otter: Public API for Rullmolder Step 2 – blunt zoom + gentle nudge; dt-invariant; no capture deps.
+///// Schneefuchs: Forward-Decls (FrameContext=struct, RendererState=struct), ASCII-only, /WX clean; C4099-frei.
+///// Maus: API behält evaluateTarget() bei; zusätzlicher Wrapper evaluateZoomTarget() für Altaufrufe.
 ///// Datei: src/zoom_logic.hpp
 
 #pragma once
 
 #include <vector>
 #include <cstddef>
-#include <vector_types.h> // float2 in Funktionssignaturen (nur in Signaturen, nicht in Structs)
+#include <vector_types.h> // float2 in Funktionssignaturen
 
-// Schlanke Forward-Decls (keine Zyklen):
-struct FrameContext;     // definiert in frame_context.hpp (struct)
-class  RendererState;    // definiert in renderer_state.hpp (class)
+// Schlanke Forward-Decls (keine Includes hier, um Zyklen zu vermeiden)
+struct FrameContext;   // definiert in frame_context.hpp  (struct)
+struct RendererState;  // definiert in renderer_state.hpp (struct)
 
 namespace ZoomLogic {
 
-// Kleiner, trivially-constructible Zustand (by-value in RendererState erlaubt)
+// Kleiner, trivially-constructible Zustand
 struct ZoomState {
-    // Wird von evaluate...-Pfaden gesetzt: true, wenn in diesem Frame ein valider
-    // Zielkandidat (Tile) gefunden wurde. Die Pipeline nutzt das als Gate für den Zoom.
     bool hadCandidate = false;
 };
 
-// Ergebnis der Zielauswahl (ohne float2, um C4324 sicher zu vermeiden)
+// Ergebnis (ohne float2 in Structs → MSVC C4324-safe)
 struct ZoomResult {
     float newOffsetX  = 0.0f;
     float newOffsetY  = 0.0f;
     float distance    = 0.0f;   // |newOffset - previousOffset|
-    float minDistance = 0.02f;  // rein informativ
+    float minDistance = 0.02f;  // informativ
     int   bestIndex   = -1;     // Ziel-Tile oder -1
     bool  isNewTarget = false;
     bool  shouldZoom  = false;
 };
 
-// Optionales Hilfsmaß (robuste Nachbarschaftsdifferenz, globaler Skalar)
-float computeEntropyContrast(const std::vector<float>& entropy,
-                             int width, int height, int tileSize) noexcept;
+// Kernzielwahl der Step-2-Pipeline (dein TU implementiert evaluateTarget)
+ZoomResult evaluateTarget(const std::vector<float>& entropy,
+                          const std::vector<float>& contrast,
+                          int tilesX, int tilesY,
+                          int width, int height,
+                          float2 currentOffset, float zoom,
+                          float2 previousOffset,
+                          ZoomState& state) noexcept;
 
-// Kern: bestes Ziel evaluieren und Bewegung vorschlagen (Top-K Softmax im NDC-Raum)
-ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
-                              const std::vector<float>& contrast,
-                              int tilesX, int tilesY,
-                              int width, int height,
-                              float2 currentOffset, float zoom,
-                              float2 previousOffset,
-                              ZoomState& state) noexcept;
+// Wrapper für Altcode, der noch evaluateZoomTarget(...) ruft
+inline ZoomResult evaluateZoomTarget(const std::vector<float>& entropy,
+                                     const std::vector<float>& contrast,
+                                     int tilesX, int tilesY,
+                                     int width, int height,
+                                     float2 currentOffset, float zoom,
+                                     float2 previousOffset,
+                                     ZoomState& state) noexcept
+{
+    return evaluateTarget(entropy, contrast, tilesX, tilesY,
+                          width, height, currentOffset, zoom, previousOffset, state);
+}
 
 // Pipeline-Adapter: schreibt pan/zoom direkt in RendererState.
 // dtOverrideSeconds > 0.0 überschreibt fctx.deltaSeconds für genau diesen Aufruf.

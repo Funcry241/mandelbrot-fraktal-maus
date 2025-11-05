@@ -1,62 +1,56 @@
-///// Otter: HUD text builder – zoom, offset, FPS (with capped max), and tile stats.
-///// Schneefuchs: MAUS header; pch first; ASCII-only; safe snprintf append without NUL.
-///// Maus: Keep API stable; compute tiles robustly for tileSize<=0; small fixed buffer lines.
+///// Otter: HUD-Text – kompakte Center-Statistik (3 Zeilen), deterministisch formatiert.
+///// Schneefuchs: ASCII-only; pch zuerst; keine GL- oder Device-Abhängigkeiten; /WX clean.
+///// Maus: Feste Präzision (cx/cy 9, z 6, fps 1); fallback auf dt für FPS falls nötig.
 ///// Datei: src/hud_text.cpp
 
 #include "pch.hpp"
 #include "hud_text.hpp"
-#include <algorithm>
-#include <cstdio>
-#include <string>
 
-#include "fps_meter.hpp"
-#include "frame_context.hpp"   // WICHTIG: liefert die Definition von FrameContext
-#include "renderer_state.hpp"  // dito fuer RendererState
+#include "frame_context.hpp"
+#include "renderer_state.hpp"
+#include "settings.hpp"
+
+#include <cstdio>
+#include <cmath>
+#include <algorithm>
+#include <string>
 
 namespace HudText {
 
-static inline void appendKV(std::string& buf, const char* label, const char* value) {
-    char line[96];
-    const int n = std::snprintf(line, sizeof(line), "%10s  %-18s\n", label, value);
-    if (n > 0) {
-        // Append at most sizeof(line)-1 to avoid embedding the terminating NUL
-        const size_t toAppend = static_cast<size_t>(std::min(n, static_cast<int>(sizeof(line) - 1)));
-        buf.append(line, toAppend);
-    }
+static inline double safe_fps_from_ms(double ms) noexcept {
+    return (ms > 1e-9) ? (1000.0 / ms) : 0.0;
 }
 
-std::string build(const FrameContext& ctx, const RendererState& state) {
-    std::string hud;
-    hud.reserve(256);
+std::string build(const FrameContext& fctx, const RendererState& state) {
+    // Daten einsammeln (nur Host-Seite; keine GL/CUDA-Aufrufe)
+    const double cx   = static_cast<double>(state.center.x);
+    const double cy   = static_cast<double>(state.center.y);
+    const double zoom = static_cast<double>(fctx.zoom);
+    const int    it   = fctx.maxIterations;
+    const int    tile = std::max(1, fctx.tileSize);
+    const int    w    = fctx.width;
+    const int    h    = fctx.height;
 
-    { char v[64]; std::snprintf(v, sizeof(v), "%.6e", static_cast<double>(ctx.zoom)); appendKV(hud, "zoom", v); }
-    { char v[64]; std::snprintf(v, sizeof(v), "%.4f, %.4f", static_cast<double>(ctx.offset.x), static_cast<double>(ctx.offset.y)); appendKV(hud, "offset", v); }
-
-    // fps actual (max) – aus Host-Framezeit in ms (state.lastTimings.frameTotalMs)
-    {
-        const double dtMs = (state.lastTimings.frameTotalMs > 0.0) ? state.lastTimings.frameTotalMs : 1000.0; // Fallback 1s
-        const double fps  = 1000.0 / dtMs;
-        const int    maxFpsInt = FpsMeter::currentMaxFpsInt();
-        char v[64];
-        std::snprintf(v, sizeof(v), "%.1f (%d)", fps, maxFpsInt);
-        appendKV(hud, "fps", v);
+    // FPS primär aus gemessener Framezeit, sonst aus dt schätzen
+    double fps = safe_fps_from_ms(state.lastTimings.frameTotalMs);
+    if (fps <= 0.0 && fctx.deltaSeconds > 0.0f) {
+        fps = 1.0 / static_cast<double>(fctx.deltaSeconds);
     }
 
-    // Tiles aus width/height + tileSize; robust gegen tileSize<=0
-    {
-        char v[64];
-        if (ctx.tileSize > 0) {
-            const int tilesX   = (ctx.width  + ctx.tileSize - 1) / ctx.tileSize;
-            const int tilesY   = (ctx.height + ctx.tileSize - 1) / ctx.tileSize;
-            const int numTiles = tilesX * tilesY;
-            std::snprintf(v, sizeof(v), "%d x %d (%d)", tilesX, tilesY, numTiles);
-        } else {
-            std::snprintf(v, sizeof(v), "n/a");
-        }
-        appendKV(hud, "tiles", v);
-    }
+    // Kompakt & stabil formatiert (ASCII)
+    char line1[96], line2[96], line3[96];
+    std::snprintf(line1, sizeof(line1), "cx=%.9f cy=%.9f", cx, cy);
+    std::snprintf(line2, sizeof(line2), "z=%.6f it=%d tile=%d", zoom, it, tile);
+    std::snprintf(line3, sizeof(line3), "res=%dx%d fps=%.1f", w, h, fps);
 
-    return hud;
+    std::string out;
+    out.reserve(96 + 96 + 96);
+    out.append(line1);
+    out.push_back('\n');
+    out.append(line2);
+    out.push_back('\n');
+    out.append(line3);
+    return out;
 }
 
 } // namespace HudText

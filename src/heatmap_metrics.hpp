@@ -7,7 +7,7 @@
 
 // Forward decls to keep header light
 struct CUstream_st; using cudaStream_t = CUstream_st*;
-class RendererState;
+struct RendererState;
 
 namespace HeatmapMetrics {
 

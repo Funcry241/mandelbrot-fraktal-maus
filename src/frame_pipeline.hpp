@@ -8,7 +8,7 @@
 #define FRAME_PIPELINE_HPP
 
 // Bewusst nur Vorwärtsdeklaration – Header leichtgewichtig halten.
-class RendererState;
+struct RendererState;
 
 namespace FramePipeline {
 

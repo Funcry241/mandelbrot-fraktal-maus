@@ -5,11 +5,12 @@
 
 #pragma once
 
-#include <cuda_runtime_api.h>  // cudaStream_t
+// Keine schweren CUDA-Includes im Header – nur Forward-Decl für cudaStream_t
+struct CUstream_st; using cudaStream_t = CUstream_st*;
 
 // Vorwärtsdeklarationen statt schwerer Includes
 namespace Hermelin { class CudaDeviceBuffer; }
-class RendererState;
+struct RendererState;   // <— HIER von class -> struct
 struct FrameContext;
 
 namespace CudaInterop {
@@ -27,9 +28,7 @@ bool getPauseZoom() noexcept;
 void registerAllPBOs(const unsigned int* pboIds, int count);
 void unregisterAllPBOs() noexcept;
 
-// Render a frame (low-level variant for internal callers)
-// Hinweis: Dieser Pfad kann intern weiterhin float verwenden.
-// Für tiefe Zooms sollte der Convenience-Overload (double-Offsets) genutzt werden.
+// Render a frame (low-level)
 void renderCudaFrame(
     Hermelin::CudaDeviceBuffer& d_iterations,
     int   width,
@@ -45,8 +44,7 @@ void renderCudaFrame(
     cudaStream_t renderStream
 );
 
-// Convenience overload used by the main renderer loop
-// *** WURZEL-FIX: Offsets als double-Referenzen, damit keine Präzision verloren geht. ***
+// Convenience overload (double Offsets)
 void renderCudaFrame(
     RendererState& state,
     const FrameContext& fctx,
@@ -54,7 +52,7 @@ void renderCudaFrame(
     double& newOffsetY
 );
 
-// GPU-Heatmap (Entropie/Kontrast) direkt in state.h_* schreiben
+// GPU-Heatmap
 bool buildHeatmapMetrics(RendererState& state,
                          int width, int height, int tilePx,
                          cudaStream_t stream) noexcept;

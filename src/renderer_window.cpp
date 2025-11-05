@@ -1,4 +1,4 @@
-///// Otter: Moderner GL-Kontext (4.3 Core), deterministischer Setup-Flow; frühes Fehler-Logging – aber erst NACH glfwInit().
+///// Otter: Moderner GL-Kontext (4.3 Core), deterministischer Setup-Flow; frühes Fehler-Logging – aber erst NACH glfwInit(); ESC handled via key callback.
 ///// Schneefuchs: ASCII-Logs; kein glfwGetWindowAttrib(GLFW_SRGB_CAPABLE); sRGB-Check erfolgt per GL in renderer_core.
 ///// Maus: State clean; zentrieren/Position deterministisch; Header/Source synchron; kein Pre-Init-GLFW in main.
 ///// Datei: src/renderer_window.cpp

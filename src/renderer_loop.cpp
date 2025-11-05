@@ -1,37 +1,45 @@
-///// Otter: Main loop; Silk-Lite motion + frame budget pacing; Axolotel key-pulse + Zoom-Coupler tick.
-///// Schneefuchs: Device/host logs separated; flush on CUDA error paths; ASCII-only.
-///// Maus: Warm-up freeze; fixed cadence for stats; one line per event.
+///// Otter: Main loop; Silk-Lite motion + frame budget pacing; Axolotel key-pulse + Zoom-Coupler tick; Dachs-HUD toggle + Reset/Copy-State.
+///// Schneefuchs: Device/host logs getrennt; flush bei CUDA-Fehlerpfaden; ASCII-only; Keybinds: F1(help), R(reset), Space(pause), Ctrl+C(copy), ESC(quit).
+///// Maus: Kein Screenshot/Capture-Feature mehr; deterministische Pfade; /WX clean.
 ///// Datei: src/renderer_loop.cpp
 
 #include "pch.hpp"
 #include "renderer_loop.hpp"
 #include "frame_pipeline.hpp"
-#include "cuda_interop.hpp"          // pause toggle in keyCallback
+#include "cuda_interop.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
-#include "luchs_cuda_log_buffer.hpp" // LuchsLogger::flushDeviceLogToHost
-#include "heatmap_overlay.hpp"       // HeatmapOverlay::toggle
-#include "frame_limiter.hpp"         // pace::FrameLimiter
-#include "frame_capture.hpp"         // async single-shot 100th-frame capture
-#include "warzenschwein_overlay.hpp" // WarzenschweinOverlay::toggle()
-#include "axolotel_hud.hpp"          // pulse feedback on keys
-#include "axolotel_coupler.hpp"      // per-frame tick() -> boost()
-#include <cuda_runtime_api.h>        // cudaPeekAtLastError
+#include "luchs_cuda_log_buffer.hpp"
+#include "heatmap_overlay.hpp"
+#include "frame_limiter.hpp"
+#include "warzenschwein_overlay.hpp"
+#include "axolotel_hud.hpp"
+#include "axolotel_coupler.hpp"
+#include "dachs_hud.hpp"
+#include <cuda_runtime_api.h>
+
+#include <cstdio>
+#include <string>
+#include <filesystem>
+#include <cstring>
+
+#if defined(_WIN32)
+  #define NOMINMAX
+  #include <windows.h>
+#endif
 
 namespace RendererLoop {
 
 namespace {
-    // Keep cadence identical to PERF cadence in frame_pipeline.cpp (constexpr int PERF_LOG_EVERY = 30;)
     constexpr int PERF_LOG_EVERY = 30;
 
     inline void beginFrameLocal(RendererState& state) {
         const double now = glfwGetTime();
         double delta = now - state.lastTime;
         if (delta < 0.0) delta = 0.0;
-        // Clamp to >= 1 ms for stable derivatives/FPS
         state.deltaTime = static_cast<float>(delta < 0.001 ? 0.001f : static_cast<float>(delta));
         state.lastTime  = now;
-        state.frameCount++; // 1-based after first frame
+        state.frameCount++;
     }
 
     inline void initVSyncOnce() {
@@ -40,15 +48,53 @@ namespace {
         vsyncInit = true;
         if constexpr (Settings::preferVSync) {
             glfwSwapInterval(1);
-            if constexpr (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[VSync] swapInterval=1");
-            }
+            if constexpr (Settings::performanceLogging) LUCHS_LOG_HOST("[VSync] swapInterval=1");
         } else {
             glfwSwapInterval(0);
-            if constexpr (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[VSync] swapInterval=0");
+            if constexpr (Settings::performanceLogging) LUCHS_LOG_HOST("[VSync] swapInterval=0");
+        }
+    }
+
+    // Copy-State Helfer (Ctrl+C)
+    static bool copy_state_to_clipboard_or_file(const RendererState& s) {
+        char line[160];
+        std::snprintf(line, sizeof(line), "cx=%.9f cy=%.9f zoom=%.6f",
+                      (double)s.center.x, (double)s.center.y, (double)s.zoom);
+
+    #if defined(_WIN32)
+        const std::string utf8 = std::string(line);
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), nullptr, 0);
+        if (wlen > 0) {
+            HGLOBAL hglb = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)((wlen + 1) * sizeof(wchar_t)));
+            if (hglb) {
+                wchar_t* wstr = (wchar_t*)GlobalLock(hglb);
+                if (wstr) {
+                    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), wstr, wlen);
+                    wstr[wlen] = L'\0';
+                    GlobalUnlock(hglb);
+                    if (OpenClipboard(nullptr)) {
+                        EmptyClipboard();
+                        SetClipboardData(CF_UNICODETEXT, hglb);
+                        CloseClipboard();
+                        return true;
+                    }
+                }
+                GlobalFree(hglb);
             }
         }
+        // Fallback: Datei
+    #endif
+        std::filesystem::create_directories("captures");
+        FILE* f = nullptr;
+    #if defined(_MSC_VER)
+        if (fopen_s(&f, "captures/last_state.txt", "wb") != 0) f = nullptr;
+    #else
+        f = std::fopen("captures/last_state.txt", "wb");
+    #endif
+        if (!f) return false;
+        const size_t n = std::fwrite(line, 1, std::strlen(line), f);
+        std::fclose(f);
+        return n == std::strlen(line);
     }
 }
 
@@ -56,18 +102,9 @@ void renderFrame_impl(RendererState& state) {
     initVSyncOnce();
     beginFrameLocal(state);
 
-    // Axolotel Zoom-Coupler: update smoothed boost once per frame
     AxolotelCoupler::tick(state.deltaTime);
-
-    // Full frame pipeline (CUDA -> Upload -> Draw -> Overlays -> PERF)
     FramePipeline::execute(state);
 
-    // Async single-shot capture every 100th frame (non-blocking hook)
-    if ((state.frameCount % 100) == 0) {
-        FrameCapture::OnFrameRendered(state.frameCount);
-    }
-
-    // Device log flush (error-triggered OR periodic with the same cadence as PERF logs)
     if constexpr (Settings::debugLogging) {
         const cudaError_t err = cudaPeekAtLastError();
         const bool periodic = (state.frameCount % PERF_LOG_EVERY) == 0;
@@ -81,30 +118,27 @@ void renderFrame_impl(RendererState& state) {
         }
     }
 
-    // 60 FPS cap - precise sleep+spin pacing, low jitter.
     static pace::FrameLimiter limiter;
     if constexpr (Settings::capFramerate) {
         limiter.limit(Settings::capTargetFps);
     } else {
-        limiter.limit(0); // update internals without sleeping
+        limiter.limit(0);
     }
 }
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    (void)scancode; (void)mods;
+    (void)scancode;
     if (action != GLFW_PRESS) return;
 
     auto* state = static_cast<RendererState*>(glfwGetWindowUserPointer(window));
     if (!state) return;
 
-    // Axolotel: every key press generates a visible pulse in the HUD (WOW feedback)
     AxolotelHUD::noteKeyPress(key, mods);
 
     switch (key) {
-        case GLFW_KEY_A: { // toggle Axolotel on/off
+        case GLFW_KEY_A: {
             const bool newEnabled = !AxolotelHUD::isEnabled();
             AxolotelHUD::setEnabled(newEnabled);
-            // keep coupler aligned with HUD master
             AxolotelCoupler::setEnabled(newEnabled);
             if constexpr (Settings::performanceLogging) {
                 LUCHS_LOG_HOST("[AXO] toggle enabled=%d", newEnabled ? 1 : 0);
@@ -117,11 +151,38 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
         case GLFW_KEY_O:
             WarzenschweinOverlay::toggle();
             break;
-        case GLFW_KEY_P: {
+        case GLFW_KEY_SPACE: {
             const bool paused = CudaInterop::getPauseZoom();
             CudaInterop::setPauseZoom(!paused);
             break;
         }
+        case GLFW_KEY_F1: {
+            const bool on = DachsHUD::toggle_help();
+            if (on) {
+                DachsHUD::set_text(DachsHUD::Pane::Center, DachsHUD::build_help_text());
+            }
+            LUCHS_LOG_HOST("[HELP] toggled=%d", on ? 1 : 0);
+            break;
+        }
+        case GLFW_KEY_R: {
+            state->center.x = Settings::initialOffsetX;
+            state->center.y = Settings::initialOffsetY;
+            state->zoom     = Settings::initialZoom;
+            LUCHS_LOG_HOST("[RESET] cx=%.9f cy=%.9f z=%.6f",
+                           (double)state->center.x, (double)state->center.y, (double)state->zoom);
+            break;
+        }
+        case GLFW_KEY_C: {
+            if (mods & GLFW_MOD_CONTROL) {
+                const bool ok = copy_state_to_clipboard_or_file(*state);
+                LUCHS_LOG_HOST("[CLIP] cx=%.9f cy=%.9f z=%.6f ok=%d",
+                               (double)state->center.x, (double)state->center.y, (double)state->zoom, ok ? 1 : 0);
+            }
+            break;
+        }
+        case GLFW_KEY_ESCAPE:
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+            break;
         default:
             break;
     }

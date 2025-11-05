@@ -1,9 +1,10 @@
-///// Otter: Nacktmull — frame pipeline with Axolotel Coupler; draw-lag-1; perf warm-up; VISUAL FALLBACK removed (keeps compute tile).
-///// Schneefuchs: ASCII logs; pch first; small, deterministic diff; Stats forced next frame when E>0.
-///// Maus: Compute → Metrics → Overlays → Axolotel → Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex.
+///// Otter: Nacktmull — frame pipeline with Axolotel Coupler; draw-lag-1; perf warm-up; VISUAL FALLBACK removed (keeps compute tile); Dachs-HUD center handling.
+///// Schneefuchs: ASCII logs; pch first; small, deterministic diff; Stats forced next frame when E>0; Warzenschwein only when no Dachs-HUD.
+///// Maus: Compute → Metrics → Overlays → Axolotel → Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex; center help uses top middle column.
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
+#include <GLFW/glfw3.h>       // glfwGetTime()
 #include <chrono>
 #include <algorithm>
 #include <cstdio>     // snprintf for dynamic ring logging
@@ -25,6 +26,7 @@
 #include "common.hpp"
 #include "fps_meter.hpp"
 #include "axolotel_hud.hpp" // ✨ Axolotel WOW-HUD (additive, on key-pulse)
+#include "dachs_hud.hpp"    // Dachs-HUD help state/text
 
 #include <vector_types.h>
 #include <vector_functions.h>
@@ -118,7 +120,6 @@ namespace {
     }
 
     // ---------------------- Metrics EINMAL pro Frame ------------------------
-    // Nacktmull: Cadence-Guard – berechne nur jede N-te Frame; sonst reuse. Eager trigger via g_forceMetricsNext.
     static void ensureAnalysisMetrics(FrameContext& fctx, RendererState& state)
     {
         const int statsPx = std::max(1,
@@ -290,9 +291,15 @@ namespace {
                                         drawTexId, state);
         }
 
+        // Warzenschwein: nur wenn kein Dachs-HUD aktiv ist (sonst Center-HUD)
         if constexpr (Settings::warzenschweinOverlayEnabled) {
             state.warzenschweinText = HudText::build(fctx, state);
-            WarzenschweinOverlay::setText(state.warzenschweinText);
+            if (!DachsHUD::help_enabled()) {
+                WarzenschweinOverlay::setText(state.warzenschweinText);
+            } else {
+                // Center overlay takes the Dachs help text; left/right symmetry handled in WS implementation
+                WarzenschweinOverlay::setText(DachsHUD::build_help_text());
+            }
             WarzenschweinOverlay::drawOverlay(fctx.zoom);
         }
 
@@ -361,7 +368,7 @@ void execute(RendererState& state) {
                 const int ovTx = (g_ctx.width  + px - 1) / px;
                 const int ovTy = (g_ctx.height + px - 1) / px;
                 const int cTx  = (g_ctx.width  + ts - 1) / ts;
-                const int cTy  = (g_ctx.height  + ts - 1) / ts;
+                const int cTy  = (g_ctx.height + ts - 1) / ts;
 
                 LUCHS_LOG_HOST("[GRID] overlayPx=%d overlay=%dx%d computePx=%d tiles=%dx%d res=%dx%d",
                                px, ovTx, ovTy, ts, cTx, cTy, g_ctx.width, g_ctx.height);

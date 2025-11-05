@@ -1,6 +1,6 @@
-///// Otter: HUD overlay; zoom/offset/FPS/entropy in deterministic layout.
-///// Schneefuchs: No duplicate includes; API stable with header.
-///// Maus: ASCII-only; minimal allocations per frame.
+///// Otter: HUD overlay; zoom/offset/FPS/entropy in deterministic layout; center-top mode for Dachs-HUD help.
+///// Schneefuchs: No duplicate includes; API stable with header; single entrypoint drawOverlay() adapts to help state.
+///// Maus: ASCII-only; minimal allocations per frame; pixel-snap; symmetric columns planned but center implemented now.
 ///// Datei: src/warzenschwein_overlay.cpp
 
 #pragma warning(push)
@@ -11,6 +11,7 @@
 #include "warzenschwein_fontdata.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
+#include "dachs_hud.hpp"
 
 #include <vector>
 #include <string>
@@ -95,6 +96,8 @@ static void initGL(){
     uMode    =glGetUniformLocation(prog,"uMode");
 }
 
+static inline float snap(float v){ return std::floor(v + 0.5f); }
+
 static void buildPanel(std::vector<float>& out, float x0,float y0,float x1,float y1){
     const float bg[3]={0.10f,0.10f,0.10f};
     const float q[30]={ x0,y0,bg[0],bg[1],bg[2], x1,y0,bg[0],bg[1],bg[2],
@@ -103,37 +106,39 @@ static void buildPanel(std::vector<float>& out, float x0,float y0,float x1,float
     out.insert(out.end(), q, q+30);
 }
 
-void generateOverlayQuads(const std::string& t, int viewportW, int viewportH, float zoom,
-                          std::vector<float>& vOut, std::vector<float>& pOut) {
-    (void)viewportW; (void)viewportH; (void)zoom;
+static void generateOverlayQuadsAt(const std::string& t, int viewportW, int viewportH,
+                                   float xAnchor, float yTop, int hAlign,
+                                   std::vector<float>& vOut, std::vector<float>& pOut)
+{
+    (void)viewportH;
     vOut.clear(); pOut.clear();
     const float scalePx = std::max(1.0f, Settings::hudPixelSize);
 
-    // Außenabstand soll EXAKT UI_MARGIN sein -> Content-Anker = MARGIN + PADDING
-    const float marginX = Pfau::UI_MARGIN,  marginY = Pfau::UI_MARGIN;
     const float pad     = Pfau::UI_PADDING;
-    const float x0 = (float)WarzenschweinOverlay::snapToPixel(marginX + pad);
-    const float y0 = (float)WarzenschweinOverlay::snapToPixel(marginY + pad);
+    const float advX=(glyphW+1)*scalePx, advY=(glyphH+2)*scalePx;
 
-    // Zeilen splitten
+    // split lines
     std::vector<std::string> lines; { std::string cur; cur.reserve(64);
         for(char c: t){ if(c=='\n'){ lines.push_back(cur); cur.clear(); } else cur+=c; }
         if(!cur.empty()) lines.push_back(cur);
     }
 
-    // Content-Box
     size_t maxW=0; for(const auto& l:lines) maxW=std::max(maxW,l.size());
-    const float advX=(glyphW+1)*scalePx, advY=(glyphH+2)*scalePx;
     const float boxW=float(maxW)*advX, boxH=float(lines.size())*advY;
-
-    // Panel-Rand exakt bei UI_MARGIN
-    // Maus: Unterer Innenabstand soll exakt dem oberen entsprechen.
-    //       Da die letzte Zeile keinen +2px-Zeilenabstand mehr braucht,
-    //       ziehen wir einmalig 2*scalePx am unteren Rand ab.
     const float bottomFix = !lines.empty() ? 2.0f*scalePx : 0.0f;
+
+    float x0 = xAnchor;
+    if (hAlign == 1) { // center
+        x0 = xAnchor - boxW * 0.5f;
+    } else if (hAlign == 2) { // right
+        x0 = xAnchor - boxW;
+    }
+    x0 = snap(x0); // pixel snap
+
+    const float y0 = snap(yTop + Pfau::UI_PADDING);
+
     buildPanel(pOut, x0 - pad, y0 - pad, x0 + boxW + pad, y0 + boxH - bottomFix + pad);
 
-    // Glyphen
     const float r=1.0f,g=0.82f,b=0.32f;
     for(size_t row=0; row<lines.size(); ++row){
         const std::string& line=lines[row];
@@ -157,14 +162,33 @@ void generateOverlayQuads(const std::string& t, int viewportW, int viewportH, fl
     }
 }
 
-void drawOverlay(float zoom){
+static void generateOverlayQuadsDefault(const std::string& t, int viewportW, int viewportH,
+                                        std::vector<float>& vOut, std::vector<float>& pOut)
+{
+    // Default: oben links an UI_MARGIN ausrichten
+    const float marginX = Pfau::UI_MARGIN,  marginY = Pfau::UI_MARGIN;
+    generateOverlayQuadsAt(t, viewportW, viewportH, snap(marginX + Pfau::UI_PADDING),
+                           snap(marginY + Pfau::UI_PADDING), 0, vOut, pOut);
+}
+
+void drawOverlay(float /*zoom*/){
     if(!Settings::warzenschweinOverlayEnabled || !visible || text.empty()) return;
 
     GLint vp[4]={0,0,0,0}; glGetIntegerv(GL_VIEWPORT,vp);
     const int vpW=vp[2], vpH=vp[3];
 
     initGL(); if(!prog) return;
-    generateOverlayQuads(text, vpW, vpH, zoom, verts, panel);
+
+    // Decide placement: Dachs-HUD center-top or legacy top-left
+    if (DachsHUD::help_enabled()) {
+        const int colW = std::max(1, vpW / 3);
+        const float xCenter = (float)(colW + colW/2);
+        const float yTop = (float)Pfau::UI_MARGIN;
+
+        generateOverlayQuadsAt(text, vpW, vpH, xCenter, yTop, /*center*/1, verts, panel);
+    } else {
+        generateOverlayQuadsDefault(text, vpW, vpH, verts, panel);
+    }
 
     float xMin= std::numeric_limits<float>::max(), yMin=xMin, xMax=-xMin, yMax=-yMin;
     for(size_t i=0;i+4<panel.size();i+=5){ xMin=std::min(xMin,panel[i]); yMin=std::min(yMin,panel[i+1]);

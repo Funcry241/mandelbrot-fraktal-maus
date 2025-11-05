@@ -1,5 +1,5 @@
-##### Otter: Modern build (no PS-magic) — dynamic CRT (/MD), dynamic GLEW, CUDA13 guard, Ninja response files, clean target props; Axolotel-HUD sources added.
-##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; removed -Xcompiler=/MT... for CUDA TUs; keep compile warnings strict; duplicate-free defines; no GLEW_STATIC; sources list includes axolotel_hud.cpp.
+##### Otter: Modern build (no PS-magic) — dynamic CRT (/MD), dynamic GLEW, CUDA13 guard, Ninja response files, clean target props; Axolotel- & Dachs-HUD sources added.
+##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; removed -Xcompiler=/MT... for CUDA TUs; keep compile warnings strict; duplicate-free defines; no GLEW_STATIC; sources list includes axolotel_hud.cpp and dachs_hud.cpp.
 ##### Maus: Deterministic build; Arch=80/86/89/90; C++23 / CUDA20; separable compilation on; AppLocal-friendly link setup.
 ##### Datei: CMakeLists.txt
 
@@ -115,9 +115,9 @@ add_executable(mandelbrot_otterdream
   src/luchs_cuda_log_buffer.cu
   src/renderer_core.cu
   src/renderer_loop.cpp
-  src/renderer_pipeline.cpp
+  src/renderer_pipeline.cpp       # <— wieder hinzugefügt
   src/renderer_window.cpp
-  src/renderer_resources.cpp
+  src/renderer_resources.cpp      # <— wieder hinzugefügt
   src/heatmap_overlay.cpp
   src/hud_text.cpp
   src/warzenschwein_overlay.cpp
@@ -132,7 +132,7 @@ add_executable(mandelbrot_otterdream
   src/frame_context.cpp
   src/hermelin_buffer.cpp
   src/bear_CudaPBOResource.cpp
-  src/frame_capture.cpp
+
   src/fps_meter.cpp
   src/renderer_state_cuda.cpp
   src/renderer_state_gl.cpp
@@ -140,6 +140,8 @@ add_executable(mandelbrot_otterdream
   # Axolotel HUD (WOW overlay)
   src/axolotel_hud.cpp
   src/axolotel_coupler.cpp
+  # Dachs HUD (tri-pane top layout)
+  src/dachs_hud.cpp
 )
 
 # ---------------------- Compile-Options --------------------

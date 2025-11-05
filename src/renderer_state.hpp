@@ -27,8 +27,7 @@ struct CUevent_st;  using cudaEvent_t  = CUevent_st*;  // Events für Render-Ket
   #pragma warning(disable : 4324)
 #endif
 
-class RendererState {
-public:
+struct RendererState {
     // 🖼️ Fenster/Viewport
     int         width  = 0;
     int         height = 0;
