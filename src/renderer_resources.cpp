@@ -28,6 +28,45 @@ namespace {
     inline size_t rgba8Bytes(int w, int h) {
         return static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
     }
+
+    // --- Loader-/Extension-Utilities (GLEW/GLAD-agnostisch) -----------------
+    inline bool haveDSA() {
+    #if defined(GLAD_GL_VERSION_4_5)
+        return glCreateTextures != nullptr;
+    #elif defined(GLEW_VERSION)
+        return (GLEW_VERSION_4_5 || GLEW_ARB_direct_state_access);
+    #elif defined(GL_VERSION_4_5)
+        return glCreateTextures != nullptr;
+    #else
+        return false;
+    #endif
+    }
+
+    inline bool haveInvalidateSubData() {
+    #if defined(GLAD_GL_VERSION_4_3)
+        return glInvalidateTexImage != nullptr;
+    #elif defined(GLEW_VERSION)
+        return (GLEW_VERSION_4_3 || GLEW_ARB_invalidate_subdata);
+    #elif defined(GL_VERSION_4_3)
+        return glInvalidateTexImage != nullptr;
+    #else
+        return false;
+    #endif
+    }
+
+    inline bool hasKHRDebug() {
+    #if defined(GL_KHR_debug)
+      #if defined(GLEW_VERSION)
+        return GLEW_KHR_debug != 0;
+      #elif defined(GLAD_GL_H_)
+        return glObjectLabel != nullptr;
+      #else
+        return true;
+      #endif
+    #else
+        return false;
+    #endif
+    }
 } // anon ns
 
 void setGLResourceContext(const char* context) {
@@ -58,22 +97,16 @@ unsigned int createTexture(int width, int height) {
 
     GLuint tex = 0;
 
-#if defined(GL_VERSION_4_5)
-    const bool haveDSA = (GLEW_VERSION_4_5 || GLEW_ARB_direct_state_access);
-#else
-    const bool haveDSA = (GLEW_ARB_direct_state_access != 0);
-#endif
-
-    if (haveDSA) {
+    if (haveDSA()) {
         // ---- DSA-Pfad: keine Bindings, keine globalen Seiteneffekte
         glCreateTextures(GL_TEXTURE_2D, 1, &tex);
-#ifdef GL_KHR_debug
-        if (GLEW_KHR_debug) {
+    #if defined(GL_KHR_debug)
+        if (hasKHRDebug()) {
             char label[64];
             std::snprintf(label, sizeof(label), "OTR_tex_%dx%d_%s", width, height, g_resourceContext);
             glObjectLabel(GL_TEXTURE, tex, -1, label);
         }
-#endif
+    #endif
         glTextureParameteri(tex, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTextureParameteri(tex, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTextureParameteri(tex, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_EDGE);
@@ -104,8 +137,8 @@ unsigned int createTexture(int width, int height) {
 
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
-#ifdef GL_KHR_debug
-    if (GLEW_KHR_debug) {
+#if defined(GL_KHR_debug)
+    if (hasKHRDebug()) {
         char label[64];
         std::snprintf(label, sizeof(label), "OTR_tex_%dx%d_%s", width, height, g_resourceContext);
         glObjectLabel(GL_TEXTURE, tex, -1, label);
@@ -161,8 +194,8 @@ unsigned int createPBO(int width, int height) {
     GLuint pbo = 0;
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-#ifdef GL_KHR_debug
-    if (GLEW_KHR_debug) {
+#if defined(GL_KHR_debug)
+    if (hasKHRDebug()) {
         char label[64];
         std::snprintf(label, sizeof(label), "OTR_pbo_%dx%d_%s", width, height, g_resourceContext);
         glObjectLabel(GL_BUFFER, pbo, -1, label);
@@ -206,25 +239,17 @@ void updateTextureFromPBO(unsigned int pboU, unsigned int texU, int width, int h
     const GLuint pbo = static_cast<GLuint>(pboU);
     const GLuint tex = static_cast<GLuint>(texU);
 
-#if defined(GL_VERSION_4_5)
-    const bool haveDSA = (GLEW_VERSION_4_5 || GLEW_ARB_direct_state_access);
-#else
-    const bool haveDSA = (GLEW_ARB_direct_state_access != 0);
-#endif
-
     // Quelle: gebundener UNPACK-PBO – nur kurzzeitig binden; PixelStore
     // Policy wurde bei Resize/Init einmalig gesetzt (UNPACK_ALIGNMENT=1 etc.).
     GLint prevPBO = 0;
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevPBO);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 
-#if defined(GL_VERSION_4_3)
-    if (GLEW_VERSION_4_3 || GLEW_ARB_invalidate_subdata) {
+    if (haveInvalidateSubData()) {
         glInvalidateTexImage(tex, 0);
     }
-#endif
 
-    if (haveDSA) {
+    if (haveDSA()) {
         // DSA: kein Textur-Bind nötig; kein per-Frame PixelStore-Save/Restore
         glTextureSubImage2D(tex, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 

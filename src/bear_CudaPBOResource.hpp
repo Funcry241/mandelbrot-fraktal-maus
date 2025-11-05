@@ -1,6 +1,6 @@
 ///// Otter: Public PBO/CUDA resource wrapper; clean API; no CUDA vector leakage in headers.
 ///// Schneefuchs: MAUS header; stable ABI; forward-declare uchar4; include-lean; noexcept accessors.
-///// Maus: Map/unmap with logging in .cpp; guard overload; move-only; lifetime deterministic.
+///// Maus: Map/unmap mit Logging in .cpp; Guard-Overload; move-only; Lifetime deterministisch.
 ///// Datei: src/bear_CudaPBOResource.hpp
 
 #pragma once
@@ -8,7 +8,6 @@
 #define BEAR_CUDA_PBO_RESOURCE_HPP
 
 #include <cstddef>          // size_t
-#include <GL/glew.h>        // GLuint
 #include <cuda_gl_interop.h>
 
 // Avoid leaking CUDA vector types in public headers.
@@ -19,7 +18,7 @@ namespace CudaInterop {
 // Verwaltet Lifetime & Mapping eines CUDA-GL PBO-Interop-Handles
 class bear_CudaPBOResource {
 public:
-    explicit bear_CudaPBOResource(GLuint pboId);
+    explicit bear_CudaPBOResource(unsigned int pboId);
     ~bear_CudaPBOResource();
 
     // Nicht kopierbar; beweglich

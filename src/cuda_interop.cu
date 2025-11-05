@@ -60,6 +60,7 @@ static inline bool perf_gate(int frame) {
 }
 
 static bool s_perfHeaderDone = false;
+static int  s_prevFrameSeen  = -1;  // detect Framecounter-Restarts/Wraps
 
 // ---- PBO CUDA resources ----------------------------------------------
 static std::vector<CudaInterop::bear_CudaPBOResource> s_pboResources;
@@ -211,6 +212,15 @@ static void render_to_pbo_core(RendererState& state,
     }
 
     (void)cudaGetLastError(); // clear sticky
+
+    // Detect Framecounter-Restart/Hot-Reload → PERF-Header erneut erlauben
+    if (s_prevFrameSeen >= 0 && state.frameCount < s_prevFrameSeen) {
+        s_perfHeaderDone = false;
+    }
+    if (state.frameCount <= Settings::PerfLog::warmupFrames) {
+        s_perfHeaderDone = false;
+    }
+    s_prevFrameSeen = state.frameCount;
 
     const int freeIx = choose_free_pbo_index(state);
     if (freeIx < 0) {

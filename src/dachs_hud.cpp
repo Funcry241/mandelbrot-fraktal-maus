@@ -1,9 +1,6 @@
 ///// Otter: Dachs-HUD -- tri-pane top layout (Left | Center | Right) with centered "Dachs-HUD" help.
 ///// Schneefuchs: ASCII-only; pixel-snapped; DPI-scaled metrics; no GL deps; zero hot-path allocs.
 ///// Maus: simple state API (set_text/visible/style, toggle_help); renderer builds boxes from model.
-///// Ziel: symmetrische Top-HUDs; Mitte priorisiert; 6-8 lines onboarding; stable across resizes.
-///// Perf: layout math is O(1); text measuring left to existing renderer; equal-height optional.
-///// Log: [HELP] only on toggle; no spam; header belongs to caller.
 ///// Datei: src/dachs_hud.cpp
 
 #include "dachs_hud.hpp"

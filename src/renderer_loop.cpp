@@ -107,7 +107,10 @@ void renderFrame_impl(RendererState& state) {
     // Nur bei Fehler Host/Device-Logs flushen (kein periodisches Debug mehr)
     const cudaError_t err = cudaPeekAtLastError();
     if (err != cudaSuccess) {
-        LUCHS_LOG_HOST("[Loop][ERR] device err=%d frame=%d", static_cast<int>(err), state.frameCount);
+        const char* emsg = cudaGetErrorString(err);
+        if (!emsg) emsg = "<cudaGetErrorString=null>";
+        LUCHS_LOG_HOST("[Loop][ERR] device err=%d msg=%s frame=%d",
+                       static_cast<int>(err), emsg, state.frameCount);
         LuchsLogger::flushDeviceLogToHost(0);
     }
 
