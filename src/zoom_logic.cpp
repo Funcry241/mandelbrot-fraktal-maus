@@ -1,6 +1,6 @@
 ///// Otter: Rullmolder Step 2 - blunt zoom + gentle nudge toward Interest (dt-invariant).
 ///// Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts (no ref-casts).
-///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF]/[ZLEASH]/[ZJIT]/[ZANGL]/[ZDEF]/[ZPILOT].
+///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF]/[ZLEASH]/[ZJIT]/[ZANGL]/[ZDEF]/[ZPILOT]/[ZKEY].
 ///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
@@ -20,6 +20,9 @@
 #include <type_traits>
 #include <algorithm>
 #include <chrono>
+
+// GLFW für Tastatur-Polling (WASD/Arrows); PCH bleibt zuerst.
+#include <GLFW/glfw3.h>
 
 #define RS_OFFSET_X(ctx) ((ctx).center.x)
 #define RS_OFFSET_Y(ctx) ((ctx).center.y)
@@ -50,9 +53,9 @@ static inline double blunt_zoom_rate_per_sec() noexcept {
 
 // Gentle nudge tunables (slightly stronger to ensure visible effect)
 struct NudgeCfg {
-    double gainPerSec      = 1.30;  // ↑ from 0.95 → quicker response
-    double deadzoneNdc     = 0.10;  // ↓ from 0.12 → eher aus der DZ raus
-    double maxPxPerFrame   = 16.0;  // ↑ from 8.0  → größere Schritte möglich
+    double gainPerSec      = 1.30;
+    double deadzoneNdc     = 0.10;
+    double maxPxPerFrame   = 16.0;
     double yScale          = 0.94;
     double strengthFloor   = 0.30;
 };
@@ -66,17 +69,81 @@ struct AxisLeashCfg {
 static constexpr AxisLeashCfg kLeash{};
 
 // Phase A: Early-Locality Cap (öffnet weich von R0→1.0; nur in diesem TU)
-// (etwas offener, damit seitliche Ausweichbewegungen Platz haben)
 struct StartLeashCfg {
     bool   enabled     = true;
-    double R0          = 0.22; // anfänglicher Max-Radius in |ndc|
-    double openSeconds = 2.4;  // Zeit bis volle Öffnung
-    bool   cubicEase   = true; // t' = t^2*(3-2t)
+    double R0          = 0.22;
+    double openSeconds = 2.4;
+    bool   cubicEase   = true;
 };
 static constexpr StartLeashCfg kStartLeash{};
 
+// ---------------- Keyboard Nav Bias (WASD/Arrows) ----------------------------
+// Sanfter Tastatur-Bias in NDC; additiv, dt-invariant integriert.
+static double sKeyBiasX = 0.0, sKeyBiasY = 0.0;
+
+static inline void update_key_nav_bias(float dt) noexcept
+{
+    // Halbwert → λ
+    const double dtD    = (dt > 0.0f) ? static_cast<double>(dt) : 0.0;
+    const double lambda = (Settings::NavBias::halfLifeSec > 0.0)
+                        ? (std::log(2.0) / Settings::NavBias::halfLifeSec)
+                        : 0.0;
+
+    // Zielrichtung u aus Tastenzuständen, normiert (keine √2-Bevorzugung)
+    double ux = 0.0, uy = 0.0;
+
+    if constexpr (Settings::NavBias::enabled) {
+        if (GLFWwindow* window = glfwGetCurrentContext()) {
+            const int xPos = (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+                           + (glfwGetKey(window, GLFW_KEY_D)     == GLFW_PRESS);
+            const int xNeg = (glfwGetKey(window, GLFW_KEY_LEFT)  == GLFW_PRESS)
+                           + (glfwGetKey(window, GLFW_KEY_A)     == GLFW_PRESS);
+            const int yPos = (glfwGetKey(window, GLFW_KEY_UP)    == GLFW_PRESS)
+                           + (glfwGetKey(window, GLFW_KEY_W)     == GLFW_PRESS);
+            const int yNeg = (glfwGetKey(window, GLFW_KEY_DOWN)  == GLFW_PRESS)
+                           + (glfwGetKey(window, GLFW_KEY_S)     == GLFW_PRESS);
+
+            const int txi = (xPos > 0) - (xNeg > 0);
+            const int tyi = (yPos > 0) - (yNeg > 0);
+
+            const double tx = static_cast<double>(txi);
+            const double ty = static_cast<double>(tyi);
+
+            const double L = std::sqrt(tx*tx + ty*ty);
+            if (L > 0.0) { ux = tx / L; uy = (ty / L) * Settings::NavBias::yScale; }
+        }
+    }
+
+    // db/dt = gain*u − λ*b
+    sKeyBiasX += dtD * (Settings::NavBias::gainPerSec * ux - lambda * sKeyBiasX);
+    sKeyBiasY += dtD * (Settings::NavBias::gainPerSec * uy - lambda * sKeyBiasY);
+
+    // radialer Cap (compile-time)
+    if constexpr (Settings::NavBias::maxNdc > 0.0) {
+        const double cap  = Settings::NavBias::maxNdc;
+        const double m2   = sKeyBiasX*sKeyBiasX + sKeyBiasY*sKeyBiasY;
+        const double cap2 = cap*cap;
+        if (m2 > cap2) {
+            const double invM = 1.0 / std::sqrt(m2);
+            const double s    = cap * invM;
+            sKeyBiasX *= s; sKeyBiasY *= s;
+        }
+    }
+
+    // Snap-To-Zero gegen Jitter/Log-Spam
+    if (std::abs(sKeyBiasX) < 1e-6) sKeyBiasX = 0.0;
+    if (std::abs(sKeyBiasY) < 1e-6) sKeyBiasY = 0.0;
+}
+
+static inline void add_key_bias_to_ndc(double& x, double& y) noexcept
+{
+    if constexpr (Settings::NavBias::enabled) {
+        x += sKeyBiasX;
+        y += sKeyBiasY;
+    }
+}
+
 // --- experimental: run-seeded jitter + early deflection + pilot-kick ---------
-// (keine Settings-Änderungen; reiner TU-Scoped Versuch)
 struct XorShift32 {
     uint32_t s;
     uint32_t next() noexcept {
@@ -92,9 +159,8 @@ struct StartNoise {
     double   angleBiasRad  = 0.0;   // +/- ~24°
     double   angleDurSec   = 2.2;   // fade-out Dauer
     int      deflectSign   = +1;    // +/- 1
-    double   deflectMax    = 0.22;  // max orthogonale NDC-Deflektion (stärker)
+    double   deflectMax    = 0.22;  // max orthogonale NDC-Deflektion
     double   deflectDurSec = 2.6;   // länger wirksam
-    // Pilot: zusätzlicher px-Impuls orthogonal od. seed-basiert
     double   pilotMaxPx    = 18.0;  // direkt in Pixel
     double   pilotDurSec   = 1.6;   // kurzer, kräftiger Antritt
     XorShift32 rng{0};
@@ -110,7 +176,6 @@ static void ensure_seed_once() noexcept {
     if (!sNoise.seed) sNoise.seed = 0x9E3779B9u;
     sNoise.rng.s = sNoise.seed;
 
-    // Winkel ±24° → Rad
     const double degToRad = 0.017453292519943295;
     const double a = (sNoise.rng.u01() * 2.0 - 1.0) * (24.0 * degToRad);
     sNoise.angleBiasRad = a;
@@ -129,7 +194,7 @@ static void ensure_seed_once() noexcept {
 struct ZLogState {
     uint64_t frame = 0;
     bool     headerPrinted = false;
-    double   sinceStartSec = 0.0; // akkumulierte Laufzeit für Start-Phasen
+    double   sinceStartSec = 0.0;
 };
 static ZLogState zls;
 
@@ -194,7 +259,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
 
     // Base zoom rate and Axolotel coupler boost (multiplier ≥ 1.0)
     double       rate = blunt_zoom_rate_per_sec();
-    const float  cplBoost = AxolotelCoupler::boost(); // smoothed; cheap
+    const float  cplBoost = AxolotelCoupler::boost();
     rate *= static_cast<double>(cplBoost);
 
     // Laufzeit fürs Startverhalten
@@ -204,7 +269,6 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     if (zls.frame == 1) {
         ensure_seed_once();
 
-        // Jitterradius in Pixel (22..46), zufälliger Winkel → spürbarer Startversatz
         const double rpx   = 22.0 + 24.0 * (double)sNoise.rng.u01();
         const double phi   = 6.283185307179586 * (double)sNoise.rng.u01();
         const double jx_px = rpx * std::cos(phi);
@@ -235,12 +299,12 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     // Effective per-frame logarithmic delta with coupler boost
     const double ldz = rate * static_cast<double>(dt);
 
-    // Fast exp: g = exp(ldz) ≈ 1 + ldz + 0.5*ldz^2 (dt-robust, no transcendentals)
+    // Fast exp: g = exp(ldz) ≈ 1 + ldz + 0.5*ldz^2
     const double g   = exp_fast2(ldz);
     const ZoomT  z1  = static_cast<ZoomT>(static_cast<double>(z0) * g);
     RS_ZOOM(rs) = z1;
 
-    // Logging cadence (einmal definieren, überall nutzen)
+    // Logging cadence
     const uint64_t modN       = (Settings::ZoomLog::everyN > 0)
                               ? static_cast<uint64_t>(Settings::ZoomLog::everyN) : 1ULL;
     const bool     emitEveryN = ((zls.frame % modN) == 0);
@@ -271,7 +335,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             }
         }
 
-        // Orthogonale Deflektion (seitlicher „Schubs“) – stark, aber ausfaded
+        // Orthogonale Deflektion – stark, aber ausfaded
         if (sNoise.seeded && sNoise.deflectMax > 0.0 && sNoise.deflectDurSec > 0.0) {
             const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.deflectDurSec), 0.0, 1.0);
             if (t > 0.0) {
@@ -294,13 +358,21 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             }
         }
 
-        // Pilot-Kick: garantierter kurzer Seitenimpuls IN PIXELS (unabhängig von DZ),
-        // wirkt selbst wenn |ndc| klein ist; Richtung orthogonal zu ndc oder seed-basiert
+        // --- Keyboard Nav Bias (additiv) -------------------------------------
+        update_key_nav_bias(dt);
+        add_key_bias_to_ndc(ndcX_in, ndcY_in);
+        if constexpr (Settings::ZoomLog::enabled) {
+            if (emitEveryN && (sKeyBiasX != 0.0 || sKeyBiasY != 0.0)) {
+                LUCHS_LOG_HOST("[ZKEY] f=%llu keyBias=(%.4f,%.4f) ndc+key=(%.4f,%.4f)",
+                               (unsigned long long)zls.frame, sKeyBiasX, sKeyBiasY, ndcX_in, ndcY_in);
+            }
+        }
+
+        // Pilot-Kick: kurzer Seitenimpuls in Pixeln
         double pilot_px_x = 0.0, pilot_px_y = 0.0;
         if (sNoise.seeded && sNoise.pilotMaxPx > 0.0 && sNoise.pilotDurSec > 0.0) {
             const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.pilotDurSec), 0.0, 1.0);
             if (t > 0.0) {
-                // Easing (cubic) → kräftig am Anfang, sanft auslaufend
                 const double f = t * t * (3.0 - 2.0 * t);
                 const double ampPx = sNoise.pilotMaxPx * f;
 
@@ -308,10 +380,9 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                 const double r2 = ndcX_in*ndcX_in + ndcY_in*ndcY_in;
                 if (r2 > 1e-12) {
                     const double invLen = 1.0 / std::sqrt(r2);
-                    ox = -ndcY_in * invLen; // 90°
+                    ox = -ndcY_in * invLen;
                     oy =  ndcX_in * invLen;
                 } else {
-                    // Seed-basierte feste Richtung, falls ndc≈0
                     const double phi = 6.283185307179586 * (double)sNoise.rng.u01();
                     ox = std::cos(phi); oy = std::sin(phi);
                 }
@@ -327,11 +398,15 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             }
         }
 
-        // Deadzone und Leashes auf den (ggf. rotierten/deflektierten) NDC anwenden
+        // Deadzone & Leashes
         double ndcX = applyDeadzone(ndcX_in, kNudge.deadzoneNdc);
         double ndcY = applyDeadzone(ndcY_in, kNudge.deadzoneNdc);
 
-        // ---- Phase A: Early-Locality Cap (öffnet weich von R0 → 1.0) --------
+        // Early-Locality Cap (öffnet weich von R0 → 1.0)
+        #if defined(_MSC_VER)
+        #pragma warning(push)
+        #pragma warning(disable:4127) // constant condition intended
+        #endif
         if (kStartLeash.enabled) {
             const double T = (kStartLeash.openSeconds > 0.0) ? kStartLeash.openSeconds : 0.0;
             double t = (T > 0.0) ? std::min(1.0, zls.sinceStartSec / T) : 1.0;
@@ -353,9 +428,11 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                 }
             }
         }
-        // ---------------------------------------------------------------------
+        #if defined(_MSC_VER)
+        #pragma warning(pop)
+        #endif
 
-        // ---- Axis-weighted radial leash (B+) ----
+        // Axis-weighted radial leash
         const double leashX = leashAxis(ndcX, kLeash.xStart, kLeash.xStop, kLeash.xMin);
         const double leashY = leashAxis(ndcY, kLeash.yStart, kLeash.yStop, kLeash.yMin);
         ndcX *= leashX;
@@ -374,17 +451,14 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         if (ndcX != 0.0 || ndcY != 0.0 || (pilot_px_x != 0.0 || pilot_px_y != 0.0)) {
             const double s = std::max(kNudge.strengthFloor, std::min(1.0, rs.interest.strength));
 
-            // pixel goals (aus NDC) + Pilot-Kick in px
             const double halfW = 0.5 * static_cast<double>(rs.width);
             const double halfH = 0.5 * static_cast<double>(rs.height);
             double dx_px_goal = ndcX * halfW + pilot_px_x;
             double dy_px_goal = ndcY * halfH + pilot_px_y;
 
-            // alpha ≈ 1 - exp(-k*s*dt)  →  Padé(1,1)
             const double a = kNudge.gainPerSec * s * static_cast<double>(dt);
             const double alpha = std::min(1.0, std::max(0.0, one_minus_expm_fast(a)));
 
-            // per-frame caps
             double step_px_x = clamp_abs(dx_px_goal * alpha, kNudge.maxPxPerFrame);
             double step_px_y = clamp_abs(dy_px_goal * alpha * kNudge.yScale, kNudge.maxPxPerFrame);
 

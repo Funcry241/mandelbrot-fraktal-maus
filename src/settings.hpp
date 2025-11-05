@@ -216,6 +216,31 @@ namespace TargetBias {
     inline constexpr double mix      = 0.35;
 } // namespace TargetBias
 
+// ============================== Nav Bias (WASD/Arrows) =======================
+// Sanfter Tastatur-Bias in NDC für Auto-Pan/Nudge. Additiv – kein Override.
+// - build: Bias wächst mit gainPerSec, solange Taste(n) gehalten
+// - decay: Bias fällt mit Halbwertzeit halfLifeSec wieder ab
+// - clamp: radialer Cap, damit Tasten allein nicht die Richtung "flippen"
+
+namespace NavBias {
+    // Master-Switch
+    inline constexpr bool   enabled     = true;
+
+    // Aufbau-Tempo (pro Sekunde), dt-invariant integriert.
+    // Fühlt sich knackig, aber nicht "hart" an.
+    inline constexpr double gainPerSec  = 1.6;
+
+    // Halbwertzeit des Abklingens bei losgelassener Taste (Sekunden).
+    inline constexpr double halfLifeSec = 0.8;
+
+    // Radialer Cap auf |bias| in NDC (vor Deadzone/Leashes).
+    // So drückt die Tastatur spürbar, aber dominiert nicht.
+    inline constexpr double maxNdc      = 0.28;
+
+    // Optional: Y leicht dämpfen, passend zur bestehenden Nudge-Y-Skalierung.
+    inline constexpr double yScale      = 0.94;
+} // namespace NavBias
+
 // ============================== Sanity checks ================================
 // Guard obvious configuration errors at compile time.
 
@@ -231,5 +256,8 @@ static_assert(TargetBias::mix >= 0.0 && TargetBias::mix <= 1.0, "mix in [0,1]");
 static_assert(ZoomLog::everyN >= 1, "ZoomLog::everyN must be >= 1");
 static_assert(PerfLog::everyN >= 1, "PerfLog::everyN must be >= 1");
 static_assert(PerfLog::warmupFrames >= 0, "PerfLog::warmupFrames must be >= 0");
+static_assert(NavBias::gainPerSec  >= 0.0, "gainPerSec must be >= 0");
+static_assert(NavBias::halfLifeSec >  0.0, "halfLifeSec must be > 0");
+static_assert(NavBias::maxNdc      >= 0.0, "maxNdc must be >= 0");
 
 } // namespace Settings
