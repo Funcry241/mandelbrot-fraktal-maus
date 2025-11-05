@@ -1,6 +1,7 @@
 ##### Otter: Modern build (no PS-magic) — dynamic CRT (/MD), dynamic GLEW, CUDA13 guard, Ninja response files, clean target props; Axolotel- & Dachs-HUD sources added.
 ##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; caret-diagnostics for CUDA; strict warnings; no GLEW_STATIC; duplicate-free defines.
 ##### Maus: Deterministic build; Arch=80/86/89/90; C++23 / CUDA20; separable compilation on; AppLocal-friendly link setup (no GLU).
+##### Datei: .\CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
@@ -162,7 +163,7 @@ else()
     $<$<COMPILE_LANGUAGE:CUDA>:
       -Xcompiler=-Wall
       -Xcompiler=-Wextra
-      -Xcompiler=-Wpedantic
+      -Xcompiler=-Pedantic
       -Xcompiler=-Werror
     >
   )
@@ -212,17 +213,13 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
 
 # --- Anti-GLU Filter für Windows (nach dem Link-Aufruf anwenden) ------------
 if(WIN32)
-  # Aktuelle Linkliste des Targets holen und GLU-Einträge rausfiltern.
   get_target_property(_OTTER_LINK_LIBS mandelbrot_otterdream LINK_LIBRARIES)
   if(_OTTER_LINK_LIBS)
     set(_OTTER_LINK_LIBS_FILTERED "${_OTTER_LINK_LIBS}")
-    # Entferne OpenGL::GLU, glu32, glu32.lib (Groß-/Kleinschreibung egal)
-    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX [[(^|;)OpenGL::GLU($|;)]])
-    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX [[(^|;)[Gg][Ll][Uu]32(\.lib)?($|;)]])
-    if(NOT _OTTER_LINK_LIBS_FILTERED STREQUAL "${_OTTER_LINK_LIBS}")
-      # Korrigierte Linkliste zurückschreiben (richtige API!)
-      set_property(TARGET mandelbrot_otterdream PROPERTY LINK_LIBRARIES "${_OTTER_LINK_LIBS_FILTERED}")
-    endif()
+    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX "^OpenGL::GLU$")
+    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX "^[Gg][Ll][Uu]32(\\.lib)?$")
+    set_property(TARGET mandelbrot_otterdream PROPERTY LINK_LIBRARIES "${_OTTER_LINK_LIBS_FILTERED}")
+    # message(STATUS "LINK_LIBRARIES after anti-GLU: ${_OTTER_LINK_LIBS_FILTERED}")
   endif()
 endif()
 
@@ -235,8 +232,7 @@ endif()
 if(MSVC)
   target_link_options(mandelbrot_otterdream PRIVATE
     $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO /OPT:REF /OPT:ICF>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
-    $<$<CONFIG:RelWithDebInfo>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
+    $<$<CONFIG:RelWithDebInfo>:$<HOST_LINK:/INCREMENTAL:NO /NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
     $<HOST_LINK:/Brepro>
   )
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
