@@ -83,16 +83,16 @@ static double sKeyBiasX = 0.0, sKeyBiasY = 0.0;
 
 static inline void update_key_nav_bias(float dt) noexcept
 {
+    namespace NB = Settings::NavBias;
+
     // Halbwert → λ
-    const double dtD    = (dt > 0.0f) ? static_cast<double>(dt) : 0.0;
-    const double lambda = (Settings::NavBias::halfLifeSec > 0.0)
-                        ? (std::log(2.0) / Settings::NavBias::halfLifeSec)
-                        : 0.0;
+    const double dtD = (dt > 0.0f) ? static_cast<double>(dt) : 0.0;
+    const double lambda = (NB::halfLifeSec > 0.0) ? (std::log(2.0) / NB::halfLifeSec) : 0.0;
 
     // Zielrichtung u aus Tastenzuständen, normiert (keine √2-Bevorzugung)
     double ux = 0.0, uy = 0.0;
 
-    if constexpr (Settings::NavBias::enabled) {
+    if constexpr (NB::enabled) {
         if (GLFWwindow* window = glfwGetCurrentContext()) {
             const int xPos = (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
                            + (glfwGetKey(window, GLFW_KEY_D)     == GLFW_PRESS);
@@ -110,17 +110,20 @@ static inline void update_key_nav_bias(float dt) noexcept
             const double ty = static_cast<double>(tyi);
 
             const double L = std::sqrt(tx*tx + ty*ty);
-            if (L > 0.0) { ux = tx / L; uy = (ty / L) * Settings::NavBias::yScale; }
+            if (L > 0.0) { 
+                ux = tx / L; 
+                uy = -(ty / L) * NB::yScale; // Y-Richtung invertiert
+            }
         }
     }
 
     // db/dt = gain*u − λ*b
-    sKeyBiasX += dtD * (Settings::NavBias::gainPerSec * ux - lambda * sKeyBiasX);
-    sKeyBiasY += dtD * (Settings::NavBias::gainPerSec * uy - lambda * sKeyBiasY);
+    sKeyBiasX += dtD * (NB::gainPerSec * ux - lambda * sKeyBiasX);
+    sKeyBiasY += dtD * (NB::gainPerSec * uy - lambda * sKeyBiasY);
 
     // radialer Cap (compile-time)
-    if constexpr (Settings::NavBias::maxNdc > 0.0) {
-        const double cap  = Settings::NavBias::maxNdc;
+    if constexpr (NB::maxNdc > 0.0) {
+        const double cap  = NB::maxNdc;
         const double m2   = sKeyBiasX*sKeyBiasX + sKeyBiasY*sKeyBiasY;
         const double cap2 = cap*cap;
         if (m2 > cap2) {
@@ -159,7 +162,7 @@ struct StartNoise {
     double   angleBiasRad  = 0.0;   // +/- ~24°
     double   angleDurSec   = 2.2;   // fade-out Dauer
     int      deflectSign   = +1;    // +/- 1
-    double   deflectMax    = 0.22;  // max orthogonale NDC-Deflektion
+    double   deflectMax    = 0.22;  // max orthogonale NDC-Deflektion (stärker)
     double   deflectDurSec = 2.6;   // länger wirksam
     double   pilotMaxPx    = 18.0;  // direkt in Pixel
     double   pilotDurSec   = 1.6;   // kurzer, kräftiger Antritt
@@ -403,14 +406,10 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         double ndcY = applyDeadzone(ndcY_in, kNudge.deadzoneNdc);
 
         // Early-Locality Cap (öffnet weich von R0 → 1.0)
-        #if defined(_MSC_VER)
-        #pragma warning(push)
-        #pragma warning(disable:4127) // constant condition intended
-        #endif
-        if (kStartLeash.enabled) {
+        if constexpr (kStartLeash.enabled) {
             const double T = (kStartLeash.openSeconds > 0.0) ? kStartLeash.openSeconds : 0.0;
             double t = (T > 0.0) ? std::min(1.0, zls.sinceStartSec / T) : 1.0;
-            if (kStartLeash.cubicEase) t = t * t * (3.0 - 2.0 * t);
+            if constexpr (kStartLeash.cubicEase) t = t * t * (3.0 - 2.0 * t);
 
             const double R0   = std::clamp(kStartLeash.R0, 0.0, 1.0);
             const double Rcap = R0 + (1.0 - R0) * t;
@@ -428,9 +427,6 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                 }
             }
         }
-        #if defined(_MSC_VER)
-        #pragma warning(pop)
-        #endif
 
         // Axis-weighted radial leash
         const double leashX = leashAxis(ndcX, kLeash.xStart, kLeash.xStop, kLeash.xMin);
