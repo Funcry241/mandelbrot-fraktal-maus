@@ -1,5 +1,5 @@
 ##### Otter: Modern build (no PS-magic) — dynamic CRT (/MD), dynamic GLEW, CUDA13 guard, Ninja response files, clean target props; Axolotel- & Dachs-HUD sources added.
-##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; removed -Xcompiler=/MT... for CUDA TUs; keep compile warnings strict; duplicate-free defines; no GLEW_STATIC; sources list includes axolotel_hud.cpp and dachs_hud.cpp.
+##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; caret-diagnostics for CUDA; strict warnings; no GLEW_STATIC; duplicate-free defines.
 ##### Maus: Deterministic build; Arch=80/86/89/90; C++23 / CUDA20; separable compilation on; AppLocal-friendly link setup.
 ##### Datei: CMakeLists.txt
 
@@ -64,7 +64,6 @@ if(NOT CUDA_GL_INTEROP_HEADER)
 endif()
 
 # ---------------------- GLEW (dynamisch) -------------------
-# Ensure we never inject GLEW_STATIC and prefer the import lib + DLL.
 set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
 remove_definitions(-DGLEW_STATIC)
 foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
@@ -87,7 +86,6 @@ if(WIN32)
     message(FATAL_ERROR "GLEW CMake-Target nicht gefunden (erwartet GLEW::GLEW oder GLEW::glew).")
   endif()
 else()
-  # Fallback for non-Windows if no CONFIG package is exported by the triplet:
   if(NOT DEFINED VCPKG_INSTALLED_DIR)
     if(DEFINED ENV{VCPKG_INSTALLED_DIR})
       set(VCPKG_INSTALLED_DIR "$ENV{VCPKG_INSTALLED_DIR}")
@@ -96,10 +94,8 @@ else()
     endif()
   endif()
   set(_VCPKG_PREFIX "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
-
   find_path(GLEW_INCLUDE_DIR GL/glew.h HINTS "${_VCPKG_PREFIX}/include" REQUIRED)
   find_library(GLEW_LIBRARY NAMES GLEW glew HINTS "${_VCPKG_PREFIX}/lib" "${_VCPKG_PREFIX}/debug/lib" REQUIRED)
-
   add_library(GLEW::GLEW UNKNOWN IMPORTED)
   set_target_properties(GLEW::GLEW PROPERTIES
     IMPORTED_LOCATION "${GLEW_LIBRARY}"
@@ -115,9 +111,9 @@ add_executable(mandelbrot_otterdream
   src/luchs_cuda_log_buffer.cu
   src/renderer_core.cu
   src/renderer_loop.cpp
-  src/renderer_pipeline.cpp       # <— wieder hinzugefügt
+  src/renderer_pipeline.cpp
   src/renderer_window.cpp
-  src/renderer_resources.cpp      # <— wieder hinzugefügt
+  src/renderer_resources.cpp
   src/heatmap_overlay.cpp
   src/hud_text.cpp
   src/warzenschwein_overlay.cpp
@@ -132,7 +128,6 @@ add_executable(mandelbrot_otterdream
   src/frame_context.cpp
   src/hermelin_buffer.cpp
   src/bear_CudaPBOResource.cpp
-
   src/fps_meter.cpp
   src/renderer_state_cuda.cpp
   src/renderer_state_gl.cpp
@@ -146,16 +141,14 @@ add_executable(mandelbrot_otterdream
 
 # ---------------------- Compile-Options --------------------
 if(MSVC)
-  # Einheitliche /MD (und /MDd) — richtige Generator-Expression
   set_property(TARGET mandelbrot_otterdream PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
-
-  # Host (C++): /EHsc ergänzt, damit C4530 nicht triggert (und /WX bleibt)
   target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /sdl /permissive- /Zc:__cplusplus /EHsc /Brepro>
     $<$<COMPILE_LANGUAGE:CUDA>:
       -Xcompiler=/W4
       -Xcompiler=/WX
+      -Xcompiler=/diagnostics:caret
       -Xcompiler=/permissive-
       -Xcompiler=/Zc:__cplusplus
       -Xcompiler=/EHsc
@@ -190,14 +183,13 @@ target_compile_options(mandelbrot_otterdream PRIVATE
 set_target_properties(mandelbrot_otterdream PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON
   CUDA_RESOLVE_DEVICE_SYMBOLS ON
-  # Keep CUDA runtime static by default (independent from MSVC host CRT).
   CUDA_RUNTIME_LIBRARY Static
 )
 
 # ---------------------- Includes ---------------------------
 target_include_directories(mandelbrot_otterdream PRIVATE
   "${CMAKE_SOURCE_DIR}/src"
-  ${CUDAToolkit_INCLUDE_DIRS}  # CCCL / CUB / Thrust
+  ${CUDAToolkit_INCLUDE_DIRS}
 )
 
 # ---------------------- Defines ----------------------------
@@ -206,14 +198,11 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
   GLEW_NO_GLU
   CAPY_DEFAULT_ON=1
 )
-# CUDA 13 vector-types deprecation guard (harmlos wenn ungenutzt)
 target_compile_definitions(mandelbrot_otterdream PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:__NV_NO_VECTOR_DEPRECATION_DIAG>
 )
 
 # ---------------------- Link -------------------------------
-# NOTE (Schneefuchs): Keine explizite cudart_static hier – sie kommt bereits über
-#   CUDA_RUNTIME_LIBRARY=Static. Doppel-Eintrag im Linkerlog wird so verhindert.
 target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
   ${GLEW_TARGET}
@@ -227,7 +216,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_link_options(mandelbrot_otterdream PRIVATE -pthread)
 endif()
 
-# Windows: Host-Linker-Härtung + deterministisch (Host-Link)
+# Windows: deterministisch & gehärtet
 if(MSVC)
   target_link_options(mandelbrot_otterdream PRIVATE
     $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO /OPT:REF /OPT:ICF>>

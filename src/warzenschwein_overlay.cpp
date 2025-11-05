@@ -1,6 +1,6 @@
 ///// Otter: HUD overlay; zoom/offset/FPS/entropy in deterministic layout; center-top mode for Dachs-HUD help.
 ///// Schneefuchs: No duplicate includes; API stable with header; single entrypoint drawOverlay() adapts to help state.
-///// Maus: ASCII-only; minimal allocations per frame; pixel-snap; symmetric columns planned but center implemented now.
+///// Maus: ASCII-only; minimal allocations per frame; pixel-snap; symmetric columns with equal-height boxes when Dachs-HUD active.
 ///// Datei: src/warzenschwein_overlay.cpp
 
 #pragma warning(push)
@@ -25,7 +25,7 @@ constexpr int glyphW=8, glyphH=12;
 
 static GLuint vao=0, vbo=0, prog=0;
 static std::vector<float> verts;    // x,y,r,g,b
-static std::vector<float> panel;    // x,y,r,g,b (nur als Träger)
+static std::vector<float> panel;    // x,y,r,g,b (legacy single-panel path)
 static std::string text;
 static bool visible=true;
 
@@ -106,6 +106,14 @@ static void buildPanel(std::vector<float>& out, float x0,float y0,float x1,float
     out.insert(out.end(), q, q+30);
 }
 
+struct Box { float x0, y0, x1, y1; };
+
+static inline void splitLines(const std::string& t, std::vector<std::string>& out){
+    out.clear(); std::string cur; cur.reserve(64);
+    for(char c: t){ if(c=='\n'){ out.push_back(cur); cur.clear(); } else cur+=c; }
+    if(!cur.empty()) out.push_back(cur);
+}
+
 static void generateOverlayQuadsAt(const std::string& t, int viewportW, int viewportH,
                                    float xAnchor, float yTop, int hAlign,
                                    std::vector<float>& vOut, std::vector<float>& pOut)
@@ -118,10 +126,7 @@ static void generateOverlayQuadsAt(const std::string& t, int viewportW, int view
     const float advX=(glyphW+1)*scalePx, advY=(glyphH+2)*scalePx;
 
     // split lines
-    std::vector<std::string> lines; { std::string cur; cur.reserve(64);
-        for(char c: t){ if(c=='\n'){ lines.push_back(cur); cur.clear(); } else cur+=c; }
-        if(!cur.empty()) lines.push_back(cur);
-    }
+    std::vector<std::string> lines; splitLines(t, lines);
 
     size_t maxW=0; for(const auto& l:lines) maxW=std::max(maxW,l.size());
     const float boxW=float(maxW)*advX, boxH=float(lines.size())*advY;
@@ -179,20 +184,96 @@ void drawOverlay(float /*zoom*/){
 
     initGL(); if(!prog) return;
 
-    // Decide placement: Dachs-HUD center-top or legacy top-left
+    // Decide placement:
+    //  - Dachs-HUD active: tri-pane (Left | Center | Right) with equal-height boxes
+    //  - Legacy: single panel top-left using internal 'text'
+    std::vector<Box> panelBoxes;
+    panelBoxes.clear();
+    verts.clear();
+    panel.clear();
+
     if (DachsHUD::help_enabled()) {
-        const int colW = std::max(1, vpW / 3);
-        const float xCenter = (float)(colW + colW/2);
-        const float yTop = (float)Pfau::UI_MARGIN;
+        // Build tri-pane model from Dachs-HUD
+        const float dpiScale = 1.0f; // GLFW content-scale optional; snap keeps crisp edges
+        auto model = DachsHUD::build_render_model(vpW, vpH, dpiScale);
 
-        generateOverlayQuadsAt(text, vpW, vpH, xCenter, yTop, /*center*/1, verts, panel);
+        const float scalePx = std::max(1.0f, Settings::hudPixelSize);
+        const float pad     = Pfau::UI_PADDING;
+        const float advX=(glyphW+1)*scalePx, advY=(glyphH+2)*scalePx;
+
+        // Measure boxes (per pane)
+        float maxBoxH = 0.0f;
+        struct Meas { float boxW{0}, boxH{0}; std::vector<std::string> lines; };
+        Meas meas[3];
+        for (int i=0;i<3;++i){
+            const auto& it = model.items[i];
+            if (!it.visible) continue;
+            splitLines(it.text, meas[i].lines);
+            size_t maxWch = 0; for (auto& L : meas[i].lines) maxWch = std::max(maxWch, L.size());
+            meas[i].boxW = float(maxWch)*advX;
+            meas[i].boxH = float(meas[i].lines.size())*advY;
+            maxBoxH = std::max(maxBoxH, meas[i].boxH);
+        }
+        // Equal-height boxes if requested
+        if (model.style.equalHeightBoxes) {
+            for (int i=0;i<3;++i) if (!meas[i].lines.empty()) meas[i].boxH = maxBoxH;
+        }
+
+        // Build geometry per pane
+        const float r=1.0f,g=0.82f,b=0.32f;
+        for (int i=0;i<3;++i){
+            const auto& it = model.items[i];
+            if (!it.visible) continue;
+            const float boxW = meas[i].boxW;
+            const float boxH = meas[i].boxH;
+
+            // horizontal placement inside column
+            float x0 = (float)it.rect.x;
+            if (it.align == DachsHUD::Align::Left)       x0 = (float)it.rect.x + pad;
+            else if (it.align == DachsHUD::Align::Center)x0 = (float)it.rect.x + (float)it.rect.w*0.5f - boxW*0.5f;
+            else /*Right*/                               x0 = (float)(it.rect.x + it.rect.w) - pad - boxW;
+            x0 = snap(x0);
+
+            const float y0 = snap((float)it.rect.y + pad);
+
+            // panel box
+            const float bottomFix = !meas[i].lines.empty() ? 2.0f*scalePx : 0.0f;
+            const float x1 = x0 + boxW;
+            const float y1 = y0 + boxH - bottomFix;
+            panelBoxes.push_back(Box{ x0 - pad, y0 - pad, x1 + pad, y1 + pad });
+
+            // text quads
+            for(size_t row=0; row<meas[i].lines.size(); ++row){
+                const std::string& line=meas[i].lines[row];
+                const float yBase=y0+row*advY;
+                for(size_t col=0; col<line.size(); ++col){
+                    const auto& glyph=WarzenschweinFont::get(line[col]);
+                    const float xBase=x0+col*advX;
+                    for(int gy=0; gy<glyphH; ++gy){
+                        const uint8_t bits=glyph[gy];
+                        for(int gx=0; gx<glyphW; ++gx){
+                            if((bits>>(7-gx))&1){
+                                const float x=xBase+gx*scalePx, y=yBase+gy*scalePx;
+                                const float q[30]={ x,y,r,g,b, x+scalePx,y,r,g,b,
+                                                    x+scalePx,y+scalePx,r,g,b, x,y,r,g,b,
+                                                    x+scalePx,y+scalePx,r,g,b, x,y+scalePx,r,g,b };
+                                verts.insert(verts.end(), q, q+30);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // NOTE: panel[] unused in tri-pane path; we draw panels per-box below.
     } else {
+        // Legacy single top-left box for internal 'text'
         generateOverlayQuadsDefault(text, vpW, vpH, verts, panel);
+        // synthesize single bounding box for shader round-rect
+        float xMin= std::numeric_limits<float>::max(), yMin=xMin, xMax=-xMin, yMax=-yMin;
+        for(size_t i=0;i+4<panel.size();i+=5){ xMin=std::min(xMin,panel[i]); yMin=std::min(yMin,panel[i+1]);
+                                               xMax=std::max(xMax,panel[i]); yMax=std::max(yMax,panel[i+1]); }
+        panelBoxes.push_back(Box{ xMin, yMin, xMax, yMax });
     }
-
-    float xMin= std::numeric_limits<float>::max(), yMin=xMin, xMax=-xMin, yMax=-yMin;
-    for(size_t i=0;i+4<panel.size();i+=5){ xMin=std::min(xMin,panel[i]); yMin=std::min(yMin,panel[i+1]);
-                                           xMax=std::max(xMax,panel[i]); yMax=std::max(yMax,panel[i+1]); }
 
     // State sichern
     GLint prevVAO=0, prevBuf=0, prevProg=0, srcRGB=0,dstRGB=0,srcA=0,dstA=0;
@@ -211,17 +292,25 @@ void drawOverlay(float /*zoom*/){
     if(uViewport>=0) glUniform2f(uViewport,(float)vpW,(float)vpH);
     if(uScaleLoc>=0) glUniform2f(uScaleLoc,1.0f,1.0f);
 
-    // Pass 1: Panel
-    if(!panel.empty()){
+    // Pass 1: Panels (one round-rect per box)
+    if(!panelBoxes.empty()){
         if(uMode>=0)   glUniform1i(uMode,1);
         if(uAlpha>=0)  glUniform1f(uAlpha,Pfau::PANEL_ALPHA);
-        if(uRect>=0)   glUniform4f(uRect,xMin,yMin,xMax,yMax);
         if(uRadius>=0) glUniform1f(uRadius,Pfau::UI_RADIUS);
         if(uBorder>=0) glUniform1f(uBorder,Pfau::UI_BORDER);
-        const GLsizeiptr bytes=(GLsizeiptr)(panel.size()*sizeof(float));
-        glBufferData(GL_ARRAY_BUFFER,bytes,nullptr,GL_DYNAMIC_DRAW);
-        glBufferSubData(GL_ARRAY_BUFFER,0,bytes,panel.data());
-        glDrawArrays(GL_TRIANGLES,0,(GLsizei)(panel.size()/5));
+        for(const auto& bx : panelBoxes){
+            if(uRect>=0) glUniform4f(uRect, bx.x0, bx.y0, bx.x1, bx.y1);
+            const float q[30]={ bx.x0,bx.y0,0.10f,0.10f,0.10f,
+                                bx.x1,bx.y0,0.10f,0.10f,0.10f,
+                                bx.x1,bx.y1,0.10f,0.10f,0.10f,
+                                bx.x0,bx.y0,0.10f,0.10f,0.10f,
+                                bx.x1,bx.y1,0.10f,0.10f,0.10f,
+                                bx.x0,bx.y1,0.10f,0.10f,0.10f };
+            const GLsizeiptr bytes=(GLsizeiptr)sizeof(q);
+            glBufferData(GL_ARRAY_BUFFER,bytes,nullptr,GL_DYNAMIC_DRAW);
+            glBufferSubData(GL_ARRAY_BUFFER,0,bytes,q);
+            glDrawArrays(GL_TRIANGLES,0,6);
+        }
     }
     // Pass 2: Text
     if(!verts.empty()){
