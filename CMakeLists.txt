@@ -1,7 +1,7 @@
 ##### Otter: Modern build (no PS-magic) — dynamic CRT (/MD), dynamic GLEW, CUDA13 guard, Ninja response files, clean target props; Axolotel- & Dachs-HUD sources added.
 ##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; caret-diagnostics for CUDA; strict warnings; no GLEW_STATIC; duplicate-free defines.
 ##### Maus: Deterministic build; Arch=80/86/89/90; C++23 / CUDA20; separable compilation on; AppLocal-friendly link setup (no GLU).
-##### Datei: .\CMakeLists.txt
+##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
@@ -48,9 +48,16 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
 # ---------------------- Packages ---------------------------
-set(OpenGL_GL_PREFERENCE GLVND)
-find_package(OpenGL REQUIRED)                 # OpenGL::GL
-find_package(glfw3 CONFIG REQUIRED)           # glfw
+# OpenGL: avoid GLU on Windows by linking directly to opengl32
+if(WIN32)
+  set(OTTER_OPENGL_LIB opengl32)
+else()
+  set(OpenGL_GL_PREFERENCE GLVND)
+  find_package(OpenGL REQUIRED)                 # OpenGL::GL
+  set(OTTER_OPENGL_LIB OpenGL::GL)
+endif()
+
+find_package(glfw3 CONFIG REQUIRED)             # glfw
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -163,7 +170,7 @@ else()
     $<$<COMPILE_LANGUAGE:CUDA>:
       -Xcompiler=-Wall
       -Xcompiler=-Wextra
-      -Xcompiler=-Pedantic
+      -Xcompiler=-Wpedantic
       -Xcompiler=-Werror
     >
   )
@@ -204,24 +211,12 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
 
 # ---------------------- Link -------------------------------
 target_link_libraries(mandelbrot_otterdream PRIVATE
-  OpenGL::GL
+  ${OTTER_OPENGL_LIB}
   ${GLEW_TARGET}
   glfw
   $<$<TARGET_EXISTS:CUDA::cudadevrt>:CUDA::cudadevrt>
   Threads::Threads
 )
-
-# --- Anti-GLU Filter für Windows (nach dem Link-Aufruf anwenden) ------------
-if(WIN32)
-  get_target_property(_OTTER_LINK_LIBS mandelbrot_otterdream LINK_LIBRARIES)
-  if(_OTTER_LINK_LIBS)
-    set(_OTTER_LINK_LIBS_FILTERED "${_OTTER_LINK_LIBS}")
-    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX "^OpenGL::GLU$")
-    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX "^[Gg][Ll][Uu]32(\\.lib)?$")
-    set_property(TARGET mandelbrot_otterdream PROPERTY LINK_LIBRARIES "${_OTTER_LINK_LIBS_FILTERED}")
-    # message(STATUS "LINK_LIBRARIES after anti-GLU: ${_OTTER_LINK_LIBS_FILTERED}")
-  endif()
-endif()
 
 # Linux: -pthread explizit
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -232,7 +227,8 @@ endif()
 if(MSVC)
   target_link_options(mandelbrot_otterdream PRIVATE
     $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO /OPT:REF /OPT:ICF>>
-    $<$<CONFIG:RelWithDebInfo>:$<HOST_LINK:/INCREMENTAL:NO /NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
+    $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
+    $<$<CONFIG:RelWithDebInfo>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
     $<HOST_LINK:/Brepro>
   )
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
