@@ -2,39 +2,34 @@
   "version": 4,
   "configurations": [
     {
-      "name": "Win64-MSVC",
-      "configurationProvider": "ms-vscode.cmake-tools",
-      "compileCommands": "${workspaceFolder}/build/compile_commands.json",
-
-      "intelliSenseMode": "windows-msvc-x64",
-      "compilerPath": "cl.exe",
-      "windowsSdkVersion": "10.0.19041.0",
-      "cStandard": "c11",
+      "name": "Windows-MSVC",
+      "compilerPath": "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe",
+      "intelliSenseMode": "msvc-x64",
+      "cStandard": "c17",
       "cppStandard": "c++23",
 
-      "defines": [
-        "UNICODE",
-        "_UNICODE",
-        "NOMINMAX",
-        "__INTELLISENSE__"
-      ],
+      // Nutze die von CMake erzeugten Flags/Pfade
+      "compileCommands": "${workspaceFolder}/build/compile_commands.json",
 
-      "forcedInclude": [
-        "${workspaceFolder}/src/pch.hpp"
-      ],
-
+      // Nur minimale Zusatzpfade für IntelliSense-Browse:
       "includePath": [
         "${workspaceFolder}/src",
         "${workspaceFolder}/vcpkg_installed/x64-windows/include",
-        "C:/vcpkg/installed/x64-windows/include",
-        "${env:CUDA_PATH}/include"
+        "${env:CUDA_PATH}/include",
+        "${env:CUDA_PATH}/include/cccl"
       ],
-
+      "defines": [
+        "NOMINMAX",
+        "WIN32_LEAN_AND_MEAN",
+        "GLEW_NO_GLU",
+        "GLEW_NO_IMAGING",
+        "CAPY_DEFAULT_ON=1",
+        "_CRT_SECURE_NO_WARNINGS"
+      ],
       "browse": {
         "path": [
           "${workspaceFolder}/src",
           "${workspaceFolder}/vcpkg_installed/x64-windows/include",
-          "C:/vcpkg/installed/x64-windows/include",
           "${env:CUDA_PATH}/include"
         ],
         "limitSymbolsToIncludedHeaders": true

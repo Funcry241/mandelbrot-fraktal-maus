@@ -1,6 +1,6 @@
 ##### Otter: Modern build (no PS-magic) — dynamic CRT (/MD), dynamic GLEW, CUDA13 guard, Ninja response files, clean target props; Axolotel- & Dachs-HUD sources added.
 ##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; caret-diagnostics for CUDA; strict warnings; no GLEW_STATIC; duplicate-free defines.
-##### Maus: Deterministic build; Arch=80/86/89/90; C++23 / CUDA20; separable compilation on; AppLocal-friendly link setup (no GLU).
+##### Maus: Deterministic build; Arch=80/86/89/90; C++23 / CUDA20; separable compilation on; AppLocal-friendly link setup (no GLU) + auto-copy runtime DLLs.
 ##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
@@ -48,16 +48,9 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
 # ---------------------- Packages ---------------------------
-# OpenGL: avoid GLU on Windows by linking directly to opengl32
-if(WIN32)
-  set(OTTER_OPENGL_LIB opengl32)
-else()
-  set(OpenGL_GL_PREFERENCE GLVND)
-  find_package(OpenGL REQUIRED)                 # OpenGL::GL
-  set(OTTER_OPENGL_LIB OpenGL::GL)
-endif()
-
-find_package(glfw3 CONFIG REQUIRED)             # glfw
+set(OpenGL_GL_PREFERENCE GLVND)
+find_package(OpenGL REQUIRED)                 # OpenGL::GL
+find_package(glfw3 CONFIG REQUIRED)           # glfw
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -206,16 +199,41 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
   CAPY_DEFAULT_ON=1
 )
 target_compile_definitions(mandelbrot_otterdream PRIVATE
+  # Windows-Header schlank & min/max-Makros weg
+  $<$<CXX_COMPILER_ID:MSVC>:NOMINMAX WIN32_LEAN_AND_MEAN>
+)
+target_compile_definitions(mandelbrot_otterdream PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:__NV_NO_VECTOR_DEPRECATION_DIAG>
 )
 
 # ---------------------- Link -------------------------------
 target_link_libraries(mandelbrot_otterdream PRIVATE
-  ${OTTER_OPENGL_LIB}
+  OpenGL::GL
   ${GLEW_TARGET}
   glfw
   $<$<TARGET_EXISTS:CUDA::cudadevrt>:CUDA::cudadevrt>
   Threads::Threads
+)
+
+# --- Anti-GLU Filter für Windows (nach dem Link-Aufruf anwenden) ------------
+if(WIN32)
+  get_target_property(_OTTER_LINK_LIBS mandelbrot_otterdream LINK_LIBRARIES)
+  if(_OTTER_LINK_LIBS)
+    set(_OTTER_LINK_LIBS_FILTERED "${_OTTER_LINK_LIBS}")
+    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX [[(^|;)OpenGL::GLU($|;)]])
+    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX [[(^|;)[Gg][Ll][Uu]32(\.lib)?($|;)]])
+    if(NOT _OTTER_LINK_LIBS_FILTERED STREQUAL "${_OTTER_LINK_LIBS}")
+      set_property(TARGET mandelbrot_otterdream PROPERTY LINK_LIBRARIES "${_OTTER_LINK_LIBS_FILTERED}")
+    endif()
+  endif()
+endif()
+
+# --- AppLocal: Runtime-DLLs neben die EXE kopieren ---------------------------
+add_custom_command(TARGET mandelbrot_otterdream POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy
+          $<TARGET_RUNTIME_DLLS:mandelbrot_otterdream>
+          $<TARGET_FILE_DIR:mandelbrot_otterdream>
+  COMMAND_EXPAND_LISTS
 )
 
 # Linux: -pthread explizit
