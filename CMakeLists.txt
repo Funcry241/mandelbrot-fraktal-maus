@@ -13,6 +13,9 @@ endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Map imported RELWITHDEBINFO -> Release for vcpkg targets that don't define it
+set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release)
+
 # ---------------------- Ninja QoL --------------------------
 if(CMAKE_GENERATOR MATCHES "Ninja")
   set(CMAKE_NINJA_FORCE_RESPONSE_FILE ON)
@@ -34,6 +37,16 @@ if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   endif()
 endif()
 
+# Resolve vcpkg installed dir for manual fallbacks
+if(NOT DEFINED VCPKG_INSTALLED_DIR)
+  if(DEFINED ENV{VCPKG_INSTALLED_DIR})
+    set(VCPKG_INSTALLED_DIR "$ENV{VCPKG_INSTALLED_DIR}")
+  else()
+    set(VCPKG_INSTALLED_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed")
+  endif()
+endif()
+set(_VCPKG_PREFIX "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+
 # ---------------------- Language Std -----------------------
 if(NOT DEFINED CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 23)
@@ -50,58 +63,54 @@ set(CMAKE_CUDA_EXTENSIONS OFF)
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
 find_package(OpenGL REQUIRED)                 # OpenGL::GL
-find_package(glfw3 CONFIG REQUIRED)           # glfw
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 
-# ---------------------- CUDA 13 Guard ----------------------
-if(CUDAToolkit_VERSION VERSION_LESS 13.0)
-  message(FATAL_ERROR "CUDA 13.0 oder neuer ist erforderlich. Gefunden: ${CUDAToolkit_VERSION}")
-endif()
-find_file(CUDA_GL_INTEROP_HEADER cuda_gl_interop.h HINTS ${CUDAToolkit_INCLUDE_DIRS})
-if(NOT CUDA_GL_INTEROP_HEADER)
-  message(FATAL_ERROR "cuda_gl_interop.h nicht im CUDAToolkit gefunden.")
+# --- GLFW (prefer imported target, else direct import-lib) ----
+set(GLFW_LINK_ITEM "")
+if(WIN32)
+  find_package(glfw3 CONFIG REQUIRED)         # usually provides 'glfw'
+  if(TARGET glfw)
+    set(GLFW_LINK_ITEM glfw)
+  elseif(TARGET glfw3)
+    set(GLFW_LINK_ITEM glfw3)
+  else()
+    find_library(GLFW_LINK_ITEM
+      NAMES glfw3 glfw3dll glfw
+      HINTS "${_VCPKG_PREFIX}/lib" "${_VCPKG_PREFIX}/debug/lib"
+      REQUIRED)
+  endif()
+else()
+  find_package(glfw3 CONFIG REQUIRED)
+  set(GLFW_LINK_ITEM glfw)
 endif()
 
-# ---------------------- GLEW (dynamisch) -------------------
+# --- GLEW (dynamic, no GLU; robust mapping) ----------------
 set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
 remove_definitions(-DGLEW_STATIC)
-foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CUDA_FLAGS)
-  if(DEFINED ${flag_var})
-    string(REPLACE "/DGLEW_STATIC" "" ${flag_var} "${${flag_var}}")
-    string(REPLACE "-DGLEW_STATIC" "" ${flag_var} "${${flag_var}}")
-    string(REPLACE "/UGLEW_STATIC" "" ${flag_var} "${${flag_var}}")
-    string(REPLACE "-UGLEW_STATIC" "" ${flag_var} "${${flag_var}}")
-    set(${flag_var} "${${flag_var}}" CACHE STRING "" FORCE)
-  endif()
-endforeach()
 
+set(GLEW_LINK_ITEM "")
 if(WIN32)
   find_package(GLEW CONFIG REQUIRED)
   if(TARGET GLEW::GLEW)
-    set(GLEW_TARGET GLEW::GLEW)
+    set(GLEW_LINK_ITEM GLEW::GLEW)
   elseif(TARGET GLEW::glew)
-    set(GLEW_TARGET GLEW::glew)
+    set(GLEW_LINK_ITEM GLEW::glew)
+  elseif(TARGET GLEW::glew32)
+    set(GLEW_LINK_ITEM GLEW::glew32)
   else()
-    message(FATAL_ERROR "GLEW CMake-Target nicht gefunden (erwartet GLEW::GLEW oder GLEW::glew).")
+    find_library(GLEW_LINK_ITEM
+      NAMES glew32 glew
+      HINTS "${_VCPKG_PREFIX}/lib" "${_VCPKG_PREFIX}/debug/lib"
+      REQUIRED)
   endif()
 else()
-  if(NOT DEFINED VCPKG_INSTALLED_DIR)
-    if(DEFINED ENV{VCPKG_INSTALLED_DIR})
-      set(VCPKG_INSTALLED_DIR "$ENV{VCPKG_INSTALLED_DIR}")
-    else()
-      set(VCPKG_INSTALLED_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed")
-    endif()
+  find_package(GLEW REQUIRED)
+  if(TARGET GLEW::GLEW)
+    set(GLEW_LINK_ITEM GLEW::GLEW)
+  else()
+    find_library(GLEW_LINK_ITEM NAMES GLEW glew REQUIRED)
   endif()
-  set(_VCPKG_PREFIX "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
-  find_path(GLEW_INCLUDE_DIR GL/glew.h HINTS "${_VCPKG_PREFIX}/include" REQUIRED)
-  find_library(GLEW_LIBRARY NAMES GLEW glew HINTS "${_VCPKG_PREFIX}/lib" "${_VCPKG_PREFIX}/debug/lib" REQUIRED)
-  add_library(GLEW::GLEW UNKNOWN IMPORTED)
-  set_target_properties(GLEW::GLEW PROPERTIES
-    IMPORTED_LOCATION "${GLEW_LIBRARY}"
-    INTERFACE_INCLUDE_DIRECTORIES "${GLEW_INCLUDE_DIR}"
-  )
-  set(GLEW_TARGET GLEW::GLEW)
 endif()
 
 # ---------------------- Executable -------------------------
@@ -158,8 +167,6 @@ if(MSVC)
 else()
   target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic -Werror>
-  )
-  target_compile_options(mandelbrot_otterdream PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:
       -Xcompiler=-Wall
       -Xcompiler=-Wextra
@@ -174,7 +181,7 @@ else()
   endif()
 endif()
 
-# CUDA-spezifisch (reine Device-Flags)
+# CUDA device flags (pure device)
 target_compile_options(mandelbrot_otterdream PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:--std=c++20 --expt-relaxed-constexpr>
 )
@@ -197,9 +204,7 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
   GLEW_NO_IMAGING
   GLEW_NO_GLU
   CAPY_DEFAULT_ON=1
-)
-target_compile_definitions(mandelbrot_otterdream PRIVATE
-  # Windows-Header schlank & min/max-Makros weg
+  # Windows headers lean & no min/max macros
   $<$<CXX_COMPILER_ID:MSVC>:NOMINMAX WIN32_LEAN_AND_MEAN>
 )
 target_compile_definitions(mandelbrot_otterdream PRIVATE
@@ -209,13 +214,13 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
 # ---------------------- Link -------------------------------
 target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
-  ${GLEW_TARGET}
-  glfw
+  ${GLEW_LINK_ITEM}
+  ${GLFW_LINK_ITEM}
   $<$<TARGET_EXISTS:CUDA::cudadevrt>:CUDA::cudadevrt>
   Threads::Threads
 )
 
-# --- Anti-GLU Filter für Windows (nach dem Link-Aufruf anwenden) ------------
+# --- Anti-GLU Filter für Windows (erzwingt "no GLU") -------
 if(WIN32)
   get_target_property(_OTTER_LINK_LIBS mandelbrot_otterdream LINK_LIBRARIES)
   if(_OTTER_LINK_LIBS)
@@ -228,7 +233,13 @@ if(WIN32)
   endif()
 endif()
 
-# --- AppLocal: Runtime-DLLs neben die EXE kopieren ---------------------------
+# Optional: /VERBOSE:LIB für Diagnose (einmalig einschalten, dann zurück)
+option(OTTER_LINK_VERBOSE "Add /VERBOSE:LIB to MSVC link for diagnostics" OFF)
+if(MSVC AND OTTER_LINK_VERBOSE)
+  target_link_options(mandelbrot_otterdream PRIVATE /VERBOSE:LIB)
+endif()
+
+# --- AppLocal: Runtime-DLLs neben die EXE kopieren ----------
 add_custom_command(TARGET mandelbrot_otterdream POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy
           $<TARGET_RUNTIME_DLLS:mandelbrot_otterdream>
@@ -252,6 +263,15 @@ if(MSVC)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "HIGHENTROPYVA erfordert 64-bit (/MACHINE:X64). Bitte 64-bit Toolchain verwenden.")
   endif()
+endif()
+
+# ---------------------- CUDA 13 Guard ----------------------
+if(CUDAToolkit_VERSION VERSION_LESS 13.0)
+  message(FATAL_ERROR "CUDA 13.0 oder neuer ist erforderlich. Gefunden: ${CUDAToolkit_VERSION}")
+endif()
+find_file(CUDA_GL_INTEROP_HEADER cuda_gl_interop.h HINTS ${CUDAToolkit_INCLUDE_DIRS})
+if(NOT CUDA_GL_INTEROP_HEADER)
+  message(FATAL_ERROR "cuda_gl_interop.h nicht im CUDAToolkit gefunden.")
 endif()
 
 # ---------------------- Defaults ---------------------------
