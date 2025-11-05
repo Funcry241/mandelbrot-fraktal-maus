@@ -1,6 +1,6 @@
-///// Otter: Main loop; Silk-Lite motion + frame budget pacing; Axolotel key-pulse + Zoom-Coupler tick; Dachs-HUD toggle + Reset/Copy-State.
-///// Schneefuchs: Device/host logs getrennt; flush bei CUDA-Fehlerpfaden; ASCII-only; Keybinds: F1(help), R(reset), Space(pause), Ctrl+C(copy), ESC(quit).
-///// Maus: Kein Screenshot/Capture-Feature mehr; deterministische Pfade; /WX clean.
+///// Otter: Main loop – compact logs only; Silk-Lite motion + frame pacing; Axolotel key-pulse; Dachs-HUD toggle
+///// Schneefuchs: Flush device logs only on CUDA error; ASCII-only; Keybinds: F1(help), R(reset), Space(pause), Ctrl+C(copy), ESC(quit)
+///// Maus: Keine periodischen [Loop]-Spamzeilen; /WX clean; deterministische Pfade
 ///// Datei: src/renderer_loop.cpp
 
 #include "pch.hpp"
@@ -31,7 +31,6 @@
 namespace RendererLoop {
 
 namespace {
-    constexpr int PERF_LOG_EVERY = 30;
 
     inline void beginFrameLocal(RendererState& state) {
         const double now = glfwGetTime();
@@ -96,7 +95,7 @@ namespace {
         std::fclose(f);
         return n == std::strlen(line);
     }
-}
+} // anon
 
 void renderFrame_impl(RendererState& state) {
     initVSyncOnce();
@@ -105,17 +104,11 @@ void renderFrame_impl(RendererState& state) {
     AxolotelCoupler::tick(state.deltaTime);
     FramePipeline::execute(state);
 
-    if constexpr (Settings::debugLogging) {
-        const cudaError_t err = cudaPeekAtLastError();
-        const bool periodic = (state.frameCount % PERF_LOG_EVERY) == 0;
-        if (err != cudaSuccess || periodic) {
-            LUCHS_LOG_HOST("[Loop] flushing device logs (err=%d, frame=%d)",
-                           static_cast<int>(err), state.frameCount);
-            LuchsLogger::flushDeviceLogToHost(0);
-        }
-        if (periodic) {
-            LUCHS_LOG_HOST("[Loop] frame=%d dt=%.3f", state.frameCount, state.deltaTime);
-        }
+    // Nur bei Fehler Host/Device-Logs flushen (kein periodisches Debug mehr)
+    const cudaError_t err = cudaPeekAtLastError();
+    if (err != cudaSuccess) {
+        LUCHS_LOG_HOST("[Loop][ERR] device err=%d frame=%d", static_cast<int>(err), state.frameCount);
+        LuchsLogger::flushDeviceLogToHost(0);
     }
 
     static pace::FrameLimiter limiter;

@@ -1,6 +1,6 @@
-///// Otter: OpenGL PBO interop – fence-aware map; single Capybara core; deterministic logs
-///// Schneefuchs: Ring-Slotwahl mit GLsync; numeric CUDA rc; Events nur bei PerfLog; keine Dup-Pfade
-///// Maus: Skip statt Blockieren bei Sättigung; klare [ZK]-Logs; Heatmap bleibt delegiert
+///// Otter: CUDA interop – compact [PERF]-Zeile mit Kadenz/Warmup; kein per-frame Zeit-Spam
+///// Schneefuchs: Gate nutzt Settings::performanceLogging && PerfLog::*; Header einmalig; Events nur bei Gate
+///// Maus: /WX clean; Debugdetails hinter debugLogging; Skip bei Ring-Sättigung
 ///// Datei: src/cuda_interop.cu
 
 #include "pch.hpp"
@@ -28,7 +28,7 @@
 
 namespace {
 
-// ---- CUDA timing events (created only when performanceLogging) ----
+// ---- CUDA timing events (nur wenn Gate feuert) ----
 static cudaEvent_t s_evStart = nullptr;
 static cudaEvent_t s_evStop  = nullptr;
 
@@ -49,6 +49,17 @@ inline void ensureEventsOnce() {
         throw std::runtime_error("cudaEventCreate(stop) failed");
     }
 }
+
+static inline bool perf_gate(int frame) {
+    using namespace Settings;
+    using namespace Settings::PerfLog;
+    if (!performanceLogging) return false;   // globaler Schalter (Settings)
+    if (!enabled) return false;              // PerfLog-Master
+    if (frame <= warmupFrames) return false; // Warm-up
+    return (frame % everyN) == 0;            // Kadenz
+}
+
+static bool s_perfHeaderDone = false;
 
 // ---- PBO CUDA resources ----------------------------------------------
 static std::vector<CudaInterop::bear_CudaPBOResource> s_pboResources;
@@ -152,7 +163,6 @@ void logCudaDeviceContext(const char* tag) noexcept {
 
 // ------------------------------ fence-aware PBO slotwahl ------------------------------
 static int choose_free_pbo_index(RendererState& state) {
-    // Start beim gewünschten Index; nacheinander Slots prüfen.
     const int N = RendererState::kPboRingSize;
     int start = (state.pboIndex >= 0 && state.pboIndex < N) ? state.pboIndex : 0;
 
@@ -160,16 +170,13 @@ static int choose_free_pbo_index(RendererState& state) {
         const int ix = (start + k) % N;
         GLsync f = state.pboFence[ix];
         if (!f) {
-            // Kein Fence -> Slot ist frei
             if constexpr (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[ZK][PBO] pick free slot=%d (no fence)", ix);
             }
             return ix;
         }
-        // Non-blocking prüfen
         const GLenum st = glClientWaitSync(f, 0, 0);
         if (st == GL_ALREADY_SIGNALED || st == GL_CONDITION_SATISFIED) {
-            // Fertig – Fence aufräumen
             glDeleteSync(f);
             state.pboFence[ix] = 0;
             if constexpr (Settings::debugLogging) {
@@ -177,9 +184,7 @@ static int choose_free_pbo_index(RendererState& state) {
             }
             return ix;
         }
-        // TIMEOUT_EXPIRED / WAIT_FAILED -> Slot busy, weiter prüfen
     }
-    // Alle Slots busy → lieber Frame überspringen statt blockieren
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[ZK][PBO][SAT] ring saturated – skip upload this frame");
     }
@@ -187,10 +192,6 @@ static int choose_free_pbo_index(RendererState& state) {
 }
 
 // ------------------------------ single render core ------------------------------
-/*
-   Nacktmull: one authoritative core that maps the current (fence-free) PBO,
-   runs capy_render, then colorizes into the mapped memory.
-*/
 static void render_to_pbo_core(RendererState& state,
                                int width, int height,
                                double cx, double cy,
@@ -211,27 +212,23 @@ static void render_to_pbo_core(RendererState& state,
 
     (void)cudaGetLastError(); // clear sticky
 
-    // 0) Zaunkönig: fence-aware Slotwahl
     const int freeIx = choose_free_pbo_index(state);
     if (freeIx < 0) {
         state.skipUploadThisFrame = true;
-        return; // Keine Compute/Colorize, um Stalls zu vermeiden
+        return; // keine Compute/Colorize, um Stalls zu vermeiden
     }
-    // Auf den tatsächlich nutzbaren Slot umstellen
     state.pboIndex = freeIx;
 
-    // 1) map current PBO slot
     const size_t needBytes = size_t(width) * size_t(height) * sizeof(uchar4);
-
     if constexpr (Settings::debugLogging) {
         LUCHS_LOG_HOST("[PBO][MAP] try ring=%d need=%zu", state.pboIndex, (size_t)needBytes);
     }
 
     MapGuard map(&s_pboResources[state.pboIndex]);
-
     if (!map.ptr) {
         const auto rcMap = cudaGetLastError();
-        LUCHS_LOG_HOST("[PBO][MAP][ERR] null ptr ring=%d need=%zu rc=%d", state.pboIndex, (size_t)needBytes, (int)rcMap);
+        LUCHS_LOG_HOST("[PBO][MAP][ERR] null ptr ring=%d need=%zu rc=%d",
+                       state.pboIndex, (size_t)needBytes, (int)rcMap);
         LuchsLogger::flushDeviceLogToHost(0);
         state.skipUploadThisFrame = true;
         return;
@@ -248,7 +245,7 @@ static void render_to_pbo_core(RendererState& state,
         state.ringUse[state.pboIndex]++;
     }
 
-    // 2) capybara render (iterations)
+    // Schrittgrößen
     const double sx = (double)state.pixelScale.x;
     const double sy = (double)state.pixelScale.y;
     double stepX = 0.0, stepY = 0.0;
@@ -259,54 +256,76 @@ static void render_to_pbo_core(RendererState& state,
                        cx, cy, stepX, stepY, maxIterations, width, height);
     }
 
-    if constexpr (Settings::performanceLogging) {
+    // ---- Perf gate / timing nur bei Kadenz ----------------------------------
+    const bool gate = perf_gate(state.frameCount);
+    float capyMs   = 0.0f;
+    float colorMs  = 0.0f;
+
+    if (gate) {
+        if (Settings::PerfLog::header && !s_perfHeaderDone) {
+            LUCHS_LOG_HOST("[PERF] f dt  capy-ms  color-ms  w  h  it  ring");
+            s_perfHeaderDone = true;
+        }
         ensureEventsOnce();
-        auto rc = cudaEventRecord(s_evStart, renderStream);
-        if (rc != cudaSuccess) throw_with_log("eventRecord(start) before capy_render", rc);
     }
 
-    capy_render(
-        static_cast<uint16_t*>(state.d_iterations.get()),
-        width, height, cx, cy, stepX, stepY,
-        maxIterations, renderStream, state.evEcDone
-    );
-
-    auto rc = cudaPeekAtLastError();
-    if (rc != cudaSuccess) throw_with_log("capy_render launch", rc);
-
-    if constexpr (Settings::performanceLogging) {
+    // 2) capybara render
+    if (gate) {
+        auto rc = cudaEventRecord(s_evStart, renderStream);
+        if (rc != cudaSuccess) throw_with_log("eventRecord(start) before capy_render", rc);
+        capy_render(static_cast<uint16_t*>(state.d_iterations.get()),
+                    width, height, cx, cy, stepX, stepY,
+                    maxIterations, renderStream, state.evEcDone);
+        rc = cudaPeekAtLastError();
+        if (rc != cudaSuccess) throw_with_log("capy_render launch", rc);
         rc = cudaEventRecord(s_evStop, renderStream);
         if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after capy_render", rc);
         rc = cudaEventSynchronize(s_evStop);
         if (rc != cudaSuccess) throw_with_log("capy_render sync", rc);
-        float ms = 0.0f;
-        (void)cudaEventElapsedTime(&ms, s_evStart, s_evStop);
-        LUCHS_LOG_HOST("[CAPY][time] capy_render=%.3f ms (w=%d h=%d it=%d)", (double)ms, width, height, maxIterations);
+        (void)cudaEventElapsedTime(&capyMs, s_evStart, s_evStop);
+    } else {
+        capy_render(static_cast<uint16_t*>(state.d_iterations.get()),
+                    width, height, cx, cy, stepX, stepY,
+                    maxIterations, renderStream, state.evEcDone);
+        auto rc = cudaPeekAtLastError();
+        if (rc != cudaSuccess) throw_with_log("capy_render launch", rc);
     }
 
     // 3) colorize into mapped PBO
-    if constexpr (Settings::performanceLogging) {
-        rc = cudaEventRecord(s_evStart, renderStream);
+    if (gate) {
+        auto rc = cudaEventRecord(s_evStart, renderStream);
         if (rc != cudaSuccess) throw_with_log("eventRecord(start) before colorize", rc);
-    }
-
-    colorize_iterations_to_pbo(
-        static_cast<const uint16_t*>(state.d_iterations.get()),
-        static_cast<uchar4*>(map.ptr),
-        width, height, maxIterations, renderStream
-    );
-
-    rc = cudaPeekAtLastError();
-    if (rc != cudaSuccess) throw_with_log("colorize launch", rc);
-
-    if constexpr (Settings::performanceLogging) {
+        colorize_iterations_to_pbo(
+            static_cast<const uint16_t*>(state.d_iterations.get()),
+            static_cast<uchar4*>(map.ptr),
+            width, height, maxIterations, renderStream
+        );
+        rc = cudaPeekAtLastError();
+        if (rc != cudaSuccess) throw_with_log("colorize launch", rc);
         rc = cudaEventRecord(s_evStop, renderStream);
         if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after colorize", rc);
         rc = cudaEventSynchronize(s_evStop);
         if (rc != cudaSuccess) throw_with_log("colorize sync", rc);
-        float ms = 0.0f;
-        (void)cudaEventElapsedTime(&ms, s_evStart, s_evStop);
-        LUCHS_LOG_HOST("[CAPY][time] colorize=%.3f ms (w=%d h=%d)", (double)ms, width, height);
+        (void)cudaEventElapsedTime(&colorMs, s_evStart, s_evStop);
+    } else {
+        colorize_iterations_to_pbo(
+            static_cast<const uint16_t*>(state.d_iterations.get()),
+            static_cast<uchar4*>(map.ptr),
+            width, height, maxIterations, renderStream
+        );
+        auto rc = cudaPeekAtLastError();
+        if (rc != cudaSuccess) throw_with_log("colorize launch", rc);
+    }
+
+    // 4) kompakte, getaktete Perf-Zeile
+    if (gate) {
+        LUCHS_LOG_HOST("[PERF] %d %.3f  %.3f   %.3f   %d %d %d  %d",
+                       state.frameCount,
+                       (double)state.deltaTime,
+                       (double)capyMs,
+                       (double)colorMs,
+                       width, height, maxIterations,
+                       state.pboIndex);
     }
 }
 
@@ -339,7 +358,7 @@ void renderCudaFrame(
 void renderCudaFrame(RendererState& state, const FrameContext& fctx,
                      double& newOffsetX, double& newOffsetY)
 {
-    (void)s_pauseZoom; // Flag wird nur zentral in FramePipeline beachtet
+    (void)s_pauseZoom; // Flag wird zentral in FramePipeline beachtet
 
     const int    width  = fctx.width;
     const int    height = fctx.height;
