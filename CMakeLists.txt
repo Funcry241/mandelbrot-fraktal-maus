@@ -321,26 +321,31 @@ endif()
 option(OTTER_LINK_VERBOSE "Add /VERBOSE:LIB to MSVC link for diagnostics" ON)
 if(MSVC)
   if(OTTER_LINK_VERBOSE)
-    target_link_options(mandelbrot_otterdream PRIVATE /VERBOSE:LIB)
+    target_link_options(mandelbrot_otterdream PRIVATE $<$<LINK_LANGUAGE:CXX>:/VERBOSE:LIB>)
   endif()
 
   target_link_options(mandelbrot_otterdream PRIVATE
     # Release: kein Incremental & Optimierungen
-    $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/OPT:REF>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/OPT:ICF>>
-    # Security: Release & Debug
-    $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/DYNAMICBASE>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/HIGHENTROPYVA>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/guard:cf>>
-    $<$<CONFIG:Debug>  :$<HOST_LINK:/NXCOMPAT>>
-    $<$<CONFIG:Debug>  :$<HOST_LINK:/DYNAMICBASE>>
-    $<$<CONFIG:Debug>  :$<HOST_LINK:/HIGHENTROPYVA>>
-    $<$<CONFIG:Debug>  :$<HOST_LINK:/guard:cf>>
+    $<$<AND:$<CONFIG:Release>,$<LINK_LANGUAGE:CXX>>:/INCREMENTAL:NO>
+    $<$<AND:$<CONFIG:Release>,$<LINK_LANGUAGE:CXX>>:/OPT:REF>
+    $<$<AND:$<CONFIG:Release>,$<LINK_LANGUAGE:CXX>>:/OPT:ICF>
+
+    # Sicherheitsflags Release
+    $<$<AND:$<CONFIG:Release>,$<LINK_LANGUAGE:CXX>>:/NXCOMPAT>
+    $<$<AND:$<CONFIG:Release>,$<LINK_LANGUAGE:CXX>>:/DYNAMICBASE>
+    $<$<AND:$<CONFIG:Release>,$<LINK_LANGUAGE:CXX>>:/HIGHENTROPYVA>
+    $<$<AND:$<CONFIG:Release>,$<LINK_LANGUAGE:CXX>>:/guard:cf>
+
+    # Sicherheitsflags Debug (ohne /OPT:*)
+    $<$<AND:$<CONFIG:Debug>,$<LINK_LANGUAGE:CXX>>:/NXCOMPAT>
+    $<$<AND:$<CONFIG:Debug>,$<LINK_LANGUAGE:CXX>>:/DYNAMICBASE>
+    $<$<AND:$<CONFIG:Debug>,$<LINK_LANGUAGE:CXX>>:/HIGHENTROPYVA>
+    $<$<AND:$<CONFIG:Debug>,$<LINK_LANGUAGE:CXX>>:/guard:cf>
+
     # Reproducible builds – immer
-    $<HOST_LINK:/Brepro>
+    $<$<LINK_LANGUAGE:CXX>:/Brepro>
   )
+
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "HIGHENTROPYVA erfordert 64-bit (/MACHINE:X64). Bitte 64-bit Toolchain verwenden.")
   endif()
@@ -356,7 +361,7 @@ add_custom_command(TARGET mandelbrot_otterdream POST_BUILD
 
 # Linux: -pthread explizit
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  target_link_options(mandelbrot_otterdream PRIVATE -pthread)
+  target_link_options(mandelbrot_otterdream PRIVATE $<$<LINK_LANGUAGE:CXX>:-pthread>)
 endif()
 
 # ---------------------- CUDA 13 Guard ----------------------
