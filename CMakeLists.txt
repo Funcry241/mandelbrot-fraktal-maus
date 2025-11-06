@@ -1,6 +1,6 @@
-##### Otter: CMake – Replikatoren nur bei Feature; gezielte /wd4702 nur für perturb_core.cpp.
-##### Schneefuchs: Strenge /WX bleibt global; optionale Quellen via target_sources.
-##### Maus: Default-Build warnungsfrei; klare Schalter OTTER_USE_ORT/NVRTC.
+##### Otter: CMake – Replikatoren nur bei Feature; gezielte /wd4702 nur für perturb_core.cpp; CUDA-Driver robust via nvcuda.lib.
+##### Schneefuchs: Strenge /WX bleibt global; optionale Quellen via target_sources; Multi-Config-Stabilität ohne CUDA::cuda_driver.
+##### Maus: Default-Build warnungsfrei; klare Schalter OTTER_USE_ORT/NVRTC; kein GLU; CUDA Runtime = Shared.
 ##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
@@ -13,7 +13,7 @@ endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Map imported RELWITHDEBINFO -> Release for vcpkg targets that don't define it
+# Map imported RELWITHDEBINFO -> Release for vcpkg/CUDA imported targets that don't define it
 set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release)
 
 # ---------------------- Ninja QoL --------------------------
@@ -254,20 +254,32 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
   Threads::Threads
 )
 
-# --- CUDA Driver API verlinken (für cu* Symbole & GL-Interop) ---
+# --- CUDA Driver API robust verlinken (kein hartes CUDA::cuda_driver) --------
+# Bevorzugt direktes nvcuda.lib; nur wenn das importierte Target *tatsächlich*
+# eine IMPORTED_LOCATION in irgendeiner Config hat, darf es genutzt werden.
+set(_USE_CUDA_DRIVER_TARGET OFF)
 if(TARGET CUDA::cuda_driver)
+  foreach(_cfg IN ITEMS RELEASE DEBUG RELWITHDEBINFO MINSIZEREL)
+    get_target_property(_drv_loc CUDA::cuda_driver IMPORTED_LOCATION_${_cfg})
+    if(_drv_loc)
+      set(_USE_CUDA_DRIVER_TARGET ON)
+    endif()
+  endforeach()
+endif()
+
+if(_USE_CUDA_DRIVER_TARGET)
   target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cuda_driver)
 else()
-  # Fallback: nvcuda.lib direkt suchen
   find_library(NVCUDA_LIB
     NAMES nvcuda
     HINTS
-      "${CUDAToolkit_LIBRARY_DIR}"
+      "${CUDAToolkit_LIBRARY_DIR}" "${CUDAToolkit_LIBRARY_DIR}/x64"
       "$ENV{CUDA_PATH}/lib/x64"
+      "$ENV{CUDA_PATH_V13_2}/lib/x64" "$ENV{CUDA_PATH_V13_1}/lib/x64" "$ENV{CUDA_PATH_V13_0}/lib/x64"
       "$ENV{SystemRoot}/System32"
   )
   if(NOT NVCUDA_LIB)
-    message(FATAL_ERROR "nvcuda.lib nicht gefunden (CUDA Driver API benötigt).")
+    message(FATAL_ERROR "CUDA Driver API nicht gefunden: nvcuda.lib fehlt und CUDA::cuda_driver ohne IMPORTED_LOCATION.")
   endif()
   target_link_libraries(mandelbrot_otterdream PRIVATE "${NVCUDA_LIB}")
 endif()
