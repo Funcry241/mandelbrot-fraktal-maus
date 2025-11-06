@@ -1,6 +1,6 @@
-///// Otter: Nacktmull — frame pipeline with Axolotel Coupler; draw-lag-1; perf warm-up; VISUAL FALLBACK removed; Dachs-HUD center handling + left Warzenschwein stays visible during Help.
-///// Schneefuchs: ASCII logs; pch first; small deterministic diffs; Stats forced next frame when E>0; WS-Left always on with Dachs-Help.
-///// Maus: Compute → Metrics → Overlays → Axolotel → Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex; center uses Help, left shows standard WS text.
+///// Otter: Nacktmull — frame pipeline with Axolotel Coupler; draw-lag-1; perf warm-up; VISUAL FALLBACK removed; Dachs-HUD center handling, Warzenschwein-HUD off during Help (F1).
+///// Schneefuchs: ASCII logs; pch first; small deterministic diffs; Stats forced next frame when E>0; WS disabled while Help active.
+///// Maus: Compute → Metrics → Overlays → Axolotel → Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex; center shows Help; WS hidden on Help.
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
@@ -291,24 +291,17 @@ namespace {
                                         drawTexId, state);
         }
 
-        // Warzenschwein-HUD: Linke Spalte bleibt sichtbar, auch wenn Dachs-Help aktiv ist.
+        // Warzenschwein-HUD:
+        // - normal anzeigen, wenn Help AUS ist
+        // - vollständig AUS, wenn Help AN ist (F1), damit nur das Dachs-HUD sichtbar ist.
         if constexpr (Settings::warzenschweinOverlayEnabled) {
-            // Basistext immer bauen
-            state.warzenschweinText = HudText::build(fctx, state);
-
             if (!DachsHUD::help_enabled()) {
-                // Klassischer einspaltiger Modus
+                // Klassischer Modus
+                state.warzenschweinText = HudText::build(fctx, state);
                 WarzenschweinOverlay::setText(state.warzenschweinText);
             } else {
-                // Dachs-HUD aktiv: Center zeigt Help, Links zeigt das normale Warzenschwein-HUD.
-                DachsHUD::set_text(DachsHUD::Pane::Left, state.warzenschweinText);
-                DachsHUD::set_visible(DachsHUD::Pane::Left, true);
-
-                DachsHUD::set_text(DachsHUD::Pane::Center, DachsHUD::build_help_text());
-                DachsHUD::set_visible(DachsHUD::Pane::Center, true);
-
-                // Right bleibt wie konfiguriert (sichtbar nur, wenn Text gesetzt)
-                WarzenschweinOverlay::setText(""); // Inhalt egal; drawOverlay nutzt Dachs-Modell.
+                // Help aktiv: WS-Overlay aus
+                WarzenschweinOverlay::setText("");
             }
             WarzenschweinOverlay::drawOverlay(fctx.zoom);
         }
