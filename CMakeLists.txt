@@ -1,6 +1,6 @@
-##### Otter: MSVC-only: Suppress C4702 („unreachable code“) für zwei gezielte Dateien.
-##### Schneefuchs: File-scoped; globale Strenge bleibt erhalten.
-##### Maus: Temporär, bis die Stellen refaktoriert sind.
+##### Otter: CMake – Replikatoren nur bei Feature; gezielte /wd4702 nur für perturb_core.cpp.
+##### Schneefuchs: Strenge /WX bleibt global; optionale Quellen via target_sources.
+##### Maus: Default-Build warnungsfrei; klare Schalter OTTER_USE_ORT/NVRTC.
 ##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
@@ -150,24 +150,33 @@ add_executable(mandelbrot_otterdream
   src/axolotel_coupler.cpp
   # Dachs HUD (tri-pane top layout)
   src/dachs_hud.cpp
-  # ---------- Replikatoren (new) ----------
+  # ---------- Replikatoren (core; optionale werden unten ergänzt) ----------
   src/perturb_core.cpp
   src/perturb_orbit_mp.cpp
-  src/ai/onnx_model.cpp
-  src/ai/aop_controller.cpp
   src/luchs_dsl.cpp
-  src/coloring_runtime_nvrtc.cpp
 )
+
+# ---------- Optionale Replikatoren-Quellen hinzufügen ----------
+if(OTTER_USE_ORT)
+  target_sources(mandelbrot_otterdream PRIVATE
+    src/ai/onnx_model.cpp
+    src/ai/aop_controller.cpp
+  )
+endif()
+
+if(OTTER_USE_NVRTC)
+  target_sources(mandelbrot_otterdream PRIVATE
+    src/coloring_runtime_nvrtc.cpp
+  )
+endif()
 
 # --- MSVC: gezielt Warning C4702 (unreachable code) unterdrücken -------------
 # Wichtig: NACH add_executable und mit RELATIVEN Pfaden wie oben angegeben.
 if(MSVC)
-  foreach(_src IN ITEMS
+  set_source_files_properties(
     src/perturb_core.cpp
-    src/ai/onnx_model.cpp
+    PROPERTIES COMPILE_OPTIONS "/wd4702"
   )
-    set_source_files_properties(${_src} PROPERTIES COMPILE_OPTIONS "/wd4702")
-  endforeach()
 endif()
 
 # ---------------------- Compile-Options --------------------
