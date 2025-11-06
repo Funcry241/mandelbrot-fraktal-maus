@@ -1,7 +1,7 @@
-# ##### Otter: CMake – Early prune + map (nur Release/Debug) VOR project(); hartes Mapping RelWithDebInfo/MinSizeRel → Release.
-# ##### Schneefuchs: CUDA Runtime via CUDA_RUNTIME_LIBRARY Shared; CUDA-Driver optional (OTTER_LINK_CUDA_DRIVER); Link-Verbose default ON.
-# ##### Maus: Stabiler Configure ohne IMPORTED_LOCATION-Fehler; AppLocal behält $<TARGET_RUNTIME_DLLS>; GLU sauber ausgeschlossen.
-# ##### Datei: CMakeLists.txt
+##### Otter: CMake – Early prune + map (nur Release/Debug) VOR project(); hartes Mapping RelWithDebInfo/MinSizeRel → Release.
+##### Schneefuchs: CUDA Runtime via CUDA_RUNTIME_LIBRARY Shared; CUDA-Driver optional (OTTER_LINK_CUDA_DRIVER); Link-Verbose default ON.
+##### Maus: Stabiler Configure ohne IMPORTED_LOCATION-Fehler; AppLocal behält $<TARGET_RUNTIME_DLLS>; GLU sauber ausgeschlossen.
+##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
@@ -12,10 +12,16 @@ if(CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_CONFIGURATION_TYPES "Release;Debug" CACHE STRING "Supported configs" FORCE)
 endif()
 
-# Alle "verwandten" Configs strikt auf Release mappen (verhindert cudart/cuda_driver-RelWithDebInfo-Brüche)
-foreach(_cfg RelWithDebInfo MinSizeRel RelWithDebInfoInit Checked Profile)
-  set(CMAKE_MAP_IMPORTED_CONFIG_${_cfg} Release)
-endforeach()
+# Striktes Mapping "verwandter" Konfigurationen -> Release
+# (verhindert cudart/cuda_driver-RelWithDebInfo-Brüche)
+set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release)
+set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL     Release)
+# Falls Toolchains/Packages gemischte Schreibweisen nutzen: doppelt absichern
+set(CMAKE_MAP_IMPORTED_CONFIG_RelWithDebInfo Release)
+set(CMAKE_MAP_IMPORTED_CONFIG_MinSizeRel     Release)
+# Optionale exotische Profile auf Release biegen (falls auftauchen)
+set(CMAKE_MAP_IMPORTED_CONFIG_PROFILE        Release)
+set(CMAKE_MAP_IMPORTED_CONFIG_CHECKED        Release)
 
 # try_compile etc. ebenfalls konsistent in Release ausführen (wichtig für MSVC+CUDA)
 set(CMAKE_TRY_COMPILE_CONFIGURATION Release)
@@ -177,6 +183,9 @@ add_executable(mandelbrot_otterdream
   src/luchs_dsl.cpp
 )
 
+# WICHTIG: sicherstellen, dass Linker-Sprache korrekt erkannt wird
+set_property(TARGET mandelbrot_otterdream PROPERTY LINKER_LANGUAGE CXX)
+
 # ---------- Optionale Replikatoren-Quellen ----------
 if(OTTER_USE_ORT)
   target_sources(mandelbrot_otterdream PRIVATE
@@ -272,19 +281,9 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
   Threads::Threads
 )
 
-# Windows-Systemlibs für GLFW/Win32-Fensterkette explizit (einige Targets propagieren nicht sauber)
+# Win32-Systemlibs, falls GLFW-Toolchain diese nicht vollständig propagated
 if(WIN32)
-  target_link_libraries(mandelbrot_otterdream PRIVATE
-    user32
-    gdi32
-    shell32
-    advapi32
-  )
-endif()
-
-# CUDA Runtime explizit als Fallback – falls die Propagation in dieser Toolchain/Config hakt
-if(TARGET CUDA::cudart)
-  target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cudart)
+  target_link_libraries(mandelbrot_otterdream PRIVATE user32 gdi32 shell32 advapi32)
 endif()
 
 # --- CUDA Driver API (optional) ----------------------------
@@ -339,23 +338,18 @@ if(MSVC)
     target_link_options(mandelbrot_otterdream PRIVATE /VERBOSE:LIB)
   endif()
 
+  # Sicherheits- & Repro-Flags für alle Konfigurationen:
   target_link_options(mandelbrot_otterdream PRIVATE
-    # Release: kein Incremental & Optimierungen
-    $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/OPT:REF>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/OPT:ICF>>
-    # Security: Release & Debug
-    $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/DYNAMICBASE>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/HIGHENTROPYVA>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/guard:cf>>
-    $<$<CONFIG:Debug>  :$<HOST_LINK:/NXCOMPAT>>
-    $<$<CONFIG:Debug>  :$<HOST_LINK:/DYNAMICBASE>>
-    $<$<CONFIG:Debug>  :$<HOST_LINK:/HIGHENTROPYVA>>
-    $<$<CONFIG:Debug>  :$<HOST_LINK:/guard:cf>>
-    # Reproducible builds – immer
-    $<HOST_LINK:/Brepro>
+    /NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf /Brepro
   )
+
+  # Release-spezifisch:
+  target_link_options(mandelbrot_otterdream PRIVATE
+    $<$<CONFIG:Release>:/INCREMENTAL:NO>
+    $<$<CONFIG:Release>:/OPT:REF>
+    $<$<CONFIG:Release>:/OPT:ICF>
+  )
+
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "HIGHENTROPYVA erfordert 64-bit (/MACHINE:X64). Bitte 64-bit Toolchain verwenden.")
   endif()
@@ -392,6 +386,6 @@ endif()
 message(STATUS "Otter Configs: ${CMAKE_CONFIGURATION_TYPES}")
 message(STATUS "Map RelWithDebInfo -> ${CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO}")
 
-# Diagnose: Linker-Sprache anzeigen (sollte i.d.R. CXX sein)
+# Bonus: Linker-Language sichtbar machen
 get_target_property(_OTTER_LINK_LANG mandelbrot_otterdream LINKER_LANGUAGE)
 message(STATUS "Otter Linker language: ${_OTTER_LINK_LANG}")
