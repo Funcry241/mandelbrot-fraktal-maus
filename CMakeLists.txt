@@ -329,9 +329,24 @@ endif()
 # Windows: deterministisch & gehärtet
 if(MSVC)
   target_link_options(mandelbrot_otterdream PRIVATE
-    $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO /OPT:REF /OPT:ICF>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
-    $<$<CONFIG:Debug>  :$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
+    # Release: kein Incremental & Optimierungen
+    $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO>>
+    $<$<CONFIG:Release>:$<HOST_LINK:/OPT:REF>>
+    $<$<CONFIG:Release>:$<HOST_LINK:/OPT:ICF>>
+
+    # Sicherheitsflags Release
+    $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT>>
+    $<$<CONFIG:Release>:$<HOST_LINK:/DYNAMICBASE>>
+    $<$<CONFIG:Release>:$<HOST_LINK:/HIGHENTROPYVA>>
+    $<$<CONFIG:Release>:$<HOST_LINK:/guard:cf>>
+
+    # Sicherheitsflags Debug (ohne /OPT:*)
+    $<$<CONFIG:Debug>:$<HOST_LINK:/NXCOMPAT>>
+    $<$<CONFIG:Debug>:$<HOST_LINK:/DYNAMICBASE>>
+    $<$<CONFIG:Debug>:$<HOST_LINK:/HIGHENTROPYVA>>
+    $<$<CONFIG:Debug>:$<HOST_LINK:/guard:cf>>
+
+    # Reproducible builds – immer
     $<HOST_LINK:/Brepro>
   )
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
