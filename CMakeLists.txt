@@ -1,6 +1,6 @@
-##### Otter: CMake – Replikatoren-Quellen per Feature; gezielte /wd4702 nur für perturb_core.cpp; CUDA Runtime explizit.
-##### Schneefuchs: Driver-API optional (OTTER_LINK_CUDA_DRIVER, default OFF); OpenGL unter Windows direkt opengl32 → kein GLU.
-##### Maus: Warnungsfrei & robust in Multi-Config; kein Hard-Fail mehr auf CUDA::cuda_driver / nvcuda.lib.
+##### Otter: CMake – Multi-Config entschlacken (nur Release/Debug); kein explizites CUDA::cudart/cudadevrt.
+##### Schneefuchs: CUDA Runtime via `CUDA_RUNTIME_LIBRARY Shared`; Driver-API bleibt optional per OTTER_LINK_CUDA_DRIVER.
+##### Maus: Konfiguration stabil; kein RelWithDebInfo-Bruch, kein LIBCMT-Konflikt, GLU ferngehalten.
 ##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
@@ -12,7 +12,13 @@ if(POLICY CMP0091)
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# Map imported RELWITHDEBINFO -> Release (falls ein Paket es doch triggert)
 set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release)
+
+# ---- Nur Release/Debug bei Multi-Config-Generatoren (VS, Ninja Multi) ----
+if(CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_CONFIGURATION_TYPES "Release;Debug" CACHE STRING "Supported configs" FORCE)
+endif()
 
 # ---------------------- Ninja QoL --------------------------
 if(CMAKE_GENERATOR MATCHES "Ninja")
@@ -64,7 +70,7 @@ find_package(OpenGL REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 
-# OpenGL link target: unter Windows direkt opengl32, sonst OpenGL::GL
+# OpenGL lib: unter Windows direkt opengl32, sonst OpenGL::GL
 if(WIN32)
   set(_OPENGL_GL_LIB opengl32)
 else()
@@ -249,12 +255,11 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
 )
 
 # ---------------------- Link (Basis) -----------------------
+# WICHTIG: Kein explizites CUDA::cudart/cudadevrt – CMake/NVCC fügt das passend hinzu.
 target_link_libraries(mandelbrot_otterdream PRIVATE
   ${_OPENGL_GL_LIB}
   ${GLEW_LINK_ITEM}
   ${GLFW_LINK_ITEM}
-  CUDA::cudart
-  $<$<TARGET_EXISTS:CUDA::cudadevrt>:CUDA::cudadevrt>
   Threads::Threads
 )
 
@@ -262,7 +267,7 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
 if(OTTER_LINK_CUDA_DRIVER)
   set(_USE_CUDA_DRIVER_TARGET OFF)
   if(TARGET CUDA::cuda_driver)
-    foreach(_cfg IN ITEMS RELEASE DEBUG RELWITHDEBINFO MINSIZEREL)
+    foreach(_cfg IN ITEMS RELEASE DEBUG)
       get_target_property(_drv_loc CUDA::cuda_driver IMPORTED_LOCATION_${_cfg})
       if(_drv_loc)
         set(_USE_CUDA_DRIVER_TARGET ON)
@@ -285,6 +290,19 @@ if(OTTER_LINK_CUDA_DRIVER)
       target_link_libraries(mandelbrot_otterdream PRIVATE "${CUDA_DRIVER_LIB}")
     else()
       message(STATUS "CUDA Driver API nicht gefunden – überspringe Verlinkung (cu* ungenutzt).")
+    endif()
+  endif()
+endif()
+
+# --- Anti-GLU Filter (Sicherheitsnetz) ---------------------
+if(WIN32)
+  get_target_property(_OTTER_LINK_LIBS mandelbrot_otterdream LINK_LIBRARIES)
+  if(_OTTER_LINK_LIBS)
+    set(_OTTER_LINK_LIBS_FILTERED "${_OTTER_LINK_LIBS}")
+    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX [[(^|;)OpenGL::GLU($|;)]])
+    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX [[(^|;)[Gg][Ll][Uu]32(\.lib)?($|;)]])
+    if(NOT _OTTER_LINK_LIBS_FILTERED STREQUAL "${_OTTER_LINK_LIBS}")
+      set_property(TARGET mandelbrot_otterdream PROPERTY LINK_LIBRARIES "${_OTTER_LINK_LIBS_FILTERED}")
     endif()
   endif()
 endif()
@@ -313,7 +331,7 @@ if(MSVC)
   target_link_options(mandelbrot_otterdream PRIVATE
     $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO /OPT:REF /OPT:ICF>>
     $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
-    $<$<CONFIG:RelWithDebInfo>:$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
+    $<$<CONFIG:Debug>  :$<HOST_LINK:/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf>>
     $<HOST_LINK:/Brepro>
   )
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -331,6 +349,6 @@ if(NOT CUDA_GL_INTEROP_HEADER)
 endif()
 
 # ---------------------- Defaults ---------------------------
-if(NOT CMAKE_BUILD_TYPE)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
