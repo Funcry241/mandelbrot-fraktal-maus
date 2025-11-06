@@ -221,7 +221,7 @@ target_compile_options(mandelbrot_otterdream PRIVATE
 set_target_properties(mandelbrot_otterdream PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON
   CUDA_RESOLVE_DEVICE_SYMBOLS ON
-  # IMPORTANT: shared cudart to avoid CRT conflicts (LNK4098 with LIBCMT)
+  # Hinweis: Shared, um LIBCMT-Konflikte zu vermeiden
   CUDA_RUNTIME_LIBRARY Shared
 )
 
@@ -245,7 +245,7 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
   $<$<BOOL:${OTTER_USE_NVRTC}>:OTTER_USE_NVRTC=1>
 )
 
-# ---------------------- Link -------------------------------
+# ---------------------- Link (Basis) -----------------------
 target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
   ${GLEW_LINK_ITEM}
@@ -253,6 +253,24 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
   $<$<TARGET_EXISTS:CUDA::cudadevrt>:CUDA::cudadevrt>
   Threads::Threads
 )
+
+# --- CUDA Driver API verlinken (für cu* Symbole & GL-Interop) ---
+if(TARGET CUDA::cuda_driver)
+  target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cuda_driver)
+else()
+  # Fallback: nvcuda.lib direkt suchen
+  find_library(NVCUDA_LIB
+    NAMES nvcuda
+    HINTS
+      "${CUDAToolkit_LIBRARY_DIR}"
+      "$ENV{CUDA_PATH}/lib/x64"
+      "$ENV{SystemRoot}/System32"
+  )
+  if(NOT NVCUDA_LIB)
+    message(FATAL_ERROR "nvcuda.lib nicht gefunden (CUDA Driver API benötigt).")
+  endif()
+  target_link_libraries(mandelbrot_otterdream PRIVATE "${NVCUDA_LIB}")
+endif()
 
 # --- Anti-GLU Filter für Windows (erzwingt "no GLU") -------
 if(WIN32)
