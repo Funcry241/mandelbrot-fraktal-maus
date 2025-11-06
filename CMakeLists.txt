@@ -1,24 +1,33 @@
-##### Otter: CMake – Multi-Config entschlackt (nur Release/Debug); cudart/cudadevrt sicher dazugelinkt.
-##### Schneefuchs: CUDA Runtime via CUDA_RUNTIME_LIBRARY Shared; Driver-API optional per OTTER_LINK_CUDA_DRIVER.
-##### Maus: Stabil & warnungsfrei; Link-Verbose automatisch AN (abschaltbar via -DOTTER_LINK_VERBOSE=OFF).
+##### Otter: CMake – Early prune + map (nur Release/Debug) VOR project(); hartes Mapping RelWithDebInfo/MinSizeRel → Release.
+##### Schneefuchs: CUDA Runtime via CUDA_RUNTIME_LIBRARY Shared; CUDA-Driver optional (OTTER_LINK_CUDA_DRIVER); Link-Verbose default ON.
+##### Maus: Stabiler Configure ohne IMPORTED_LOCATION-Fehler; AppLocal behält $<TARGET_RUNTIME_DLLS>; GLU sauber ausgeschlossen.
 ##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
+
+# ---- Early: Multi-Config entschlacken und Imported-Config-Mapping setzen ----
+# (MUSS vor project() und vor find_package(...) passieren!)
+if(CMAKE_CONFIGURATION_TYPES)
+  # Nur Release & Debug zulassen – Cache-Historie überschreiben
+  set(CMAKE_CONFIGURATION_TYPES "Release;Debug" CACHE STRING "Supported configs" FORCE)
+endif()
+
+# Alle "verwandten" Configs strikt auf Release mappen (verhindert cudart/cuda_driver-RelWithDebInfo-Brüche)
+foreach(_cfg RelWithDebInfo MinSizeRel RelWithDebInfoInit Checked Profile)
+  set(CMAKE_MAP_IMPORTED_CONFIG_${_cfg} Release)
+endforeach()
+
+# try_compile etc. ebenfalls konsistent in Release ausführen (wichtig für MSVC+CUDA)
+set(CMAKE_TRY_COMPILE_CONFIGURATION Release)
+
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
-# Allow MSVC runtime to be controlled by MSVC_RUNTIME_LIBRARY
+# MSVC Runtime über MSVC_RUNTIME_LIBRARY steuerbar machen
 if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW)
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-# Map imported RELWITHDEBINFO -> Release (falls ein Paket es doch triggert)
-set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release)
-
-# ---- Nur Release/Debug bei Multi-Config-Generatoren (VS, Ninja Multi) ----
-if(CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_CONFIGURATION_TYPES "Release;Debug" CACHE STRING "Supported configs" FORCE)
-endif()
 
 # ---------------------- Ninja QoL --------------------------
 if(CMAKE_GENERATOR MATCHES "Ninja")
@@ -255,21 +264,13 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
 )
 
 # ---------------------- Link (Basis) -----------------------
-# Hinweis: Wir fügen cudart/cudadevrt unten *zusätzlich & sicher* hinzu, falls vorhanden.
+# Kein explizites CUDA::cudart/cudadevrt – NVCC/CMake zieht das korrekt dazu.
 target_link_libraries(mandelbrot_otterdream PRIVATE
   ${_OPENGL_GL_LIB}
   ${GLEW_LINK_ITEM}
   ${GLFW_LINK_ITEM}
   Threads::Threads
 )
-
-# --- CUDA Runtime explizit & safe (hilft gegen LNK1120 bei separater Device-Linkage) ---
-if(TARGET CUDA::cudart)
-  target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cudart)
-endif()
-if(TARGET CUDA::cudadevrt)
-  target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cudadevrt)
-endif()
 
 # --- CUDA Driver API (optional) ----------------------------
 if(OTTER_LINK_CUDA_DRIVER)
@@ -315,10 +316,34 @@ if(WIN32)
   endif()
 endif()
 
-# --- /VERBOSE:LIB standardmäßig AN (abschaltbar) -----------
+# ---------------------- Link-Optionen ----------------------
+# OTTER_LINK_VERBOSE standardmäßig AN (MSVC: /VERBOSE:LIB)
 option(OTTER_LINK_VERBOSE "Add /VERBOSE:LIB to MSVC link for diagnostics" ON)
-if(MSVC AND OTTER_LINK_VERBOSE)
-  target_link_options(mandelbrot_otterdream PRIVATE /VERBOSE:LIB)
+if(MSVC)
+  if(OTTER_LINK_VERBOSE)
+    target_link_options(mandelbrot_otterdream PRIVATE /VERBOSE:LIB)
+  endif()
+
+  target_link_options(mandelbrot_otterdream PRIVATE
+    # Release: kein Incremental & Optimierungen
+    $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO>>
+    $<$<CONFIG:Release>:$<HOST_LINK:/OPT:REF>>
+    $<$<CONFIG:Release>:$<HOST_LINK:/OPT:ICF>>
+    # Security: Release & Debug
+    $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT>>
+    $<$<CONFIG:Release>:$<HOST_LINK:/DYNAMICBASE>>
+    $<$<CONFIG:Release>:$<HOST_LINK:/HIGHENTROPYVA>>
+    $<$<CONFIG:Release>:$<HOST_LINK:/guard:cf>>
+    $<$<CONFIG:Debug>  :$<HOST_LINK:/NXCOMPAT>>
+    $<$<CONFIG:Debug>  :$<HOST_LINK:/DYNAMICBASE>>
+    $<$<CONFIG:Debug>  :$<HOST_LINK:/HIGHENTROPYVA>>
+    $<$<CONFIG:Debug>  :$<HOST_LINK:/guard:cf>>
+    # Reproducible builds – immer
+    $<HOST_LINK:/Brepro>
+  )
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "HIGHENTROPYVA erfordert 64-bit (/MACHINE:X64). Bitte 64-bit Toolchain verwenden.")
+  endif()
 endif()
 
 # --- AppLocal: Runtime-DLLs neben die EXE kopieren ----------
@@ -334,34 +359,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_link_options(mandelbrot_otterdream PRIVATE -pthread)
 endif()
 
-# Windows: deterministisch & gehärtet
-if(MSVC)
-  target_link_options(mandelbrot_otterdream PRIVATE
-    # Release: kein Incremental & Optimierungen
-    $<$<CONFIG:Release>:$<HOST_LINK:/INCREMENTAL:NO>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/OPT:REF>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/OPT:ICF>>
-
-    # Sicherheitsflags Release
-    $<$<CONFIG:Release>:$<HOST_LINK:/NXCOMPAT>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/DYNAMICBASE>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/HIGHENTROPYVA>>
-    $<$<CONFIG:Release>:$<HOST_LINK:/guard:cf>>
-
-    # Sicherheitsflags Debug (ohne /OPT:*)
-    $<$<CONFIG:Debug>:$<HOST_LINK:/NXCOMPAT>>
-    $<$<CONFIG:Debug>:$<HOST_LINK:/DYNAMICBASE>>
-    $<$<CONFIG:Debug>:$<HOST_LINK:/HIGHENTROPYVA>>
-    $<$<CONFIG:Debug>:$<HOST_LINK:/guard:cf>>
-
-    # Reproducible builds – immer
-    $<HOST_LINK:/Brepro>
-  )
-  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "HIGHENTROPYVA erfordert 64-bit (/MACHINE:X64). Bitte 64-bit Toolchain verwenden.")
-  endif()
-endif()
-
 # ---------------------- CUDA 13 Guard ----------------------
 if(CUDAToolkit_VERSION VERSION_LESS 13.0)
   message(FATAL_ERROR "CUDA 13.0 oder neuer ist erforderlich. Gefunden: ${CUDAToolkit_VERSION}")
@@ -371,7 +368,11 @@ if(NOT CUDA_GL_INTEROP_HEADER)
   message(FATAL_ERROR "cuda_gl_interop.h nicht im CUDAToolkit gefunden.")
 endif()
 
-# ---------------------- Defaults ---------------------------
+# ---------------------- Defaults (Single-Config) -----------
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
+
+# Diagnose: zeige aktive Config-Typen/Mappings einmalig
+message(STATUS "Otter Configs: ${CMAKE_CONFIGURATION_TYPES}")
+message(STATUS "Map RelWithDebInfo -> ${CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO}")
