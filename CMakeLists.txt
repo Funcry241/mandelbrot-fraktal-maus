@@ -1,6 +1,6 @@
-##### Otter: CMake – Replikatoren nur bei Feature; gezielte /wd4702 nur für perturb_core.cpp; CUDA-Driver robust via nvcuda.lib.
-##### Schneefuchs: Strenge /WX bleibt global; optionale Quellen via target_sources; Multi-Config-Stabilität ohne CUDA::cuda_driver.
-##### Maus: Default-Build warnungsfrei; klare Schalter OTTER_USE_ORT/NVRTC; kein GLU; CUDA Runtime = Shared.
+##### Otter: CMake – Replikatoren-Quellen per Feature; gezielte /wd4702 nur für perturb_core.cpp; CUDA Runtime explizit.
+##### Schneefuchs: Driver-API optional (OTTER_LINK_CUDA_DRIVER, default OFF); OpenGL unter Windows direkt opengl32 → kein GLU.
+##### Maus: Warnungsfrei & robust in Multi-Config; kein Hard-Fail mehr auf CUDA::cuda_driver / nvcuda.lib.
 ##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
@@ -12,8 +12,6 @@ if(POLICY CMP0091)
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-# Map imported RELWITHDEBINFO -> Release for vcpkg/CUDA imported targets that don't define it
 set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release)
 
 # ---------------------- Ninja QoL --------------------------
@@ -62,14 +60,21 @@ set(CMAKE_CUDA_EXTENSIONS OFF)
 
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
-find_package(OpenGL REQUIRED)                 # OpenGL::GL
+find_package(OpenGL REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 
-# --- GLFW (prefer imported target, else direct import-lib) ----
+# OpenGL link target: unter Windows direkt opengl32, sonst OpenGL::GL
+if(WIN32)
+  set(_OPENGL_GL_LIB opengl32)
+else()
+  set(_OPENGL_GL_LIB OpenGL::GL)
+endif()
+
+# --- GLFW --------------------------------------------------
 set(GLFW_LINK_ITEM "")
 if(WIN32)
-  find_package(glfw3 CONFIG REQUIRED)         # usually provides 'glfw'
+  find_package(glfw3 CONFIG REQUIRED)
   if(TARGET glfw)
     set(GLFW_LINK_ITEM glfw)
   elseif(TARGET glfw3)
@@ -85,7 +90,7 @@ else()
   set(GLFW_LINK_ITEM glfw)
 endif()
 
-# --- GLEW (dynamic, no GLU; robust mapping) ----------------
+# --- GLEW (dynamic, no GLU) --------------------------------
 set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
 remove_definitions(-DGLEW_STATIC)
 
@@ -113,9 +118,10 @@ else()
   endif()
 endif()
 
-# ---------------------- Replikatoren Options ----------------
+# ---------------------- Feature-Schalter -------------------
 option(OTTER_USE_ORT   "Enable ONNX Runtime AOP (Policy-Replikatoren)" OFF)
 option(OTTER_USE_NVRTC "Enable NVRTC Coloring (Color-Replikatoren)"   OFF)
+option(OTTER_LINK_CUDA_DRIVER "Link the CUDA Driver API (cu*). Enable only if you call cu* symbols." OFF)
 
 # ---------------------- Executable -------------------------
 add_executable(mandelbrot_otterdream
@@ -156,7 +162,7 @@ add_executable(mandelbrot_otterdream
   src/luchs_dsl.cpp
 )
 
-# ---------- Optionale Replikatoren-Quellen hinzufügen ----------
+# ---------- Optionale Replikatoren-Quellen ----------
 if(OTTER_USE_ORT)
   target_sources(mandelbrot_otterdream PRIVATE
     src/ai/onnx_model.cpp
@@ -170,8 +176,7 @@ if(OTTER_USE_NVRTC)
   )
 endif()
 
-# --- MSVC: gezielt Warning C4702 (unreachable code) unterdrücken -------------
-# Wichtig: NACH add_executable und mit RELATIVEN Pfaden wie oben angegeben.
+# --- MSVC: gezielt C4702 nur für perturb_core.cpp ----------
 if(MSVC)
   set_source_files_properties(
     src/perturb_core.cpp
@@ -221,7 +226,6 @@ target_compile_options(mandelbrot_otterdream PRIVATE
 set_target_properties(mandelbrot_otterdream PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON
   CUDA_RESOLVE_DEVICE_SYMBOLS ON
-  # Hinweis: Shared, um LIBCMT-Konflikte zu vermeiden
   CUDA_RUNTIME_LIBRARY Shared
 )
 
@@ -236,7 +240,6 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
   GLEW_NO_IMAGING
   GLEW_NO_GLU
   CAPY_DEFAULT_ON=1
-  # Windows headers lean & no min/max macros
   $<$<CXX_COMPILER_ID:MSVC>:NOMINMAX WIN32_LEAN_AND_MEAN>
 )
 target_compile_definitions(mandelbrot_otterdream PRIVATE
@@ -247,57 +250,46 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
 
 # ---------------------- Link (Basis) -----------------------
 target_link_libraries(mandelbrot_otterdream PRIVATE
-  OpenGL::GL
+  ${_OPENGL_GL_LIB}
   ${GLEW_LINK_ITEM}
   ${GLFW_LINK_ITEM}
+  CUDA::cudart
   $<$<TARGET_EXISTS:CUDA::cudadevrt>:CUDA::cudadevrt>
   Threads::Threads
 )
 
-# --- CUDA Driver API robust verlinken (kein hartes CUDA::cuda_driver) --------
-# Bevorzugt direktes nvcuda.lib; nur wenn das importierte Target *tatsächlich*
-# eine IMPORTED_LOCATION in irgendeiner Config hat, darf es genutzt werden.
-set(_USE_CUDA_DRIVER_TARGET OFF)
-if(TARGET CUDA::cuda_driver)
-  foreach(_cfg IN ITEMS RELEASE DEBUG RELWITHDEBINFO MINSIZEREL)
-    get_target_property(_drv_loc CUDA::cuda_driver IMPORTED_LOCATION_${_cfg})
-    if(_drv_loc)
-      set(_USE_CUDA_DRIVER_TARGET ON)
-    endif()
-  endforeach()
-endif()
-
-if(_USE_CUDA_DRIVER_TARGET)
-  target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cuda_driver)
-else()
-  find_library(NVCUDA_LIB
-    NAMES nvcuda
-    HINTS
-      "${CUDAToolkit_LIBRARY_DIR}" "${CUDAToolkit_LIBRARY_DIR}/x64"
-      "$ENV{CUDA_PATH}/lib/x64"
-      "$ENV{CUDA_PATH_V13_2}/lib/x64" "$ENV{CUDA_PATH_V13_1}/lib/x64" "$ENV{CUDA_PATH_V13_0}/lib/x64"
-      "$ENV{SystemRoot}/System32"
-  )
-  if(NOT NVCUDA_LIB)
-    message(FATAL_ERROR "CUDA Driver API nicht gefunden: nvcuda.lib fehlt und CUDA::cuda_driver ohne IMPORTED_LOCATION.")
+# --- CUDA Driver API (optional) ----------------------------
+if(OTTER_LINK_CUDA_DRIVER)
+  set(_USE_CUDA_DRIVER_TARGET OFF)
+  if(TARGET CUDA::cuda_driver)
+    foreach(_cfg IN ITEMS RELEASE DEBUG RELWITHDEBINFO MINSIZEREL)
+      get_target_property(_drv_loc CUDA::cuda_driver IMPORTED_LOCATION_${_cfg})
+      if(_drv_loc)
+        set(_USE_CUDA_DRIVER_TARGET ON)
+      endif()
+    endforeach()
   endif()
-  target_link_libraries(mandelbrot_otterdream PRIVATE "${NVCUDA_LIB}")
-endif()
 
-# --- Anti-GLU Filter für Windows (erzwingt "no GLU") -------
-if(WIN32)
-  get_target_property(_OTTER_LINK_LIBS mandelbrot_otterdream LINK_LIBRARIES)
-  if(_OTTER_LINK_LIBS)
-    set(_OTTER_LINK_LIBS_FILTERED "${_OTTER_LINK_LIBS}")
-    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX [[(^|;)OpenGL::GLU($|;)]])
-    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX [[(^|;)[Gg][Ll][Uu]32(\.lib)?($|;)]])
-    if(NOT _OTTER_LINK_LIBS_FILTERED STREQUAL "${_OTTER_LINK_LIBS}")
-      set_property(TARGET mandelbrot_otterdream PROPERTY LINK_LIBRARIES "${_OTTER_LINK_LIBS_FILTERED}")
+  if(_USE_CUDA_DRIVER_TARGET)
+    target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cuda_driver)
+  else()
+    find_library(CUDA_DRIVER_LIB
+      NAMES cuda nvcuda
+      HINTS
+        "${CUDAToolkit_LIBRARY_DIR}" "${CUDAToolkit_LIBRARY_DIR}/x64"
+        "$ENV{CUDA_PATH}/lib/x64"
+        "$ENV{CUDA_PATH_V13_2}/lib/x64" "$ENV{CUDA_PATH_V13_1}/lib/x64" "$ENV{CUDA_PATH_V13_0}/lib/x64"
+        "$ENV{SystemRoot}/System32"
+    )
+    if(CUDA_DRIVER_LIB)
+      target_link_libraries(mandelbrot_otterdream PRIVATE "${CUDA_DRIVER_LIB}")
+    else()
+      message(STATUS "CUDA Driver API nicht gefunden – überspringe Verlinkung (cu* ungenutzt).")
     endif()
   endif()
 endif()
 
-# Optional: /VERBOSE:LIB für Diagnose (einmalig einschalten, dann zurück)
+# Optional: /VERBOSE:LIB
 option(OTTER_LINK_VERBOSE "Add /VERBOSE:LIB to MSVC link for diagnostics" OFF)
 if(MSVC AND OTTER_LINK_VERBOSE)
   target_link_options(mandelbrot_otterdream PRIVATE /VERBOSE:LIB)
