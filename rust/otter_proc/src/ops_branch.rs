@@ -1,6 +1,6 @@
 ///// Otter: Branch-Orchestrator – Build → pack ZIP (Rust) → Autogit → Summary → pinker Run-Hint.
-///// Schneefuchs: Keine PowerShell; saubere Pfade ohne \\?\-Präfix; keine ungenutzten Imports; borrows statt Moves.
-///// Maus: ASCII-Block am Ende; Branch default „wupp“; deterministische Logs.
+///// Schneefuchs: Keine PowerShell; saubere Pfade; borrows statt Moves; Warnung um `autogit_ok` entfernt.
+///// Maus: ASCII-Endblock; Default-Branch „wupp“; deterministische Logs.
 ///// Datei: rust/otter_proc/src/ops_branch.rs
 
 use std::ffi::OsStr;
@@ -27,7 +27,6 @@ fn current_branch_or_default(root: &Path) -> String {
 }
 
 fn win_path_str(p: &Path) -> String {
-    // Windows-freundlich: Backslashes, ohne \\?\ Präfix
     let mut s = p.to_string_lossy().to_string();
     if s.starts_with(r"\\?\") { s = s[4..].to_string(); }
     s.replace('/', "\\")
@@ -40,27 +39,24 @@ fn print_magenta_run_hint(root: &Path, artifact: &Path) {
     let exe = win_path_str(artifact);
     let bin = win_path_str(&vcpkg_bin);
 
-    // ANSI magenta
     println!("\x1b[95m+------------------------------------------------------------------+");
     println!("| RUN NOW                                                          |");
     println!("+------------------------------------------------------------------+");
     if have_vcpkg_bin {
         println!("| 1) Add DLL path for this session:                                |");
-        println!("|    $env:Path=\"{};$env:Path\" |", bin);
+        println!("|    set \"PATH={};%PATH%\"                          |", bin);
         println!("|                                                                  |");
         println!("| 2) Launch the app:                                               |");
-        println!("|    \"{}\" |", exe);
+        println!("|    \"{}\"                                              |", exe);
     } else {
         println!("| Launch the app:                                                  |");
-        println!("|    \"{}\" |", exe);
+        println!("|    \"{}\"                                              |", exe);
         println!("| (vcpkg bin dir not found; if needed, add it to PATH manually)    |");
     }
     println!("+------------------------------------------------------------------+\x1b[0m");
 }
 
-/// Öffentlicher Einstieg für den Branch-Pfad.
-/// Ablauf: Build (Full) → Pack (Rust) → Autogit push → Summary (+ Run-Hint).
-/// Rückgabe: Prozess-Exitcode.
+/// Öffentlicher Einstieg: Build (Full) → Pack (Rust) → Autogit push → Summary (+ Run-Hint).
 pub fn exec(root: &Path) -> i32 {
     runner_term::enable_ansi();
 
@@ -71,29 +67,19 @@ pub fn exec(root: &Path) -> i32 {
     let par   = env_opt_u32("OTTER_PARALLEL");
     let br    = current_branch_or_default(root);
 
-    crate::runner::runner_term::out_info(
+    runner_term::out_info(
         "RUNNER",
         &format!("branch-mode start ts_ms={} root={} cfg={} branch={}",
                  start_ms, crate::prockit::display_path(root), cfg, br),
     );
 
-    // 1) Full Build fahren
-    let build_rc = commands::full::run(
-        root,
-        &cfg,
-        cp.as_deref(),
-        bp.as_deref(),
-        par,
-    );
+    // 1) Full Build
+    let build_rc = commands::full::run(root, &cfg, cp.as_deref(), bp.as_deref(), par);
     let (ok_build, code_build) = match build_rc {
         Ok(code) => (code == 0, code),
-        Err(e) => {
-            eprintln!("[ERROR] full build error: {}", e);
-            return 1;
-        }
+        Err(e) => { eprintln!("[ERROR] full build error: {}", e); return 1; }
     };
     if !ok_build {
-        // Früh zusammenfassen (Build fehlgeschlagen)
         let end_ms = epoch_ms();
         let artifact = find_artifact(root);
         summary::print_end_summary(summary::EndSummary {
@@ -110,42 +96,37 @@ pub fn exec(root: &Path) -> i32 {
         return code_build;
     }
 
-    // 2) Quellen packen (reiner Rust)
+    // 2) Quellen packen (Rust)
     let zip_path = match commands::pack::run(root, None, false) {
-        Ok(p) => {
-            crate::runner::runner_term::out_info("RUNNER",
-                &format!("packed sources: {}", p.display()));
-            Some(p)
-        }
-        Err(e) => {
-            crate::runner::runner_term::out_warn("RUNNER",
-                &format!("packing skipped/failed: {}", e));
-            None
-        }
+        Ok(p) => { runner_term::out_info("RUNNER", &format!("packed sources: {}", p.display())); Some(p) }
+        Err(e) => { runner_term::out_info("WARN", &format!("packing skipped/failed: {}", e)); None }
     };
 
-    // 3) Autogit push (auch wenn Pack scheitert — Build war OK)
-    let mut autogit_ok = false;
+    // 3) Autogit push
     let msg = if let Some(z) = &zip_path {
-        format!("chore: branch build + pack ({})", z.file_name().and_then(OsStr::to_str).unwrap_or("zip"))
+        format!("chore: branch build + pack ({})",
+                z.file_name().and_then(OsStr::to_str).unwrap_or("zip"))
     } else {
         "chore: branch build".to_string()
     };
-    if commands::autogit::run(root, Some(msg), false, "origin", Some(&br), true).unwrap_or(1) == 0 {
-        autogit_ok = true;
-    }
+    let (autogit_ok, final_ok, final_code) =
+        match commands::autogit::run(root, Some(msg), false, "origin", Some(&br), true) {
+            Ok(_) => (true, true, 0),
+            Err(e) => {
+                runner_term::out_info("WARN", &format!("autogit failed: {}", e));
+                (false, false, 1)
+            }
+        };
 
-    // 4) Abschluss-Summary
+    // 4) Abschluss
     let end_ms = epoch_ms();
     let artifact = find_artifact(root);
     let mut notes = Vec::new();
-    if let Some(z) = &zip_path {
-        notes.push(format!("sources_zip={}", z.display()));
-    }
+    if let Some(z) = &zip_path { notes.push(format!("sources_zip={}", z.display())); }
 
     summary::print_end_summary(summary::EndSummary {
-        success: true,
-        exit_code: 0,
+        success: final_ok,
+        exit_code: final_code,
         started_ms: start_ms,
         elapsed_ms: end_ms.saturating_sub(start_ms),
         artifact_path: artifact.as_ref().map(|p| p.to_string_lossy().to_string()),
@@ -155,9 +136,7 @@ pub fn exec(root: &Path) -> i32 {
         notes,
     });
 
-    if let Some(art) = artifact.as_deref() {
-        print_magenta_run_hint(root, art);
-    }
+    if let Some(art) = artifact.as_deref() { print_magenta_run_hint(root, art); }
 
-    0
+    if final_ok { 0 } else { final_code }
 }

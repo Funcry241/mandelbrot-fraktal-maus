@@ -1,7 +1,15 @@
-# ///// OtterDream — Build System
-# ///// File: CMakeLists.txt
-# ///// Purpose: Modern CMake setup (+ Replikatoren Options & Sources)
-# ///// Notes: Adds OTTER_USE_ORT / OTTER_USE_NVRTC; wires new src/* files.
+##### Otter: MSVC-only: Suppress C4702 („unreachable code“) für zwei gezielte Dateien.
+##### Schneefuchs: File-scoped; globale Strenge bleibt erhalten.
+##### Maus: Temporär, bis die Stellen refaktoriert sind.
+##### Datei: CMakeLists.txt  (am Ende oder nahe der Quelldatei-Liste einfügen)
+
+if (MSVC)
+  set_source_files_properties(
+    ${CMAKE_SOURCE_DIR}/src/perturb_core.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/onnx_model.cpp
+    PROPERTIES COMPILE_OPTIONS "/wd4702"
+  )
+endif()
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)

@@ -1,7 +1,8 @@
-///// Otter: Packt Quellen in ZIP (Rust/CUDA/C/C++/CMake/TOML/JSON/Shader/Skripte) – Excludes wie vcpkg/.vscode-Whitelist aktiv.
-///// Schneefuchs: Deterministische Sortierung; Windows-freundliche Pfade → / im ZIP; kein PowerShell.
-///// Maus: ASCII-Logs via runner_term; Default-Ziel out/exports/OtterSources_yyyyMMdd_HHmm.zip; Rückgabe des ZIP-Pfads.
-///// Plus: Kollision-sicherer Dateiname & automatisches Pruning (max. 5 OtterSources-Archive).
+///// Otter: Pack – quellseitig vorgehalten; aktuell nicht vom CLI verdrahtet.
+///// Schneefuchs: Warnungen im Default-Build aus; Helper bleiben wartbar.
+///// Maus: Nur File-scope-Attribut, sonst unverändert.
+///// Datei: rust/otter_proc/src/commands/pack.rs
+#![allow(dead_code)]
 
 use std::fs::{self, File};
 use std::io::{self, BufWriter};
@@ -60,12 +61,7 @@ fn unique_suffix(path: &Path) -> PathBuf {
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("OtterSources");
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     for i in 2..=999 {
-        let cand = parent.join(format!("{}_{}{}.zip",
-            // Falls der Stem bereits "OtterSources_YYYY..." enthält, hänge nur _N an
-            stem,
-            if stem.starts_with("OtterSources_") { "" } else { "" },
-            i
-        ));
+        let cand = parent.join(format!("{}_{}.zip", stem, i));
         if !cand.exists() { return cand; }
     }
     // Fallback: epoch-seconds
@@ -236,11 +232,7 @@ pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<Pa
     // Pruning: halte nur die letzten N (Default 5) OtterSources_*.zip
     let keep = max_keep_from_env();
     if let Some(exports_dir) = out_path.parent() {
-        if let Ok(removed) = prune_old_sources(exports_dir, keep) {
-            if verbose {
-                out_info("ZIP", &format!("pruned_keep={} removed={}", keep, removed));
-            }
-        }
+        let _ = prune_old_sources(exports_dir, keep);
     }
 
     // Output
@@ -258,7 +250,6 @@ pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<Pa
         out_info("ZIP", &format!("Other  = {}", counts.other));
         out_info("ZIP", "done.");
     } else {
-        // Eine kompakte, einzelne Zusammenfassungszeile
         out_info(
             "PACK",
             &format!(

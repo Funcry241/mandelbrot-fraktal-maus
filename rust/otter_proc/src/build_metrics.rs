@@ -1,6 +1,6 @@
-///// Otter: Build-Metrics – phases.json (atomisch) + runs.jsonl (History je Lauf).
-///// Schneefuchs: Keine externen Crates; Windows/Posix; Seed aus neuestem Geschwister; stabile ASCII-JSON.
-///// Maus: snapshot(); RunSummary; write_extended_run(); minimal escape; deterministisch.
+///// Otter: BuildMetrics – Phasen-Metriken (HashMap) + runs.jsonl; atomische Writes; panic-sicheres Seeding.
+///// Schneefuchs: ASCII-JSON-Writer, keine Fremd-Deps; deterministische Pfade; Windows-safe.
+///// Maus: Klare öffentliche API (load_or_seed, save, snapshot, write_extended_run).
 ///// Datei: rust/otter_proc/src/build_metrics.rs
 
 use std::collections::HashMap;
@@ -29,26 +29,22 @@ impl BuildMetrics {
         let dir = metrics_dir(workdir);
         let file = metrics_file_path(workdir);
 
-        // Hygiene: remove old root-level .build_metrics.tmp* files from a prior bug
+        // Hygiene: alte .build_metrics.tmp* im Root entfernen (Bug-Altlast)
         cleanup_root_tmp_files(workdir);
 
-        // Ensure directory exists
         let _ = fs::create_dir_all(&dir);
 
-        // Case 1: current metrics file exists → load
         if file.exists() {
             let m = load_json_map(&file).unwrap_or_default();
             return (BuildMetrics { phases_ms: m }, file, None);
         }
 
-        // Case 2: try to seed from latest sibling directory (same parent)
         if let Some(seed_json) = find_latest_sibling_metrics_json(workdir) {
             let m = load_json_map(&seed_json).unwrap_or_default();
-            let _ = save_json_map_atomically(&file, &m); // establish local
+            let _ = save_json_map_atomically(&file, &m);
             return (BuildMetrics { phases_ms: m }, file, Some(seed_json));
         }
 
-        // Case 3: nothing found → start empty
         let m = BuildMetrics::default();
         let _ = save_json_map_atomically(&file, &m.phases_ms);
         (m, file, None)
@@ -103,11 +99,9 @@ pub fn write_extended_run(
     phases: &HashMap<String, u128>,
     counters_opt: Option<&HashMap<String, u128>>,
 ) -> std::io::Result<()> {
-    // Verzeichnis sicherstellen
     let dir = metrics_dir(workdir);
     let _ = fs::create_dir_all(&dir);
 
-    // JSON-Objekt in String zusammensetzen (ASCII/minimal escapes)
     let mut s = String::with_capacity(512);
     s.push('{');
 
@@ -155,7 +149,6 @@ pub fn write_extended_run(
 
     s.push_str("}\n");
 
-    // Append (oder anlegen)
     let mut f = OpenOptions::new()
         .create(true)
         .append(true)
@@ -186,7 +179,7 @@ fn save_json_map_atomically(path: &Path, map: &HashMap<String, u128>) -> std::io
         .unwrap_or_else(|| Path::new("."))
         .join(format!("metrics.json.tmp{}", now_millis()));
 
-    // Compose JSON into memory to keep write atomic
+    // Compose JSON in-memory → atomisch
     let mut out = String::with_capacity(64 + map.len() * 32);
     out.push_str("{\"phases\":{");
     let mut first = true;
@@ -217,33 +210,28 @@ fn load_json_map(path: &Path) -> Option<HashMap<String, u128>> {
     let mut f = File::open(path).ok()?;
     f.read_to_string(&mut s).ok()?;
 
-    // Find the "phases" object
+    // "phases" finden
     let ph_idx = s.find("\"phases\"")?;
     let brace = s[ph_idx..].find('{')?;
     let start = ph_idx + brace + 1;
 
-    // Scan key:value pairs until matching closing brace of the phases object
+    // key:number-Paare scannen bis '}' der phases-Map
     let mut depth = 1usize;
     let bytes = s.as_bytes();
     let mut i = start;
     let mut map = HashMap::new();
 
-    // Tiny state machine: "key" : number
     while i < bytes.len() && depth > 0 {
-        // skip whitespace and commas
         while i < bytes.len()
             && (((bytes[i] as char).is_ascii_whitespace()) || bytes[i] == b',')
-        {
-            i += 1;
-        }
+        { i += 1; }
         if i >= bytes.len() { break; }
         if bytes[i] == b'}' {
-            depth -= 1;
-            i += 1;
-            continue;
+            depth -= 1; i += 1; continue;
         }
         if bytes[i] != b'"' { break; }
-        // read key
+
+        // key
         i += 1;
         let key_start = i;
         while i < bytes.len() && bytes[i] != b'"' { i += 1; }
@@ -251,13 +239,13 @@ fn load_json_map(path: &Path) -> Option<HashMap<String, u128>> {
         let key = &s[key_start..i];
         i += 1;
 
-        // skip spaces and colon
+        // :
         while i < bytes.len() && (bytes[i] as char).is_ascii_whitespace() { i += 1; }
         if i >= bytes.len() || bytes[i] != b':' { break; }
         i += 1;
         while i < bytes.len() && (bytes[i] as char).is_ascii_whitespace() { i += 1; }
 
-        // read number
+        // number
         let num_start = i;
         while i < bytes.len() && (bytes[i] as char).is_ascii_digit() { i += 1; }
         if num_start == i { break; }
@@ -265,18 +253,16 @@ fn load_json_map(path: &Path) -> Option<HashMap<String, u128>> {
         if let Ok(val) = num_str.parse::<u128>() {
             map.insert(key.to_string(), val);
         }
-        // next pair
     }
 
     Some(map)
 }
 
-/// Find newest sibling folder (lexicographically) that has .build_metrics/metrics.json
+/// Neueste Geschwistermappe (lexikographisch) mit .build_metrics/metrics.json finden.
 fn find_latest_sibling_metrics_json(workdir: &Path) -> Option<PathBuf> {
     let parent = workdir.parent()?;
     let current_name = workdir.file_name()?.to_string_lossy().to_string();
 
-    // Collect candidates
     let mut names_paths: Vec<(String, PathBuf)> = Vec::new();
     if let Ok(rd) = fs::read_dir(parent) {
         for e in rd.flatten() {
@@ -290,12 +276,11 @@ fn find_latest_sibling_metrics_json(workdir: &Path) -> Option<PathBuf> {
             }
         }
     }
-    // Sort by name desc (timestamps like 20251101_09 sort well)
     names_paths.sort_by(|a, b| b.0.cmp(&a.0));
     names_paths.into_iter().map(|(_, p)| p).next()
 }
 
-/// Remove obsolete root-level .build_metrics.tmp* files created by an older buggy implementation.
+/// Obsolete Root-Tempfiles löschen (.build_metrics.tmp*)
 fn cleanup_root_tmp_files(workdir: &Path) {
     if let Ok(rd) = fs::read_dir(workdir) {
         for e in rd.flatten() {
@@ -329,9 +314,7 @@ fn escape_json_str(s: &str) -> String {
             b'\n' => { out.push('\\'); out.push('n'); }
             b'\r' => { out.push('\\'); out.push('r'); }
             b'\t' => { out.push('\\'); out.push('t'); }
-            _ if *b < 0x20 => { // control chars
-                out.push_str(&format!("\\u{:04x}", *b as u16));
-            }
+            _ if *b < 0x20 => { out.push_str(&format!("\\u{:04x}", *b as u16)); }
             _ => out.push(*b as char),
         }
     }
