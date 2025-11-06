@@ -1,15 +1,7 @@
 ##### Otter: MSVC-only: Suppress C4702 („unreachable code“) für zwei gezielte Dateien.
 ##### Schneefuchs: File-scoped; globale Strenge bleibt erhalten.
 ##### Maus: Temporär, bis die Stellen refaktoriert sind.
-##### Datei: CMakeLists.txt  (am Ende oder nahe der Quelldatei-Liste einfügen)
-
-if (MSVC)
-  set_source_files_properties(
-    ${CMAKE_SOURCE_DIR}/src/perturb_core.cpp
-    ${CMAKE_SOURCE_DIR}/src/ai/onnx_model.cpp
-    PROPERTIES COMPILE_OPTIONS "/wd4702"
-  )
-endif()
+##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
@@ -166,6 +158,17 @@ add_executable(mandelbrot_otterdream
   src/luchs_dsl.cpp
   src/coloring_runtime_nvrtc.cpp
 )
+
+# --- MSVC: gezielt Warning C4702 (unreachable code) unterdrücken -------------
+# Wichtig: NACH add_executable und mit RELATIVEN Pfaden wie oben angegeben.
+if(MSVC)
+  foreach(_src IN ITEMS
+    src/perturb_core.cpp
+    src/ai/onnx_model.cpp
+  )
+    set_source_files_properties(${_src} PROPERTIES COMPILE_OPTIONS "/wd4702")
+  endforeach()
+endif()
 
 # ---------------------- Compile-Options --------------------
 if(MSVC)
