@@ -62,8 +62,9 @@ namespace {
     // Copy-State Helfer (Ctrl+C)
     static bool copy_state_to_clipboard_or_file(const RendererState& s) {
         char line[160];
-        std::snprintf(line, sizeof(line), "cx=%.9f cy=%.9f zoom=%.6f",
-                      (double)s.center.x, (double)s.center.y, (double)s.zoom);
+        std::snprintf(line, sizeof(line),
+              "cx=%.9f cy=%.9f z=%.3e",
+              (double)s.center.x, (double)s.center.y, (double)s.zoom);
 
     #if defined(_WIN32)
         const std::string utf8 = std::string(line);
@@ -169,14 +170,14 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
             state->center.x = Settings::initialOffsetX;
             state->center.y = Settings::initialOffsetY;
             state->zoom     = Settings::initialZoom;
-            LUCHS_LOG_HOST("[RESET] cx=%.9f cy=%.9f z=%.6f",
+            LUCHS_LOG_HOST("[RESET] cx=%.9f cy=%.9f z=%.3e",
                            (double)state->center.x, (double)state->center.y, (double)state->zoom);
             break;
         }
         case GLFW_KEY_C: {
             if (mods & GLFW_MOD_CONTROL) {
                 const bool ok = copy_state_to_clipboard_or_file(*state);
-                LUCHS_LOG_HOST("[CLIP] cx=%.9f cy=%.9f z=%.6f ok=%d",
+                LUCHS_LOG_HOST("[CLIP] cx=%.9f cy=%.9f z=%.3e ok=%d",
                                (double)state->center.x, (double)state->center.y, (double)state->zoom, ok ? 1 : 0);
             }
             break;

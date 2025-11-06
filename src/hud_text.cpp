@@ -1,6 +1,6 @@
 ///// Otter: HUD-Text – kompakte Center-Statistik (3 Zeilen), deterministisch formatiert.
-///// Schneefuchs: ASCII-only; pch zuerst; keine GL- oder Device-Abhängigkeiten; /WX clean.
-///// Maus: Feste Präzision (cx/cy 9, z 6, fps 1); fallback auf dt für FPS falls nötig.
+///// Schneefuchs: ASCII-only; pch zuerst; keine GL- oder Device-Abhängigkeiten; /WX clean; C-Locale wird vorausgesetzt.
+///// Maus: Feste Präzision (cx/cy 9, z wissenschaftlich %.3e, fps 1); Fallback auf dt für FPS falls nötig.
 ///// Datei: src/hud_text.cpp
 
 #include "pch.hpp"
@@ -27,7 +27,7 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
     const double cy   = static_cast<double>(state.center.y);
     const double zoom = static_cast<double>(fctx.zoom);
     const int    it   = fctx.maxIterations;
-    const int    tile = std::max(1, fctx.tileSize);
+    const int    tile = std::max(1, static_cast<int>(fctx.tileSize));
     const int    w    = fctx.width;
     const int    h    = fctx.height;
 
@@ -37,10 +37,10 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
         fps = 1.0 / static_cast<double>(fctx.deltaSeconds);
     }
 
-    // Kompakt & stabil formatiert (ASCII)
+    // Kompakt & stabil formatiert (ASCII; C-Locale erwartet)
     char line1[96], line2[96], line3[96];
     std::snprintf(line1, sizeof(line1), "cx=%.9f cy=%.9f", cx, cy);
-    std::snprintf(line2, sizeof(line2), "z=%.6f it=%d tile=%d", zoom, it, tile);
+    std::snprintf(line2, sizeof(line2), "z=%.3e it=%d tile=%d", zoom, it, tile);
     std::snprintf(line3, sizeof(line3), "res=%dx%d fps=%.1f", w, h, fps);
 
     std::string out;
