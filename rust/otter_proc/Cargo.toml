@@ -38,4 +38,4 @@ path = "src/main.rs"
 # Optionaler zweiter Bin (nur lassen, wenn die Datei existiert)
 [[bin]]
 name = "boot"
-path = "src/bin/boot.rs"
+path = "src/boot.rs"
