@@ -1,6 +1,6 @@
-///// Otter: Dachs-HUD -- tri-pane top layout (Left | Center | Right) with centered "Dachs-HUD" help.
-///// Schneefuchs: ASCII-only; pixel-snapped; DPI-scaled metrics; no GL deps; zero hot-path allocs.
-///// Maus: simple state API (set_text/visible/style, toggle_help); renderer builds boxes from model.
+///// Otter: Dachs-HUD -- tri-pane top layout (Left | Center | Right) with centered help; persistent hint-badge state.
+///// Schneefuchs: ASCII-only; pixel-snapped; DPI-scaled; no GL deps; zero hot-path allocs.
+///// Maus: implements set_text/visible/style, toggle_help; adds help-hint controls (enable_help_hint/set_help_hint_text).
 ///// Datei: src/dachs_hud.cpp
 
 #include "dachs_hud.hpp"
@@ -20,6 +20,10 @@ namespace {
         std::string{}, std::string{}, std::string{}
     };
     bool g_help{false};
+
+    // Hint-Badge unten links
+    bool        g_help_hint_enabled = true;
+    std::string g_help_hint_text    = "F1 - Help";
 
     inline int iround(float v) {
         return static_cast<int>(std::lround(v));
@@ -143,5 +147,17 @@ RenderModel build_render_model(int vpW, int vpH, float dpiScale) {
 
     return model;
 }
+
+// --- Hint-Badge-API ----------------------------------------------------------
+
+void enable_help_hint(bool on) noexcept { g_help_hint_enabled = on; }
+bool help_hint_enabled() noexcept { return g_help_hint_enabled; }
+
+void set_help_hint_text(std::string s) {
+    if (s.empty()) g_help_hint_text = "F1 - Help";
+    else           g_help_hint_text = std::move(s);
+}
+
+const std::string& help_hint_text() { return g_help_hint_text; }
 
 } // namespace DachsHUD

@@ -1,6 +1,6 @@
-///// Otter: HUD overlay; zoom/offset/FPS/entropy in deterministic layout; center-top mode for Dachs-HUD help.
-///// Schneefuchs: No duplicate includes; API stable with header; single entrypoint drawOverlay() adapts to help state.
-///// Maus: ASCII-only; minimal allocations per frame; pixel-snap; symmetric columns with equal-height boxes when Dachs-HUD active.
+///// Otter: HUD overlay; zoom/offset/FPS/entropy in deterministic layout; center-top mode for Dachs-HUD help; bottom-left "F1 - Help" badge when help is off.
+///// Schneefuchs: single entry drawOverlay() adapts to help state; stable header API; tri-pane path uses Dachs model.
+///// Maus: ASCII-only; minimal per-frame allocs; pixel-snap; equal-height tri-columns when Dachs-HUD active; subtle badge panel+text.
 ///// Datei: src/warzenschwein_overlay.cpp
 
 #pragma warning(push)
@@ -177,7 +177,10 @@ static void generateOverlayQuadsDefault(const std::string& t, int viewportW, int
 }
 
 void drawOverlay(float /*zoom*/){
-    if(!Settings::warzenschweinOverlayEnabled || !visible || text.empty()) return;
+    const bool help = DachsHUD::help_enabled();
+
+    if(!Settings::warzenschweinOverlayEnabled || !visible) return;
+    if(!help && text.empty()) return;
 
     GLint vp[4]={0,0,0,0}; glGetIntegerv(GL_VIEWPORT,vp);
     const int vpW=vp[2], vpH=vp[3];
@@ -192,7 +195,7 @@ void drawOverlay(float /*zoom*/){
     verts.clear();
     panel.clear();
 
-    if (DachsHUD::help_enabled()) {
+    if (help) {
         // Build tri-pane model from Dachs-HUD
         const float dpiScale = 1.0f; // GLFW content-scale optional; snap keeps crisp edges
         auto model = DachsHUD::build_render_model(vpW, vpH, dpiScale);
@@ -273,6 +276,45 @@ void drawOverlay(float /*zoom*/){
         for(size_t i=0;i+4<panel.size();i+=5){ xMin=std::min(xMin,panel[i]); yMin=std::min(yMin,panel[i+1]);
                                                xMax=std::max(xMax,panel[i]); yMax=std::max(yMax,panel[i+1]); }
         panelBoxes.push_back(Box{ xMin, yMin, xMax, yMax });
+
+        // Kleines Hint-Badge unten links ("F1 - Help"), nur wenn Help nicht aktiv ist
+        if (DachsHUD::help_hint_enabled()) {
+            const std::string& label = DachsHUD::help_hint_text();
+            const float scalePx = std::max(1.0f, Settings::hudPixelSize);
+            const float pad     = Pfau::UI_PADDING;
+            const float margin  = Pfau::UI_MARGIN;
+            const float advX=(glyphW+1)*scalePx, advY=(glyphH+2)*scalePx;
+
+            const float boxW = (float)label.size() * advX;
+            const float boxH = 1.0f * advY;
+            const float x0 = snap(margin + Pfau::UI_PADDING);
+            const float y0 = snap((float)vpH - margin - Pfau::UI_PADDING - boxH);
+
+            // Panelbox fürs Badge
+            const float x1 = x0 + boxW;
+            const float y1 = y0 + boxH;
+            panelBoxes.push_back(Box{ x0 - pad, y0 - pad, x1 + pad, y1 + pad });
+
+            // Textquads fürs Badge
+            const float r=1.0f,g=0.82f,b=0.32f;
+            const float yBase=y0;
+            for(size_t col=0; col<label.size(); ++col){
+                const auto& glyph=WarzenschweinFont::get(label[col]);
+                const float xBase=x0+col*advX;
+                for(int gy=0; gy<glyphH; ++gy){
+                    const uint8_t bits=glyph[gy];
+                    for(int gx=0; gx<glyphW; ++gx){
+                        if((bits>>(7-gx))&1){
+                            const float x=xBase+gx*scalePx, y=yBase+gy*scalePx;
+                            const float q[30]={ x,y,r,g,b, x+scalePx,y,r,g,b,
+                                                x+scalePx,y+scalePx,r,g,b, x,y,r,g,b,
+                                                x+scalePx,y+scalePx,r,g,b, x,y+scalePx,r,g,b };
+                            verts.insert(verts.end(), q, q+30);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // State sichern
