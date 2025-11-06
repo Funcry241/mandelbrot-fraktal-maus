@@ -1,11 +1,12 @@
 ///// Otter: Packt Quellen in ZIP (Rust/CUDA/C/C++/CMake/TOML/JSON/Shader/Skripte) – Excludes wie vcpkg/.vscode-Whitelist aktiv.
 ///// Schneefuchs: Deterministische Sortierung; Windows-freundliche Pfade → / im ZIP; kein PowerShell.
 ///// Maus: ASCII-Logs via runner_term; Default-Ziel out/exports/OtterSources_yyyyMMdd_HHmm.zip; Rückgabe des ZIP-Pfads.
-///// Datei: rust/otter_proc/src/commands/pack.rs
+///// Plus: Kollision-sicherer Dateiname & automatisches Pruning (max. 5 OtterSources-Archive).
 
 use std::fs::{self, File};
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use walkdir::WalkDir;
 use zip::write::FileOptions;
@@ -32,6 +33,8 @@ fn is_verbose() -> bool {
     false
 }
 
+// ---------- helpers -----------------------------------------------------------
+
 fn rel_path(root: &Path, p: &Path) -> Option<String> {
     let rp = p.strip_prefix(root).ok()?;
     let s = rp.to_string_lossy().replace('\\', "/");
@@ -46,8 +49,28 @@ fn ensure_parent_dirs(path: &Path) -> io::Result<()> {
 }
 
 fn default_zip_path(root: &Path) -> PathBuf {
+    // Standard-Muster: yyyyMMdd_HHmm (Minuten-genau, kompatibel zu bestehender Doku)
     let ts = Local::now().format("%Y%m%d_%H%M").to_string();
     root.join("out").join("exports").join(format!("OtterSources_{}.zip", ts))
+}
+
+fn unique_suffix(path: &Path) -> PathBuf {
+    // Falls in derselben Minute mehrfach gepackt wird, vermeide Kollisionen:
+    if !path.exists() { return path.to_path_buf(); }
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("OtterSources");
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    for i in 2..=999 {
+        let cand = parent.join(format!("{}_{}{}.zip",
+            // Falls der Stem bereits "OtterSources_YYYY..." enthält, hänge nur _N an
+            stem,
+            if stem.starts_with("OtterSources_") { "" } else { "" },
+            i
+        ));
+        if !cand.exists() { return cand; }
+    }
+    // Fallback: epoch-seconds
+    let epoch = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    parent.join(format!("{}_{}.zip", stem, epoch))
 }
 
 fn is_excluded_dir(rel: &str, include_dist: bool) -> bool {
@@ -118,12 +141,56 @@ fn bump_counts(c: &mut Counts, rel: &str) {
     c.other += 1;
 }
 
+// ---------- pruning (max 5 OtterSources_*.zip) --------------------------------
+
+fn max_keep_from_env() -> usize {
+    // OTTER_PACK_MAX_KEEP erlaubt Anpassung; Default 5; begrenzt auf 1..50
+    if let Ok(s) = std::env::var("OTTER_PACK_MAX_KEEP") {
+        if let Ok(n) = s.parse::<usize>() {
+            return n.clamp(1, 50);
+        }
+    }
+    5
+}
+
+fn prune_old_sources(exports_dir: &Path, keep: usize) -> io::Result<usize> {
+    let mut zips: Vec<(PathBuf, SystemTime)> = fs::read_dir(exports_dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .map(|n| n.starts_with("OtterSources_") && n.ends_with(".zip"))
+                .unwrap_or(false)
+        })
+        .filter_map(|p| {
+            let mtime = fs::metadata(&p).and_then(|m| m.modified()).ok()?;
+            Some((p, mtime))
+        })
+        .collect();
+
+    zips.sort_by_key(|(_, t)| std::cmp::Reverse(*t));
+    let mut removed = 0usize;
+    for (idx, (p, _)) in zips.into_iter().enumerate() {
+        if idx >= keep {
+            let _ = fs::remove_file(p);
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+// ---------- entry point -------------------------------------------------------
+
 /// Entry point: pack all relevant sources into a ZIP.
 /// Returns: Ok(PathBuf to ZIP) on success.
 pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<PathBuf> {
     let verbose = is_verbose();
 
-    let out_path = out.map(|p| p.to_path_buf()).unwrap_or_else(|| default_zip_path(root));
+    // Zielpfad bestimmen (und bei Kollisionen eindeutigen Namen wählen)
+    let base_out = out.map(|p| p.to_path_buf()).unwrap_or_else(|| default_zip_path(root));
+    let out_path = unique_suffix(&base_out);
 
     if verbose {
         out_info("ZIP", &format!("root={}", root.display()));
@@ -143,7 +210,7 @@ pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<Pa
         if is_excluded_file(&rel) { continue; }
         files.push((abs, rel));
     }
-    files.sort_by(|a, b| a.1.cmp(&b.1));
+    files.sort_by(|a, b| a.1.cmp(&b.1)); // deterministisch
 
     // Create ZIP
     let file = File::create(&out_path)?;
@@ -166,6 +233,16 @@ pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<Pa
     // flush + close
     zip.finish()?.into_inner()?; 
 
+    // Pruning: halte nur die letzten N (Default 5) OtterSources_*.zip
+    let keep = max_keep_from_env();
+    if let Some(exports_dir) = out_path.parent() {
+        if let Ok(removed) = prune_old_sources(exports_dir, keep) {
+            if verbose {
+                out_info("ZIP", &format!("pruned_keep={} removed={}", keep, removed));
+            }
+        }
+    }
+
     // Output
     if verbose {
         out_info("ZIP", &format!("files={}", added));
@@ -185,13 +262,14 @@ pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<Pa
         out_info(
             "PACK",
             &format!(
-                "zip={} files={} Rust={} CUDA={} C={} CXX={} Headers={} CMake={} TOML={} JSON={} GLSL={} Scripts={} Docs={} Other={} include-dist={}",
+                "zip={} files={} Rust={} CUDA={} C={} CXX={} Headers={} CMake={} TOML={} JSON={} GLSL={} Scripts={} Docs={} Other={} include-dist={} keep={}",
                 out_path.display(),
                 added,
                 counts.rust_, counts.cuda, counts.c, counts.cxx, counts.hdr,
                 counts.cmake, counts.toml, counts.json, counts.glsl,
                 counts.scripts, counts.docs, counts.other,
-                if include_dist { "YES" } else { "no" }
+                if include_dist { "YES" } else { "no" },
+                keep
             ),
         );
     }

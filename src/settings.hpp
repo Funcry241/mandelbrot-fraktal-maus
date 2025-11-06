@@ -2,6 +2,7 @@
 ///// Schneefuchs: No hidden macros; single source of truth for flags & cadences; ASCII-only policy
 ///// Maus: performanceLogging=1, ForceAlwaysZoom=1 baseline; 32×8 blocks; no fast-math; deterministic logs
 ///// Datei: src/settings.hpp
+///// Change: + Replikatoren Settings (Perturb / Ai / Luchs)
 
 #pragma once
 
@@ -259,5 +260,27 @@ static_assert(PerfLog::warmupFrames >= 0, "PerfLog::warmupFrames must be >= 0");
 static_assert(NavBias::gainPerSec  >= 0.0, "gainPerSec must be >= 0");
 static_assert(NavBias::halfLifeSec >  0.0, "halfLifeSec must be > 0");
 static_assert(NavBias::maxNdc      >= 0.0, "maxNdc must be >= 0");
+
+// ============================== Replikatoren ================================
+// Orbit / Policy / Color (stubs). Build flags: OTTER_USE_ORT / OTTER_USE_NVRTC.
+
+namespace Perturb {
+    inline constexpr bool   enabled       = false; // Ctrl+P toggelt zur Laufzeit intern
+    inline constexpr int    gatePixelSize = 12;    // unterhalb hiervon => Perturb on
+    inline constexpr double deltaScale    = 1.0;   // Skala der Δ-Fehlerakkumulation
+    inline constexpr int    sandboxTile   = -1;    // -1 = aus; sonst Tile-ID isoliert
+}
+
+namespace Ai {
+    inline constexpr bool        enabled    = false;   // Master-Switch
+    inline constexpr bool        aopEnabled = true;    // nur AOP-Controller
+    inline constexpr const char* ep         = "cuda";  // "cuda" | "dml" | "cpu"
+}
+
+namespace Luchs {
+    inline constexpr bool enabled        = false; // Master
+    inline constexpr bool nvrtc          = false; // nur aktiv mit OTTER_USE_NVRTC
+    inline constexpr int  compileTimeout = 200;   // ms Budget
+}
 
 } // namespace Settings

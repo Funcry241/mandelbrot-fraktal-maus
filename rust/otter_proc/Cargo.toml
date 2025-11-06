@@ -1,19 +1,17 @@
-##### Otter: Minimaler Runner-Crate für robuste Prozessausführung & Log-Filter.
-##### Schneefuchs: clap v4.5 (derive), Edition 2021; default-run fix; autobins aus; Zip via zip + walkdir.
-##### Maus: Windows-first; saubere Vorgabe für cargo run; keine toten Warnungen im Default-Build.
-##### Datei: rust/otter_proc/Cargo.toml
+# Otter: Minimaler Runner-Crate für robuste Prozessausführung & Log-Filter.
+# Schneefuchs: clap v4.5 (derive+env), Edition 2021; default-run fix; autobins aus; Zip via zip + walkdir.
+# Maus: Windows-first; saubere Vorgabe für cargo run; keine toten Warnungen im Default-Build.
+# Datei: rust/otter_proc/Cargo.toml
 
 [package]
 name = "otter_proc"
 version = "0.1.0"
 edition = "2021"
-# Wenn mehrere Binaries existieren, soll `cargo run` ohne --bin immer otter_proc starten:
 default-run = "otter_proc"
-# Keine automatischen Binaries aus src/bin nehmen – nur die unten definierten:
 autobins = false
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "env"] }
 anyhow = "1"
 walkdir = "2.5"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
@@ -25,17 +23,9 @@ lto = "thin"
 opt-level = 3
 
 [features]
-# Optional: aktiviert detect.rs/envkit.rs ohne dead_code-Warnungen
 win-probe = []
-# Standard: keine Zusatzfeatures → sauberer, warnungsfreier Build
 default = []
 
-# --- Binärziele ---
 [[bin]]
 name = "otter_proc"
 path = "src/main.rs"
-
-# Optionaler zweiter Bin (nur lassen, wenn die Datei existiert)
-[[bin]]
-name = "boot"
-path = "src/boot.rs"

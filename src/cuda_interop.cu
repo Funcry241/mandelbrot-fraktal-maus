@@ -2,6 +2,7 @@
 ///// Schneefuchs: Gate nutzt Settings::performanceLogging && PerfLog::*; Header einmalig; Events nur bei Gate
 ///// Maus: /WX clean; Debugdetails hinter debugLogging; Skip bei Ring-Sättigung
 ///// Datei: src/cuda_interop.cu
+///// Change: + Color-Replikatoren NVRTC-Hook vor colorize_iterations_to_pbo()
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
@@ -16,6 +17,7 @@
 #include "capybara_frame_pipeline.cuh"
 #include "capybara_mapping.cuh"    // capy_pixel_steps_from_zoom_scale(...)
 #include "heatmap_metrics.hpp"     // HeatmapMetrics::buildGPU
+#include "coloring_runtime_nvrtc.hpp" // [REPL/COLOR] NVRTC hook
 
 #include <vector>
 #include <stdexcept>
@@ -301,30 +303,46 @@ static void render_to_pbo_core(RendererState& state,
         if (rc != cudaSuccess) throw_with_log("capy_render launch", rc);
     }
 
-    // 3) colorize into mapped PBO
+    // 3) colorize into mapped PBO (NVRTC hook first)
     if (gate) {
         auto rc = cudaEventRecord(s_evStart, renderStream);
         if (rc != cudaSuccess) throw_with_log("eventRecord(start) before colorize", rc);
-        colorize_iterations_to_pbo(
+
+        bool usedNvrtc = ColoringNVRTC::launch_if_active(
             static_cast<const uint16_t*>(state.d_iterations.get()),
             static_cast<uchar4*>(map.ptr),
             width, height, maxIterations, renderStream
         );
-        rc = cudaPeekAtLastError();
-        if (rc != cudaSuccess) throw_with_log("colorize launch", rc);
+        if (!usedNvrtc) {
+            colorize_iterations_to_pbo(
+                static_cast<const uint16_t*>(state.d_iterations.get()),
+                static_cast<uchar4*>(map.ptr),
+                width, height, maxIterations, renderStream
+            );
+            rc = cudaPeekAtLastError();
+            if (rc != cudaSuccess) throw_with_log("colorize launch", rc);
+        }
+
         rc = cudaEventRecord(s_evStop, renderStream);
         if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after colorize", rc);
         rc = cudaEventSynchronize(s_evStop);
         if (rc != cudaSuccess) throw_with_log("colorize sync", rc);
         (void)cudaEventElapsedTime(&colorMs, s_evStart, s_evStop);
     } else {
-        colorize_iterations_to_pbo(
+        bool usedNvrtc = ColoringNVRTC::launch_if_active(
             static_cast<const uint16_t*>(state.d_iterations.get()),
             static_cast<uchar4*>(map.ptr),
             width, height, maxIterations, renderStream
         );
-        auto rc = cudaPeekAtLastError();
-        if (rc != cudaSuccess) throw_with_log("colorize launch", rc);
+        if (!usedNvrtc) {
+            colorize_iterations_to_pbo(
+                static_cast<const uint16_t*>(state.d_iterations.get()),
+                static_cast<uchar4*>(map.ptr),
+                width, height, maxIterations, renderStream
+            );
+            auto rc = cudaPeekAtLastError();
+            if (rc != cudaSuccess) throw_with_log("colorize launch", rc);
+        }
     }
 
     // 4) kompakte, getaktete Perf-Zeile

@@ -2,6 +2,7 @@
 ///// Schneefuchs: ASCII logs; pch first; small deterministic diffs; Stats forced next frame when E>0; WS disabled while Help active.
 ///// Maus: Compute → Metrics → Overlays → Axolotel → Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex; center shows Help; WS hidden on Help.
 ///// Datei: src/frame_pipeline.cpp
+///// Change: + Replikatoren Hooks — [REPL/ORBIT] vor Compute, [REPL/POLICY] nach ensureAnalysisMetrics()
 
 #include "pch.hpp"
 #include <GLFW/glfw3.h>       // glfwGetTime()
@@ -26,7 +27,11 @@
 #include "common.hpp"
 #include "fps_meter.hpp"
 #include "axolotel_hud.hpp" // ✨ Axolotel WOW-HUD (additive, on key-pulse)
-#include "dachs_hud.hpp"    // Dachs-HUD help state/text
+#include "dachs_hud.hpp"    // Dachs-HUD help state/text"
+
+// --- Replikatoren ---------------------------
+#include "ai/aop_controller.hpp"  // [REPL/POLICY]
+#include "perturb_core.hpp"       // [REPL/ORBIT]
 
 #include <vector_types.h>
 #include <vector_functions.h>
@@ -380,11 +385,20 @@ void execute(RendererState& state) {
         }
     }
 
+    // ---- Replikatoren: Orbit-Gate vor Compute ----
+    Repl::Orbit::maybe_prepare_orbit(g_ctx, state);
+
     // ---- Render (CUDA) ----
     computeCudaFrame(g_ctx, state);
 
     // ---- Analysis-Metrics (Cadence-Guard) ----
     ensureAnalysisMetrics(g_ctx, state);
+
+    // ---- Replikatoren: Policy nach Metrics ----
+    if constexpr (Settings::Ai::enabled && Settings::Ai::aopEnabled) {
+        auto d = Repl::Policy::evaluate_tile_policy(g_ctx, state);
+        (void)d; // Entscheidungen folgen in Phase 2
+    }
 
     // ---- Overlays (nutzen die vorliegenden Metrics) ----
     drawOverlays(state, g_ctx);

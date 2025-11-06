@@ -1,7 +1,7 @@
-##### Otter: Modern build (no PS-magic) — dynamic CRT (/MD), dynamic GLEW, CUDA13 guard, Ninja response files, clean target props; Axolotel- & Dachs-HUD sources added.
-##### Schneefuchs: Unified /MD via MSVC_RUNTIME_LIBRARY; caret-diagnostics for CUDA; strict warnings; no GLEW_STATIC; duplicate-free defines.
-##### Maus: Deterministic build; Arch=80/86/89/90; C++23 / CUDA20; separable compilation on; AppLocal-friendly link setup (no GLU) + auto-copy runtime DLLs.
-##### Datei: CMakeLists.txt
+# ///// OtterDream — Build System
+# ///// File: CMakeLists.txt
+# ///// Purpose: Modern CMake setup (+ Replikatoren Options & Sources)
+# ///// Notes: Adds OTTER_USE_ORT / OTTER_USE_NVRTC; wires new src/* files.
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
@@ -113,6 +113,10 @@ else()
   endif()
 endif()
 
+# ---------------------- Replikatoren Options ----------------
+option(OTTER_USE_ORT   "Enable ONNX Runtime AOP (Policy-Replikatoren)" OFF)
+option(OTTER_USE_NVRTC "Enable NVRTC Coloring (Color-Replikatoren)"   OFF)
+
 # ---------------------- Executable -------------------------
 add_executable(mandelbrot_otterdream
   src/main.cpp
@@ -146,6 +150,13 @@ add_executable(mandelbrot_otterdream
   src/axolotel_coupler.cpp
   # Dachs HUD (tri-pane top layout)
   src/dachs_hud.cpp
+  # ---------- Replikatoren (new) ----------
+  src/perturb_core.cpp
+  src/perturb_orbit_mp.cpp
+  src/ai/onnx_model.cpp
+  src/ai/aop_controller.cpp
+  src/luchs_dsl.cpp
+  src/coloring_runtime_nvrtc.cpp
 )
 
 # ---------------------- Compile-Options --------------------
@@ -209,6 +220,8 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
 )
 target_compile_definitions(mandelbrot_otterdream PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:__NV_NO_VECTOR_DEPRECATION_DIAG>
+  $<$<BOOL:${OTTER_USE_ORT}>:OTTER_USE_ORT=1>
+  $<$<BOOL:${OTTER_USE_NVRTC}>:OTTER_USE_NVRTC=1>
 )
 
 # ---------------------- Link -------------------------------
