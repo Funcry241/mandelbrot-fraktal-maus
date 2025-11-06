@@ -1,6 +1,6 @@
-##### Otter: CMake – Multi-Config entschlacken (nur Release/Debug); kein explizites CUDA::cudart/cudadevrt.
-##### Schneefuchs: CUDA Runtime via `CUDA_RUNTIME_LIBRARY Shared`; Driver-API bleibt optional per OTTER_LINK_CUDA_DRIVER.
-##### Maus: Konfiguration stabil; kein RelWithDebInfo-Bruch, kein LIBCMT-Konflikt, GLU ferngehalten.
+##### Otter: CMake – Multi-Config entschlackt (nur Release/Debug); cudart/cudadevrt sicher dazugelinkt.
+##### Schneefuchs: CUDA Runtime via CUDA_RUNTIME_LIBRARY Shared; Driver-API optional per OTTER_LINK_CUDA_DRIVER.
+##### Maus: Stabil & warnungsfrei; Link-Verbose automatisch AN (abschaltbar via -DOTTER_LINK_VERBOSE=OFF).
 ##### Datei: CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
@@ -255,13 +255,21 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
 )
 
 # ---------------------- Link (Basis) -----------------------
-# WICHTIG: Kein explizites CUDA::cudart/cudadevrt – CMake/NVCC fügt das passend hinzu.
+# Hinweis: Wir fügen cudart/cudadevrt unten *zusätzlich & sicher* hinzu, falls vorhanden.
 target_link_libraries(mandelbrot_otterdream PRIVATE
   ${_OPENGL_GL_LIB}
   ${GLEW_LINK_ITEM}
   ${GLFW_LINK_ITEM}
   Threads::Threads
 )
+
+# --- CUDA Runtime explizit & safe (hilft gegen LNK1120 bei separater Device-Linkage) ---
+if(TARGET CUDA::cudart)
+  target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cudart)
+endif()
+if(TARGET CUDA::cudadevrt)
+  target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cudadevrt)
+endif()
 
 # --- CUDA Driver API (optional) ----------------------------
 if(OTTER_LINK_CUDA_DRIVER)
@@ -307,8 +315,8 @@ if(WIN32)
   endif()
 endif()
 
-# Optional: /VERBOSE:LIB
-option(OTTER_LINK_VERBOSE "Add /VERBOSE:LIB to MSVC link for diagnostics" OFF)
+# --- /VERBOSE:LIB standardmäßig AN (abschaltbar) -----------
+option(OTTER_LINK_VERBOSE "Add /VERBOSE:LIB to MSVC link for diagnostics" ON)
 if(MSVC AND OTTER_LINK_VERBOSE)
   target_link_options(mandelbrot_otterdream PRIVATE /VERBOSE:LIB)
 endif()
