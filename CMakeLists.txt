@@ -221,7 +221,8 @@ target_compile_options(mandelbrot_otterdream PRIVATE
 set_target_properties(mandelbrot_otterdream PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON
   CUDA_RESOLVE_DEVICE_SYMBOLS ON
-  CUDA_RUNTIME_LIBRARY Static
+  # IMPORTANT: shared cudart to avoid CRT conflicts (LNK4098 with LIBCMT)
+  CUDA_RUNTIME_LIBRARY Shared
 )
 
 # ---------------------- Includes ---------------------------
