@@ -56,7 +56,7 @@ fn main() {
                 build_preset: None,
                 parallel: None,
             });
-            autogit_after_full = false;
+            autogit_after_full = false; // wir machen unten explizit einen Post-Build-Push für branch_mode
         } else if op.eq_ignore_ascii_case("build") {
             forced_cmd = Some(Commands::Full {
                 cfg: "RelWithDebInfo".to_string(),
@@ -115,10 +115,13 @@ fn main() {
             build_preset: None,
             parallel: None,
         };
-        autogit_after_full = false;
+        // autogit_after_full bleibt false; für branch_mode machen wir unten eine eigene Post-Build-Phase
     }
 
     // ------------------------------ Ausführung --------------------------------
+    // Pfad für evtl. exportierte ZIP merken, damit wir es im Commit-Text nennen können
+    let mut exported_zip: Option<PathBuf> = None;
+
     let res_code: anyhow::Result<i32> = match command {
         Commands::Export { out_dir, max_keep, dry_run } => {
             commands::export::run(&root, out_dir.as_deref(), max_keep, dry_run)
@@ -134,13 +137,10 @@ fn main() {
                 parallel,
             );
 
-            // Nach erfolgreichem Build ggf. Export anschieben:
-            // branch_mode ⇒ Default **AN**, via OTTER_EXPORT_ON_BRANCH (1/true/on) steuerbar (default: true)
-            // sonst ⇒ via OTTER_EXPORT_AFTER_BUILD steuerbar (default: false)
             if let Ok(code) = rc {
                 let success = code == 0;
 
-                // Build-Metriken erfassen
+                // Build-Metriken erfassen (schreibt .build_metrics/*)
                 let end_ms = utils::epoch_ms();
                 let artifact = find_artifact(&root);
                 let branch = git_current_branch(&root)
@@ -179,21 +179,26 @@ fn main() {
                         .ok()
                         .map(|s| {
                             let s = s.to_ascii_lowercase();
-                            // default: true (wenn gesetzt leer → false; wenn nicht gesetzt → None)
                             matches!(s.as_str(), "1" | "true" | "yes" | "on")
                         })
-                        .unwrap_or(true)
+                        .unwrap_or(true) // branch_mode: default AN
                 } else {
                     env_truthy("OTTER_EXPORT_AFTER_BUILD")
                 };
 
                 if success && export_after_build {
-                    let _ = commands::export::run(
+                    match commands::export::run(
                         &root,
                         Some(&root.join("out").join("exports")),
                         5,
                         false,
-                    ).map(|p| runner_term::out_info("EXPORT", &format!("wrote {}", p.display())));
+                    ) {
+                        Ok(p) => {
+                            runner_term::out_info("EXPORT", &format!("wrote {}", p.display()));
+                            exported_zip = Some(p);
+                        }
+                        Err(e) => runner_term::out_info("WARN", &format!("export failed: {}", e)),
+                    }
                 }
             }
 
@@ -217,17 +222,28 @@ fn main() {
         Err(e) => (false, 1, vec![format!("command failed: {}", e)]),
     };
 
+    // Post-Build-Autogit:
+    // - bei normalem Build, wenn autogit_after_full==true (z.B. OTTER_OP=build oder OTTER_UPLOAD=1)
+    // - **und zusätzlich im branch_mode immer**, damit .build_metrics + Export-ZIP ins Repo gelangen
     let mut autogit_ok = false;
-    if run_ok && autogit_after_full {
+    if run_ok && (autogit_after_full || branch_mode) {
         let curr_branch = git_current_branch(&root)
             .or_else(|| std::env::var("OTTER_BRANCH").ok())
             .unwrap_or_else(|| "wupp".to_string());
 
-        match commands::autogit::run(&root, None, false, "origin", Some(&curr_branch), true) {
+        let msg = if let Some(ref z) = exported_zip {
+            let name = z.file_name().and_then(|s| s.to_str()).unwrap_or("export.zip");
+            format!("chore: build metrics + pack ({})", name)
+        } else {
+            "chore: build metrics".to_string()
+        };
+
+        match commands::autogit::run(&root, Some(msg), false, "origin", Some(&curr_branch), true) {
             Ok(_) => autogit_ok = true,
             Err(e) => {
                 autogit_ok = false;
                 notes.push(format!("autogit after build failed: {}", e));
+                // Konsistent zum bisherigen Verhalten: Autogit-Fehler färbt den Lauf rot.
                 run_ok = false;
                 run_code = 1;
             }
@@ -250,7 +266,7 @@ fn main() {
         artifact_path: artifact.map(|p| p.to_string_lossy().to_string()),
         commit_short: git_hash,
         commit_branch: Some(format!("origin/{}", curr_branch)),
-        autogit_pushed: autogit_ok || branch_mode,
+        autogit_pushed: autogit_ok || branch_mode, // pre-push (branch_mode) **oder** post-push ok
         notes,
     });
 
