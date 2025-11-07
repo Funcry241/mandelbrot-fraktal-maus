@@ -1,3 +1,5 @@
+<!-- Datei: ARCHITECTURE.md -->
+
 ```mermaid
 mindmap
   root((Mandelbrot Otterdream))

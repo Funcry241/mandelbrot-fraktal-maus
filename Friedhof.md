@@ -47,4 +47,3 @@ Sie verhindert Doppelvergabe, dokumentiert Historie und skizziert eine mögliche
 ## Changelog
 
 - **2025-09-17**: Initiale Anlage basierend auf Fallback-Scan. Einträge: Eule (reserviert/in Arbeit), Mücke (archiviert), Ringelrobbe (archiviert), Biber (reserviert), Dachs (reserviert), Krähe (reserviert).
-
