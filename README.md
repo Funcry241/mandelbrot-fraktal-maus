@@ -18,7 +18,7 @@ Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeig
 Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom – und kompakte **Epoch-Millis**-Logs.
 
 > **Wichtig (Änderung)**: Ab diesem Stand rendert OtterDream über einen **einzigen aktiven Pfad**:  
-> **Capybara → Iterationen → Colorizer → PBO**.  
+> **Capybara -> Iterationen -> Colorizer -> PBO**.  
 > Es gibt **keinen Referenz-Orbit / keine Perturbation** und **keine EC/Wrapper** im aktiven Code.
 
 ---
@@ -160,8 +160,8 @@ cmake --install build --prefix ./dist
 Header und Source bleiben **synchron**. Kein Drift, kein API-Bruch. Die Robbe wacht.
 
 **Referenz-Signaturen (Auszug):**
-* `src/cuda_interop.hpp` → **`renderCudaFrame(...)`**
-* `src/capybara_frame_pipeline.cuh` → **`capy_render(...)`**
+* `src/cuda_interop.hpp` -> **`renderCudaFrame(...)`**
+* `src/capybara_frame_pipeline.cuh` -> **`capy_render(...)`**
 
 ---
 

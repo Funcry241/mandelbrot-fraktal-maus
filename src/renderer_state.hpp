@@ -114,7 +114,7 @@ struct RendererState {
     bool        warzenschweinOverlayEnabled = false;
     std::string warzenschweinText;
 
-    // 🎯 Interest-Signal (Heatmap → Zoom-Logik)
+    // 🎯 Interest-Signal (Heatmap -> Zoom-Logik)
     struct ZoomInterest {
         double ndcX = 0.0;       // -1..+1, Screenmitte = 0
         double ndcY = 0.0;       // -1..+1, oben = +1 (NDC)

@@ -68,7 +68,7 @@ pub fn enable_ansi() -> bool {
 }
 
 /// Farben **automatisch an**:
-/// - `OTTER_COLOR=0`  → global aus (Plain-ASCII)
+/// - `OTTER_COLOR=0`  -> global aus (Plain-ASCII)
 /// - Sonst: **immer true** (wir emittieren ANSI-Codes); WinConsole-Fallback greift nur,
 ///          wenn wir ANSI bewusst deaktivieren (OTTER_COLOR=0).
 ///
@@ -100,7 +100,7 @@ fn paint(s: &str, code: &str) -> String {
 fn paint_dim(s: &str) -> String { paint(s, BRIGHT_BLACK) }
 
 // -----------------------------------------------------------------------------
-// WinConsole-Fallback (nur sinnvoll, wenn OTTER_COLOR=0 → ANSI aus).
+// WinConsole-Fallback (nur sinnvoll, wenn OTTER_COLOR=0 -> ANSI aus).
 // -----------------------------------------------------------------------------
 #[cfg(windows)]
 mod wincon {

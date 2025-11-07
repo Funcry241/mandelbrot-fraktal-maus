@@ -27,12 +27,12 @@ bool launch_if_active(const uint16_t* d_it,
 
 #if OTTER_USE_NVRTC
     if constexpr (Settings::Luchs::enabled && Settings::Luchs::nvrtc) {
-        LUCHS_LOG_HOST("[REPL/COLOR] NVRTC active (stub) → falling back");
+        LUCHS_LOG_HOST("[REPL/COLOR] NVRTC active (stub) -> falling back");
         // Hier würde der JIT-Launch erfolgen; wir fallen absichtlich zurück.
         return false; // bewusst Fallback, bis echte Implementierung steht
     }
 #endif
-    return false; // NVRTC nicht aktiv → Fallback
+    return false; // NVRTC nicht aktiv -> Fallback
 }
 
 } // namespace ColoringNVRTC

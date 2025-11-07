@@ -158,7 +158,7 @@ fn report_artifact_status(project_root: &Path, build_cfg: &str) {
 }
 
 /// Öffentliche Orchestrierung für den Windows-Build:
-/// 1) VsDevCmd → 2) vcvars64 → 3) vcvarsall x64 → 4) Direkt (Fallback)
+/// 1) VsDevCmd -> 2) vcvars64 -> 3) vcvarsall x64 -> 4) Direkt (Fallback)
 pub fn run_cmake_windows(
     project_root: &Path,
     configure_preset: &str,

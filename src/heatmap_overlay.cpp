@@ -1,4 +1,4 @@
-///// Otter: GPU Heatmap overlay (fragment shader alpha) + Z0 sticker (argmax→CoM bend), no blur.
+///// Otter: GPU Heatmap overlay (fragment shader alpha) + Z0 sticker (argmax->CoM bend), no blur.
 ///// Schneefuchs: Coordinates harmonized with Eule; header/source kept in sync; no extra programs.
 ///// Maus: One-line ASCII logs; forwards blended interest to RendererState (screen coords); no zoom/pan changes.
 ///// Datei: src/heatmap_overlay.cpp

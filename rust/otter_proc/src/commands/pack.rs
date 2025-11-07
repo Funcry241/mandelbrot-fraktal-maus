@@ -21,7 +21,7 @@ use crate::runner::runner_term::out_info;
 
 fn is_verbose() -> bool {
     // OTTER_PACK_VERBOSE=1|true|yes|verbose  OR  OTTER_PACK_LOG=verbose
-    // Alles andere → compact one-line summary.
+    // Alles andere -> compact one-line summary.
     use std::env;
     if let Ok(v) = env::var("OTTER_PACK_VERBOSE") {
         let s = v.to_ascii_lowercase();

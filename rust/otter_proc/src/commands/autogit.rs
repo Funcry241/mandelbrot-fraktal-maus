@@ -117,7 +117,7 @@ fn run_cmd_in(root: &Path, program: &str, args: &[&str]) -> io::Result<i32> {
             "-c", "core.safecrlf=false",
             "-c", "core.autocrlf=input",
             "-c", "advice.addEmbeddedRepo=false",
-            // bewusst KEIN "color.ui=always" → nur unsere Tags sind farbig
+            // bewusst KEIN "color.ui=always" -> nur unsere Tags sind farbig
         ]);
     }
     full_args.extend_from_slice(args);

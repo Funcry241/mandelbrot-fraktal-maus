@@ -82,7 +82,7 @@ void mandelbrotKernel_classic(
     const double y  = cy + (static_cast<double>(py) - 0.5 * static_cast<double>(h)) * stepY;
     const double2 cD = make_double2(x, y);
 
-    // 1) Analytic interior: exact membership → it = maxIter
+    // 1) Analytic interior: exact membership -> it = maxIter
     if (in_cardioid_or_bulb(cD)) {
         d_it[idx] = clamp_u16_from_int(maxIter);
         return;

@@ -22,7 +22,7 @@ mindmap
       Z-iteration, mapping, math
       Kernels & CUHs
     Colorization & Post-processing
-      Iteration buffer → RGBA
+      Iteration buffer -> RGBA
     Overlays & HUD
       Heatmap (preview, EC off)
       Text HUD (Warzenschwein)
@@ -67,7 +67,7 @@ mindmap
 - `src/renderer_window.cpp` / `src/renderer_window.hpp`
 
 ### Frame Pipeline & Timing
-- Einziger Ort für pro-Frame Ablauf & Timings: compute → PBO→Tex-Upload → Base-Draw → Overlays → **eine feste ASCII-PERF-Zeile**.
+- Einziger Ort für pro-Frame Ablauf & Timings: compute -> PBO->Tex-Upload -> Base-Draw -> Overlays -> **eine feste ASCII-PERF-Zeile**.
 - Pflegt `FrameContext` und Ring-Statistiken; triggert Zoom-Logik.
 
 - `src/capybara_frame_pipeline.cuh`
@@ -97,7 +97,7 @@ mindmap
 - `src/capybara_ziter.cuh`
 
 ### Colorization & Post-processing
-- 16-bit Iterationen → RGBA in den gemappten PBO, optional Palette.
+- 16-bit Iterationen -> RGBA in den gemappten PBO, optional Palette.
 
 - `src/colorize_iterations.cu` / `src/colorize_iterations.cuh`
 

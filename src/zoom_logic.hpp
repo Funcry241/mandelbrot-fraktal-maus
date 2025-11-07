@@ -20,7 +20,7 @@ struct ZoomState {
     bool hadCandidate = false;
 };
 
-// Ergebnis (ohne float2 in Structs → MSVC C4324-safe)
+// Ergebnis (ohne float2 in Structs -> MSVC C4324-safe)
 struct ZoomResult {
     float newOffsetX  = 0.0f;
     float newOffsetY  = 0.0f;

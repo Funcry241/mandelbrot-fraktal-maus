@@ -23,7 +23,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Configure + Build via CMake Presets (PS '/build' → Full)
+    /// Configure + Build via CMake Presets (PS '/build' -> Full)
     Full {
         /// Build configuration (e.g., RelWithDebInfo, Release, Debug)
         #[arg(long = "cfg", default_value = "RelWithDebInfo")]
@@ -57,7 +57,7 @@ pub enum Commands {
         extra: Vec<PathBuf>,
     },
 
-    /// Auto add/commit/push with SSH→HTTPS remote fallback (PS '/branch' → Autogit --branch wupp)
+    /// Auto add/commit/push with SSH->HTTPS remote fallback (PS '/branch' -> Autogit --branch wupp)
     Autogit {
         /// Commit message (if omitted, a generic one is used)
         #[arg(short = 'm', long = "message")]

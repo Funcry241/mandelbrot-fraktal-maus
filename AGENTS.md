@@ -7,7 +7,7 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 **Seit Alpha 41** gilt das **Robbe-Prinzip**: *Header & Source bleiben synchron. Kein Drift, kein API-Bruch.*  
 **Seit Alpha 81** zusätzlich relevant: *Silk-Lite Zoom*, *Frame-Budget-Pacing* und **ASCII-only Logs** ohne Seiteneffekt.  
-**Neu (Renderer-Pfad)**: Einziger aktiver Pfad ist **Capybara → Iterationen → Colorizer → PBO** (kein Referenz-Orbit, **keine Perturbation**, **kein EC/Wrapper**).
+**Neu (Renderer-Pfad)**: Einziger aktiver Pfad ist **Capybara -> Iterationen -> Colorizer -> PBO** (kein Referenz-Orbit, **keine Perturbation**, **kein EC/Wrapper**).
 
 ---
 
@@ -15,10 +15,10 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 | Agent/Tool               | Zweck                           | Trigger                 | Aktionen                                                             |
 | ------------------------ | ------------------------------- | ----------------------- | -------------------------------------------------------------------- |
-| **GitHub Actions (CI)**  | Build-, Test-, Install-Check    | Push/PR auf `main`      | CMake Configure → Ninja Build → `cmake --install`                    |
+| **GitHub Actions (CI)**  | Build-, Test-, Install-Check    | Push/PR auf `main`      | CMake Configure -> Ninja Build -> `cmake --install`                    |
 | **Dependabot**           | Abhängigkeits-Updates (vcpkg)   | Wöchentlich             | PRs für `vcpkg.json`, CI baut PR                                     |
 | **Waschbär-Watchdog**    | Hygiene & Auto-Fixes (lokal)    | On-Demand               | Räumt CMake-Caches, fixt typische GLEW/vcpkg-Fallen                  |
-| **Autogit (lokal)**      | Mini-CI für Commits/Push        | Nach erfolgreichem Build| `git add -A` → `git commit -m "<msg>"` → `git push` (https Fallback) |
+| **Autogit (lokal)**      | Mini-CI für Commits/Push        | Nach erfolgreichem Build| `git add -A` -> `git commit -m "<msg>"` -> `git push` (https Fallback) |
 | **Rust Runner (lokal)**  | Komfort-Build mit Live-Progress | Manuell (CLI/PS)        | Farben/Spinner/%/ETA, Log-Tags `[PS]/[RUST]/[PROC]`, ETA aus Metrics |
 
 > CI stellt sicher, dass **Debug-/Perf-Logging keine Seiteneffekte** erzeugt (keine erzwungenen Synchronisationen im Hot-Path).
@@ -40,9 +40,9 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 - Zeitbasierte Fortschritts-Absicherung (Zeit-Prozent max mit Builder-Prozent fusioniert).
 
 **Env-Toggles:**  
-- `OTTER_PROGRESS=0` → Progress-UI aus (Default: **an**)  
-- `OTTER_COLOR=0` → Farben aus (Default: **an**)  
-- `OTTER_ASCII=1` → ASCII-Spinner/Balken erzwingen
+- `OTTER_PROGRESS=0` -> Progress-UI aus (Default: **an**)  
+- `OTTER_COLOR=0` -> Farben aus (Default: **an**)  
+- `OTTER_ASCII=1` -> ASCII-Spinner/Balken erzwingen
 
 **Cache-Schutz:**  
 - Erkanntes **CMake-Cache-Mismatch** (Repo-Root-Wechsel) ⇒ Runner löscht `build/` sicher und konfiguriert neu.
@@ -85,8 +85,8 @@ Die passende Compute Capability deiner GPU findest du in NVIDIAs Übersicht.
   *Hinweis:* Nachricht mit `snprintf` zusammenbauen ist ok – der **finale** Aufruf ist genau **ein** `LUCHS_LOG_DEVICE(const char*)`.
 * **Kein `printf/fprintf`** im Produktionspfad. Logs dürfen **keine** impliziten Synchronisationen auslösen.
 * **Schalter (Settings)**:  
-  `performanceLogging` → kompakte Messwerte via CUDA-Events (ASCII)  
-  `debugLogging` → detaillierter, ggf. langsamer
+  `performanceLogging` -> kompakte Messwerte via CUDA-Events (ASCII)  
+  `debugLogging` -> detaillierter, ggf. langsamer
 
 ---
 
@@ -100,9 +100,9 @@ Der Mandelbrot-Pfad hält sich an ein weiches **Zeitbudget** pro Frame. Silk-Lit
 ## 🎨 Renderer-Pfad & Farbgebung (Status)
 
 * **Aktiver Pfad:** **Capybara-Iteration** (Float), Escape-Test **vor** dem Update (`|z|^2 > 4`).  
-  → *Innen* schreibt `iterOut = maxIter`, *Escape* schreibt den Iterationsindex.  
-* **Pipeline:** `capy_render(...)` (Iterations) → `colorize_iterations_to_pbo(...)` → PBO (GL-Interop).  
-* **Palette:** **GT (Cyan→Amber)**, Interpolation im **Linearraum** (Banding-mindernd).  
+  -> *Innen* schreibt `iterOut = maxIter`, *Escape* schreibt den Iterationsindex.  
+* **Pipeline:** `capy_render(...)` (Iterations) -> `colorize_iterations_to_pbo(...)` -> PBO (GL-Interop).  
+* **Palette:** **GT (Cyan->Amber)**, Interpolation im **Linearraum** (Banding-mindernd).  
   **Stripes** sind **standardmäßig aus** (`stripes = 0.0f`) für ringfreie Darstellung.  
 * **Mapping:** Projektweit über `screenToComplex(...)` (Koordinaten-Harmonisierung, „Eule“).
 
@@ -174,7 +174,7 @@ cmake --install build --prefix ./dist
 
 ## 🧷 Toolchain & Hardening (Windows)
 
-* **CRT vereinheitlicht**: `/MT` (inkl. NVCC-Host) → keine LNK2038-Mismatches.  
+* **CRT vereinheitlicht**: `/MT` (inkl. NVCC-Host) -> keine LNK2038-Mismatches.  
 * **`CUDA::cudart_static`**: passt zum `/MT`-CRT.  
 * **GLEW dynamisch**: **kein** `GLEW_STATIC`; vcpkg-Triplet passend wählen.  
 * **Hardening nur im Host-Link**: `/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf` über `$<HOST_LINK:...>`.  
@@ -214,12 +214,12 @@ cmake --install build --prefix ./dist
 
 **GitHub Actions** (`.github/workflows/ci.yml`)
 
-* Configure → Build (Ninja) → Install  
+* Configure -> Build (Ninja) -> Install  
 * Artefakte: Install-Tree unter `dist/`  
 * Prüfungen:
   * CUDA-Kompilation für Presets
   * konsistente CMake-Presets
-  * deterministische Builds (gleiche Inputs → gleiche Outputs)
+  * deterministische Builds (gleiche Inputs -> gleiche Outputs)
 
 **Dependabot**
 
@@ -230,10 +230,10 @@ cmake --install build --prefix ./dist
 
 ## ❓ Troubleshooting (Kurz)
 
-* **`nvcc` fehlt** → **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen  
-* **GLEW-Mismatch** (z. B. `glew32d.lib`) → **dynamisches GLEW** sicherstellen und Triplet/Cache prüfen  
-* **Schwarze Frames** bei extremem Pan/Zoom → Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs  
-* **CUDA-Interop Stalls** → PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences
+* **`nvcc` fehlt** -> **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen  
+* **GLEW-Mismatch** (z. B. `glew32d.lib`) -> **dynamisches GLEW** sicherstellen und Triplet/Cache prüfen  
+* **Schwarze Frames** bei extremem Pan/Zoom -> Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs  
+* **CUDA-Interop Stalls** -> PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences
 
 ---
 

@@ -1,5 +1,5 @@
 ///// Otter: Mini-Entrypoint – delegiert (full/clean/autogit/export) + ENV-Zweimodus OTTER_OP=branch|build.
-///// Schneefuchs: /branch committet & pusht → dann Build; “wupp” Default-Branch.
+///// Schneefuchs: /branch committet & pusht -> dann Build; “wupp” Default-Branch.
 ///// Maus: Null-Magie, deterministisch; remote=origin; /build pusht nach Full; ASCII-Logs.
 ///// Datei: rust/otter_proc/src/main.rs
 

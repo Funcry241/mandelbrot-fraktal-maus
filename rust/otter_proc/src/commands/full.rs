@@ -56,7 +56,7 @@ fn ensure_cache_matches_source(project_root: &Path, _configure_preset: &str) -> 
     if let Some(cache) = cache_src {
         if cache != curr {
             println!(
-                "[RUNNER][CMAKE] cache source mismatch: from={} → to={} (clean build dir)",
+                "[RUNNER][CMAKE] cache source mismatch: from={} -> to={} (clean build dir)",
                 cache, curr
             );
             let _ = fs::remove_dir_all(&build_dir);

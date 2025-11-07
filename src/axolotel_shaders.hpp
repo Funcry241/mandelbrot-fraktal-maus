@@ -11,10 +11,10 @@ namespace AxolotelShaders
     static constexpr const char* kVertex = R"(#version 430 core
     out vec2 vUV;
     void main(){
-        // IDs 0,1,2 → one big triangle covering the viewport
+        // IDs 0,1,2 -> one big triangle covering the viewport
         vUV = vec2( (gl_VertexID == 2) ? 2.0 : 0.0,
                     (gl_VertexID == 1) ? 2.0 : 0.0);
-        vec2 ndc = vUV * 2.0 - 1.0;   // uv in [0,1] → NDC [-1,1]
+        vec2 ndc = vUV * 2.0 - 1.0;   // uv in [0,1] -> NDC [-1,1]
         gl_Position = vec4(ndc, 0.0, 1.0);
     })";
 

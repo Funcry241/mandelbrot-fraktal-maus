@@ -300,7 +300,7 @@ pub fn run_streamed_with_env(
     drop(tx); // main thread keeps only rx
 
     // ---- Heartbeat/Spinner (falls zu Beginn keine Ausgaben kommen) -----------------
-    let heartbeat_enabled = !progress_enabled(); // Falls Progress-Renderer aus ist → Spinner aktivieren
+    let heartbeat_enabled = !progress_enabled(); // Falls Progress-Renderer aus ist -> Spinner aktivieren
     let spinner: [char; 4] = ['-', '\\', '|', '/'];
     let mut hb_idx: usize = 0;
     let mut hb_last = Instant::now();

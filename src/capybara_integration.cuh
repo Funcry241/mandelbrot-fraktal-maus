@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #include "capybara_math.cuh"      // Hi/Lo primitives + telemetry
-#include "capybara_mapping.cuh"   // pixel→complex (double & Hi/Lo)
+#include "capybara_mapping.cuh"   // pixel->complex (double & Hi/Lo)
 #include "capybara_ziter.cuh"     // early Hi/Lo iteration
 
 #if defined(__CUDACC__)

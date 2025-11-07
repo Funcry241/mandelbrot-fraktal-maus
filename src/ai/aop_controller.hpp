@@ -1,6 +1,6 @@
 ///// OtterDream — Replikatoren
 ///// File: src/ai/aop_controller.hpp
-///// Purpose: AOP-Controller – Feature→Policy (Ordnung/Rebase/Enable) – Stubs
+///// Purpose: AOP-Controller – Feature->Policy (Ordnung/Rebase/Enable) – Stubs
 ///// Phase: 2 (Policy-Replikatoren)
 ///// Hooks: frame_pipeline (nach ensureAnalysisMetrics())
 ///// Depends: Forward-Decls (FrameContext, RendererState)

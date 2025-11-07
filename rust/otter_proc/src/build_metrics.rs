@@ -179,7 +179,7 @@ fn save_json_map_atomically(path: &Path, map: &HashMap<String, u128>) -> std::io
         .unwrap_or_else(|| Path::new("."))
         .join(format!("metrics.json.tmp{}", now_millis()));
 
-    // Compose JSON in-memory → atomisch
+    // Compose JSON in-memory -> atomisch
     let mut out = String::with_capacity(64 + map.len() * 32);
     out.push_str("{\"phases\":{");
     let mut first = true;

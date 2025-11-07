@@ -1,4 +1,4 @@
-///// Otter: Pixel→Complex mapping hygiene for Capybara (Hi/Lo + exact step split).
+///// Otter: Pixel->Complex mapping hygiene for Capybara (Hi/Lo + exact step split).
 ///// Schneefuchs: Header-only; safe include anywhere; ASCII-only; rate-limited device logs via capy_* helpers.
 ///// Maus: Returns both classic double2 and CapyHiLo2; no API break for existing kernels.
 ///// Datei: src/capybara_mapping.cuh

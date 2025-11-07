@@ -1,6 +1,6 @@
 ///// OtterDream — Replikatoren
 ///// File: src/luchs_dsl.hpp
-///// Purpose: LuchsScript Mini-DSL (Prompt→Coloring AST) – Stubs
+///// Purpose: LuchsScript Mini-DSL (Prompt->Coloring AST) – Stubs
 ///// Phase: 3 (Color-Replikatoren)
 ///// Hooks: prompt_coloring / NVRTC-Pipeline
 ///// Depends: <string>
@@ -19,7 +19,7 @@ namespace LuchsDSL {
         bool        ok = false;
     };
 
-    // Einfache Prompt→DSL-Übersetzung (Stub).
+    // Einfache Prompt->DSL-Übersetzung (Stub).
     Program compile_from_prompt(const std::string& prompt);
 
 } // namespace LuchsDSL

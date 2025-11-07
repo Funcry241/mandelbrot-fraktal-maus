@@ -1,4 +1,4 @@
-///// Otter: Branch-Orchestrator – Build → pack ZIP (Rust) → Autogit → Summary → pinker Run-Hint.
+///// Otter: Branch-Orchestrator – Build -> pack ZIP (Rust) -> Autogit -> Summary -> pinker Run-Hint.
 ///// Schneefuchs: Keine PowerShell; saubere Pfade ohne \\?\-Präfix; keine ungenutzten Imports; borrows statt Moves.
 ///// Maus: ASCII-Block am Ende; Branch default „wupp“; deterministische Logs.
 ///// Datei: rust/otter_proc/src/ops_branch.rs
@@ -58,7 +58,7 @@ fn print_magenta_run_hint(root: &Path, artifact: &Path) {
     println!("+------------------------------------------------------------------+\x1b[0m");
 }
 
-/// Öffentlicher Einstieg: Build (Full) → Pack (Rust) → Autogit push → Summary (+ Run-Hint).
+/// Öffentlicher Einstieg: Build (Full) -> Pack (Rust) -> Autogit push -> Summary (+ Run-Hint).
 pub fn exec(root: &Path) -> i32 {
     runner_term::enable_ansi();
 

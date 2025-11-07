@@ -215,7 +215,7 @@ static void render_to_pbo_core(RendererState& state,
 
     (void)cudaGetLastError(); // clear sticky
 
-    // Detect Framecounter-Restart/Hot-Reload → PERF-Header erneut erlauben
+    // Detect Framecounter-Restart/Hot-Reload -> PERF-Header erneut erlauben
     if (s_prevFrameSeen >= 0 && state.frameCount < s_prevFrameSeen) {
         s_perfHeaderDone = false;
     }

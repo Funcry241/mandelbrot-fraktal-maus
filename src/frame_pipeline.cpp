@@ -1,6 +1,6 @@
 ///// Otter: Nacktmull — frame pipeline with Axolotel Coupler; draw-lag-1; perf warm-up; VISUAL FALLBACK removed; Dachs-HUD center handling, Warzenschwein-HUD off during Help (F1).
 ///// Schneefuchs: ASCII logs; pch first; small deterministic diffs; Stats forced next frame when E>0; WS disabled while Help active.
-///// Maus: Compute → Metrics → Overlays → Axolotel → Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex; center shows Help; WS hidden on Help.
+///// Maus: Compute -> Metrics -> Overlays -> Axolotel -> Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex; center shows Help; WS hidden on Help.
 ///// Datei: src/frame_pipeline.cpp
 ///// Change: + Replikatoren Hooks — [REPL/ORBIT] vor Compute, [REPL/POLICY] nach ensureAnalysisMetrics()
 
@@ -231,7 +231,7 @@ namespace {
             LUCHS_LOG_HOST("[PIPE] compute end");
         }
 
-        // Upload → aktuelle Upload-Textur
+        // Upload -> aktuelle Upload-Textur
         const auto t0 = Clock::now();
         if (!state.skipUploadThisFrame) {
             OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(),
@@ -256,7 +256,7 @@ namespace {
         const auto tUploadEnd = Clock::now();
         g_texMs = std::chrono::duration_cast<msd>(tUploadEnd - t0).count();
 
-        // Draw → die vorherige (fertige) Draw-Textur
+        // Draw -> die vorherige (fertige) Draw-Textur
         RendererPipeline::drawFullscreenQuad(state.currentDrawTex().id());
 
         // Nach dem Draw: Upload-Textur wird zur neuen Draw-Textur
@@ -403,7 +403,7 @@ void execute(RendererState& state) {
     // ---- Overlays (nutzen die vorliegenden Metrics) ----
     drawOverlays(state, g_ctx);
 
-    // ---- Axolotel Coupler → Zoom (ein Pfad: dt-Scaling) -------------------
+    // ---- Axolotel Coupler -> Zoom (ein Pfad: dt-Scaling) -------------------
     float E = AxolotelHUD::activityEnergy(); // 0..1 from live pulses
     float dtScaled = g_ctx.deltaSeconds;
     if (E > 0.0f) {

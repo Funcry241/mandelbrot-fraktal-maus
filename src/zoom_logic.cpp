@@ -36,7 +36,7 @@ static inline float get_dt_seconds(const FrameContext& fc) noexcept {
     return (fc.deltaSeconds > 0.0f) ? fc.deltaSeconds : (1.0f / 60.0f);
 }
 
-// exp(x) with |x| << 1  →  1 + x + x²/2 (error O(x³)); dt≈1/60 → x≈0.003.. ok
+// exp(x) with |x| << 1  ->  1 + x + x²/2 (error O(x³)); dt≈1/60 -> x≈0.003.. ok
 static inline double exp_fast2(double x) noexcept {
     return 1.0 + x * (1.0 + 0.5 * x);
 }
@@ -68,7 +68,7 @@ struct AxisLeashCfg {
 };
 static constexpr AxisLeashCfg kLeash{};
 
-// Phase A: Early-Locality Cap (öffnet weich von R0→1.0; nur in diesem TU)
+// Phase A: Early-Locality Cap (öffnet weich von R0->1.0; nur in diesem TU)
 struct StartLeashCfg {
     bool   enabled     = true;
     double R0          = 0.22;
@@ -85,7 +85,7 @@ static inline void update_key_nav_bias(float dt) noexcept
 {
     namespace NB = Settings::NavBias;
 
-    // Halbwert → λ
+    // Halbwert -> λ
     const double dtD = (dt > 0.0f) ? static_cast<double>(dt) : 0.0;
     const double lambda = (NB::halfLifeSec > 0.0) ? (std::log(2.0) / NB::halfLifeSec) : 0.0;
 
@@ -268,7 +268,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     // Laufzeit fürs Startverhalten
     zls.sinceStartSec += static_cast<double>(dt);
 
-    // einmalig: Seed + Startjitter (px→world / zoom)
+    // einmalig: Seed + Startjitter (px->world / zoom)
     if (zls.frame == 1) {
         ensure_seed_once();
 
@@ -405,7 +405,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         double ndcX = applyDeadzone(ndcX_in, kNudge.deadzoneNdc);
         double ndcY = applyDeadzone(ndcY_in, kNudge.deadzoneNdc);
 
-        // Early-Locality Cap (öffnet weich von R0 → 1.0)
+        // Early-Locality Cap (öffnet weich von R0 -> 1.0)
         if constexpr (kStartLeash.enabled) {
             const double T = (kStartLeash.openSeconds > 0.0) ? kStartLeash.openSeconds : 0.0;
             double t = (T > 0.0) ? std::min(1.0, zls.sinceStartSec / T) : 1.0;

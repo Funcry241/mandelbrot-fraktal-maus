@@ -1,4 +1,4 @@
-///// Otter: Iteration→PBO colorizer; one path, no dependencies on legacy files.
+///// Otter: Iteration->PBO colorizer; one path, no dependencies on legacy files.
 ///// Schneefuchs: Deterministic HSV palette; interior = dark; ASCII-only, no device printf.
 ///// Maus: Simple API: colorize_iterations_to_pbo(d_it, pbo, w,h,maxIter,stream).
 ///// Datei: src/colorize_iterations.cuh
