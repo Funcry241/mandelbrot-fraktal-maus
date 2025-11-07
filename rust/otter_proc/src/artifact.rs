@@ -37,12 +37,19 @@ fn exe_basename() -> &'static str {
 /// Candidate list in priority order (app-local first).
 pub(crate) fn artifact_candidates(root: &Path) -> Vec<PathBuf> {
     let exe = exe_basename();
+    let d = root.join("dist");
     let b = root.join("build");
 
-    let mut v = Vec::with_capacity(8);
-    // Highest priority: flat app-local in build/
+    let mut v = Vec::with_capacity(12);
+
+    // Highest priority: final installed binary in dist/
+    v.push(d.join(exe));
+    v.push(d.join("bin").join(exe));
+
+    // Next priorities under build/
+    // Flat app-local
     v.push(b.join(exe));
-    // Next: build/bin/
+    // build/bin/
     v.push(b.join("bin").join(exe));
 
     // Common multi-config layouts

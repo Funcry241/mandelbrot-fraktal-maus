@@ -154,11 +154,16 @@ add_executable(mandelbrot_otterdream
   src/perturb_core.cpp
   src/perturb_orbit_mp.cpp
   src/luchs_dsl.cpp
-  src/coloring_runtime_nvrtc.cpp
   # --- AI (AOP/Policy) now compiled-in (safe even without ORT) ---
   src/ai/aop_controller.cpp
   src/ai/onnx_model.cpp
 )
+
+# NVRTC source is compiled **only** if explicitly enabled
+if(OTTER_USE_NVRTC)
+  target_sources(mandelbrot_otterdream PRIVATE src/coloring_runtime_nvrtc.cpp)
+  target_compile_definitions(mandelbrot_otterdream PRIVATE OTTER_USE_NVRTC=1)
+endif()
 
 ##### Otter: Per-TU relax — keep /WX globally, disable only for onnx_model.cpp so build stays green.
 ##### Schneefuchs: Generator expressions; MSVC -> /WX-, GCC/Clang -> -Wno-error; append to existing options.
@@ -174,7 +179,7 @@ if(MSVC)
   set_property(TARGET mandelbrot_otterdream PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
   target_compile_options(mandelbrot_otterdream PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /sdl /permissive- /Zc:__cplusplus /EHsc /Brepro>
+    $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /sdl /permissive- /Zc:__cplusplus /EHsc /Brepro /MP>
     $<$<COMPILE_LANGUAGE:CUDA>:
       -Xcompiler=/W4
       -Xcompiler=/WX
@@ -233,9 +238,6 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
 )
 
 # Optional feature defines (compile-time gates; linking left to toolchain/user)
-if(OTTER_USE_NVRTC)
-  target_compile_definitions(mandelbrot_otterdream PRIVATE OTTER_USE_NVRTC=1)
-endif()
 if(OTTER_USE_ORT)
   target_compile_definitions(mandelbrot_otterdream PRIVATE OTTER_USE_ORT=1)
 endif()
