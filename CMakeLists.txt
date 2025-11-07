@@ -65,7 +65,7 @@ option(OTTER_USE_ORT   "Enable ONNX Runtime integration (expects ORT in toolchai
 
 # ORT wiring (prereqs only; default OFF keeps build without ORT link)
 set(OTTER_ORT_ROOT "" CACHE PATH "Root directory of ONNX Runtime (optional if CMake package is available)")
-set(OTTER_ORT_PROVIDER "cuda" CACHE STRING "ONNX Runtime execution provider: cpu|cuda")
+set(OTTER_ORT_PROVIDER "cuda" CACHE STRING "ONNX Runtime execution provider: cuda|cpu")
 set_property(CACHE OTTER_ORT_PROVIDER PROPERTY STRINGS cpu cuda)
 
 # Configure-time echo for visibility (Phase-1: both OFF is expected)
