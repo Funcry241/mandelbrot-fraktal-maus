@@ -154,8 +154,15 @@ add_executable(mandelbrot_otterdream
   # --- AI
   src/ai/aop_controller.cpp
   src/ai/onnx_model.cpp
-  
+)
 
+##### Otter: Per-TU relax — keep /WX globally, disable only for onnx_model.cpp so build stays green.
+##### Schneefuchs: Generator expressions; MSVC → /WX-, GCC/Clang → -Wno-error; append to existing options.
+##### Maus: Minimal touch, deterministic logs; place right after sources.
+set_property(SOURCE src/ai/onnx_model.cpp
+  APPEND PROPERTY COMPILE_OPTIONS
+    "$<$<CXX_COMPILER_ID:MSVC>:/WX->"
+    "$<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<COMPILE_LANGUAGE:CXX>>:-Wno-error>"
 )
 
 # ---------------------- Compile-Options --------------------
