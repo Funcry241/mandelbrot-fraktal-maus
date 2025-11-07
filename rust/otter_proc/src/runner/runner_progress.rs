@@ -230,13 +230,25 @@ pub fn render_and_print(p: &mut ProgressState, predicted_ms: u128) {
         phase_plain
     };
 
-    // Bar-Farbe (L2): 0–33% rot, 34–66% gelb, 67–99% grün
-    let bar_col = if pct < 0.34 {
-        "\x1b[31m" // RED
-    } else if pct < 0.67 {
-        "\x1b[33m" // YELLOW
+    // Bar-Farbe (L2):
+    // PROC: 0–33% pink (bright magenta, 95), 34–66% gelb, 67–99% grün
+    // Andere Phasen: 0–33% rot, 34–66% gelb, 67–99% grün (unverändert)
+    let bar_col = if p.runtime_phase == "proc" {
+        if pct < 0.34 {
+            "\x1b[95m" // PINK (BRIGHT MAGENTA)
+        } else if pct < 0.67 {
+            "\x1b[33m" // YELLOW
+        } else {
+            "\x1b[32m" // GREEN
+        }
     } else {
-        "\x1b[32m" // GREEN
+        if pct < 0.34 {
+            "\x1b[31m" // RED
+        } else if pct < 0.67 {
+            "\x1b[33m" // YELLOW
+        } else {
+            "\x1b[32m" // GREEN
+        }
     };
     let bar_colored = if colors_on {
         format!("{bar_col}{bar_plain}\x1b[0m")
