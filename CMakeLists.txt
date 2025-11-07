@@ -150,6 +150,7 @@ add_executable(mandelbrot_otterdream
   src/perturb_core.cpp
   src/perturb_orbit_mp.cpp
   src/luchs_dsl.cpp
+  src/coloring_runtime_nvrtc.cpp
 )
 
 # ---------------------- Compile-Options --------------------
