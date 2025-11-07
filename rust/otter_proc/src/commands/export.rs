@@ -91,11 +91,18 @@ fn prune_old_zips(out_dir: &Path, op: &str, status: &str, keep: usize) -> Result
     Ok(())
 }
 
-pub fn run(root: &Path, out_dir: Option<&Path>, max_keep: usize, dry_run: bool) -> Result<()> {
-    let out = out_dir
+/// Erzeugt ein ZIP **unter `out/exports/`**, das den **Inhalt von `out/`** packt.
+/// Rückgabe: Pfad zur erzeugten ZIP-Datei.
+pub fn run(root: &Path, out_dir: Option<&Path>, max_keep: usize, dry_run: bool) -> Result<PathBuf> {
+    // Zielverzeichnis für ZIPs (Default: out/exports)
+    let exports_dir = out_dir
         .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| root.join("out"));
-    fs::create_dir_all(&out)?;
+        .unwrap_or_else(|| root.join("out").join("exports"));
+    fs::create_dir_all(&exports_dir)?;
+
+    // Quelle: out/
+    let src_out = root.join("out");
+    fs::create_dir_all(&src_out)?;
 
     let op = std::env::var("OTTER_OP").unwrap_or_else(|_| "export".to_string());
     let status = std::env::var("OTTER_STATUS").unwrap_or_else(|_| "any".to_string());
@@ -103,25 +110,25 @@ pub fn run(root: &Path, out_dir: Option<&Path>, max_keep: usize, dry_run: bool) 
 
     // Unterschiedliche Namen pro Sorte: <op>_<status>_<epoch>.zip
     let zip_name = format!("{}_{}_{}.zip", op, status, ts);
-    let zip_path = out.join(&zip_name);
+    let zip_path = exports_dir.join(&zip_name);
 
     if dry_run {
         println!("[Otter/export] DRY-RUN would write: {}", zip_path.display());
-        return Ok(());
+        return Ok(zip_path);
     }
 
     // Falls out/ leer ist, Marker erzeugen, damit es überhaupt etwas zu packen gibt
-    if fs::read_dir(&out)?.next().is_none() {
-        let _ = fs::write(out.join(".otter.empty"), b"");
+    if fs::read_dir(&src_out)?.next().is_none() {
+        let _ = fs::write(src_out.join(".otter.empty"), b"");
     }
 
-    zip_dir(&out, &zip_path)?;
+    zip_dir(&src_out, &zip_path)?;
     println!("[Otter/export] wrote {}", zip_path.display());
 
     if max_keep > 0 {
-        // WICHTIG: prune pro Sorte (op+status)
-        let _ = prune_old_zips(&out, &op, &status, max_keep);
+        // WICHTIG: prune pro Sorte (op+status) **im exports-dir**
+        let _ = prune_old_zips(&exports_dir, &op, &status, max_keep);
     }
 
-    Ok(())
+    Ok(zip_path)
 }

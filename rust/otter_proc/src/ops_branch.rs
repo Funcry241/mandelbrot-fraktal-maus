@@ -97,8 +97,8 @@ pub fn exec(root: &Path) -> i32 {
         return code_build;
     }
 
-    // 2) Quellen packen (Rust)
-    let zip_path = match commands::pack::run(root, None, false) {
+    // 2) Export-ZIP (zielt auf out/exports; packt den Inhalt aus out/)
+    let zip_path = match commands::export::run(root, Some(&root.join("out").join("exports")), 5, false) {
         Ok(p) => { runner_term::out_info("RUNNER", &format!("packed sources: {}", p.display())); Some(p) }
         Err(e) => { runner_term::out_info("WARN", &format!("packing skipped/failed: {}", e)); None }
     };

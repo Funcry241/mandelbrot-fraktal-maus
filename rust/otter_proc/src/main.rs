@@ -122,7 +122,7 @@ fn main() {
     let res_code: anyhow::Result<i32> = match command {
         Commands::Export { out_dir, max_keep, dry_run } => {
             commands::export::run(&root, out_dir.as_deref(), max_keep, dry_run)
-                .map(|_| 0)
+                .map(|_p| 0)
                 .map_err(Into::into)
         }
         Commands::Full { cfg, configure_preset, build_preset, parallel } => {
@@ -134,15 +134,19 @@ fn main() {
                 parallel,
             );
 
-            // Metrics aktiv → keine dead_code-Warnungen im Modul
+            // Nach erfolgreichem Build ggf. Export anschieben:
+            // branch_mode ⇒ Default **AN**, via OTTER_EXPORT_ON_BRANCH (1/true/on) steuerbar (default: true)
+            // sonst ⇒ via OTTER_EXPORT_AFTER_BUILD steuerbar (default: false)
             if let Ok(code) = rc {
+                let success = code == 0;
+
+                // Build-Metriken erfassen
                 let end_ms = utils::epoch_ms();
                 let artifact = find_artifact(&root);
                 let branch = git_current_branch(&root)
                     .or_else(|| std::env::var("OTTER_BRANCH").ok())
                     .unwrap_or_else(|| "wupp".to_string());
                 let hash = git_short_hash(&root);
-                let success = code == 0;
 
                 if let Ok((m, _, _)) =
                     std::panic::catch_unwind(|| build_metrics::BuildMetrics::load_or_seed(&root))
@@ -167,6 +171,29 @@ fn main() {
                         &m.snapshot(),
                         None,
                     );
+                }
+
+                // Export-Entscheidung
+                let export_after_build = if branch_mode {
+                    std::env::var("OTTER_EXPORT_ON_BRANCH")
+                        .ok()
+                        .map(|s| {
+                            let s = s.to_ascii_lowercase();
+                            // default: true (wenn gesetzt leer → false; wenn nicht gesetzt → None)
+                            matches!(s.as_str(), "1" | "true" | "yes" | "on")
+                        })
+                        .unwrap_or(true)
+                } else {
+                    env_truthy("OTTER_EXPORT_AFTER_BUILD")
+                };
+
+                if success && export_after_build {
+                    let _ = commands::export::run(
+                        &root,
+                        Some(&root.join("out").join("exports")),
+                        5,
+                        false,
+                    ).map(|p| runner_term::out_info("EXPORT", &format!("wrote {}", p.display())));
                 }
             }
 
