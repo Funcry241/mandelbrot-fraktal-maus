@@ -5,6 +5,9 @@
 
 use std::path::{Path, PathBuf};
 
+// Route messages through the colored runner terminal helpers
+use crate::runner::runner_term;
+
 /// Tiny trait so `fmt_exists` can take either a `bool` **or** a `&Path`.
 pub(crate) trait ExistsLike {
     fn exists_bool(self) -> bool;
@@ -54,9 +57,12 @@ pub(crate) fn artifact_candidates(root: &Path) -> Vec<PathBuf> {
 /// Returns the first existing artifact path.
 pub fn find_artifact(root: &Path) -> Option<PathBuf> {
     for cand in artifact_candidates(root) {
-        println!("[RUNNER] artifact-candidate: {} exists={}", cand.display(), fmt_exists(&cand));
+        runner_term::out_info(
+            "RUNNER",
+            &format!("artifact-candidate: {} exists={}", cand.display(), fmt_exists(&cand)),
+        );
         if cand.exists() {
-            println!("[RUNNER] artifact: {}", cand.display());
+            runner_term::out_info("RUNNER", &format!("artifact: {}", cand.display()));
             return Some(cand);
         }
     }

@@ -53,6 +53,21 @@ int main()
         return EXIT_FAILURE;
     }
 
+    // Replikatoren: one-time boot status (compact)
+    if constexpr (Settings::performanceLogging) {
+        LUCHS_LOG_HOST(
+            "[REPL][BOOT] orbit=%d policy=%d(ep=%s,aop=%d) color=%d(nvrtc=%d) perfLog=%d alwaysZoom=%d",
+            Settings::Perturb::enabled ? 1 : 0,
+            Settings::Ai::enabled ? 1 : 0,
+            Settings::Ai::ep,
+            Settings::Ai::aopEnabled ? 1 : 0,
+            Settings::Luchs::enabled ? 1 : 0,
+            Settings::Luchs::nvrtc ? 1 : 0,
+            Settings::performanceLogging ? 1 : 0,
+            Settings::ForceAlwaysZoom ? 1 : 0
+        );
+    }
+
     while (!renderer.shouldClose())
     {
         auto frameStart = std::chrono::high_resolution_clock::now();

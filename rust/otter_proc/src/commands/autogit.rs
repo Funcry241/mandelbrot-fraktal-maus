@@ -3,7 +3,7 @@
 ///// Maus: Auto-detect current branch; fallback “wupp”; ensure upstream; never track vcpkg/_installed/_cache.
 ///// Datei: rust/otter_proc/src/commands/autogit.rs
 
-use std::io;
+use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -54,46 +54,66 @@ fn colorize_autogit(line: &str) -> String {
     const DIM:   &str = "\x1b[90m";
     const RESET: &str = "\x1b[0m";
 
-    // helper: nur das Tag einfärben, Rest unverändert
     fn paint_tag(tag: &str, color: &str, rest: &str) -> String {
-        format!("{color}{tag}{RESET}{rest}", color=color, tag=tag, rest=rest, RESET="\x1b[0m")
+        format!("{color}{tag}\x1b[0m{rest}")
     }
 
-    // Häufige AUTOGIT-Formen: färbe NUR die Tags
-    if let Some(rest) = line.strip_prefix("[AUTOGIT][RUN]") {
-        // RUN jetzt dezent grau statt gelb
-        return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[RUN]", DIM, rest));
-    }
-    if let Some(rest) = line.strip_prefix("[AUTOGIT][ERR]") {
-        return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[ERR]", RED, rest));
-    }
-    if let Some(rest) = line.strip_prefix("[AUTOGIT][WARN]") {
-        return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[WARN]", YELL, rest));
-    }
-    if let Some(rest) = line.strip_prefix("[AUTOGIT][INFO]") {
-        // INFO dezent grau
-        return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[INFO]", DIM, rest));
-    }
-    if let Some(rest) = line.strip_prefix("[AUTOGIT]") {
-        return paint_tag("[AUTOGIT]", CYAN, rest);
+    // 1) Unsere AUTOGIT-Tags
+    if let Some(rest) = line.strip_prefix("[AUTOGIT][RUN]")  { return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[RUN]",  DIM, rest)); }
+    if let Some(rest) = line.strip_prefix("[AUTOGIT][ERR]")  { return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[ERR]",  RED, rest)); }
+    if let Some(rest) = line.strip_prefix("[AUTOGIT][WARN]") { return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[WARN]", YELL, rest)); }
+    if let Some(rest) = line.strip_prefix("[AUTOGIT][INFO]") { return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[INFO]", DIM, rest)); }
+    if let Some(rest) = line.strip_prefix("[AUTOGIT]")       { return paint_tag("[AUTOGIT]", CYAN, rest); }
+
+    // 2) Abschlussstatus
+    if line.contains("status=OK")          { return line.replace("status=OK", &format!("status={GREEN}OK{RESET}")); }
+    if line.contains("status=WITH_ERRORS") { return line.replace("status=WITH_ERRORS", &format!("status={RED}WITH_ERRORS{RESET}")); }
+
+    // 3) Git-Fehler/Warnungen
+    let ltrim = line.trim_start();
+    if ltrim.starts_with("fatal:") || ltrim.starts_with("error:") { return format!("{RED}{line}{RESET}"); }
+    if ltrim.starts_with("warning:")                               { return format!("{YELL}{line}{RESET}"); }
+
+    // 4) Commit-Summary einfärben
+    if line.contains("file changed") || line.contains("files changed") {
+        let parts: Vec<&str> = line.split(", ").collect();
+        let mut colored = Vec::with_capacity(parts.len());
+        for seg in parts {
+            let segc = if seg.contains("file changed") || seg.contains("files changed") {
+                format!("{CYAN}{seg}{RESET}")
+            } else if seg.contains("insertions(+)") || seg.contains("insertion(+)") {
+                format!("{GREEN}{seg}{RESET}")
+            } else if seg.contains("deletions(-)") || seg.contains("deletion(-)") {
+                format!("{RED}{seg}{RESET}")
+            } else {
+                seg.to_string()
+            };
+            colored.push(segc);
+        }
+        return colored.join(", ");
     }
 
-    // Abschlusszeile: „status=OK“ / „status=WITH_ERRORS“ dezent färben
-    if line.contains("status=OK") {
-        return line.replace("status=OK", &format!("status={}OK{}", GREEN, RESET));
-    }
-    if line.contains("status=WITH_ERRORS") {
-        return line.replace("status=WITH_ERRORS", &format!("status={}WITH_ERRORS{}", RED, RESET));
+    // 5) Up-to-date / Ahead / Behind / Diverged
+    if line.contains("Everything up-to-date")                 { return format!("{GREEN}{line}{RESET}"); }
+    if line.contains("Your branch is up to date with")        { return format!("{DIM}{line}{RESET}"); }
+    if line.contains("Your branch is ahead of")               { return format!("{YELL}{line}{RESET}"); }
+    if line.contains("Your branch is behind") || line.contains("have diverged") {
+        return format!("{RED}{line}{RESET}");
     }
 
-    // Git-Noise wahlweise leicht dimmen (Enumerating/Counting/...); sonst unverändert
-    if line.starts_with("Enumerating objects:")
-        || line.starts_with("Counting objects:")
-        || line.starts_with("Compressing objects:")
-        || line.starts_with("Writing objects:")
-        || line.starts_with("remote:")
-        || line.starts_with("To ")
-        || line.starts_with("Total ")
+    // 6) Rauschen dezent dimmen
+    if ltrim.starts_with("remote:")
+        || ltrim.starts_with("To ")
+        || ltrim.starts_with("From ")
+        || ltrim.starts_with("Enumerating objects:")
+        || ltrim.starts_with("Counting objects:")
+        || ltrim.starts_with("Compressing objects:")
+        || ltrim.starts_with("Writing objects:")
+        || ltrim.starts_with("Total ")
+        || ltrim.starts_with("Switched to branch '")
+        || ltrim.starts_with("Already on '")
+        || ltrim.starts_with("On branch ")
+        || ltrim.contains("set up to track ")
     {
         return format!("{DIM}{line}{RESET}");
     }
@@ -109,7 +129,7 @@ fn logc<S: AsRef<str>>(s: S) {
 // -----------------------------------------------------------------------------
 
 fn run_cmd_in(root: &Path, program: &str, args: &[&str]) -> io::Result<i32> {
-    // Für git-Befehle je Aufruf Konfigs setzen (keine Git-Farbexplosion).
+    // Für git-Befehle je Aufruf Konfigs setzen: keine Git-eigene Farbe.
     let is_git = program == "git";
     let mut full_args: Vec<&str> = Vec::new();
     if is_git {
@@ -117,19 +137,61 @@ fn run_cmd_in(root: &Path, program: &str, args: &[&str]) -> io::Result<i32> {
             "-c", "core.safecrlf=false",
             "-c", "core.autocrlf=input",
             "-c", "advice.addEmbeddedRepo=false",
-            // bewusst KEIN "color.ui=always" -> nur unsere Tags sind farbig
+            "-c", "color.ui=never",
         ]);
     }
     full_args.extend_from_slice(args);
 
+    // Für bekannte Kommandos ohne CR-Progress: per Flag statt -c progress=false
+    if is_git {
+        if let Some(cmd0) = args.first() {
+            if *cmd0 == "push" {
+                full_args.push("--no-progress");
+            }
+            // (optional: bei fetch/clone ebenfalls --no-progress)
+        }
+    }
+
     logc(format!("[AUTOGIT][RUN] {} {}", program, full_args.join(" ")));
-    let status = Command::new(program)
+
+    // Piped + live einfärben (stdout/stderr getrennt)
+    let mut child = Command::new(program)
         .args(&full_args)
         .current_dir(root)
         .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    // stdout-Thread
+    let out_handle = if let Some(out) = child.stdout.take() {
+        Some(std::thread::spawn(move || {
+            let reader = BufReader::new(out);
+            for line in reader.lines() {
+                if let Ok(l) = line {
+                    println!("{}", colorize_autogit(&l));
+                }
+            }
+        }))
+    } else { None };
+
+    // stderr-Thread
+    let err_handle = if let Some(err) = child.stderr.take() {
+        Some(std::thread::spawn(move || {
+            let reader = BufReader::new(err);
+            for line in reader.lines() {
+                if let Ok(l) = line {
+                    println!("{}", colorize_autogit(&l));
+                }
+            }
+        }))
+    } else { None };
+
+    let status = child.wait()?;
+
+    if let Some(h) = out_handle { let _ = h.join(); }
+    if let Some(h) = err_handle { let _ = h.join(); }
+
     Ok(status.code().unwrap_or(1))
 }
 
@@ -215,7 +277,7 @@ fn checkout_or_create_branch(root: &Path, name: &str, remote: &str) -> io::Resul
 fn has_upstream(root: &Path, branch: &str) -> bool {
     Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", &format!("{}@{{u}}", branch)])
-        .current_dir(root)
+    .current_dir(root)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
