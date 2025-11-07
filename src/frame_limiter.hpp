@@ -86,11 +86,16 @@ public:
         _lastDt    = std::chrono::duration<double>(after - _lastStamp).count();
         _lastStamp = after;
 
-        // Drift handling: if we overran significantly, rebase to avoid creep.
+        // Drift handling: if we overran, rebase; only log if > +25% of target frame time.
         if (after - _nextTick > period) [[unlikely]] {
             _nextTick = after + period; // re-sync (no accumulated lag)
             if constexpr (Settings::performanceLogging) {
-                LUCHS_LOG_HOST("[FPS] overrun: frame=%.3fms; re-sync next tick", _lastDt * 1000.0);
+                const double targetMs = 1000.0 / static_cast<double>(targetFps);
+                const double frameMs  = _lastDt * 1000.0;
+                if (frameMs > 1.25 * targetMs) {
+                    LUCHS_LOG_HOST("[FPS] overrun: frame=%.3fms (>%.0f%% of target); re-sync next tick",
+                                   frameMs, 125.0);
+                }
             }
         } else {
             _nextTick += period;

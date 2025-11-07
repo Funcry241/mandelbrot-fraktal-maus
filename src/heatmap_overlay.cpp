@@ -295,10 +295,15 @@ void drawOverlay(const std::vector<float>& entropy,
         glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
         glDrawArrays(GL_TRIANGLES,0,6);
 
+        // Sparse debug signal: only on grid shape change or every 120 frames
         if constexpr(Settings::debugLogging){
-            const int bx0 = bestIdx % tilesX, by0 = bestIdx / tilesX;
-            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d rawMax=%.6f nearMix=%.2f sig=%.2f ndc=(%.6f,%.6f)",
-                           tilesX,tilesY,bestIdx,bestRaw,Settings::TargetBias::mix,Settings::TargetBias::sigmaNdc, ndcX, ndcY);
+            static int sPrevTilesX=-1, sPrevTilesY=-1;
+            const bool gridChanged = (sPrevTilesX!=tilesX) || (sPrevTilesY!=tilesY);
+            if (gridChanged || (ctx.frameCount % 120) == 0) {
+                LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d rawMax=%.6f nearMix=%.2f sig=%.2f ndc=(%.6f,%.6f)",
+                               tilesX,tilesY,bestIdx,bestRaw,Settings::TargetBias::mix,Settings::TargetBias::sigmaNdc, ndcX, ndcY);
+                sPrevTilesX = tilesX; sPrevTilesY = tilesY;
+            }
         }
     }
 

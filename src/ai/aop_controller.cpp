@@ -19,8 +19,14 @@ namespace Repl { namespace Policy {
 Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& state) {
     (void)fctx; (void)state;
     Decision d{};
+
+    // Throttle noisy boot-stub log: once every 60 frames.
     if constexpr (Settings::Ai::enabled && Settings::Ai::aopEnabled) {
-        LUCHS_LOG_HOST("[REPL/POLICY] evaluate policy (stub, ep=%s)", Settings::Ai::ep);
+        static int s_lastLogFrame = -1000000000;
+        if (state.frameCount - s_lastLogFrame >= 60) {
+            LUCHS_LOG_HOST("[REPL/POLICY] evaluate policy (stub, ep=%s)", Settings::Ai::ep);
+            s_lastLogFrame = state.frameCount;
+        }
     }
     return d;
 }
