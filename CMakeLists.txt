@@ -124,7 +124,6 @@ add_executable(mandelbrot_otterdream
   src/luchs_cuda_log_buffer.cu
   src/renderer_core.cu
   src/renderer_loop.cpp
-  src/renderer_pipeline.cpp
   src/renderer_window.cpp
   src/renderer_resources.cpp
   src/heatmap_overlay.cpp
