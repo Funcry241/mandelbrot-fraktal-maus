@@ -60,6 +60,10 @@ endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
+# ---------------------- Feature Toggles (safe defaults OFF) ----------
+option(OTTER_USE_NVRTC "Enable NVRTC coloring runtime (links provided by CUDA Toolkit)" OFF)
+option(OTTER_USE_ORT   "Enable ONNX Runtime integration (expects ORT in toolchain)" OFF)
+
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
 find_package(OpenGL REQUIRED)                 # OpenGL::GL
@@ -146,12 +150,12 @@ add_executable(mandelbrot_otterdream
   src/axolotel_coupler.cpp
   # Dachs HUD (tri-pane top layout)
   src/dachs_hud.cpp
-  # --- NEW (only added files, nothing else changed) ---
+  # --- Replikatoren / Orbit & Color ---
   src/perturb_core.cpp
   src/perturb_orbit_mp.cpp
   src/luchs_dsl.cpp
   src/coloring_runtime_nvrtc.cpp
-  # --- AI
+  # --- AI (AOP/Policy) now compiled-in (safe even without ORT) ---
   src/ai/aop_controller.cpp
   src/ai/onnx_model.cpp
 )
@@ -227,6 +231,14 @@ target_compile_definitions(mandelbrot_otterdream PRIVATE
 target_compile_definitions(mandelbrot_otterdream PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:__NV_NO_VECTOR_DEPRECATION_DIAG>
 )
+
+# Optional feature defines (compile-time gates; linking left to toolchain/user)
+if(OTTER_USE_NVRTC)
+  target_compile_definitions(mandelbrot_otterdream PRIVATE OTTER_USE_NVRTC=1)
+endif()
+if(OTTER_USE_ORT)
+  target_compile_definitions(mandelbrot_otterdream PRIVATE OTTER_USE_ORT=1)
+endif()
 
 # ---------------------- Link -------------------------------
 target_link_libraries(mandelbrot_otterdream PRIVATE
