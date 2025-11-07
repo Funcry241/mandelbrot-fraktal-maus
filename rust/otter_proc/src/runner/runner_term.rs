@@ -227,59 +227,9 @@ fn tag_colored_ansi(src: &str) -> String {
         "RUST"   => CYAN,
         "PROC"   => BLUE,
         "RUNNER" => CYAN,
-        // Dezent für echten RUN-Tag (falls genutzt)
-        "RUN"    => BRIGHT_BLACK,
         _        => CYAN,
     };
     paint(&raw, col)
-}
-
-// -----------------------------------------------------------------------------
-// Interne Helfer: [RUN] im Nachrichtentext dezent grau einfärben
-// -----------------------------------------------------------------------------
-fn dim_run_token_in(msg: &str) -> String {
-    if !color_enabled() { return msg.to_string(); }
-    // Ersetze jede Vorkommen von "[RUN]" durch grau, rest unverändert
-    // (kein Regex nötig; bewusst simpel und robust)
-    if !msg.contains("[RUN]") { return msg.to_string(); }
-    let mut out = String::with_capacity(msg.len() + 16);
-    let parts = msg.split("[RUN]");
-    let mut first = true;
-    for part in parts {
-        if !first {
-            out.push_str(BRIGHT_BLACK);
-            out.push_str("[RUN]");
-            out.push_str(RESET);
-        }
-        out.push_str(part);
-        first = false;
-    }
-    out
-}
-
-// Für WARN/ERR: Gesamtfarbe + lokale [RUN]-Dimmung (re-applies surround)
-fn paint_with_dimmed_run(msg: &str, surround: &str) -> String {
-    if !color_enabled() {
-        return msg.to_string();
-    }
-    if !msg.contains("[RUN]") {
-        return format!("{surround}{msg}{RESET}");
-    }
-    // Splitten und innerhalb [RUN] -> grau, danach wieder surround setzen
-    let mut out = String::new();
-    out.push_str(surround);
-    let mut first = true;
-    for part in msg.split("[RUN]") {
-        if !first {
-            out.push_str(BRIGHT_BLACK);
-            out.push_str("[RUN]");
-            out.push_str(surround);
-        }
-        out.push_str(part);
-        first = false;
-    }
-    out.push_str(RESET);
-    out
 }
 
 // -----------------------------------------------------------------------------
@@ -291,15 +241,13 @@ pub fn out_info(src: &str, msg: &str) {
 
     if color_enabled() {
         let t = tag_colored_ansi(src);
-        let m2 = dim_run_token_in(m); // << [RUN] dezent grau
-        let _ = writeln!(io::stdout(), "{} {}", t, m2);
+        let _ = writeln!(io::stdout(), "{} {}", t, m);
         let _ = io::stdout().flush();
         return;
     }
     if wincon::can_use() {
         let (raw_tag, ttxt) = tag_text(src);
         wincon::print_tag_only(&ttxt, raw_tag);
-        // Fallback (ohne ANSI) kann Inline-Teilfärbung nicht – belassen
         let _ = writeln!(io::stdout(), " {}", m);
         let _ = io::stdout().flush();
         return;
@@ -315,8 +263,8 @@ pub fn out_warn(src: &str, msg: &str) {
 
     if color_enabled() {
         let t = tag_colored_ansi(src);
-        let colored = paint_with_dimmed_run(m, YELLOW); // << gelb gesamt, [RUN] grau
-        let _ = writeln!(io::stdout(), "{} {}", t, colored);
+        let m = paint(m, YELLOW);
+        let _ = writeln!(io::stdout(), "{} {}", t, m);
         let _ = io::stdout().flush();
         return;
     }
@@ -336,8 +284,8 @@ pub fn out_err(src: &str, msg: &str) {
 
     if color_enabled() {
         let t = tag_colored_ansi(src);
-        let colored = paint_with_dimmed_run(m, RED); // << rot gesamt, [RUN] grau
-        let _ = writeln!(io::stdout(), "{} {}", t, colored);
+        let m = paint(m, RED);
+        let _ = writeln!(io::stdout(), "{} {}", t, m);
         let _ = io::stdout().flush();
         return;
     }

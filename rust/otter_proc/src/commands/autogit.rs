@@ -61,7 +61,8 @@ fn colorize_autogit(line: &str) -> String {
 
     // Häufige AUTOGIT-Formen: färbe NUR die Tags
     if let Some(rest) = line.strip_prefix("[AUTOGIT][RUN]") {
-        return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[RUN]", YELL, rest));
+        // RUN jetzt dezent grau statt gelb
+        return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[RUN]", DIM, rest));
     }
     if let Some(rest) = line.strip_prefix("[AUTOGIT][ERR]") {
         return paint_tag("[AUTOGIT]", CYAN, &paint_tag("[ERR]", RED, rest));
