@@ -63,9 +63,16 @@ set(CMAKE_CUDA_EXTENSIONS OFF)
 option(OTTER_USE_NVRTC "Enable NVRTC coloring runtime (links provided by CUDA Toolkit)" OFF)
 option(OTTER_USE_ORT   "Enable ONNX Runtime integration (expects ORT in toolchain)" OFF)
 
+# ORT wiring (prereqs only; default OFF keeps build without ORT link)
+set(OTTER_ORT_ROOT "" CACHE PATH "Root directory of ONNX Runtime (optional if CMake package is available)")
+set(OTTER_ORT_PROVIDER "cpu" CACHE STRING "ONNX Runtime execution provider: cpu|cuda")
+set_property(CACHE OTTER_ORT_PROVIDER PROPERTY STRINGS cpu cuda)
+
 # Configure-time echo for visibility (Phase-1: both OFF is expected)
 message(STATUS "OTTER_USE_NVRTC = ${OTTER_USE_NVRTC}")
 message(STATUS "OTTER_USE_ORT   = ${OTTER_USE_ORT}")
+message(STATUS "OTTER_ORT_ROOT  = ${OTTER_ORT_ROOT}")
+message(STATUS "OTTER_ORT_PROVIDER = ${OTTER_ORT_PROVIDER}")
 
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
@@ -251,6 +258,65 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
   $<$<TARGET_EXISTS:CUDA::cudadevrt>:CUDA::cudadevrt>
   Threads::Threads
 )
+
+# NVRTC (only when explicitly enabled)
+if(OTTER_USE_NVRTC)
+  if(TARGET CUDA::nvrtc)
+    target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::nvrtc)
+  else()
+    message(FATAL_ERROR "OTTER_USE_NVRTC=ON, but CUDA::nvrtc target not found (install CUDA Toolkit with NVRTC).")
+  endif()
+  # CUDA driver is required for module loading/launch via driver API
+  if(TARGET CUDA::cuda_driver)
+    target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cuda_driver)
+  else()
+    message(FATAL_ERROR "OTTER_USE_NVRTC=ON, but CUDA::cuda_driver target not found.")
+  endif()
+endif()
+
+# ORT (robust conditional wiring; default OFF keeps build w/o ORT)
+if(OTTER_USE_ORT)
+  set(_OTTER_ORT_TGT "")
+  # 1) Try a CMake package that exports targets
+  find_package(onnxruntime CONFIG QUIET)
+  if(TARGET onnxruntime)
+    set(_OTTER_ORT_TGT onnxruntime)
+  elseif(TARGET onnxruntime::onnxruntime)
+    set(_OTTER_ORT_TGT onnxruntime::onnxruntime)
+  endif()
+
+  # 2) Fallback to manual find if no target yet and a root is provided
+  if(NOT _OTTER_ORT_TGT)
+    if(OTTER_ORT_ROOT)
+      find_path(_OTTER_ORT_INC onnxruntime_c_api.h
+        HINTS "${OTTER_ORT_ROOT}/include" "${OTTER_ORT_ROOT}/include/onnxruntime" REQUIRED)
+      find_library(_OTTER_ORT_LIB onnxruntime
+        HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" REQUIRED)
+      target_include_directories(mandelbrot_otterdream PRIVATE "${_OTTER_ORT_INC}")
+      set(_OTTER_ORT_TGT "${_OTTER_ORT_LIB}")
+    else()
+      message(FATAL_ERROR "OTTER_USE_ORT=ON, aber kein onnxruntime CMake-Paket und kein OTTER_ORT_ROOT angegeben.")
+    endif()
+  endif()
+
+  # Link core ORT
+  target_link_libraries(mandelbrot_otterdream PRIVATE ${_OTTER_ORT_TGT})
+
+  # Optional CUDA provider
+  if(OTTER_ORT_PROVIDER STREQUAL "cuda")
+    if(TARGET onnxruntime_providers_cuda)
+      target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime_providers_cuda)
+    else()
+      find_library(_OTTER_ORT_CUDA onnxruntime_providers_cuda
+        HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64")
+      if(_OTTER_ORT_CUDA)
+        target_link_libraries(mandelbrot_otterdream PRIVATE "${_OTTER_ORT_CUDA}")
+      else()
+        message(FATAL_ERROR "OTTER_ORT_PROVIDER=cuda gewählt, aber 'onnxruntime_providers_cuda' nicht gefunden.")
+      endif()
+    endif()
+  endif()
+endif()
 
 # --- Anti-GLU Filter für Windows (erzwingt "no GLU") ------------------------
 if(WIN32)
