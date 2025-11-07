@@ -6,6 +6,7 @@
 
 use std::ffi::OsStr;
 use std::path::Path;
+use std::fs;
 
 use crate::artifact::find_artifact;
 use crate::commands;
@@ -97,9 +98,37 @@ pub fn exec(root: &Path) -> i32 {
         return code_build;
     }
 
-    // 2) Export-ZIP (zielt auf out/exports; packt den Inhalt aus out/)
-    let zip_path = match commands::export::run(root, Some(&root.join("out").join("exports")), 5, false) {
-        Ok(p) => { runner_term::out_info("RUNNER", &format!("packed sources: {}", p.display())); Some(p) }
+    // 2) Export-ZIP: Vor dem Export 'exports/' temporär aus dem Baum nehmen,
+    // um verschachtelte Zips sicher zu verhindern.
+    let exports_dir = root.join("out").join("exports");
+    let hold_dir = root.join("out").join(format!("__exports_hold_{}__", epoch_ms()));
+    let mut moved_exports = false;
+
+    if exports_dir.exists() && exports_dir.is_dir() {
+        if let Err(e) = fs::rename(&exports_dir, &hold_dir) {
+            runner_term::out_info("WARN", &format!("guard: failed to hide exports/: {}", e));
+        } else {
+            moved_exports = true;
+            runner_term::out_info("GUARD", &format!("hidden: {}", crate::prockit::display_path(&exports_dir)));
+        }
+    }
+
+    let zip_path_res = commands::export::run(root, Some(&root.join("out").join("exports")), 5, false);
+    // Exports-Verzeichnis zurückbewegen (auch bei Fehlern).
+    if moved_exports {
+        // Falls 'exports/' neu angelegt wurde, entferne es, dann zurückrenamen.
+        if exports_dir.exists() {
+            let _ = fs::remove_dir_all(&exports_dir);
+        }
+        if let Err(e) = fs::rename(&hold_dir, &exports_dir) {
+            runner_term::out_info("WARN", &format!("guard: failed to restore exports/: {}", e));
+        } else {
+            runner_term::out_info("GUARD", &format!("restored: {}", crate::prockit::display_path(&exports_dir)));
+        }
+    }
+
+    let zip_path = match zip_path_res {
+        Ok(p) => { runner_term::out_info("RUNNER", &format!("packed export: {}", p.display())); Some(p) }
         Err(e) => { runner_term::out_info("WARN", &format!("packing skipped/failed: {}", e)); None }
     };
 
@@ -123,7 +152,7 @@ pub fn exec(root: &Path) -> i32 {
     let end_ms = epoch_ms();
     let artifact = find_artifact(root);
     let mut notes = Vec::new();
-    if let Some(z) = &zip_path { notes.push(format!("sources_zip={}", z.display())); }
+    if let Some(z) = &zip_path { notes.push(format!("export_zip={}", z.display())); }
 
     summary::print_end_summary(summary::EndSummary {
         success: final_ok,
