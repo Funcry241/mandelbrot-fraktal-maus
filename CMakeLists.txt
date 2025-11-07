@@ -1,20 +1,15 @@
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
-# ---- Early: Multi-Config entschlacken und Imported-Config-Mapping setzen ----
-# (MUSS vor project() und vor find_package(...) passieren!)
+# ---- Early: nur Release/Debug und Imported-Config-Mapping ----
 if(CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_CONFIGURATION_TYPES "Release;Debug" CACHE STRING "Supported configs" FORCE)
 endif()
-
-# Striktes Mapping "verwandter" Konfigurationen -> Release
 set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release)
 set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL     Release)
 set(CMAKE_MAP_IMPORTED_CONFIG_RelWithDebInfo Release)
 set(CMAKE_MAP_IMPORTED_CONFIG_MinSizeRel     Release)
 set(CMAKE_MAP_IMPORTED_CONFIG_PROFILE        Release)
 set(CMAKE_MAP_IMPORTED_CONFIG_CHECKED        Release)
-
-# try_compile etc. konsistent in Release (wichtig für MSVC+CUDA)
 set(CMAKE_TRY_COMPILE_CONFIGURATION Release)
 
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
@@ -33,12 +28,11 @@ if(CMAKE_GENERATOR MATCHES "Ninja")
   set(CMAKE_JOB_POOL_LINK link_pool)
 endif()
 
-# ---------------------- Architectures ----------------------
+# ---------------------- Archs & Standards ------------------
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 80;86;89;90 CACHE STRING "Default architectures if none provided")
 endif()
 
-# ---------------------- vcpkg Triplet ----------------------
 if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   if(WIN32)
     set(VCPKG_TARGET_TRIPLET "x64-windows")
@@ -47,7 +41,6 @@ if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   endif()
 endif()
 
-# Resolve vcpkg installed dir for manual fallbacks
 if(NOT DEFINED VCPKG_INSTALLED_DIR)
   if(DEFINED ENV{VCPKG_INSTALLED_DIR})
     set(VCPKG_INSTALLED_DIR "$ENV{VCPKG_INSTALLED_DIR}")
@@ -57,7 +50,6 @@ if(NOT DEFINED VCPKG_INSTALLED_DIR)
 endif()
 set(_VCPKG_PREFIX "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
 
-# ---------------------- Language Std -----------------------
 if(NOT DEFINED CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 23)
 endif()
@@ -70,13 +62,13 @@ endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
-# ---------------------- Packages ---------------------------
+# ---------------------- Pakete ------------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
 find_package(OpenGL REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 
-# OpenGL lib: unter Windows direkt opengl32, sonst OpenGL::GL
+# Windows: direkt opengl32, sonst OpenGL::GL
 if(WIN32)
   set(_OPENGL_GL_LIB opengl32)
 else()
@@ -85,21 +77,16 @@ endif()
 
 # --- GLFW --------------------------------------------------
 set(GLFW_LINK_ITEM "")
-if(WIN32)
-  find_package(glfw3 CONFIG REQUIRED)
-  if(TARGET glfw)
-    set(GLFW_LINK_ITEM glfw)
-  elseif(TARGET glfw3)
-    set(GLFW_LINK_ITEM glfw3)
-  else()
-    find_library(GLFW_LINK_ITEM
-      NAMES glfw3 glfw3dll glfw
-      HINTS "${_VCPKG_PREFIX}/lib" "${_VCPKG_PREFIX}/debug/lib"
-      REQUIRED)
-  endif()
-else()
-  find_package(glfw3 CONFIG REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)
+if(TARGET glfw)
   set(GLFW_LINK_ITEM glfw)
+elseif(TARGET glfw3)
+  set(GLFW_LINK_ITEM glfw3)
+else()
+  find_library(GLFW_LINK_ITEM
+    NAMES glfw3 glfw3dll glfw
+    HINTS "${_VCPKG_PREFIX}/lib" "${_VCPKG_PREFIX}/debug/lib"
+    REQUIRED)
 endif()
 
 # --- GLEW (dynamic, no GLU) --------------------------------
@@ -107,30 +94,53 @@ set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
 remove_definitions(-DGLEW_STATIC)
 
 set(GLEW_LINK_ITEM "")
-if(WIN32)
-  find_package(GLEW CONFIG REQUIRED)
-  if(TARGET GLEW::GLEW)
-    set(GLEW_LINK_ITEM GLEW::GLEW)
-  elseif(TARGET GLEW::glew)
-    set(GLEW_LINK_ITEM GLEW::glew)
-  elseif(TARGET GLEW::glew32)
-    set(GLEW_LINK_ITEM GLEW::glew32)
-  else()
-    find_library(GLEW_LINK_ITEM
-      NAMES glew32 glew
-      HINTS "${_VCPKG_PREFIX}/lib" "${_VCPKG_PREFIX}/debug/lib"
-      REQUIRED)
-  endif()
+find_package(GLEW CONFIG REQUIRED)
+if(TARGET GLEW::GLEW)
+  set(GLEW_LINK_ITEM GLEW::GLEW)
+elseif(TARGET GLEW::glew)
+  set(GLEW_LINK_ITEM GLEW::glew)
+elseif(TARGET GLEW::glew32)
+  set(GLEW_LINK_ITEM GLEW::glew32)
 else()
-  find_package(GLEW REQUIRED)
-  if(TARGET GLEW::GLEW)
-    set(GLEW_LINK_ITEM GLEW::GLEW)
-  else()
-    find_library(GLEW_LINK_ITEM NAMES GLEW glew REQUIRED)
-  endif()
+  find_library(GLEW_LINK_ITEM
+    NAMES glew32 glew GLEW
+    HINTS "${_VCPKG_PREFIX}/lib" "${_VCPKG_PREFIX}/debug/lib"
+    REQUIRED)
 endif()
 
-# ---------------------- Feature-Schalter -------------------
+# -------- Helper: GLU aus importierten Targets entfernen ----
+function(otter_strip_glu_from target_name)
+  if(NOT TARGET ${target_name})
+    return()
+  endif()
+  # Prüfe und säubere gängige Link-Properties
+  foreach(_prop
+          INTERFACE_LINK_LIBRARIES
+          INTERFACE_LINK_LIBRARIES_DEBUG
+          INTERFACE_LINK_LIBRARIES_RELEASE
+          IMPORTED_LINK_INTERFACE_LIBRARIES
+          IMPORTED_LINK_INTERFACE_LIBRARIES_DEBUG
+          IMPORTED_LINK_INTERFACE_LIBRARIES_RELEASE)
+    get_target_property(_libs ${target_name} ${_prop})
+    if(_libs)
+      set(_new "${_libs}")
+      list(FILTER _new EXCLUDE REGEX [[(^|;)OpenGL::GLU($|;)]])
+      list(FILTER _new EXCLUDE REGEX [[(^|;)[Gg][Ll][Uu]32(\.lib)?($|;)]])
+      if(NOT "${_new}" STREQUAL "${_libs}")
+        set_property(TARGET ${target_name} PROPERTY ${_prop} "${_new}")
+      endif()
+    endif()
+  endforeach()
+endfunction()
+
+# konsequent auf die üblichen Verdächtigen anwenden
+otter_strip_glu_from(${GLEW_LINK_ITEM})
+otter_strip_glu_from(${GLFW_LINK_ITEM})
+if(TARGET OpenGL::GLU)
+  otter_strip_glu_from(OpenGL::GLU)
+endif()
+
+# ---------------------- Features ---------------------------
 option(OTTER_USE_ORT   "Enable ONNX Runtime AOP (Policy-Replikatoren)" OFF)
 option(OTTER_USE_NVRTC "Enable NVRTC Coloring (Color-Replikatoren)"   OFF)
 option(OTTER_LINK_CUDA_DRIVER "Link the CUDA Driver API (cu*). Enable only if you call cu* symbols." OFF)
@@ -163,28 +173,27 @@ add_executable(mandelbrot_otterdream
   src/renderer_state_cuda.cpp
   src/renderer_state_gl.cpp
   src/heatmap_metrics.cu
-  # Axolotel HUD (WOW overlay)
+  # Axolotel HUD
   src/axolotel_hud.cpp
   src/axolotel_coupler.cpp
-  # Dachs HUD (tri-pane top layout)
+  # Dachs HUD
   src/dachs_hud.cpp
-  # ---------- Replikatoren (core; optionale werden unten ergänzt) ----------
+  # Replikatoren (core)
   src/perturb_core.cpp
   src/perturb_orbit_mp.cpp
   src/luchs_dsl.cpp
 )
 
-# Sicherstellen, dass Linker-Sprache korrekt erkannt wird
+# Linker-Sprache sichtbar und korrekt
 set_property(TARGET mandelbrot_otterdream PROPERTY LINKER_LANGUAGE CXX)
 
-# ---------- Optionale Replikatoren-Quellen ----------
+# Optionale Replikatoren-Quellen
 if(OTTER_USE_ORT)
   target_sources(mandelbrot_otterdream PRIVATE
     src/ai/onnx_model.cpp
     src/ai/aop_controller.cpp
   )
 endif()
-
 if(OTTER_USE_NVRTC)
   target_sources(mandelbrot_otterdream PRIVATE
     src/coloring_runtime_nvrtc.cpp
@@ -193,10 +202,7 @@ endif()
 
 # --- MSVC: gezielt C4702 nur für perturb_core.cpp ----------
 if(MSVC)
-  set_source_files_properties(
-    src/perturb_core.cpp
-    PROPERTIES COMPILE_OPTIONS "/wd4702"
-  )
+  set_source_files_properties(src/perturb_core.cpp PROPERTIES COMPILE_OPTIONS "/wd4702")
 endif()
 
 # ---------------------- Compile-Options --------------------
@@ -232,7 +238,7 @@ else()
   endif()
 endif()
 
-# CUDA device flags (pure device)
+# CUDA device flags
 target_compile_options(mandelbrot_otterdream PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:--std=c++20 --expt-relaxed-constexpr>
 )
@@ -244,27 +250,23 @@ set_target_properties(mandelbrot_otterdream PROPERTIES
   CUDA_RUNTIME_LIBRARY Shared
 )
 
-# ---------------------- Includes ---------------------------
+# ---------------------- Includes & Defines -----------------
 target_include_directories(mandelbrot_otterdream PRIVATE
   "${CMAKE_SOURCE_DIR}/src"
   ${CUDAToolkit_INCLUDE_DIRS}
 )
 
-# ---------------------- Defines ----------------------------
 target_compile_definitions(mandelbrot_otterdream PRIVATE
   GLEW_NO_IMAGING
   GLEW_NO_GLU
   CAPY_DEFAULT_ON=1
   $<$<CXX_COMPILER_ID:MSVC>:NOMINMAX WIN32_LEAN_AND_MEAN>
-)
-target_compile_definitions(mandelbrot_otterdream PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:__NV_NO_VECTOR_DEPRECATION_DIAG>
   $<$<BOOL:${OTTER_USE_ORT}>:OTTER_USE_ORT=1>
   $<$<BOOL:${OTTER_USE_NVRTC}>:OTTER_USE_NVRTC=1>
 )
 
 # ---------------------- Link (Basis) -----------------------
-# Kein explizites CUDA::cudart/cudadevrt – NVCC/CMake zieht das korrekt dazu.
 target_link_libraries(mandelbrot_otterdream PRIVATE
   ${_OPENGL_GL_LIB}
   ${GLEW_LINK_ITEM}
@@ -272,7 +274,6 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
   Threads::Threads
 )
 
-# Win32-Systemlibs, falls GLFW-Toolchain diese nicht vollständig propagated
 if(WIN32)
   target_link_libraries(mandelbrot_otterdream PRIVATE user32 gdi32 shell32 advapi32)
 endif()
@@ -288,7 +289,6 @@ if(OTTER_LINK_CUDA_DRIVER)
       endif()
     endforeach()
   endif()
-
   if(_USE_CUDA_DRIVER_TARGET)
     target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cuda_driver)
   else()
@@ -309,7 +309,6 @@ if(OTTER_LINK_CUDA_DRIVER)
 endif()
 
 # --- Hardcore Anti-GLU (explizit + transitiv) --------------
-# 1) Aus der Linkliste des Ziels streichen (explizit angehängte Items).
 if(WIN32)
   get_target_property(_OTTER_LINK_LIBS mandelbrot_otterdream LINK_LIBRARIES)
   if(_OTTER_LINK_LIBS)
@@ -320,9 +319,23 @@ if(WIN32)
       set_property(TARGET mandelbrot_otterdream PROPERTY LINK_LIBRARIES "${_OTTER_LINK_LIBS_FILTERED}")
     endif()
   endif()
-  # 2) Sicherheitsschalter: Default-Libs mit GLU ignorieren (falls via #pragma(DEFAULTLIB) gezogen).
   if(MSVC)
+    # Falls irgendein DEFAULTLIB Eintrag GLU reinmogelt:
     target_link_options(mandelbrot_otterdream PRIVATE /NODEFAULTLIB:GLU32 /NODEFAULTLIB:glu32)
+  endif()
+endif()
+
+# ---------------------- NVCC Host-Compiler PIN --------------
+# Stabiler -ccbin, auch wenn PATH/Runner-Kaskade variiert.
+if(MSVC)
+  if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
+    set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}" CACHE FILEPATH "Host compiler for NVCC" FORCE)
+  endif()
+  # Doppelt hält besser: in Flags aufnehmen, damit der dlink es garantiert sieht.
+  if(CMAKE_CXX_COMPILER)
+    # Sauber quoten (Spaces in Pfaden)
+    string(REPLACE "/" "\\" _ccbin_norm "${CMAKE_CXX_COMPILER}")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -ccbin=\"${_ccbin_norm}\"" CACHE STRING "NVCC flags" FORCE)
   endif()
 endif()
 
@@ -332,19 +345,12 @@ if(MSVC)
   if(OTTER_LINK_VERBOSE)
     target_link_options(mandelbrot_otterdream PRIVATE /VERBOSE:LIB)
   endif()
-
-  # Sicherheits- & Repro-Flags für alle Konfigurationen:
   target_link_options(mandelbrot_otterdream PRIVATE
     /NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf /Brepro
-  )
-
-  # Release-spezifisch:
-  target_link_options(mandelbrot_otterdream PRIVATE
     $<$<CONFIG:Release>:/INCREMENTAL:NO>
     $<$<CONFIG:Release>:/OPT:REF>
     $<$<CONFIG:Release>:/OPT:ICF>
   )
-
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "HIGHENTROPYVA erfordert 64-bit (/MACHINE:X64). Bitte 64-bit Toolchain verwenden.")
   endif()
@@ -377,10 +383,8 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# Diagnose: zeige aktive Config-Typen/Mappings einmalig
+# Diagnose
 message(STATUS "Otter Configs: ${CMAKE_CONFIGURATION_TYPES}")
 message(STATUS "Map RelWithDebInfo -> ${CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO}")
-
-# Bonus: Linker-Language sichtbar machen
 get_target_property(_OTTER_LINK_LANG mandelbrot_otterdream LINKER_LANGUAGE)
 message(STATUS "Otter Linker language: ${_OTTER_LINK_LANG}")
