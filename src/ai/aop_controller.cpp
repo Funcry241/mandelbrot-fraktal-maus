@@ -15,21 +15,13 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     (void)fctx; (void)state;
     Decision d{};
 
-    if constexpr (Settings::Ai::enabled && Settings::Ai::aopEnabled) {
-        // Einzige Quelle für [REPL/POLICY]-Logs: an Perf-Cadence gekoppelt
-        if constexpr (Settings::PerfLog::enabled) {
-            const int warm = Settings::PerfLog::warmupFrames;
-            const int step = Settings::PerfLog::everyN;
-            if (state.frameCount > warm && (state.frameCount % step) == 0) {
-                LUCHS_LOG_HOST("[REPL/POLICY] evaluate (stub, ep=%s)", Settings::Ai::ep);
-            }
-        } else {
-            // Falls Perf-Logs aus: sehr sparsam loggen (alle 120 Frames)
-            static int s_last = -1000000000;
-            if (state.frameCount - s_last >= 120) {
-                LUCHS_LOG_HOST("[REPL/POLICY] evaluate (stub, ep=%s)", Settings::Ai::ep);
-                s_last = state.frameCount;
-            }
+    // Keine Logs, wenn globales PerfLogging aus ist.
+    if constexpr (Settings::Ai::enabled && Settings::Ai::aopEnabled
+                  && Settings::performanceLogging && Settings::PerfLog::enabled) {
+        const int warm = Settings::PerfLog::warmupFrames;
+        const int step = Settings::PerfLog::everyN;
+        if (state.frameCount > warm && (state.frameCount % step) == 0) {
+            LUCHS_LOG_HOST("[REPL/POLICY] evaluate (stub, ep=%s)", Settings::Ai::ep);
         }
     }
 

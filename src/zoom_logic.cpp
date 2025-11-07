@@ -30,6 +30,9 @@
 
 namespace ZoomLogic {
 
+// Master-Gate für Zoom-Logs: nur wenn globales PerfLogging **und** PerfLog::enabled **und** ZoomLog::enabled.
+static constexpr bool ZLOG_ON = (Settings::performanceLogging && Settings::PerfLog::enabled && Settings::ZoomLog::enabled);
+
 // --- tiny helpers (fast math; no transcendentals in hot-path) ----------------
 
 static inline float get_dt_seconds(const FrameContext& fc) noexcept {
@@ -184,7 +187,7 @@ static void ensure_seed_once() noexcept {
     sNoise.angleBiasRad = a;
     sNoise.deflectSign  = (sNoise.rng.u01() < 0.5f) ? -1 : +1;
 
-    if constexpr (Settings::ZoomLog::enabled) {
+    if constexpr (ZLOG_ON) {
         LUCHS_LOG_HOST("[ZSEED] runSeed=0x%08X angleBias=%.3f deg deflectSign=%+d durA=%.2fs durD=%.2fs pilot=%.1fpx/%.1fs",
                        (unsigned)sNoise.seed, a / degToRad, sNoise.deflectSign,
                        sNoise.angleDurSec, sNoise.deflectDurSec, sNoise.pilotMaxPx, sNoise.pilotDurSec);
@@ -289,7 +292,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             RS_OFFSET_X(rs) += dWorldX;
             RS_OFFSET_Y(rs) += dWorldY;
             sNoise.jitterDone = true;
-            if constexpr (Settings::ZoomLog::enabled) {
+            if constexpr (ZLOG_ON) {
                 LUCHS_LOG_HOST("[ZJIT] seed=0x%08X rpx=%.2f phi=%.2f dWorld=(%.9f,%.9f) invZ=%.6g",
                                (unsigned)sNoise.seed, rpx, phi, dWorldX, dWorldY, invZ);
             }
@@ -329,7 +332,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                 const double rx = ndcX_in * c - ndcY_in * s;
                 const double ry = ndcX_in * s + ndcY_in * c;
                 ndcX_in = rx; ndcY_in = ry;
-                if constexpr (Settings::ZoomLog::enabled) {
+                if constexpr (ZLOG_ON) {
                     if (emitEveryN) {
                         LUCHS_LOG_HOST("[ZANGL] f=%llu fade=%.2f ang=%.3f ndcRot=(%.3f,%.3f)",
                                        (unsigned long long)zls.frame, t, ang, ndcX_in, ndcY_in);
@@ -351,7 +354,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                     ndcX_in += (double)sNoise.deflectSign * amp * ox;
                     ndcY_in += (double)sNoise.deflectSign * amp * oy;
 
-                    if constexpr (Settings::ZoomLog::enabled) {
+                    if constexpr (ZLOG_ON) {
                         if (emitEveryN) {
                             LUCHS_LOG_HOST("[ZDEF] f=%llu fade=%.2f amp=%.3f sign=%+d ndcDef=(%.3f,%.3f)",
                                            (unsigned long long)zls.frame, t, amp, sNoise.deflectSign, ndcX_in, ndcY_in);
@@ -364,7 +367,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         // --- Keyboard Nav Bias (additiv) -------------------------------------
         update_key_nav_bias(dt);
         add_key_bias_to_ndc(ndcX_in, ndcY_in);
-        if constexpr (Settings::ZoomLog::enabled) {
+        if constexpr (ZLOG_ON) {
             if (emitEveryN && (sKeyBiasX != 0.0 || sKeyBiasY != 0.0)) {
                 LUCHS_LOG_HOST("[ZKEY] f=%llu keyBias=(%.4f,%.4f) ndc+key=(%.4f,%.4f)",
                                (unsigned long long)zls.frame, sKeyBiasX, sKeyBiasY, ndcX_in, ndcY_in);
@@ -392,7 +395,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                 pilot_px_x = (double)sNoise.deflectSign * ampPx * ox;
                 pilot_px_y = (double)sNoise.deflectSign * ampPx * oy;
 
-                if constexpr (Settings::ZoomLog::enabled) {
+                if constexpr (ZLOG_ON) {
                     if (emitEveryN) {
                         LUCHS_LOG_HOST("[ZPILOT] f=%llu fade=%.2f ampPx=%.2f dir=(%.3f,%.3f) pilotPx=(%.2f,%.2f)",
                                        (unsigned long long)zls.frame, t, ampPx, ox, oy, pilot_px_x, pilot_px_y);
@@ -419,7 +422,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                 const double invR = Rcap / std::sqrt(r2);
                 ndcX *= invR;
                 ndcY *= invR;
-                if constexpr (Settings::ZoomLog::enabled) {
+                if constexpr (ZLOG_ON) {
                     if (emitEveryN) {
                         LUCHS_LOG_HOST("[ZLEASH] f=%llu earlyLocality R=%.3f ndc'=(%.3f,%.3f)",
                                        (unsigned long long)zls.frame, Rcap, ndcX, ndcY);
@@ -434,7 +437,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         ndcX *= leashX;
         ndcY *= leashY;
 
-        if constexpr (Settings::ZoomLog::enabled) {
+        if constexpr (ZLOG_ON) {
             if (emitEveryN && (leashX < 0.999 || leashY < 0.999)) {
                 LUCHS_LOG_HOST("[ZLEASH] f=%llu leashX=%.2f leashY=%.2f ndc'=(%.3f,%.3f)",
                                (unsigned long long)zls.frame, leashX, leashY, ndcX, ndcY);
@@ -464,7 +467,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             // ----- Dachs Phase 3: Sub-pixel clamp (kill micro-jitter) -----
             if (std::abs(step_px_x) < 1.0) step_px_x = 0.0;
             if (std::abs(step_px_y) < 1.0) step_px_y = 0.0;
-            if constexpr (Settings::ZoomLog::enabled) {
+            if constexpr (ZLOG_ON) {
                 static double s_lastCapLog = 0.0;
                 const double now = glfwGetTime();
                 if ((std::abs(step_px_x) == 0.0 || std::abs(step_px_y) == 0.0) && (now - s_lastCapLog) > 1.0) {
@@ -493,7 +496,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                                 | (hitCAP_Y ? 8 : 0)
                                 | (scaleZero ? 16 : 0);
 
-                if constexpr (Settings::ZoomLog::enabled) {
+                if constexpr (ZLOG_ON) {
                     if (emitEveryN) {
                         LUCHS_LOG_HOST("[ZPAN1] f=%llu ndc=(%.4f,%.4f) a=%.3f s=%.2f "
                                        "goal_px=(%.2f,%.2f) step_px=(%.2f,%.2f) dWorld=(%.9f,%.9f) invZ=%.6g flags=0x%02X",
@@ -510,7 +513,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     }
 
     // --- Foundational Zoom Telemetry -----------------------------------------
-    if constexpr (Settings::ZoomLog::enabled) {
+    if constexpr (ZLOG_ON) {
         const bool needHeader = (Settings::ZoomLog::header && !zls.headerPrinted);
         if (needHeader) {
             LUCHS_LOG_HOST("[ZHDR] keys=f,dt_ms,z0,z1,g,rps,ldz%s",

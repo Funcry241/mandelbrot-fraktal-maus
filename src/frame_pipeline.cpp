@@ -2,6 +2,7 @@
 ///// Schneefuchs: ASCII logs; pch first; small deterministic diffs; centralized [REPL/*] logging (no local echoes).
 ///// Maus: Compute -> Metrics -> Overlays -> Axolotel -> Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex; center shows Help; WS hidden on Help.
 ///// Datei: src/frame_pipeline.cpp
+
 #include "pch.hpp"
 #include <GLFW/glfw3.h>       // glfwGetTime()
 #include <chrono>
@@ -119,7 +120,9 @@ namespace {
             }
         }
 
-        LUCHS_LOG_HOST("[HM][FALLBACK] generated N=%zu tiles=%dx%d tilePx=%d", N, tx, ty, px);
+        if constexpr (Settings::debugLogging) {
+            LUCHS_LOG_HOST("[HM][FALLBACK] generated N=%zu tiles=%dx%d tilePx=%d", N, tx, ty, px);
+        }
     }
 
     // ---------------------- Metrics EINMAL pro Frame ------------------------

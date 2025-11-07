@@ -11,6 +11,7 @@
 #include "axolotel_hud.hpp"
 #include "axolotel_shaders.hpp"
 #include "settings_axolotel.hpp"
+#include "settings.hpp"
 
 #include <array>
 #include <algorithm>
@@ -51,7 +52,8 @@ namespace {
     static float sBreathAmp = Settings::Axolotel::breathAmp;
     static float sBreathHz  = Settings::Axolotel::breathHz;
     static int   sMaxPulses = std::clamp(Settings::Axolotel::maxPulses, 1, kShaderMaxPulses);
-    static bool  sPerfLog   = Settings::Axolotel::perfLog;
+    // Perf-Log nur aktiv, wenn globales Perf-Logging **und** PerfLog::enabled **und** Axolotel::perfLog aktiv ist.
+    static bool  sPerfLog   = (Settings::performanceLogging && Settings::PerfLog::enabled && Settings::Axolotel::perfLog);
 
     static float sColorNav[3]     = { Settings::Axolotel::colorNav[0],     Settings::Axolotel::colorNav[1],     Settings::Axolotel::colorNav[2]     };
     static float sColorOverlay[3] = { Settings::Axolotel::colorOverlay[0], Settings::Axolotel::colorOverlay[1], Settings::Axolotel::colorOverlay[2] };
@@ -273,7 +275,8 @@ void configure(float pulseMs, float breathAmp, float breathHz, int maxPulsesClam
     sBreathAmp = std::clamp(breathAmp, 0.0f, 1.0f);
     sBreathHz  = std::clamp(breathHz,  0.05f, 3.0f);
     sMaxPulses = std::clamp(maxPulsesClamped, 1, kShaderMaxPulses);
-    sPerfLog   = perfLog;
+    // honor runtime toggle but keep master gates
+    sPerfLog   = (Settings::performanceLogging && Settings::PerfLog::enabled && perfLog);
 }
 
 // --- Energy tap ---------------------------------------------------------------
