@@ -216,7 +216,8 @@ target_compile_options(mandelbrot_otterdream PRIVATE
 set_target_properties(mandelbrot_otterdream PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON
   CUDA_RESOLVE_DEVICE_SYMBOLS ON
-  CUDA_RUNTIME_LIBRARY Static
+  # WICHTIG: dynamische CUDA-Runtime, damit /MD (CRT DLL) nicht mit LIBCMT kollidiert
+  CUDA_RUNTIME_LIBRARY Shared
 )
 
 # ---------------------- Includes ---------------------------
