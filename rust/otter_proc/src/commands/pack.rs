@@ -1,6 +1,6 @@
-///// Otter: Pack – quellseitig vorgehalten; aktuell nicht vom CLI verdrahtet.
-///// Schneefuchs: Warnungen im Default-Build aus; Helper bleiben wartbar.
-///// Maus: Nur File-scope-Attribut, sonst unverändert.
+///// Otter: Pack – exports/ strikt ausschließen (ZIP-Guard) + Selbstinklusion absichern; weiterhin nicht am CLI verdrahtet.
+///// Schneefuchs: Deterministischer Walk; out_rel-Skip nur, falls Ziel im Repo-Baum liegt; nur verbose-Hinweis, sonst unverändert.
+///// Maus: Minimalinvasiv – dir_prefix „exports/“ ergänzt; optionale Skip-Prüfung für das Ziel-ZIP.
 ///// Datei: rust/otter_proc/src/commands/pack.rs
 #![allow(dead_code)]
 
@@ -81,6 +81,7 @@ fn is_excluded_dir(rel: &str, include_dist: bool) -> bool {
         "vcpkg_installed/", "vcpkg_downloads/", "vcpkg_buildtrees/", "vcpkg_packages/", "vcpkg_cache/",
         "build/", "build-",
         "out/",
+        "exports/",                      // <-- ZIP-Guard: verhindert verschachtelte Zips aus vorherigen Läufen
         "target/", "rust/otter_proc/target/",
         ".git/", ".vs/", ".idea/",
         // KEIN .vscode/ hier — Whitelist greift im File-Filter
@@ -192,9 +193,13 @@ pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<Pa
         out_info("ZIP", &format!("root={}", root.display()));
         out_info("ZIP", &format!("zip={}", out_path.display()));
         if !include_dist { out_info("ZIP", "include-dist=no"); } else { out_info("ZIP", "include-dist=YES"); }
+        out_info("ZIP", "guard: excluding 'exports/' (prevent nested zips)");
     }
 
     ensure_parent_dirs(&out_path)?;
+
+    // Ermitteln, wie das Ziel relativ zum Root aussehen würde (falls im Baum)
+    let out_rel = rel_path(root, &out_path);
 
     // Collect all candidate files (deterministic order)
     let mut files: Vec<(PathBuf, String)> = Vec::new();
@@ -202,8 +207,16 @@ pub fn run(root: &Path, out: Option<&Path>, include_dist: bool) -> io::Result<Pa
         if !entry.file_type().is_file() { continue; }
         let abs = entry.path().to_path_buf();
         let Some(rel) = rel_path(root, &abs) else { continue; };
+
+        // Exporte strikt außen vor, ebenso generische Ausschlüsse
         if is_excluded_dir(&rel, include_dist) { continue; }
         if is_excluded_file(&rel) { continue; }
+
+        // Sicherheitsnetz: Ziel-ZIP nicht in sich selbst aufnehmen (falls out unterhalb root liegt)
+        if let Some(or) = &out_rel {
+            if &rel == or { continue; }
+        }
+
         files.push((abs, rel));
     }
     files.sort_by(|a, b| a.1.cmp(&b.1)); // deterministisch
