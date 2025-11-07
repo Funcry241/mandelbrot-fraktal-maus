@@ -1,3 +1,7 @@
+##### Otter: Phase-1 Replikatoren aktiv (Stubs/Logs), Build bleibt ohne ORT/NVRTC-Link
+##### Schneefuchs: Keine funktionale Änderung; strikte Flags unverändert; dynamisches GLEW bleibt
+##### Maus: ASCII-only; configure-Echo der OTTER_USE_*-Schalter
+##### Datei: CMakeLists.txt
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
@@ -58,6 +62,10 @@ set(CMAKE_CUDA_EXTENSIONS OFF)
 # ---------------------- Feature Toggles (safe defaults OFF) ----------
 option(OTTER_USE_NVRTC "Enable NVRTC coloring runtime (links provided by CUDA Toolkit)" OFF)
 option(OTTER_USE_ORT   "Enable ONNX Runtime integration (expects ORT in toolchain)" OFF)
+
+# Configure-time echo for visibility (Phase-1: both OFF is expected)
+message(STATUS "OTTER_USE_NVRTC = ${OTTER_USE_NVRTC}")
+message(STATUS "OTTER_USE_ORT   = ${OTTER_USE_ORT}")
 
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)

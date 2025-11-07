@@ -2,7 +2,7 @@
 ///// Schneefuchs: ASCII logs; pch first; small deterministic diffs; Stats forced next frame when E>0; WS disabled while Help active.
 ///// Maus: Compute -> Metrics -> Overlays -> Axolotel -> Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex; center shows Help; WS hidden on Help.
 ///// Datei: src/frame_pipeline.cpp
-///// Change: + Replikatoren Hooks — [REPL/ORBIT] vor Compute, [REPL/POLICY] nach ensureAnalysisMetrics()
+///// Change: + Replikatoren Hooks — [REPL/ORBIT] vor Compute, [REPL/POLICY] nach ensureAnalysisMetrics(); Phase-1: leichte Log-Echos (perf-cadence)
 
 #include "pch.hpp"
 #include <GLFW/glfw3.h>       // glfwGetTime()
@@ -387,6 +387,9 @@ void execute(RendererState& state) {
 
     // ---- Replikatoren: Orbit-Gate vor Compute ----
     Repl::Orbit::maybe_prepare_orbit(g_ctx, state);
+    if (perfShouldLog(g_frame)) {
+        LUCHS_LOG_HOST("[REPL/ORBIT] active (stub) tilePx=%d zoom=%.6f", g_ctx.tileSize, (double)g_ctx.zoom);
+    }
 
     // ---- Render (CUDA) ----
     computeCudaFrame(g_ctx, state);
@@ -398,6 +401,9 @@ void execute(RendererState& state) {
     if constexpr (Settings::Ai::enabled && Settings::Ai::aopEnabled) {
         auto d = Repl::Policy::evaluate_tile_policy(g_ctx, state);
         (void)d; // Entscheidungen folgen in Phase 2
+        if (perfShouldLog(g_frame)) {
+            LUCHS_LOG_HOST("[REPL/POLICY] evaluate (stub, ep=%s) tiles=%zu", Settings::Ai::ep, g_ctx.entropy.size());
+        }
     }
 
     // ---- Overlays (nutzen die vorliegenden Metrics) ----
