@@ -1,6 +1,6 @@
 ##### Otter: Phase-1 Replikatoren aktiv (Stubs/Logs), Build bleibt ohne ORT/NVRTC-Link
-##### Schneefuchs: Keine funktionale Änderung; strikte Flags unverändert; dynamisches GLEW bleibt
-##### Maus: ASCII-only; configure-Echo der OTTER_USE_*-Schalter
+##### Schneefuchs: Dynamisches GLEW; **harter Anti-GLU-Filter** (auch Pfad-Tokens & importierte Targets)
+##### Maus: ASCII-only; configure-Echo der OTTER_USE_*-Schalter; /WX-safe unverändert
 ##### Datei: CMakeLists.txt
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
@@ -252,17 +252,34 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
   Threads::Threads
 )
 
-# --- Anti-GLU Filter für Windows (erzwingt "no GLU") -------
+# --- Anti-GLU Filter für Windows (erzwingt "no GLU") ------------------------
 if(WIN32)
+  # 1) Strip GLU from this target's link interface (handles absolute/relative tokens).
   get_target_property(_OTTER_LINK_LIBS mandelbrot_otterdream LINK_LIBRARIES)
   if(_OTTER_LINK_LIBS)
     set(_OTTER_LINK_LIBS_FILTERED "${_OTTER_LINK_LIBS}")
-    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX [[(^|;)OpenGL::GLU($|;)]])
-    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX [[(^|;)[Gg][Ll][Uu]32(\.lib)?($|;)]])
+    # Match elements that end with 'glu32' or 'glu32.lib' (case-insensitive), possibly with a path.
+    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX "([/\\\\]|^)[Gg][Ll][Uu]32(\\.lib)?$")
+    list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX "OpenGL::GLU")
     if(NOT _OTTER_LINK_LIBS_FILTERED STREQUAL "${_OTTER_LINK_LIBS}")
       set_property(TARGET mandelbrot_otterdream PROPERTY LINK_LIBRARIES "${_OTTER_LINK_LIBS_FILTERED}")
     endif()
   endif()
+
+  # 2) Patch common GLEW imported targets if they transitively add GLU.
+  foreach(_glew_tgt IN ITEMS GLEW::GLEW GLEW::glew GLEW::glew32)
+    if(TARGET ${_glew_tgt})
+      get_target_property(_GLEW_LIBS ${_glew_tgt} INTERFACE_LINK_LIBRARIES)
+      if(_GLEW_LIBS)
+        set(_GLEW_LIBS_FILTERED "${_GLEW_LIBS}")
+        list(FILTER _GLEW_LIBS_FILTERED EXCLUDE REGEX "([/\\\\]|^)[Gg][Ll][Uu]32(\\.lib)?$")
+        list(FILTER _GLEW_LIBS_FILTERED EXCLUDE REGEX "OpenGL::GLU")
+        if(NOT _GLEW_LIBS_FILTERED STREQUAL "${_GLEW_LIBS}")
+          set_property(TARGET ${_glew_tgt} PROPERTY INTERFACE_LINK_LIBRARIES "${_GLEW_LIBS_FILTERED}")
+        endif()
+      endif()
+    endif()
+  endforeach()
 endif()
 
 # Optional: /VERBOSE:LIB für Diagnose (einmalig einschalten, dann zurück)
