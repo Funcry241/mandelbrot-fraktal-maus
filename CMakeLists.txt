@@ -1,37 +1,21 @@
-##### Otter: CMake – Early prune + map (nur Release/Debug) VOR project(); hartes Mapping RelWithDebInfo/MinSizeRel → Release.
-##### Schneefuchs: CUDA Runtime via CUDA_RUNTIME_LIBRARY Shared; CUDA-Driver optional (OTTER_LINK_CUDA_DRIVER); Link-Verbose default ON.
-##### Maus: Stabiler Configure ohne IMPORTED_LOCATION-Fehler; AppLocal behält $<TARGET_RUNTIME_DLLS>; GLU sauber ausgeschlossen.
-
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
 # ---- Early: Multi-Config entschlacken und Imported-Config-Mapping setzen ----
 # (MUSS vor project() und vor find_package(...) passieren!)
 if(CMAKE_CONFIGURATION_TYPES)
-  # Nur Release & Debug zulassen – Cache-Historie überschreiben
   set(CMAKE_CONFIGURATION_TYPES "Release;Debug" CACHE STRING "Supported configs" FORCE)
 endif()
 
 # Striktes Mapping "verwandter" Konfigurationen -> Release
-# (verhindert cudart/cuda_driver-RelWithDebInfo-Brüche)
 set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release)
 set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL     Release)
-# Falls Toolchains/Packages gemischte Schreibweisen nutzen: doppelt absichern
 set(CMAKE_MAP_IMPORTED_CONFIG_RelWithDebInfo Release)
 set(CMAKE_MAP_IMPORTED_CONFIG_MinSizeRel     Release)
-# Optionale exotische Profile auf Release biegen (falls auftauchen)
 set(CMAKE_MAP_IMPORTED_CONFIG_PROFILE        Release)
 set(CMAKE_MAP_IMPORTED_CONFIG_CHECKED        Release)
 
-# try_compile etc. ebenfalls konsistent in Release ausführen (wichtig für MSVC+CUDA)
+# try_compile etc. konsistent in Release (wichtig für MSVC+CUDA)
 set(CMAKE_TRY_COMPILE_CONFIGURATION Release)
-
-# Host-Compiler für NVCC robust setzen, wenn VS-Umgebung aktiv ist (verhindert "nvcc: cl.exe not found")
-if(WIN32 AND DEFINED ENV{VCToolsInstallDir})
-  set(_OTTER_CL_HINT "$ENV{VCToolsInstallDir}/bin/Hostx64/x64/cl.exe")
-  if(EXISTS "${_OTTER_CL_HINT}")
-    set(CMAKE_CUDA_HOST_COMPILER "${_OTTER_CL_HINT}" CACHE FILEPATH "NVCC host compiler" FORCE)
-  endif()
-endif()
 
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
@@ -88,8 +72,7 @@ set(CMAKE_CUDA_EXTENSIONS OFF)
 
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
-# Nur OpenGL-Core (ohne GLU) anfordern
-find_package(OpenGL REQUIRED COMPONENTS OpenGL)
+find_package(OpenGL REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -119,27 +102,24 @@ else()
   set(GLFW_LINK_ITEM glfw)
 endif()
 
-# --- GLEW (dynamic, GLU strikt vermeiden) ------------------
+# --- GLEW (dynamic, no GLU) --------------------------------
 set(GLEW_USE_STATIC_LIBS OFF CACHE BOOL "Link GLEW dynamically" FORCE)
 remove_definitions(-DGLEW_STATIC)
-add_definitions(-DGLEW_NO_GLU) # Header-seitig GLU-Funktionen ausblenden
 
 set(GLEW_LINK_ITEM "")
 if(WIN32)
-  # Bevorzugt direkt die DLL-Import-Lib binden, um transitive GLU-Propagation aus CMake-Paketen zu vermeiden
-  find_library(GLEW_LINK_ITEM NAMES glew32 glew
-               HINTS "${_VCPKG_PREFIX}/lib" "${_VCPKG_PREFIX}/debug/lib")
-  if(NOT GLEW_LINK_ITEM)
-    find_package(GLEW CONFIG REQUIRED)
-    if(TARGET GLEW::glew32)
-      set(GLEW_LINK_ITEM GLEW::glew32)
-    elseif(TARGET GLEW::GLEW)
-      set(GLEW_LINK_ITEM GLEW::GLEW)
-    elseif(TARGET GLEW::glew)
-      set(GLEW_LINK_ITEM GLEW::glew)
-    else()
-      message(FATAL_ERROR "GLEW-Ziel nicht gefunden.")
-    endif()
+  find_package(GLEW CONFIG REQUIRED)
+  if(TARGET GLEW::GLEW)
+    set(GLEW_LINK_ITEM GLEW::GLEW)
+  elseif(TARGET GLEW::glew)
+    set(GLEW_LINK_ITEM GLEW::glew)
+  elseif(TARGET GLEW::glew32)
+    set(GLEW_LINK_ITEM GLEW::glew32)
+  else()
+    find_library(GLEW_LINK_ITEM
+      NAMES glew32 glew
+      HINTS "${_VCPKG_PREFIX}/lib" "${_VCPKG_PREFIX}/debug/lib"
+      REQUIRED)
   endif()
 else()
   find_package(GLEW REQUIRED)
@@ -194,7 +174,7 @@ add_executable(mandelbrot_otterdream
   src/luchs_dsl.cpp
 )
 
-# WICHTIG: Linker-Sprache explizit festnageln
+# Sicherstellen, dass Linker-Sprache korrekt erkannt wird
 set_property(TARGET mandelbrot_otterdream PROPERTY LINKER_LANGUAGE CXX)
 
 # ---------- Optionale Replikatoren-Quellen ----------
@@ -328,8 +308,8 @@ if(OTTER_LINK_CUDA_DRIVER)
   endif()
 endif()
 
-# --- Anti-GLU: robust alles rauswerfen (direkt & transitiv) -----------------
-# 1) Fallback-Filter auf unmittelbare LINK_LIBRARIES
+# --- Hardcore Anti-GLU (explizit + transitiv) --------------
+# 1) Aus der Linkliste des Ziels streichen (explizit angehängte Items).
 if(WIN32)
   get_target_property(_OTTER_LINK_LIBS mandelbrot_otterdream LINK_LIBRARIES)
   if(_OTTER_LINK_LIBS)
@@ -340,14 +320,13 @@ if(WIN32)
       set_property(TARGET mandelbrot_otterdream PROPERTY LINK_LIBRARIES "${_OTTER_LINK_LIBS_FILTERED}")
     endif()
   endif()
+  # 2) Sicherheitsschalter: Default-Libs mit GLU ignorieren (falls via #pragma(DEFAULTLIB) gezogen).
+  if(MSVC)
+    target_link_options(mandelbrot_otterdream PRIVATE /NODEFAULTLIB:GLU32 /NODEFAULTLIB:glu32)
+  endif()
 endif()
-# 2) Transitiv via LINK_LIBRARY_OVERRIDE (CMake ≥3.24)
-set_property(TARGET mandelbrot_otterdream PROPERTY LINK_LIBRARY_OVERRIDE
-  "OpenGL::GLU;;GLU32;;glu32;;glu32.lib;;"
-)
 
 # ---------------------- Link-Optionen ----------------------
-# OTTER_LINK_VERBOSE standardmäßig AN (MSVC: /VERBOSE:LIB)
 option(OTTER_LINK_VERBOSE "Add /VERBOSE:LIB to MSVC link for diagnostics" ON)
 if(MSVC)
   if(OTTER_LINK_VERBOSE)
