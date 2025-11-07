@@ -1,7 +1,7 @@
 ///// Otter: Export – erzeugt immer ein ZIP aus out/.
 ///// Schneefuchs: Dateiname enthält OP und STATUS; Self-exclude (robust via canonicalize); ASCII-Logs; E0716-Fix.
 ///// Maus: Pruning pro Sorte (OP+STATUS), max_keep je Sorte; kompatibel zu anyhow::Result.
-/// Datei: rust/otter_proc/src/commands/export.rs
+///// Datei: rust/otter_proc/src/commands/export.rs
 
 use std::{
     fs,
@@ -21,16 +21,32 @@ fn epoch_ms() -> u128 {
         .unwrap_or(0)
 }
 
+// Archive-Detektor: harte Exklusion gängiger Container, inkl. Mehrfach-Suffixen.
+fn is_archive_name(name_lower: &str) -> bool {
+    const SUFFIXES: &[&str] = &[
+        ".zip", ".7z", ".rar",
+        ".tar", ".tar.gz", ".tgz",
+        ".tar.bz2", ".tbz2",
+        ".tar.xz", ".txz",
+        ".gz", ".bz2", ".xz",
+    ];
+    SUFFIXES.iter().any(|s| name_lower.ends_with(s))
+}
+
 fn zip_dir(src_dir: &Path, zip_path: &Path) -> Result<()> {
+    // Kanonisch, damit starts_with/== stabil funktionieren
     let src_dir = src_dir.canonicalize()?;
     let zip_file = File::create(zip_path)?;
     let mut zip = ZipWriter::new(zip_file);
     let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
 
-    // für robusten Self-Exclude: ZIP-Pfad ebenfalls kanonisch
+    // Für robusten Self-Exclude und Exports-Guard
     let zip_cmp = zip_path
         .canonicalize()
         .unwrap_or_else(|_| zip_path.to_path_buf());
+
+    // Alles unterhalb von out/exports/ strikt ausschließen (verhindert verschachtelte ZIPs)
+    let exports_dir = src_dir.join("exports");
 
     for entry in WalkDir::new(&src_dir)
         .follow_links(false)
@@ -44,18 +60,34 @@ fn zip_dir(src_dir: &Path, zip_path: &Path) -> Result<()> {
             continue;
         }
 
-        let rel = path.strip_prefix(&src_dir).unwrap();
-        let name = rel.to_string_lossy().replace('\\', "/"); // portable
+        // exports/ komplett ausschließen (kein Matroschka-Effekt)
+        if path.starts_with(&exports_dir) {
+            continue;
+        }
+
+        let rel = match path.strip_prefix(&src_dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        // Portable, vor Filter in lower-case prüfen
+        let name_string = rel.to_string_lossy().replace('\\', "/");
+        let name_l = name_string.to_ascii_lowercase();
+
+        // Keine Archive einpacken
+        if is_archive_name(&name_l) {
+            continue;
+        }
 
         if entry.file_type().is_dir() {
-            if !name.is_empty() {
-                zip.add_directory(name, options)?;
+            if !name_string.is_empty() {
+                zip.add_directory(name_string, options)?;
             }
             continue;
         }
 
         let mut f = File::open(path)?;
-        zip.start_file(name, options)?;
+        zip.start_file(name_string, options)?;
         let mut buf = Vec::with_capacity(64 * 1024);
         f.read_to_end(&mut buf)?;
         zip.write_all(&buf)?;
@@ -91,7 +123,7 @@ fn prune_old_zips(out_dir: &Path, op: &str, status: &str, keep: usize) -> Result
     Ok(())
 }
 
-/// Erzeugt ein ZIP **unter `out/exports/`**, das den **Inhalt von `out/`** packt.
+/// Erzeugt ein ZIP **unter `out/exports/`**, das den **Inhalt von `out/`** packt (ohne `out/exports/` und ohne Archivdateien).
 /// Rückgabe: Pfad zur erzeugten ZIP-Datei.
 pub fn run(root: &Path, out_dir: Option<&Path>, max_keep: usize, dry_run: bool) -> Result<PathBuf> {
     // Zielverzeichnis für ZIPs (Default: out/exports)
