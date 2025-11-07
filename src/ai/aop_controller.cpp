@@ -3,7 +3,7 @@
 ///// Purpose: AOP-Controller – Feature->Policy (Ordnung/Rebase/Enable) – Stubs
 ///// Phase: 2 (Policy-Replikatoren)
 ///// Hooks: frame_pipeline (nach ensureAnalysisMetrics())
-///// Depends: pch.hpp, luchs_log_host.hpp, settings.hpp, ai/aop_controller.hpp
+///// Depends: pch.hpp, renderer_state.hpp, luchs_log_host.hpp, settings.hpp, ai/aop_controller.hpp
 ///// Build: /WX-safe
 ///// Log-Tags: [REPL/POLICY]
 ///// Created: 2025-11-06 (Europe/Berlin)
@@ -11,6 +11,7 @@
 
 #include "pch.hpp"
 #include "ai/aop_controller.hpp"
+#include "renderer_state.hpp"
 #include "luchs_log_host.hpp"
 #include "settings.hpp"
 
