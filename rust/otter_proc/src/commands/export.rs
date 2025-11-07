@@ -21,8 +21,10 @@ fn epoch_ms() -> u128 {
         .unwrap_or(0)
 }
 
-// Archive-Detektor: harte Exklusion gängiger Container, inkl. Mehrfach-Suffixen.
+// -------------------- Filter-Logik ------------------------------------------------
+
 fn is_archive_name(name_lower: &str) -> bool {
+    // Harte Exklusion gängiger Container inkl. Mehrfach-Suffixe.
     const SUFFIXES: &[&str] = &[
         ".zip", ".7z", ".rar",
         ".tar", ".tar.gz", ".tgz",
@@ -33,22 +35,74 @@ fn is_archive_name(name_lower: &str) -> bool {
     SUFFIXES.iter().any(|s| name_lower.ends_with(s))
 }
 
-fn zip_dir(src_dir: &Path, zip_path: &Path) -> Result<()> {
+fn is_binary_ext(name_lower: &str) -> bool {
+    // Binaries/Objekte strikt raus
+    const BIN: &[&str] = &[
+        ".exe",".dll",".pdb",".lib",".obj",".o",".ilk",".dmp",
+        ".so",".dylib",".a",".lo",".class",
+        ".ico",".png",".jpg",".jpeg",".gif",".ttf",".otf",".dat",".bin",
+    ];
+    BIN.iter().any(|s| name_lower.ends_with(s))
+}
+
+fn is_allowed_source_file(base_lower: &str, name_lower: &str) -> bool {
+    // Whitelist für "relevante Analyse-Quellen"
+    if base_lower == "cmakelists.txt" || base_lower == "cmakepresets.json" || base_lower == "cmakeuserpresets.json" {
+        return true;
+    }
+    if base_lower == ".gitignore" || base_lower == ".gitattributes" ||
+       base_lower == ".editorconfig" || base_lower == ".clang-format" || base_lower == ".clang-tidy" {
+        return true;
+    }
+
+    const EXT_OK: &[&str] = &[
+        // C/C++/CUDA/GLSL
+        ".c",".cc",".cpp",".cxx",".h",".hh",".hpp",".hxx",".cu",".cuh",".glsl",".vert",".frag",".comp",
+        // Rust
+        ".rs",".toml",".lock",
+        // Scripts / Build
+        ".cmake",".ps1",".psm1",".bat",".cmd",".sh",
+        // Config/Daten
+        ".json",".yml",".yaml",".txt",
+        // Doku
+        ".md",
+    ];
+    EXT_OK.iter().any(|s| name_lower.ends_with(s))
+}
+
+fn is_excluded_dir(rel_lower: &str) -> bool {
+    // Große/irrelevante Bäume raus – wir wollen NUR Quellcode/Build-Konfigs.
+    const DIRS: &[&str] = &[
+        "vcpkg/", "vcpkg_installed/", "vcpkg_downloads/", "vcpkg_buildtrees/", "vcpkg_packages/", "vcpkg_cache/",
+        "build/", "build-",
+        "out/exports/", // verhindert Matroschka
+        "out/",         // gesamtes out/ ignorieren; wir packen aus root nur Quellen
+        "target/", "rust/otter_proc/target/",
+        ".git/", ".vs/", ".idea/",
+    ];
+    DIRS.iter().any(|p| rel_lower.starts_with(p))
+}
+
+fn vscode_whitelist(name_lower: &str) -> bool {
+    // Aus .vscode nur die beiden "nützlichen" Dateien
+    name_lower == ".vscode/c_cpp_properties.json" || name_lower == ".vscode/settings.json"
+}
+
+// -------------------- ZIP-Bau -----------------------------------------------------
+
+fn zip_from_root_sources(root: &Path, zip_path: &Path) -> Result<()> {
     // Kanonisch, damit starts_with/== stabil funktionieren
-    let src_dir = src_dir.canonicalize()?;
+    let root = root.canonicalize()?;
     let zip_file = File::create(zip_path)?;
     let mut zip = ZipWriter::new(zip_file);
     let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
 
-    // Für robusten Self-Exclude und Exports-Guard
+    // Self-Exclude robust (wenn Ziel im Baum liegt)
     let zip_cmp = zip_path
         .canonicalize()
         .unwrap_or_else(|_| zip_path.to_path_buf());
 
-    // Alles unterhalb von out/exports/ strikt ausschließen (verhindert verschachtelte ZIPs)
-    let exports_dir = src_dir.join("exports");
-
-    for entry in WalkDir::new(&src_dir)
+    for entry in WalkDir::new(&root)
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -60,34 +114,50 @@ fn zip_dir(src_dir: &Path, zip_path: &Path) -> Result<()> {
             continue;
         }
 
-        // exports/ komplett ausschließen (kein Matroschka-Effekt)
-        if path.starts_with(&exports_dir) {
-            continue;
-        }
-
-        let rel = match path.strip_prefix(&src_dir) {
+        let rel = match path.strip_prefix(&root) {
             Ok(r) => r,
             Err(_) => continue,
         };
 
-        // Portable, vor Filter in lower-case prüfen
-        let name_string = rel.to_string_lossy().replace('\\', "/");
-        let name_l = name_string.to_ascii_lowercase();
-
-        // Keine Archive einpacken
-        if is_archive_name(&name_l) {
+        // portable Relativnamen
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        if rel_str.is_empty() {
             continue;
         }
+        let rel_lower = rel_str.to_ascii_lowercase();
 
+        // Verzeichnis-Guards
         if entry.file_type().is_dir() {
-            if !name_string.is_empty() {
-                zip.add_directory(name_string, options)?;
+            // .vscode nur zulassen, wenn Whitelist-Dateien später kommen
+            if is_excluded_dir(&rel_lower) {
+                continue;
             }
+            // Verzeichnis anlegen (nur wenn nicht exkludiert)
+            zip.add_directory(rel_str, options)?;
             continue;
         }
 
+        // Datei-Guards
+        if rel_lower.starts_with(".vscode/") && !vscode_whitelist(&rel_lower) {
+            continue;
+        }
+        if is_excluded_dir(&rel_lower) { // falls Datei unter ausgeschl. Baum
+            continue;
+        }
+        if is_archive_name(&rel_lower) { continue; }
+        if is_binary_ext(&rel_lower) { continue; }
+
+        // Nur erlaubte Source-/Build-/Doc-Dateien aufnehmen
+        let base_lower = rel.file_name()
+            .map(|s| s.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        if !is_allowed_source_file(&base_lower, &rel_lower) {
+            continue;
+        }
+
+        // Datei schreiben
         let mut f = File::open(path)?;
-        zip.start_file(name_string, options)?;
+        zip.start_file(rel_str, options)?;
         let mut buf = Vec::with_capacity(64 * 1024);
         f.read_to_end(&mut buf)?;
         zip.write_all(&buf)?;
@@ -123,24 +193,21 @@ fn prune_old_zips(out_dir: &Path, op: &str, status: &str, keep: usize) -> Result
     Ok(())
 }
 
-/// Erzeugt ein ZIP **unter `out/exports/`**, das den **Inhalt von `out/`** packt (ohne `out/exports/` und ohne Archivdateien).
+/// Erzeugt ein ZIP **unter `out/exports/`**, das den **Quellcode aus dem Projekt-Root** packt
+/// (nur relevante Source-/Build-/Config-/Doc-Dateien; keine Binaries/Archive; keine `out/`, keine `target/`, kein `.git/`).
 /// Rückgabe: Pfad zur erzeugten ZIP-Datei.
 pub fn run(root: &Path, out_dir: Option<&Path>, max_keep: usize, dry_run: bool) -> Result<PathBuf> {
-    // Zielverzeichnis für ZIPs (Default: out/exports)
+    // Zielverzeichnis (Default: out/exports)
     let exports_dir = out_dir
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| root.join("out").join("exports"));
     fs::create_dir_all(&exports_dir)?;
 
-    // Quelle: out/
-    let src_out = root.join("out");
-    fs::create_dir_all(&src_out)?;
-
     let op = std::env::var("OTTER_OP").unwrap_or_else(|_| "export".to_string());
     let status = std::env::var("OTTER_STATUS").unwrap_or_else(|_| "any".to_string());
     let ts = epoch_ms();
 
-    // Unterschiedliche Namen pro Sorte: <op>_<status>_<epoch>.zip
+    // Namensschema pro Sorte: <op>_<status>_<epoch>.zip
     let zip_name = format!("{}_{}_{}.zip", op, status, ts);
     let zip_path = exports_dir.join(&zip_name);
 
@@ -149,16 +216,12 @@ pub fn run(root: &Path, out_dir: Option<&Path>, max_keep: usize, dry_run: bool) 
         return Ok(zip_path);
     }
 
-    // Falls out/ leer ist, Marker erzeugen, damit es überhaupt etwas zu packen gibt
-    if fs::read_dir(&src_out)?.next().is_none() {
-        let _ = fs::write(src_out.join(".otter.empty"), b"");
-    }
-
-    zip_dir(&src_out, &zip_path)?;
+    // Packe **Projekt-Root** (nur Quellen, siehe Filter)
+    zip_from_root_sources(root, &zip_path)?;
     println!("[Otter/export] wrote {}", zip_path.display());
 
     if max_keep > 0 {
-        // WICHTIG: prune pro Sorte (op+status) **im exports-dir**
+        // Pruning pro Sorte im exports-dir
         let _ = prune_old_zips(&exports_dir, &op, &status, max_keep);
     }
 
