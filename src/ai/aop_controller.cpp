@@ -1,19 +1,13 @@
-///// OtterDream — Replikatoren
-///// File: src/ai/aop_controller.cpp
-///// Purpose: AOP-Controller – Feature->Policy (Ordnung/Rebase/Enable) – Stubs
-///// Phase: 2 (Policy-Replikatoren)
-///// Hooks: frame_pipeline (nach ensureAnalysisMetrics())
-///// Depends: pch.hpp, renderer_state.hpp, luchs_log_host.hpp, settings.hpp, ai/aop_controller.hpp
-///// Build: /WX-safe
-///// Log-Tags: [REPL/POLICY]
-///// Created: 2025-11-06 (Europe/Berlin)
-///// Notes: Nutzt Settings::Ai.* nur für Logs; echte Features folgen.
+///// Otter: AOP controller — centralizes [REPL/POLICY] logging; Phase-1 stub
+///// Schneefuchs: /WX-safe; ASCII-only; compile-time gates via Settings::Ai
+///// Maus: Cadence = Settings::PerfLog (warmup + everyN); ep from Settings::Ai::ep
+///// Datei: src/ai/aop_controller.cpp
 
 #include "pch.hpp"
 #include "ai/aop_controller.hpp"
-#include "renderer_state.hpp"
-#include "luchs_log_host.hpp"
 #include "settings.hpp"
+#include "luchs_log_host.hpp"
+#include "renderer_state.hpp"
 
 namespace Repl { namespace Policy {
 
@@ -21,14 +15,24 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     (void)fctx; (void)state;
     Decision d{};
 
-    // Throttle noisy boot-stub log: once every 60 frames.
     if constexpr (Settings::Ai::enabled && Settings::Ai::aopEnabled) {
-        static int s_lastLogFrame = -1000000000;
-        if (state.frameCount - s_lastLogFrame >= 60) {
-            LUCHS_LOG_HOST("[REPL/POLICY] evaluate policy (stub, ep=%s)", Settings::Ai::ep);
-            s_lastLogFrame = state.frameCount;
+        // Einzige Quelle für [REPL/POLICY]-Logs: an Perf-Cadence gekoppelt
+        if constexpr (Settings::PerfLog::enabled) {
+            const int warm = Settings::PerfLog::warmupFrames;
+            const int step = Settings::PerfLog::everyN;
+            if (state.frameCount > warm && (state.frameCount % step) == 0) {
+                LUCHS_LOG_HOST("[REPL/POLICY] evaluate (stub, ep=%s)", Settings::Ai::ep);
+            }
+        } else {
+            // Falls Perf-Logs aus: sehr sparsam loggen (alle 120 Frames)
+            static int s_last = -1000000000;
+            if (state.frameCount - s_last >= 120) {
+                LUCHS_LOG_HOST("[REPL/POLICY] evaluate (stub, ep=%s)", Settings::Ai::ep);
+                s_last = state.frameCount;
+            }
         }
     }
+
     return d;
 }
 
