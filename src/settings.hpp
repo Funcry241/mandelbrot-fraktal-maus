@@ -272,7 +272,7 @@ namespace Perturb {
 }
 
 namespace Ai {
-    inline constexpr bool        enabled    = false;   // Master-Switch
+    inline constexpr bool        enabled    = true;    // Master-Switch (ON)
     inline constexpr bool        aopEnabled = true;    // nur AOP-Controller
     inline constexpr const char* ep         = "cuda";  // "cuda" | "dml" | "cpu"
 }
