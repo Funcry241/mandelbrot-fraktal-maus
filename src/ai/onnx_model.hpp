@@ -1,13 +1,7 @@
-///// OtterDream — Replikatoren
-///// File: src/ai/onnx_model.hpp
-///// Purpose: ONNX Runtime Wrapper (leichtgewichtig) – Stubs
-///// Phase: 2 (Policy-Replikatoren, AOP via ONNX)
-///// Hooks: Init/Startup; AOP-Controller nutzt dieses Wrapper-Objekt
-///// Depends: <string>
-///// Build: /WX-safe ; keine ORT-Header im Header(!)
-///// Log-Tags: [REPL/POLICY]  (Alias: [AI/ORT])
-///// Created: 2025-11-06 (Europe/Berlin)
-///// Notes: Implementierung gated via OTTER_USE_ORT in .cpp
+///// Otter: Lightweight ORT wrapper (real session load, CPU default), ASCII logs, dry-run safe.
+///// Schneefuchs: Header stays clean (no ORT includes), /WX-safe, implementation gated via OTTER_USE_ORT in .cpp.
+/// / Maus: On OTTER_USE_ORT=0 → graceful fallback with clear log; no API changes for AOP controller.
+/// / Datei: src/ai/onnx_model.hpp
 
 #pragma once
 #include <string>
@@ -18,10 +12,12 @@ namespace Repl { namespace Policy {
 
     struct OrtModel {
         bool        loaded = false;
-        std::string ep;      // "cuda" | "dml" | "cpu"
-        std::string path;    // Modellpfad zur Info/Logs
+        std::string ep;      // "cuda" | "dml" | "cpu" (actual in-use ep; may differ from preferred)
+        std::string path;    // model path for logs/info
 
+        // Load model; returns true on success. Chooses CPU by default unless provider wiring is added later.
         bool load(const std::string& modelPath, Ep preferredEp);
+
         bool is_loaded() const noexcept { return loaded; }
     };
 
