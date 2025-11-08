@@ -269,12 +269,14 @@ static void render_to_pbo_core(RendererState& state,
                        cx, cy, stepX, stepY, maxIterations, width, height);
     }
 
-    // ---- Perf gate / timing nur bei Kadenz ----------------------------------
-    const bool gate = perf_gate(state.frameCount);
+    // ---- Perf gate / optional measurement ----------------------------------
+    const bool gate    = perf_gate(state.frameCount);
+    const bool measure = gate && Settings::PerfLog::emitCudaLine;
+
     float capyMs   = 0.0f;
     float colorMs  = 0.0f;
 
-    if (gate) {
+    if (measure) {
         if (Settings::PerfLog::header && !s_perfHeaderDone) {
             LUCHS_LOG_HOST("[PERF] f dt  capy-ms  color-ms  w  h  it  ring");
             s_perfHeaderDone = true;
@@ -283,7 +285,7 @@ static void render_to_pbo_core(RendererState& state,
     }
 
     // 2) capybara render
-    if (gate) {
+    if (measure) {
         auto rc = cudaEventRecord(s_evStart, renderStream);
         if (rc != cudaSuccess) throw_with_log("eventRecord(start) before capy_render", rc);
         capy_render(static_cast<uint16_t*>(state.d_iterations.get()),
@@ -305,7 +307,7 @@ static void render_to_pbo_core(RendererState& state,
     }
 
     // 3) colorize into mapped PBO (NVRTC hook first)
-    if (gate) {
+    if (measure) {
         auto rc = cudaEventRecord(s_evStart, renderStream);
         if (rc != cudaSuccess) throw_with_log("eventRecord(start) before colorize", rc);
 
@@ -346,8 +348,8 @@ static void render_to_pbo_core(RendererState& state,
         }
     }
 
-    // 4) kompakte, getaktete Perf-Zeile
-    if (gate) {
+    // 4) kompakte, getaktete Perf-Zeile (nur wenn Cuda-Line aktiv)
+    if (measure) {
         LUCHS_LOG_HOST("[PERF] %d %.3f  %.3f   %.3f   %d %d %d  %d",
                        state.frameCount,
                        (double)state.deltaTime,

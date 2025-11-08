@@ -78,6 +78,15 @@ namespace Settings {
         // Emit a single header explaining columns on first emission.
         // Range: {false, true} | Default: true
         inline constexpr bool header       = true;
+
+        // NEW: also emit the short CUDA-side [PERF] line (capy/color)?
+        // If false, cuda_interop.cu will not time or print its compact line.
+        // Range: {false, true} | Default: false
+        inline constexpr bool emitCudaLine = false;
+
+        // Reserved: future compact formatting toggle for frame_pipeline [PERF].
+        // Range: {false, true} | Default: false
+        inline constexpr bool compact      = false;
     } // namespace PerfLog
 
 // ============================== Framerate / VSync ============================

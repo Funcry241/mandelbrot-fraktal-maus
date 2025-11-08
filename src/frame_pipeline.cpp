@@ -465,14 +465,21 @@ void execute(RendererState& state) {
         const size_t hmN = state.h_entropy.size();
         const int statsPx = std::max(1, g_ctx.statsTileSize);
 
-        char line[640];
+        // --- NEW: other-time (oth) closes the budget to tot (clamped >= 0) ---
+        double oth = g_totMs - (g_mandMs + g_entMs + g_conMs + g_texMs + g_ovlMs);
+        if (oth < 0.0) {
+            // swallow tiny negative noise from timers
+            if (oth > -0.01) oth = 0.0;
+        }
+
+        char line[700];
         const int n = std::snprintf(
             line, sizeof(line),
             "[PERF] t=%lld frame=%d res=%dx%d zoom=%.6f it=%d fps=%.2f maxfps=%.2f "
-            "mand=%.2f ent=%.2f con=%.2f up=%.2f ovl=%.2f tot=%.2f "
+            "mand=%.2f ent=%.2f con=%.2f up=%.2f ovl=%.2f oth=%.2f tot=%.2f "
             "e0=%.4f c0=%.4f ring=%d skip=%d pbo=%u tex=%u hmN=%zu statsPx=%d",
             tEpoch, g_frame, resX, resY, (double)g_ctx.zoom, it, fps, maxfps,
-            g_mandMs, g_entMs, g_conMs, g_texMs, g_ovlMs, g_totMs,
+            g_mandMs, g_entMs, g_conMs, g_texMs, g_ovlMs, oth, g_totMs,
             e0, c0, ringIx, (int)state.skipUploadThisFrame, pbo, tex, hmN, statsPx
         );
         line[(n >= 0 && n < (int)sizeof(line)) ? n : (int)sizeof(line) - 1] = '\0';
