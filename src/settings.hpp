@@ -2,7 +2,7 @@
 ///// Schneefuchs: No hidden macros; single source of truth for flags & cadences; ASCII-only policy
 ///// Maus: performanceLogging=1, ForceAlwaysZoom=1 baseline; 32×8 blocks; no fast-math; deterministic logs
 ///// Datei: src/settings.hpp
-///// Change: Phase-1 — Replikatoren sichtbar schalten: Perturb=ON, Luchs.enabled=ON (nvrtc=OFF)
+// ///// Change: Phase-1 — Replikatoren sichtbar schalten: Perturb=ON, Luchs.enabled=ON (nvrtc=OFF)
 
 #pragma once
 
@@ -68,12 +68,12 @@ namespace Settings {
         inline constexpr bool enabled      = true;
 
         // Emit every Nth frame after warm-up (1 = every frame).
-        // Range: 10 .. 240 | Default: 20
-        inline constexpr int  everyN       = 20;
+        // Range: 1 .. 240 | Default: 20
+        inline constexpr int  everyN       = 1;
 
         // Suppress perf logs during first frames to avoid cold-start noise.
         // Range: 0 .. 300 | Default: 60
-        inline constexpr int  warmupFrames = 60;
+        inline constexpr int  warmupFrames = 0;
 
         // Emit a single header explaining columns on first emission.
         // Range: {false, true} | Default: true
