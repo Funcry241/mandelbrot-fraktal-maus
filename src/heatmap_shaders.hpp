@@ -2,7 +2,7 @@
 ///// Schneefuchs: Koordinaten sauber (Panel oben-links, Texture unten-links); keine Heuristik.
 ///// Maus: Einzeilige Freude; hübsches Gold; Kreuz bleibt in Panel-Pixeln (kein Extra-Flip).
 ///// Flip: uv.y = 1.0 - uv.y (Orientation); danach Half-Texel-Recenter in X und Y.
-///// Datei: heatmap_shaders.hpp
+///// Datei: src/heatmap_shaders.hpp
 ///// Vertrag: CPU/ROI nutzen weiterhin Buffer-/Panel-Pixel; Shader übernimmt Alignment.
 
 #pragma once
@@ -55,6 +55,13 @@ uniform vec2   uMarkCenterPx;
 uniform float  uMarkRadiusPx;
 uniform float  uMarkAlpha;
 
+// Neu: Style-Schalter für futuristischen Holo-Arc + Glow
+uniform int    uHStyle;       // 0: Ring/Cross (klassisch), 1: Holo-Arc+Glow
+uniform float  uHTime;        // Sekunden
+uniform float  uHStrokePx;    // Strichstärke am Ring
+uniform float  uHGlowPx;      // Glow-Breite
+uniform float  uHArcSpanDeg;  // Bogen-Spannweite in Grad
+
 vec3 mapGold(float v){
   float g = clamp(v,0.0,1.0);
   g = smoothstep(0.0,1.0,g);
@@ -68,10 +75,7 @@ void main(){
   vec2 uv = (vPx - uContentRectPx.xy) / sizePx;
   uv.y = 1.0 - uv.y;
 
-  // ROOT FIX: Vertex-zu-Texel-Zentren re-centern (half-texel Korrektur) ------
-  // Wenn das Grid als N Kanten-Samples (0..N-1) erzeugt wurde, liegen die
-  // texel-Zentren bei (j + 0.5)/N. Das Mapping unten sorgt dafür, dass
-  // uv=0..1 genau diese Zentren trifft (und nicht die Kanten).
+  // ROOT FIX: texel-center recenter ------------------------------------------
   vec2 texDim = vec2(textureSize(uGrid, 0));         // (W, H)
   uv = ((texDim - 1.0) * uv + 0.5) / texDim;
 
@@ -85,20 +89,35 @@ void main(){
   float a = smoothstep(0.05, 0.65, v) * uAlphaBase;
   vec4 base = vec4(mapGold(v), a);
 
-  // Marker (Fadenkreuz/Ring) in Panel-Pixeln – KEIN zusätzlicher Flip --------
+  // Marker --------------------------------------------------------------------
   float m = 0.0;
   if(uMarkEnable > 0.5){
     vec2  d2   = vPx - uMarkCenterPx;
     float r    = length(d2);
     float edge = abs(r - uMarkRadiusPx);
     float aa   = fwidth(edge) + 0.75;
-    float ring = 1.0 - smoothstep(1.5, 1.5+aa, edge);
-    float cx   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.x));
-    float cy   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.y));
-    m = max(ring, max(cx, cy)) * uMarkAlpha;
+
+    if(uHStyle == 1){
+      // Holo-Arc: rotierender Bogen + sanfter Glow
+      float theta = degrees(atan(d2.y, d2.x)); // [-180,180]
+      if(theta < 0.0) theta += 360.0;
+      float baseDeg = mod(uHTime * 60.0, 360.0); // 60°/s
+      float diff = abs(((theta - baseDeg + 540.0) - 360.0));
+      float halfSpan = 0.5 * max(2.0, uHArcSpanDeg);
+      float arcMask  = smoothstep(halfSpan+8.0, halfSpan, diff);
+      float stroke   = 1.0 - smoothstep(uHStrokePx+aa, uHStrokePx, edge);
+      float glow     = 1.0 - smoothstep(uHStrokePx+2.0, uHStrokePx + max(4.0, uHGlowPx), edge);
+      m = max(stroke, 0.35*glow) * arcMask * uMarkAlpha;
+    } else {
+      // Klassisch: Ring + Fadenkreuz (leicht weich)
+      float ring = 1.0 - smoothstep(1.5, 1.5+aa, edge);
+      float cx   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.x));
+      float cy   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.y));
+      m = max(ring, max(cx, cy)) * uMarkAlpha;
+    }
   }
 
-  vec3 markCol = vec3(0.60, 1.00, 0.60);
+  vec3 markCol = vec3(0.55, 0.95, 1.00); // futuristisches Cyan
   vec4 outCol  = mix(base, vec4(markCol, 1.0), m);
   outCol.a     = max(base.a, max(outCol.a, m));
   FragColor    = outCol;

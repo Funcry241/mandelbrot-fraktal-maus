@@ -13,6 +13,7 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 
 // --- lokale UI-Helfer (fallback, ohne externe Pfau-Abhängigkeit) ------------
 namespace {
@@ -37,6 +38,8 @@ static GLint  uViewportPx=-1, uPanelRectPx=-1, uRadiusPx=-1, uAlpha=-1, uBorderP
 static GLuint sHeatVAO=0, sHeatVBO=0, sHeatProg=0, sHeatTex=0;
 static GLint  uHViewportPx=-1, uHContentRectPx=-1, uHGridTex=-1, uHAlphaBase=-1;
 static GLint  uHMarkEnable=-1, uHMarkCenterPx=-1, uHMarkRadiusPx=-1, uHMarkAlpha=-1;
+// Neu für Holo-Arc:
+static GLint  uHStyle=-1, uHTime=-1, uHStrokePx=-1, uHGlowPx=-1, uHArcSpanDeg=-1;
 
 static int    sTexW=0, sTexH=0;
 static float  sExposureEMA = 0.0f;
@@ -203,6 +206,7 @@ void cleanup(){
     sHeatVAO=sHeatVBO=sHeatProg=sHeatTex=0;
     uHViewportPx=uHContentRectPx=uHGridTex=uHAlphaBase=-1;
     uHMarkEnable=uHMarkCenterPx=uHMarkRadiusPx=uHMarkAlpha=-1;
+    uHStyle=uHTime=uHStrokePx=uHGlowPx=uHArcSpanDeg=-1;
 
     sTexW=sTexH=0; sExposureEMA=0.0f;
 }
@@ -241,6 +245,12 @@ void drawOverlay(const std::vector<float>& entropy,
         uHMarkCenterPx  = glGetUniformLocation(sHeatProg, "uMarkCenterPx");
         uHMarkRadiusPx  = glGetUniformLocation(sHeatProg, "uMarkRadiusPx");
         uHMarkAlpha     = glGetUniformLocation(sHeatProg, "uMarkAlpha");
+        // Neu: Holo-Arc Uniforms
+        uHStyle         = glGetUniformLocation(sHeatProg, "uHStyle");
+        uHTime          = glGetUniformLocation(sHeatProg, "uHTime");
+        uHStrokePx      = glGetUniformLocation(sHeatProg, "uHStrokePx");
+        uHGlowPx        = glGetUniformLocation(sHeatProg, "uHGlowPx");
+        uHArcSpanDeg    = glGetUniformLocation(sHeatProg, "uHArcSpanDeg");
     }
     UiGL::ensurePanelVAO(sPanelVAO, sPanelVBO);
     UiGL::ensureHeatVAO (sHeatVAO,  sHeatVBO);
@@ -349,7 +359,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
     }
 
-    // Heat + Z0 sticker
+    // Heat + (futuristischer) Holo-Arc Marker
     {
         const float quad[12]={
             (float)contentX0,(float)contentY0,
@@ -381,7 +391,16 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uHMarkEnable>=0)   glUniform1f(uHMarkEnable,   1.0f);
         if(uHMarkCenterPx>=0) glUniform2f(uHMarkCenterPx, centerPxX_panel, centerPxY_panel);
         if(uHMarkRadiusPx>=0) glUniform1f(uHMarkRadiusPx, ringRpx_panel);
-        if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.95f);
+        if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.60f); // dezenter als vorher
+
+        // Stil: Holo-Arc aktivieren + Parameter setzen
+        if(uHStyle>=0)      glUniform1i(uHStyle, 1);
+        static const auto t0 = std::chrono::steady_clock::now();
+        const float tSec = std::chrono::duration<float>(std::chrono::steady_clock::now() - t0).count();
+        if(uHTime>=0)       glUniform1f(uHTime, tSec);
+        if(uHStrokePx>=0)   glUniform1f(uHStrokePx, std::max(1.0f, 1.25f * sPanelScale));
+        if(uHGlowPx>=0)     glUniform1f(uHGlowPx,  8.0f * sPanelScale);
+        if(uHArcSpanDeg>=0) glUniform1f(uHArcSpanDeg, 90.0f);
 
         glBindVertexArray(sHeatVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sHeatVBO);
