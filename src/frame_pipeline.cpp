@@ -1,6 +1,6 @@
 ///// Otter: Nacktmull — frame pipeline with Axolotel Coupler; draw-lag-1; perf warm-up; VISUAL FALLBACK removed; Dachs-HUD center handling, Warzenschwein-HUD off during Help (F1).
 ///// Schneefuchs: ASCII logs; pch first; small deterministic diffs; centralized [REPL/*] logging (no local echoes).
-///// Maus: Compute -> Metrics -> Overlays -> Axolotel -> Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex; center shows Help; WS hidden on Help.
+///// Maus: Compute -> Metrics -> Overlays -> Axolotel -> Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex; PERF: e0/c0 stale-forward + hmAge + hmStale
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
@@ -59,7 +59,7 @@ namespace {
     static double g_ovlMs  = 0.0;
     static double g_totMs  = 0.0;
 
-    // --- NEW: stale-forwarding for metrics + age counter --------------------
+    // --- stale-forwarding for metrics + age counter --------------------
     static int   g_metricsAge = 0;   // frames since last metrics compute
     static float g_lastE0     = 0.f; // last known entropy[0]
     static float g_lastC0     = 0.f; // last known contrast[0]
@@ -470,7 +470,8 @@ void execute(RendererState& state) {
         const double fps    = (g_totMs > 1e-3) ? (1000.0 / g_totMs) : 0.0;
         const double maxfps = (g_texMs > 1e-3) ? (1000.0 / g_texMs) : 0.0;
 
-        // --- NEW: stale-forward e0/c0 + age marker --------------------------
+        // --- stale-forward e0/c0 + age & stale marker -----------------------
+        const bool  hmStale = (g_metricsAge > 0);
         const float e0 = !state.h_entropy.empty()  ? state.h_entropy[0]
                         : (g_haveLast ? g_lastE0 : 0.f);
         const float c0 = !state.h_contrast.empty() ? state.h_contrast[0]
@@ -490,15 +491,15 @@ void execute(RendererState& state) {
             if (oth > -0.01) oth = 0.0;
         }
 
-        char line[740];
+        char line[760];
         const int n = std::snprintf(
             line, sizeof(line),
             "[PERF] t=%lld frame=%d res=%dx%d zoom=%.6f it=%d fps=%.2f maxfps=%.2f "
             "mand=%.2f ent=%.2f con=%.2f up=%.2f ovl=%.2f oth=%.2f tot=%.2f "
-            "e0=%.4f c0=%.4f hmAge=%d ring=%d skip=%d pbo=%u tex=%u hmN=%zu statsPx=%d",
+            "e0=%.4f c0=%.4f hmAge=%d hmStale=%d ring=%d skip=%d pbo=%u tex=%u hmN=%zu statsPx=%d",
             tEpoch, g_frame, resX, resY, (double)g_ctx.zoom, it, fps, maxfps,
             g_mandMs, g_entMs, g_conMs, g_texMs, g_ovlMs, oth, g_totMs,
-            e0, c0, g_metricsAge, ringIx, (int)state.skipUploadThisFrame, pbo, tex, hmN, statsPx
+            e0, c0, g_metricsAge, (int)hmStale, ringIx, (int)state.skipUploadThisFrame, pbo, tex, hmN, statsPx
         );
         line[(n >= 0 && n < (int)sizeof(line)) ? n : (int)sizeof(line) - 1] = '\0';
         LUCHS_LOG_HOST("%s", line);
