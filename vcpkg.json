@@ -16,7 +16,7 @@
         {
           "name": "onnxruntime",
           "default-features": false,
-          "features": [ "core", "cuda" ]
+          "features": [ "cuda" ]
         }
       ]
     }
