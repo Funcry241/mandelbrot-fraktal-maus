@@ -1,4 +1,4 @@
-///// Otter: AOP controller — centralizes [REPL/POLICY] logging; Phase-1 stub + dry-run top3 tiles
+///// Otter: AOP controller — centralizes [REPL/POLICY] logging; Phase-1 stub + dry-run top3 + delta to overlay
 ///// Schneefuchs: /WX-safe; ASCII-only; compile-time gates via Settings::Ai; no side-effects
 ///// Maus: Cadence = Settings::PerfLog (warmup + everyN); ep from Settings::Ai::ep; stats grid = Kolibri::desiredTilePx
 ///// Datei: src/ai/aop_controller.cpp
@@ -9,6 +9,10 @@
 #include "luchs_log_host.hpp"
 #include "renderer_state.hpp"
 
+#include <algorithm>
+#include <cstddef>
+#include <cmath>
+
 namespace Repl { namespace Policy {
 
 Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& state) {
@@ -18,12 +22,12 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     // Nur loggen, wenn global aktiviert und die Perf-Cadence greift.
     if constexpr (Settings::Ai::enabled && Settings::Ai::aopEnabled
                   && Settings::performanceLogging && Settings::PerfLog::enabled) {
+
         const int warm = Settings::PerfLog::warmupFrames;
         const int step = Settings::PerfLog::everyN;
 
         if (state.frameCount > warm && (state.frameCount % step) == 0) {
-            // --- Dry-run-Auswertung: Top-3 Tiles auf Basis von state.h_entropy/h_contrast ---
-            // Wir verwenden ein screen-konstantes Grid gemäß Kolibri (Phase-1 ohne Seiteneffekte).
+            // --- Dry-run: Top-3 Tiles basierend auf state.h_entropy/h_contrast ---
             const int statsPx = std::max(1, Settings::Kolibri::desiredTilePx);
             const int tilesX  = (state.width  + statsPx - 1) / statsPx;
             const int tilesY  = (state.height + statsPx - 1) / statsPx;
@@ -40,12 +44,13 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
                 LUCHS_LOG_HOST("[REPL/POLICY] evaluate (stub, ep=%s) dry-run: no-metrics N=%zu statsPx=%d tiles=%dx%d",
                                Settings::Ai::ep, N, statsPx, tilesX, tilesY);
             } else {
-                // Gewichte: einheitlich aus Settings::Ai (Overlay & AOP teilen eine Quelle)
-                const float wE = Settings::Ai::wE;
-                const float wC = Settings::Ai::wC;
+                // Gewichte (einfaches konvexes Kombi-Signal)
+                const float wE = 0.60f;
+                const float wC = 0.40f;
 
-                // Top-3 in einem Durchlauf ohne Allokationen
-                struct Top { int idx; float score; int tx; int ty; } t0{-1, -1e30f, -1, -1}, t1{-1, -1e30f, -1, -1}, t2{-1, -1e30f, -1, -1};
+                // Top-3 ohne Allokation
+                struct Top { int idx; float score; int tx; int ty; };
+                Top t0{-1, -1e30f, -1, -1}, t1{-1, -1e30f, -1, -1}, t2{-1, -1e30f, -1, -1};
 
                 for (std::size_t i = 0; i < N; ++i) {
                     const float e = state.h_entropy[i];
@@ -66,7 +71,7 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
                 idxToXY(t1.idx, t1.tx, t1.ty);
                 idxToXY(t2.idx, t2.tx, t2.ty);
 
-                // NDC Zentrum des „chosen“ Tiles (nur für Log)
+                // NDC-Zentrum des „chosen“ Tiles (nur für Logs)
                 float ndcX = 0.0f, ndcY = 0.0f;
                 if (t0.tx >= 0 && t0.ty >= 0) {
                     const float px = (static_cast<float>(t0.tx) + 0.5f) * static_cast<float>(statsPx);
@@ -75,6 +80,7 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
                     ndcY = (state.height > 0) ? 1.0f - (py / static_cast<float>(state.height)) * 2.0f : 0.0f;
                 }
 
+                // Hauptzeile: Top-3 + chosen + NDC
                 LUCHS_LOG_HOST(
                     "[REPL/POLICY] evaluate (stub, ep=%s) dry-run: N=%zu statsPx=%d tiles=%dx%d "
                     "top3={%d(%d,%d):%.4f | %d(%d,%d):%.4f | %d(%d,%d):%.4f} "
@@ -85,6 +91,25 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
                     t2.idx, t2.tx, t2.ty, t2.score,
                     t0.idx, t0.tx, t0.ty, ndcX, ndcY
                 );
+
+                // NEU (Phase-1 Telemetrie): Delta zwischen Policy-NDC und Overlay-Interest-NDC
+                // Keine Verhaltensänderung – reine Ein-Zeilen-Telemetrie.
+                {
+                    const int ovValid = state.interest.valid ? 1 : 0;
+                    float ovX = 0.0f, ovY = 0.0f;
+                    if (state.interest.valid) {
+                        ovX = static_cast<float>(state.interest.ndcX);
+                        ovY = static_cast<float>(state.interest.ndcY);
+                    }
+                    const float dx = ndcX - ovX;
+                    const float dy = ndcY - ovY;
+                    const float delta = state.interest.valid ? std::sqrt(dx*dx + dy*dy) : -1.0f;
+
+                    LUCHS_LOG_HOST(
+                        "[REPL/POLICY] delta=%.4f ndc_pol=(%.3f,%.3f) ndc_ovl=(%.3f,%.3f) ov_valid=%d",
+                        delta, ndcX, ndcY, ovX, ovY, ovValid
+                    );
+                }
             }
         }
     }
