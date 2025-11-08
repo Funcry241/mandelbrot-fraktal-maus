@@ -27,6 +27,7 @@
 #include "fps_meter.hpp"
 #include "axolotel_hud.hpp" // ✨ Axolotel WOW-HUD (additive, on key-pulse)
 #include "dachs_hud.hpp"    // Dachs-HUD help state/text"
+#include "renderer_state.hpp" // <-- benötigt: vollständige Definition von RendererState
 
 // --- Replikatoren ---------------------------
 #include "ai/aop_controller.hpp"  // [REPL/POLICY]
