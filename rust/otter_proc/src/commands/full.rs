@@ -1,6 +1,6 @@
 ///// Otter: Voll-Build-Command – Cache-Guard (UNC/Case-Normalisierung) + CMake-Fahrt (+ Auto-Parallel).
-///// Schneefuchs: Robust gegen \\?\-UNC, Slash-Normalisierung, Case-insensitive Vergleich; setzt Kerne automatisch, wenn --parallel fehlt.
-///// Maus: Minimal-invasiv, Presets bleiben; optionales --parallel wird durchgereicht oder automatisch bestimmt (clamp 2..128).
+///// Schneefuchs: Robust gegen \\?\-UNC, Slash-Normalisierung, case-insensitive Vergleich; setzt Kerne automatisch, wenn --parallel fehlt.
+///// Maus: DIST-Pack findet ausschließlich in winenv.rs statt (keine Doppel-Implementierung).
 ///// Datei: rust/otter_proc/src/commands/full.rs
 use std::fs;
 use std::io::{self, Read};
@@ -107,6 +107,7 @@ pub fn run(
             }),
     };
 
-    // Danach die Windows-spezifische CMake-Fahrt (inkl. VsDev/vcvars Kette + Fallback)
+    // Danach die Windows-spezifische CMake-Fahrt (inkl. VsDev/vcvars Kette + Fallback).
+    // DIST-Pack passiert ausschließlich in winenv.rs nach erfolgreichem Build.
     winenv::run_cmake_windows(root, cfg_preset, bld_preset, build_cfg, par)
 }

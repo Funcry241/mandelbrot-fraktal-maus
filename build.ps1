@@ -1,7 +1,7 @@
-##### Otter: Three modes — (no args)=local build (no git), /build=build+upload, /branch=branch op, /export=source ZIP.
-##### Schneefuchs: PS 5.1-safe; English help (-h | -? | /h | /?); ASCII logs; clean exit codes; neutral tag.
-##### Maus: Minimal & deterministic; accepts / or -; default branch name "wupp"; export supports /out, /keep, /dry(-run).
-##### Datei: .\build.ps1
+# Otter: Three modes — (no args)=local build (no git), /build=build+upload, /branch=branch op, /export=source ZIP. Rust owns DIST sync & trailer.
+# Schneefuchs: PS 5.1-safe; English help; ASCII logs; clean exit codes; /j:/parallel passthrough to Rust.
+# Maus: Minimal & deterministic; accepts / or -; default branch "wupp"; export supports /out, /keep, /dry(-run).
+# Datei: .\build.ps1
 
 $ErrorActionPreference = 'Stop'
 
@@ -18,6 +18,7 @@ Usage:
 
 Options:
   -h, /h, -?, /?              Show this help
+  /j:<N>, /parallel:<N>       Force parallel jobs for CMake build (Rust fallback auto-detects if omitted)
 
 Export options (when using /export):
   /out:<PATH>                 Output directory for ZIPs (passed to --out-dir)
@@ -25,6 +26,7 @@ Export options (when using /export):
   /dry or /dry-run            Dry run (no ZIP written)
 
 Notes:
+  - Rust handles DIST sync & the pretty trailer; PowerShell does not copy artifacts.
   - Local build sets OTTER_UPLOAD=0 so the Rust runner skips autogit.
   - /build sets OTTER_UPLOAD=1 (commit+push on current branch).
   - /branch uses OTTER_OP=branch (always pushes -u origin/wupp).
@@ -33,11 +35,12 @@ Notes:
 }
 
 # Parse args (PS 5.1-safe)
-$wantHelp   = $false
-$mode       = ''    # '', 'build', 'branch', 'export'
-$seenBuild  = $false
-$seenBranch = $false
-$seenExport = $false
+$wantHelp      = $false
+$mode          = ''    # '', 'build', 'branch', 'export'
+$seenBuild     = $false
+$seenBranch    = $false
+$seenExport    = $false
+[int]$jobs     = 0     # /j:/parallel passthrough to Rust
 
 # /export parameters
 [string]$exportOutDir = ''
@@ -70,6 +73,12 @@ foreach ($a in $args) {
 
   # /dry or /dry-run
   if ($al -in @('/dry','-dry','/dry-run','-dry-run')) { $exportDry = $true; continue }
+
+  # /j:<N> or /parallel:<N>
+  if ($al -match '^[\-/](j|parallel)[:=](\d+)$') {
+    try { $jobs = [int]$matches[2] } catch { $jobs = 0 }
+    continue
+  }
 }
 
 if ($wantHelp) { Show-Help; exit 0 }
@@ -94,7 +103,7 @@ if (-not $cargo) { Err "'cargo' not found in PATH" }
 $runnerDir = Join-Path $root 'rust\otter_proc'
 if (-not (Test-Path -LiteralPath $runnerDir)) { Err "Runner directory missing: $runnerDir" }
 
-# Common ENV (kept for compatibility)
+# Common ENV (compat)
 $env:OTTER_ROOT = $root
 
 Push-Location -LiteralPath $runnerDir
@@ -109,8 +118,12 @@ try {
   elseif ($mode -eq 'build') {
     Remove-Item Env:OTTER_OP -ErrorAction SilentlyContinue
     $env:OTTER_UPLOAD = '1'
-    Info "[STEP] cargo run --release -- --root $root full --cfg RelWithDebInfo (upload=ON)"
-    & cargo run --release -- '--root' $root 'full' '--cfg' 'RelWithDebInfo'
+
+    $cli = @('--root', $root, 'full', '--cfg', 'RelWithDebInfo')
+    if ($jobs -gt 0) { $cli += @('--parallel', "$jobs") }
+
+    Info "[STEP] cargo run --release -- $($cli -join ' ') (upload=ON)"
+    & cargo run --release -- @cli
   }
   elseif ($mode -eq 'export') {
     Remove-Item Env:OTTER_UPLOAD -ErrorAction SilentlyContinue
@@ -120,15 +133,18 @@ try {
     if ($exportOutDir) { $cli += @('--out-dir', $exportOutDir) }
     if ($exportDry)    { $cli += '--dry-run' }
 
-    $preview = $cli -join ' '
-    Info "[STEP] cargo run --release -- $preview"
+    Info "[STEP] cargo run --release -- $($cli -join ' ')"
     & cargo run --release -- @cli
   }
   else {
     Remove-Item Env:OTTER_OP -ErrorAction SilentlyContinue
     $env:OTTER_UPLOAD = '0'
-    Info "[STEP] cargo run --release -- --root $root full --cfg RelWithDebInfo (upload=OFF)"
-    & cargo run --release -- '--root' $root 'full' '--cfg' 'RelWithDebInfo'
+
+    $cli = @('--root', $root, 'full', '--cfg', 'RelWithDebInfo')
+    if ($jobs -gt 0) { $cli += @('--parallel', "$jobs") }
+
+    Info "[STEP] cargo run --release -- $($cli -join ' ') (upload=OFF)"
+    & cargo run --release -- @cli
   }
 
   $code = $LASTEXITCODE
@@ -137,6 +153,6 @@ finally {
   Pop-Location
 }
 
+# Rust runner prints the pretty trailer (and performs DIST sync). Avoid duplicate success line here.
 if ($code -ne 0) { Err "cargo run failed (code=$code)" }
-Info "OK (code=0)"
 exit 0
