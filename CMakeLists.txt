@@ -167,7 +167,8 @@ add_executable(mandelbrot_otterdream
   src/coloring_runtime_nvrtc.cpp
   # --- AI (AOP/Policy) now compiled-in (safe even without ORT)
   src/ai/aop_controller.cpp
-  src/ai/onnx_model.cpp
+  src/ai/onnx_model.cpp 
+  src/ai/aop_telemetry.cpp 
 )
 
 # /WX locker nur für onnx_model.cpp (Third-Party-Headers etc.)

@@ -1,6 +1,6 @@
 ///// Otter: AOP controller — centralizes [REPL/POLICY] logging (shadow only, no side-effects)
-///// Schneefuchs: /WX-safe; ASCII-only; C4127 fix via `if constexpr`; minimal includes
-///// Maus: size_t-safe Math; cast to unsigned long long for printf; stabile One-Liner
+///// Schneefuchs: /WX-safe; ASCII-only; C4127 via if constexpr; nutzt AOP_Telemetry-Header
+///// Maus: size_t-safe Math; casts für printf; stabile One-Liner
 ///// Datei: src/ai/aop_controller.cpp
 
 #include "pch.hpp"
@@ -8,6 +8,7 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "renderer_state.hpp"
+#include "ai/aop_telemetry.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -22,15 +23,15 @@ static inline float clamp01(float v) {
 
 Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& state)
 {
-    (void)fctx; // ZIP-Stand: Metriken liegen im RendererState
+    (void)fctx; // Metriken aus RendererState
     Decision d{};
 
-    // --- Compile-time gate to silence C4127 (constant condition) -------------
+    // Compile-time gate, um C4127 zu vermeiden (falls als konstante Flags implementiert)
     if constexpr (!(Settings::performanceLogging && Settings::PerfLog::enabled)) {
-        return d; // Logging bzw. AOP-Preview global deaktiviert → sofort raus
+        return d;
     }
 
-    // --- Runtime cadence gate ------------------------------------------------
+    // Runtime cadence
     const int warmupFrames = Settings::PerfLog::warmupFrames;
     const int everyN       = (Settings::PerfLog::everyN > 0) ? Settings::PerfLog::everyN : 1;
 
@@ -38,7 +39,7 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
         return d;
     }
 
-    // --- Grid-Ableitung anhand gewünschter Tile-Pixelgröße -------------------
+    // Grid-Ableitung
     const int desiredPx_i = std::max(1, Settings::Kolibri::desiredTilePx);
     if (state.width <= 0 || state.height <= 0) {
         LUCHS_LOG_HOST("[REPL/POLICY] dry-run: invalid dims w=%d h=%d", state.width, state.height);
@@ -52,15 +53,11 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     const size_t tilesY = (h + desiredPx - 1) / desiredPx;
     const size_t nGrid  = tilesX * tilesY;
 
-    // Host-Metriken aus RendererState (defensiv prüfen)
-    const float* E = nullptr;
-    const float* C = nullptr;
-    size_t nE = 0, nC = 0;
-
-    E  = state.h_entropy.data();
-    C  = state.h_contrast.data();
-    nE = state.h_entropy.size();
-    nC = state.h_contrast.size();
+    // Metriken
+    const float* E = state.h_entropy.data();
+    const float* C = state.h_contrast.data();
+    const size_t nE = state.h_entropy.size();
+    const size_t nC = state.h_contrast.size();
 
     const size_t N = std::min(nGrid, std::min(nE, nC));
     if (N == 0 || tilesX == 0 || tilesY == 0 || E == nullptr || C == nullptr) {
@@ -73,11 +70,9 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
         return d;
     }
 
-    // --- Simple Z-Score-Combo und Top-3 -------------------------------------
     struct Scored { size_t idx; float s; };
     Scored top[3] = { {0, -FLT_MAX}, {0, -FLT_MAX}, {0, -FLT_MAX} };
 
-    // Mean/Std (double für Stabilität)
     double sumE = 0.0, sumE2 = 0.0, sumC = 0.0, sumC2 = 0.0;
     for (size_t i = 0; i < N; ++i) {
         const float e = E[i], c = C[i];
@@ -109,7 +104,7 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
 
     const size_t best = top[0].idx;
     const size_t tx = tilesX ? (best % tilesX) : 0;
-    const size_t ty = tilesY ? (best / tilesX) : 0; // tilesX>0 garantiert
+    const size_t ty = tilesY ? (best / tilesX) : 0;
 
     const float pxCenterX = (static_cast<float>(tx) + 0.5f) * static_cast<float>(desiredPx);
     const float pxCenterY = (static_cast<float>(ty) + 0.5f) * static_cast<float>(desiredPx);
@@ -117,7 +112,19 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     const float ndcX = clamp01(pxCenterX / static_cast<float>(state.width))  * 2.0f - 1.0f;
     const float ndcY = clamp01(pxCenterY / static_cast<float>(state.height)) * 2.0f - 1.0f;
 
-    // One-liner ASCII (MSVC-safe formats)
+    // Telemetry export (extern)
+    AOP_Telemetry::g_ai_ndc_pol_x = ndcX;
+    AOP_Telemetry::g_ai_ndc_pol_y = ndcY;
+
+    // Overlay-Preview: simple scaling
+    AOP_Telemetry::g_ai_ndc_ovl_x = ndcX * 0.75f;
+    AOP_Telemetry::g_ai_ndc_ovl_y = ndcY * 0.75f;
+    AOP_Telemetry::g_ai_ov_valid  = 1;
+
+    // Keine Crosshair-Delta-Berechnung verfügbar → sentinel
+    AOP_Telemetry::g_ai_last_delta = -1.0f;
+
+    // Log
     const unsigned long long uu_tilesX = static_cast<unsigned long long>(tilesX);
     const unsigned long long uu_tilesY = static_cast<unsigned long long>(tilesY);
     const unsigned long long uu_px     = static_cast<unsigned long long>(desiredPx);
