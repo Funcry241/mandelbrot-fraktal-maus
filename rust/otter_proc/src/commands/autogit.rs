@@ -49,7 +49,6 @@ mod vtcolor { pub fn enable_ansi_colors() {} }
 fn colorize_autogit(line: &str) -> String {
     const CYAN:  &str = "\x1b[36m";
     const YELL:  &str = "\x1b[33m";
-    const ORNG:  &str = "\x1b[38;5;208m"; // dezentes Orange für Deletions
     const RED:   &str = "\x1b[31m";
     const GREEN: &str = "\x1b[32m";
     const DIM:   &str = "\x1b[90m";
@@ -85,7 +84,7 @@ fn colorize_autogit(line: &str) -> String {
             } else if seg.contains("insertions(+)") || seg.contains("insertion(+)") {
                 format!("{GREEN}{seg}{RESET}")
             } else if seg.contains("deletions(-)") || seg.contains("deletion(-)") {
-                format!("{ORNG}{seg}{RESET}") // statt Rot jetzt Orange
+                format!("{GREEN}{seg}{RESET}") // deletions jetzt grün statt rot/orange
             } else {
                 seg.to_string()
             };
@@ -278,7 +277,7 @@ fn checkout_or_create_branch(root: &Path, name: &str, remote: &str) -> io::Resul
 fn has_upstream(root: &Path, branch: &str) -> bool {
     Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", &format!("{}@{{u}}", branch)])
-    .current_dir(root)
+        .current_dir(root)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
