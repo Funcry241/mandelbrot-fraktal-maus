@@ -10,6 +10,7 @@
 #include "luchs_log_host.hpp"
 #include "heatmap_shaders.hpp"
 #include "ui_gl.hpp"
+#include "ai/aop_telemetry.hpp" // REPL: optional AI overlay marker
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -349,7 +350,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
     }
 
-    // Heat + Z0 sticker
+    // Heat + Z0/AI marker
     {
         const float quad[12]={
             (float)contentX0,(float)contentY0,
@@ -371,17 +372,29 @@ void drawOverlay(const std::vector<float>& entropy,
         glBindTexture(GL_TEXTURE_2D, sHeatTex);
         if(uHGridTex>=0) glUniform1i(uHGridTex, 0);
 
-        // Marker-Position aus NDC-Interest zurück in Panel-Pixel
-        const float ndcX = (float)ctx.interest.ndcX;
-        const float ndcY = (float)ctx.interest.ndcY;
+        // Marker-Quelle: zuerst AI-Overlay-Position, sonst Interest-Fallback
+        bool  markEnabled = false;
+        float ndcX = 0.0f, ndcY = 0.0f;
+        if (AOP_Telemetry::g_ai_ov_valid) {
+            ndcX = AOP_Telemetry::g_ai_ndc_ovl_x;
+            ndcY = AOP_Telemetry::g_ai_ndc_ovl_y;
+            markEnabled = true;
+        } else if (ctx.interest.valid) {
+            ndcX = (float)ctx.interest.ndcX;
+            ndcY = (float)ctx.interest.ndcY;
+            markEnabled = true;
+        }
+
         const float centerPxX_panel = contentX0 + (0.5f*(ndcX+1.0f))* (contentX1-contentX0);
         const float centerPxY_panel = contentY0 + (0.5f*(1.0f-ndcY))* (contentY1-contentY0);
         const float ringRpx_panel   = 0.5f * std::min(contentX1-contentX0, contentY1-contentY0) * 0.35f;
 
-        if(uHMarkEnable>=0)   glUniform1f(uHMarkEnable,   1.0f);
-        if(uHMarkCenterPx>=0) glUniform2f(uHMarkCenterPx, centerPxX_panel, centerPxY_panel);
-        if(uHMarkRadiusPx>=0) glUniform1f(uHMarkRadiusPx, ringRpx_panel);
-        if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.95f);
+        if(uHMarkEnable>=0)   glUniform1f(uHMarkEnable,   markEnabled ? 1.0f : 0.0f);
+        if (markEnabled) {
+            if(uHMarkCenterPx>=0) glUniform2f(uHMarkCenterPx, centerPxX_panel, centerPxY_panel);
+            if(uHMarkRadiusPx>=0) glUniform1f(uHMarkRadiusPx, ringRpx_panel);
+            if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.95f);
+        }
 
         glBindVertexArray(sHeatVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sHeatVBO);
