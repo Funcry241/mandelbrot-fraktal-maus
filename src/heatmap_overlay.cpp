@@ -1,6 +1,6 @@
-///// Otter: GPU Heatmap overlay (fragment shader alpha) + Z0 sticker (argmax->CoM bend), no blur.
-///// Schneefuchs: Coordinates harmonized with Eule; header/source kept in sync; no extra programs.
-///// Maus: One-line ASCII logs; forwards blended interest to RendererState (screen coords); no zoom/pan changes.
+///// Otter: GPU Heatmap overlay (fragment shader alpha) + ROI (argmax→CoM bend), no blur.
+///// Schneefuchs: Eule-saubere Koordinaten; Shader-Texel-Center-Fix aktiv; Header/Source in Sync.
+///// Maus: Stil C „Corner-Holo“ – dezent, futuristisch; keine Zoom/Pan-Nebenwirkung; ASCII-Logs.
 ///// Datei: src/heatmap_overlay.cpp
 
 #include "pch.hpp"
@@ -15,50 +15,46 @@
 #include <cmath>
 #include <chrono>
 
-// --- lokale UI-Helfer (fallback, ohne externe Pfau-Abhängigkeit) ------------
+// --- lokale UI-Helfer --------------------------------------------------------
 namespace {
-    // konservative Defaults für Layout (Panel, Abstände, Radius)
     constexpr float kUI_PADDING  = 12.0f;
     constexpr float kUI_MARGIN   = 12.0f;
     constexpr float kUI_RADIUS   = 8.0f;
     constexpr float kUI_BORDER   = 1.0f;
     constexpr float kPANEL_ALPHA = 0.85f;
 
-    inline int snapToPixel(float v) {
-        return static_cast<int>(std::lround(v));
-    }
+    inline int snapToPixel(float v) { return static_cast<int>(std::lround(v)); }
 }
 
 namespace HeatmapOverlay {
 
-// --- GL handles / uniforms (kompakt) -----------------------------------------
+// --- GL handles / uniforms ---------------------------------------------------
 static GLuint sPanelVAO=0, sPanelVBO=0, sPanelProg=0;
 static GLint  uViewportPx=-1, uPanelRectPx=-1, uRadiusPx=-1, uAlpha=-1, uBorderPx=-1;
 
 static GLuint sHeatVAO=0, sHeatVBO=0, sHeatProg=0, sHeatTex=0;
 static GLint  uHViewportPx=-1, uHContentRectPx=-1, uHGridTex=-1, uHAlphaBase=-1;
 static GLint  uHMarkEnable=-1, uHMarkCenterPx=-1, uHMarkRadiusPx=-1, uHMarkAlpha=-1;
-// Neu für Holo-Arc:
+// Stil-Uniforms (C)
 static GLint  uHStyle=-1, uHTime=-1, uHStrokePx=-1, uHGlowPx=-1, uHArcSpanDeg=-1;
 
 static int    sTexW=0, sTexH=0;
 static float  sExposureEMA = 0.0f;
 
-// Tuning (lokal, Settings bleiben schmal)
+// Tuning (lokal)
 static constexpr float  kExposureDecay = 0.92f;
 static constexpr float  kValueFloor    = 0.03f;
 static constexpr double kBendStartZ    = 1.0;
 static constexpr double kBendFullZ     = 18.0;
 static constexpr double kBendExp       = 0.5;
 
-// ---- interner Helfer: ROI aus Entropy/Contrast berechnen --------------------
+// ---- ROI-Berechnung ---------------------------------------------------------
 struct ROIResult {
     int tilesX=0, tilesY=0, bestIdx=0;
     double ndcX=0.0, ndcY=0.0, rNdc=0.15;
     float  bestRaw=0.0f;
 };
 
-// Kern-Scoring (ohne GL); liefert auch NDC & Radius (mit CoM-Bend)
 static bool computeROI(const std::vector<float>& entropy,
                        const std::vector<float>& contrast,
                        int width, int height, int tileSize,
@@ -85,7 +81,6 @@ static bool computeROI(const std::vector<float>& entropy,
     float  bestRaw    = -1e30f;
     double bestScore  = -1e300;
 
-    // rohes Grid nur für lokale CoM
     static thread_local std::vector<float> grid;
     grid.assign(nTiles, 0.0f);
 
@@ -112,7 +107,7 @@ static bool computeROI(const std::vector<float>& entropy,
 
     const int bx = bestIdx % tilesX, by = bestIdx / tilesX;
 
-    // 3x3-CoM (baryzentrisch)
+    // 3×3-CoM (baryzentrisch)
     double cx_com = bx + 0.5, cy_com = by + 0.5;
     {
         const int r = 1; const double sigma2 = 0.75*0.75; const double gammaW = 3.0;
@@ -131,7 +126,7 @@ static bool computeROI(const std::vector<float>& entropy,
         if (wsum > 1e-9) { cx_com = xsum / wsum; cy_com = ysum / wsum; }
     }
 
-    // Bend zum CoM mit wachsendem Zoom
+    // Bend (zoom-abhängig)
     double bendT = 0.0;
     if (zoom > kBendStartZ) {
         bendT = std::min(1.0, (zoom - kBendStartZ) / (kBendFullZ - kBendStartZ));
@@ -155,7 +150,7 @@ static bool computeROI(const std::vector<float>& entropy,
     return true;
 }
 
-// ---- neue Compute-API (exportiert via Header): setzt ctx.interest, kein GL ---
+// ---- Compute-API: Interest setzen (kein GL) ---------------------------------
 bool updateInterestFromGrid(const std::vector<float>& entropy,
                             const std::vector<float>& contrast,
                             int width, int height, int tileSize,
@@ -166,11 +161,11 @@ bool updateInterestFromGrid(const std::vector<float>& entropy,
     ROIResult r;
     if(!computeROI(entropy,contrast,width,height,tileSize,zoom,r)) return false;
 
-    ctx.interest.ndcX     = r.ndcX;
-    ctx.interest.ndcY     = r.ndcY;
-    ctx.interest.radiusNdc= r.rNdc;
-    ctx.interest.strength = 1.0;
-    ctx.interest.valid    = true;
+    ctx.interest.ndcX      = r.ndcX;
+    ctx.interest.ndcY      = r.ndcY;
+    ctx.interest.radiusNdc = r.rNdc;
+    ctx.interest.strength  = 1.0;
+    ctx.interest.valid     = true;
 
     if constexpr(Settings::debugLogging){
         static int sPrevTX=-1, sPrevTY=-1;
@@ -217,17 +212,16 @@ void drawOverlay(const std::vector<float>& entropy,
                  [[maybe_unused]] unsigned int textureId,
                  RendererState& ctx)
 {
-    // --- NEU: ROI immer zuerst setzen (Compute-API), unabhängig von Sichtbarkeit
+    // 1) ROI immer setzen (unabhängig von Sichtbarkeit)
     (void)updateInterestFromGrid(entropy, contrast, width, height, tileSize, (double)ctx.zoom, ctx);
 
-    // Falls Overlay unsichtbar: hier enden – ROI bleibt gesetzt.
+    // 2) Optionales Draw
     if(!ctx.heatmapOverlayEnabled) return;
 
-    // ----------------------- Ab hier NUR Draw/GL -----------------------------
     // Programme & VAOs
     if(!sPanelProg){
         sPanelProg = UiGL::makeProgram(HeatmapShaders::PanelVS, HeatmapShaders::PanelFS);
-        if(!sPanelProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[UI/Pfau][HM] panel program==0"); return; }
+        if(!sPanelProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[UI/HM] panel program==0"); return; }
         uViewportPx = glGetUniformLocation(sPanelProg, "uViewportPx");
         uPanelRectPx= glGetUniformLocation(sPanelProg, "uPanelRectPx");
         uRadiusPx   = glGetUniformLocation(sPanelProg, "uRadiusPx");
@@ -236,7 +230,7 @@ void drawOverlay(const std::vector<float>& entropy,
     }
     if(!sHeatProg){
         sHeatProg = UiGL::makeProgram(HeatmapShaders::HeatVS, HeatmapShaders::HeatFS);
-        if(!sHeatProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[UI/Pfau][HM] heat program==0"); return; }
+        if(!sHeatProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[UI/HM] heat program==0"); return; }
         uHViewportPx    = glGetUniformLocation(sHeatProg, "uViewportPx");
         uHContentRectPx = glGetUniformLocation(sHeatProg, "uContentRectPx");
         uHGridTex       = glGetUniformLocation(sHeatProg, "uGrid");
@@ -245,7 +239,7 @@ void drawOverlay(const std::vector<float>& entropy,
         uHMarkCenterPx  = glGetUniformLocation(sHeatProg, "uMarkCenterPx");
         uHMarkRadiusPx  = glGetUniformLocation(sHeatProg, "uMarkRadiusPx");
         uHMarkAlpha     = glGetUniformLocation(sHeatProg, "uMarkAlpha");
-        // Neu: Holo-Arc Uniforms
+        // Stil-Uniforms
         uHStyle         = glGetUniformLocation(sHeatProg, "uHStyle");
         uHTime          = glGetUniformLocation(sHeatProg, "uHTime");
         uHStrokePx      = glGetUniformLocation(sHeatProg, "uHStrokePx");
@@ -262,7 +256,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     }
 
-    // Für die Darstellung normalisieren (EMA); re-kalkuliere Anzeigegrid
+    // Anzeige-Grid normalisieren (EMA)
     const int tilesX = (width  + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
     const size_t nTiles = (size_t)tilesX * (size_t)tilesY;
@@ -288,7 +282,7 @@ void drawOverlay(const std::vector<float>& entropy,
 
     glBindTexture(GL_TEXTURE_2D, sHeatTex);
 
-    // --- Upload mit sicherem Alignment (GL_R16F -> 1 byte row alignment) -----
+    // Upload (GL_R16F) mit 1-Byte Alignment
     GLint prevUnpack = 0;
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevUnpack);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -299,8 +293,6 @@ void drawOverlay(const std::vector<float>& entropy,
     }else{
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, sTexW, sTexH, GL_RED, GL_FLOAT, grid.data());
     }
-
-    // Alignment zurücksetzen
     glPixelStorei(GL_UNPACK_ALIGNMENT, prevUnpack);
 
     // Layout
@@ -317,7 +309,7 @@ void drawOverlay(const std::vector<float>& entropy,
     const int contentX0 = panelX0 + padPx, contentY0 = panelY0 + padPx;
     const int contentX1 = contentX0 + contentWPx, contentY1 = contentY0 + contentHPx;
 
-    // Save GL blend/program/vao state (kurz)
+    // State sichern
     GLint prevVAO=0, prevBuf=0, prevProg=0, srcRGB=0,dstRGB=0,srcA=0,dstA=0;
     GLboolean wasBlend=GL_FALSE, wasDepth=GL_FALSE;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&prevVAO);
@@ -359,7 +351,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
     }
 
-    // Heat + (futuristischer) Holo-Arc Marker
+    // Heat + Corner-Holo Marker (Stil C)
     {
         const float quad[12]={
             (float)contentX0,(float)contentY0,
@@ -381,7 +373,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glBindTexture(GL_TEXTURE_2D, sHeatTex);
         if(uHGridTex>=0) glUniform1i(uHGridTex, 0);
 
-        // Marker-Position aus NDC-Interest zurück in Panel-Pixel
+        // Marker-Position (Panel-Pixel)
         const float ndcX = (float)ctx.interest.ndcX;
         const float ndcY = (float)ctx.interest.ndcY;
         const float centerPxX_panel = contentX0 + (0.5f*(ndcX+1.0f))* (contentX1-contentX0);
@@ -391,16 +383,16 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uHMarkEnable>=0)   glUniform1f(uHMarkEnable,   1.0f);
         if(uHMarkCenterPx>=0) glUniform2f(uHMarkCenterPx, centerPxX_panel, centerPxY_panel);
         if(uHMarkRadiusPx>=0) glUniform1f(uHMarkRadiusPx, ringRpx_panel);
-        if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.60f); // dezenter als vorher
+        if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.45f); // dezenter als Ring/Cross
 
-        // Stil: Holo-Arc aktivieren + Parameter setzen
-        if(uHStyle>=0)      glUniform1i(uHStyle, 1);
+        // Stil C aktivieren + Parameter
+        if(uHStyle>=0)      glUniform1i(uHStyle, 2);
         static const auto t0 = std::chrono::steady_clock::now();
         const float tSec = std::chrono::duration<float>(std::chrono::steady_clock::now() - t0).count();
         if(uHTime>=0)       glUniform1f(uHTime, tSec);
-        if(uHStrokePx>=0)   glUniform1f(uHStrokePx, std::max(1.0f, 1.25f * sPanelScale));
-        if(uHGlowPx>=0)     glUniform1f(uHGlowPx,  8.0f * sPanelScale);
-        if(uHArcSpanDeg>=0) glUniform1f(uHArcSpanDeg, 90.0f);
+        if(uHStrokePx>=0)   glUniform1f(uHStrokePx, std::max(1.0f, 1.10f * sPanelScale));
+        if(uHGlowPx>=0)     glUniform1f(uHGlowPx,  6.0f * sPanelScale);
+        if(uHArcSpanDeg>=0) glUniform1f(uHArcSpanDeg, 48.0f); // ~48° je Corner-Segment
 
         glBindVertexArray(sHeatVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sHeatVBO);
@@ -411,7 +403,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
     }
 
-    // Restore GL state
+    // State zurück
     glBlendFuncSeparate(srcRGB,dstRGB,srcA,dstA);
     if(!wasBlend) glDisable(GL_BLEND);
     if(wasDepth) glEnable(GL_DEPTH_TEST);
