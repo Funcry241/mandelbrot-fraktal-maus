@@ -49,6 +49,7 @@ mod vtcolor { pub fn enable_ansi_colors() {} }
 fn colorize_autogit(line: &str) -> String {
     const CYAN:  &str = "\x1b[36m";
     const YELL:  &str = "\x1b[33m";
+    const ORNG:  &str = "\x1b[38;5;208m"; // dezentes Orange für Deletions
     const RED:   &str = "\x1b[31m";
     const GREEN: &str = "\x1b[32m";
     const DIM:   &str = "\x1b[90m";
@@ -84,7 +85,7 @@ fn colorize_autogit(line: &str) -> String {
             } else if seg.contains("insertions(+)") || seg.contains("insertion(+)") {
                 format!("{GREEN}{seg}{RESET}")
             } else if seg.contains("deletions(-)") || seg.contains("deletion(-)") {
-                format!("{RED}{seg}{RESET}")
+                format!("{ORNG}{seg}{RESET}") // statt Rot jetzt Orange
             } else {
                 seg.to_string()
             };
