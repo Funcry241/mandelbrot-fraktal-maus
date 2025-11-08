@@ -11,7 +11,7 @@ struct RendererState;
 namespace Repl { namespace Policy {
 
     struct Decision {
-        int  order = 1;          // 1./2. Ordnung für Perturbation (stub)
+        int  order = 1;          // 1./2. Ordnung (stub)
         bool rebase = false;     // Rebase jetzt? (stub)
         bool enablePerturb = false;
     };
