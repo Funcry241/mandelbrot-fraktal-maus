@@ -1,9 +1,13 @@
-///// Otter: Final – „Nano-Halo Reticle“: Punkt + feine Diamant-Klammer, sehr dezent, futuristisch.
-///// Schneefuchs: Texel-Center-Fix via textureSize(); saubere Panel→UV-Koordinaten, kein Vollring.
-///// Maus: Keine Animation, nur sanfter Halo; Marker in Panel-Pixeln, ASCII-sauber; /WX-safe.
-// /// Datei: src/heatmap_shaders.hpp
+///// Otter: Quiet & deterministic - Root-fix: re-center UVs to texel centers via textureSize.
+///// Schneefuchs: Koordinaten sauber (Panel oben-links, Texture unten-links); keine Heuristik.
+///// Maus: Einzeilige Freude; hübsches Gold; Kreuz bleibt in Panel-Pixeln (kein Extra-Flip).
+///// Flip: uv.y = 1.0 - uv.y (Orientation); danach Half-Texel-Recenter in X und Y.
+///// Datei: heatmap_shaders.hpp
+///// Vertrag: CPU/ROI nutzen weiterhin Buffer-/Panel-Pixel; Shader übernimmt Alignment.
 
 #pragma once
+// Header-only: hält nur GLSL-Quellen zusammen.
+// Kein C++-Code, keine GL-Abhängigkeit.
 
 namespace HeatmapShaders {
 
@@ -46,17 +50,10 @@ in vec2 vPx; out vec4 FragColor;
 uniform vec4   uContentRectPx;
 uniform sampler2D uGrid;
 uniform float  uAlphaBase;
-
-// Marker-Uniforms
 uniform float  uMarkEnable;
 uniform vec2   uMarkCenterPx;
+uniform float  uMarkRadiusPx;
 uniform float  uMarkAlpha;
-
-// Stil „Final“ Parameter (alle in Pixel)
-uniform float  uDotPx;        // Punkt-Radius
-uniform float  uRDiamondPx;   // „Halb-Diagonale“ der Diamant-Klammer
-uniform float  uStrokePx;     // Strichstärke Diamant
-uniform float  uHaloPx;       // Halo-Falloff-Radius
 
 vec3 mapGold(float v){
   float g = clamp(v,0.0,1.0);
@@ -66,47 +63,42 @@ vec3 mapGold(float v){
 }
 
 void main(){
-  // Panel-Pixel -> [0,1], Flip Y
+  // Panel-Pixel -> [0,1] -> Flip Y (OpenGL-UV) -------------------------------
   vec2 sizePx = uContentRectPx.zw - uContentRectPx.xy;
   vec2 uv = (vPx - uContentRectPx.xy) / sizePx;
   uv.y = 1.0 - uv.y;
 
-  // Texel-Center Recenter (Half-Texel in X/Y)
-  vec2 texDim = vec2(textureSize(uGrid, 0));
+  // ROOT FIX: Vertex-zu-Texel-Zentren re-centern (half-texel Korrektur) ------
+  // Wenn das Grid als N Kanten-Samples (0..N-1) erzeugt wurde, liegen die
+  // texel-Zentren bei (j + 0.5)/N. Das Mapping unten sorgt dafür, dass
+  // uv=0..1 genau diese Zentren trifft (und nicht die Kanten).
+  vec2 texDim = vec2(textureSize(uGrid, 0));         // (W, H)
   uv = ((texDim - 1.0) * uv + 0.5) / texDim;
 
+  // Out-of-bounds? (durch AA am Rand) ----------------------------------------
   if(any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))){
     FragColor = vec4(0.0); return;
   }
 
-  // Heat + Gold
+  // Heat-Sampling + Gold-Mapping ---------------------------------------------
   float v = texture(uGrid, uv).r;
   float a = smoothstep(0.05, 0.65, v) * uAlphaBase;
   vec4 base = vec4(mapGold(v), a);
 
-  // „Nano-Halo Reticle“ -------------------------------------------------------
+  // Marker (Fadenkreuz/Ring) in Panel-Pixeln – KEIN zusätzlicher Flip --------
   float m = 0.0;
   if(uMarkEnable > 0.5){
-    vec2  d   = vPx - uMarkCenterPx;
-    float r   = length(d);
-
-    // Punkt (kleiner Kern)
-    float aa  = fwidth(r) + 0.75;
-    float dot = 1.0 - smoothstep(uDotPx+aa, uDotPx, r);
-
-    // Diamant-Klammer: |x| + |y| ≈ r_diamond (L1-Norm)
-    float dDiamond = (abs(d.x) + abs(d.y)) - uRDiamondPx;
-    float stroke   = 1.0 - smoothstep(uStrokePx+aa, uStrokePx, abs(dDiamond));
-
-    // Sehr dezenter Halo (gaussähnlich)
-    float h = exp(- (r*r) / max(1.0, uHaloPx*uHaloPx));
-
-    // Mischung: vor allem Klammer, leichter Punkt, zarter Halo
-    m = uMarkAlpha * (0.65 * stroke + 0.25 * dot + 0.10 * h);
+    vec2  d2   = vPx - uMarkCenterPx;
+    float r    = length(d2);
+    float edge = abs(r - uMarkRadiusPx);
+    float aa   = fwidth(edge) + 0.75;
+    float ring = 1.0 - smoothstep(1.5, 1.5+aa, edge);
+    float cx   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.x));
+    float cy   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.y));
+    m = max(ring, max(cx, cy)) * uMarkAlpha;
   }
 
-  // kühles Holo-Cyan als Akzent
-  vec3 markCol = vec3(0.55, 0.95, 1.00);
+  vec3 markCol = vec3(0.60, 1.00, 0.60);
   vec4 outCol  = mix(base, vec4(markCol, 1.0), m);
   outCol.a     = max(base.a, max(outCol.a, m));
   FragColor    = outCol;
