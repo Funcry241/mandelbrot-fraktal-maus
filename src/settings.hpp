@@ -275,6 +275,10 @@ namespace Ai {
     inline constexpr bool        enabled    = true;    // Master-Switch (ON)
     inline constexpr bool        aopEnabled = true;    // nur AOP-Controller
     inline constexpr const char* ep         = "cuda";  // "cuda" | "dml" | "cpu"
+
+    // Unified weights for entropy/contrast scoring (used by overlay & AOP)
+    inline constexpr float wE = 0.60f;
+    inline constexpr float wC = 0.40f;
 }
 
 namespace Luchs {

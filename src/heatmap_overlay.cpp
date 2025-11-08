@@ -118,8 +118,13 @@ void drawOverlay(const std::vector<float>& entropy,
     const double mix      = Settings::TargetBias::mix;
     const bool   nearOn   = Settings::TargetBias::enabled && (mix > 0.0);
 
+    const float wE = Settings::Ai::wE;
+    const float wC = Settings::Ai::wC;
+
     for(int i=0;i<nTiles;++i){
-        const float raw = entropy[(size_t)i] + contrast[(size_t)i];
+        const float e = entropy[(size_t)i];
+        const float c = contrast[(size_t)i];
+        const float raw = wE * e + wC * c;     // <- vereinheitlichte Wertung
         if (raw > currentMax) currentMax = raw;
         grid[(size_t)i] = raw;
         double score = (double)raw;
@@ -146,12 +151,21 @@ void drawOverlay(const std::vector<float>& entropy,
     }
 
     glBindTexture(GL_TEXTURE_2D, sHeatTex);
+
+    // --- Upload mit sicherem Alignment (GL_R16F -> 1 byte row alignment) -----
+    GLint prevUnpack = 0;
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevUnpack);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
     if(sTexW!=tilesX || sTexH!=tilesY){
         sTexW=tilesX; sTexH=tilesY;
         glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, sTexW, sTexH, 0, GL_RED, GL_FLOAT, grid.data());
     }else{
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, sTexW, sTexH, GL_RED, GL_FLOAT, grid.data());
     }
+
+    // Alignment zurücksetzen
+    glPixelStorei(GL_UNPACK_ALIGNMENT, prevUnpack);
 
     // Layout
     constexpr int contentHPx = 92;

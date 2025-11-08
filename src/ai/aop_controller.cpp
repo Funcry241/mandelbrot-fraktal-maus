@@ -23,7 +23,7 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
 
         if (state.frameCount > warm && (state.frameCount % step) == 0) {
             // --- Dry-run-Auswertung: Top-3 Tiles auf Basis von state.h_entropy/h_contrast ---
-            // Wir verwenden ein screen-konstantes Grid gemäß Kolibri (Phase-1 ohne Seitenffekte).
+            // Wir verwenden ein screen-konstantes Grid gemäß Kolibri (Phase-1 ohne Seiteneffekte).
             const int statsPx = std::max(1, Settings::Kolibri::desiredTilePx);
             const int tilesX  = (state.width  + statsPx - 1) / statsPx;
             const int tilesY  = (state.height + statsPx - 1) / statsPx;
@@ -40,9 +40,9 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
                 LUCHS_LOG_HOST("[REPL/POLICY] evaluate (stub, ep=%s) dry-run: no-metrics N=%zu statsPx=%d tiles=%dx%d",
                                Settings::Ai::ep, N, statsPx, tilesX, tilesY);
             } else {
-                // Gewichte (einfaches konvexes Kombi-Signal)
-                const float wE = 0.60f;
-                const float wC = 0.40f;
+                // Gewichte: einheitlich aus Settings::Ai (Overlay & AOP teilen eine Quelle)
+                const float wE = Settings::Ai::wE;
+                const float wC = Settings::Ai::wC;
 
                 // Top-3 in einem Durchlauf ohne Allokationen
                 struct Top { int idx; float score; int tx; int ty; } t0{-1, -1e30f, -1, -1}, t1{-1, -1e30f, -1, -1}, t2{-1, -1e30f, -1, -1};
