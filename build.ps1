@@ -94,13 +94,12 @@ if (-not $cargo) { Err "'cargo' not found in PATH" }
 $runnerDir = Join-Path $root 'rust\otter_proc'
 if (-not (Test-Path -LiteralPath $runnerDir)) { Err "Runner directory missing: $runnerDir" }
 
-# Common ENV
+# Common ENV (kept for compatibility)
 $env:OTTER_ROOT = $root
 
 Push-Location -LiteralPath $runnerDir
 try {
   if ($mode -eq 'branch') {
-    # Branch mode (create/switch & push -u origin/wupp)
     $env:OTTER_OP     = 'branch'
     $env:OTTER_BRANCH = 'wupp'
     Remove-Item Env:OTTER_UPLOAD -ErrorAction SilentlyContinue
@@ -108,16 +107,14 @@ try {
     & cargo run --release --
   }
   elseif ($mode -eq 'build') {
-    # Build + upload (commit+push on current branch)
     Remove-Item Env:OTTER_OP -ErrorAction SilentlyContinue
     $env:OTTER_UPLOAD = '1'
     Info "[STEP] cargo run --release -- --root $root full --cfg RelWithDebInfo (upload=ON)"
     & cargo run --release -- '--root' $root 'full' '--cfg' 'RelWithDebInfo'
   }
   elseif ($mode -eq 'export') {
-    # Export only (no build)
     Remove-Item Env:OTTER_UPLOAD -ErrorAction SilentlyContinue
-    $env:OTTER_OP = 'export'   # influences ZIP name prefix in export.rs
+    $env:OTTER_OP = 'export'
 
     $cli = @('export', '--max-keep', "$exportKeep")
     if ($exportOutDir) { $cli += @('--out-dir', $exportOutDir) }
@@ -128,7 +125,6 @@ try {
     & cargo run --release -- @cli
   }
   else {
-    # Default: local build (NO upload)
     Remove-Item Env:OTTER_OP -ErrorAction SilentlyContinue
     $env:OTTER_UPLOAD = '0'
     Info "[STEP] cargo run --release -- --root $root full --cfg RelWithDebInfo (upload=OFF)"

@@ -1,14 +1,14 @@
-///// Otter: Voll-Build-Command – Cache-Guard (UNC/Case-Normalisierung) + CMake-Fahrt.
-///// Schneefuchs: Robust gegen \\?\-UNC, Slash-Normalisierung, Case-insensitive Vergleich.
-///// Maus: Minimal-invasive Änderung, behält Presets bei; optionales --parallel wird durchgereicht.
+///// Otter: Voll-Build-Command – Cache-Guard (UNC/Case-Normalisierung) + CMake-Fahrt (+ Auto-Parallel).
+///// Schneefuchs: Robust gegen \\?\-UNC, Slash-Normalisierung, Case-insensitive Vergleich; setzt Kerne automatisch, wenn --parallel fehlt.
+///// Maus: Minimal-invasiv, Presets bleiben; optionales --parallel wird durchgereicht oder automatisch bestimmt (clamp 2..128).
 ///// Datei: rust/otter_proc/src/commands/full.rs
-
 use std::fs;
 use std::io::{self, Read};
 use std::path::Path;
+use std::thread;
 
-use crate::commands::winenv;
 use crate::build_metrics::BuildMetrics;
+use crate::commands::winenv;
 
 /// Normalisiert Pfade für einen robusten Vergleich:
 /// - entfernt führendes \\?\ oder //?/
@@ -73,7 +73,7 @@ fn ensure_cache_matches_source(project_root: &Path, _configure_preset: &str) -> 
     Ok(())
 }
 
-/// Hauptlauf: Cache-Guard -> CMake configure -> CMake build (mit optionalem --parallel)
+/// Hauptlauf: Cache-Guard -> CMake configure -> CMake build (mit optionalem --parallel oder Auto-Parallel)
 pub fn run(
     root: &Path,
     build_cfg: &str,
@@ -90,6 +90,23 @@ pub fn run(
     // Vor dem Lauf: Cache gegen Source-Root absichern (mit UNC/Case-Normalisierung)
     ensure_cache_matches_source(root, cfg_preset)?;
 
+    // Auto-Parallel: wenn kein --parallel angegeben war, System-Kerne nehmen (clamp 2..128)
+    let par = match parallel {
+        Some(n) => Some(n),
+        None => thread::available_parallelism()
+            .ok()
+            .map(|n| {
+                let n = n.get() as u32;
+                if n < 2 {
+                    2
+                } else if n > 128 {
+                    128
+                } else {
+                    n
+                }
+            }),
+    };
+
     // Danach die Windows-spezifische CMake-Fahrt (inkl. VsDev/vcvars Kette + Fallback)
-    winenv::run_cmake_windows(root, cfg_preset, bld_preset, build_cfg, parallel)
+    winenv::run_cmake_windows(root, cfg_preset, bld_preset, build_cfg, par)
 }
