@@ -1,52 +1,51 @@
-///// Otter: Projekt 'Pfau' – identical UI params/alpha; anchor Top-Right; header cleaned.
-///// Schneefuchs: MAUS header (#62) strict; no GL includes in header; ASCII-only docs.
-///// Maus: Pfau final; keep function signatures unchanged so build stays stable until .cpp update.
+///// Otter: Heatmap overlay API – draw path + pure compute ROI setter (no GL).
+///// Schneefuchs: Leichter Header; keine schweren Includes; ASCII-only; signaturstabil.
+///// Maus: updateInterestFromGrid setzt ctx.interest früh im Frame; drawOverlay rendert optional.
 ///// Datei: src/heatmap_overlay.hpp
 
 #pragma once
 
 #include <vector>
-#include "renderer_state.hpp"
 
-// No GL headers here to avoid include-order constraints (GLEW before GL).
-using GLuint = unsigned int;
+// Vorwärtsdeklaration, um den Header schlank zu halten
+struct RendererState;
 
 namespace HeatmapOverlay {
 
-// -----------------------------------------------------------------------------
-// Pfau theme: unified UI parameters (no alternates, hard-wired)
-// -----------------------------------------------------------------------------
-namespace Pfau {
-inline constexpr float UI_MARGIN   = 16.0f;   // outer margin to window edge (px)
-inline constexpr float UI_PADDING  = 12.0f;   // inner padding content->panel (px)
-inline constexpr float UI_RADIUS   = 12.0f;   // panel corner radius (px)
-inline constexpr float UI_BORDER   = 1.5f;    // panel border thickness (px)
-inline constexpr float PANEL_ALPHA = 0.84f;   // panel opacity (0..1)
-inline constexpr const char* LOG_PREFIX = "[UI/Pfau]"; // ASCII log prefix
-
-// Anchor for mini heatmap: Top-Right (Warzenschwein uses Top-Left)
-enum class Anchor { TopRight };
-inline constexpr Anchor ANCHOR = Anchor::TopRight;
-} // namespace Pfau
-
-// Pixel snapping helper (for crisp edges)
-inline int snapToPixel(float v) { return static_cast<int>(v + 0.5f); }
-
-// Toggle overlay flag in RendererState (no hidden globals)
+// Sichtbarkeit toggeln (UI)
 void toggle(RendererState& ctx);
 
-// Release all GL resources created by the overlay (idempotent)
+// GL-Ressourcen freigeben (Overlay-seitig)
 void cleanup();
 
-// Draw the mini heatmap (Pfau material: panel + texture-driven heatmap with
-// FS glow/alpha). Expects one value per tile in 'entropy' and 'contrast'
-// (size tilesX*tilesY). width/height = framebuffer, tileSize = tile size in
-// pixels. textureId is optional (0 allowed).
+/**
+ * Berechnet den ROI aus Entropie/Kontrast und schreibt ihn nach RendererState::interest.
+ * Keine GL-Aufrufe, keine Nebenwirkungen außerhalb von ctx.interest.*
+ *
+ * @param entropy   Heatmap Entropie pro Tile (size = tilesX * tilesY)
+ * @param contrast  Heatmap Kontrast  pro Tile (size = tilesX * tilesY)
+ * @param width     Framebreite in Pixeln
+ * @param height    Framehöhe in Pixeln
+ * @param tileSize  Tile-Kantenlänge in Pixeln (Compute-Grid)
+ * @param zoom      aktueller Zoom (double)
+ * @param ctx       RendererState; schreibt ctx.interest.{ndcX,ndcY,radiusNdc,strength,valid}
+ * @return          true bei Erfolg, false wenn Eingaben ungültig/unvollständig
+ */
+bool updateInterestFromGrid(const std::vector<float>& entropy,
+                            const std::vector<float>& contrast,
+                            int width, int height, int tileSize,
+                            double zoom,
+                            RendererState& ctx) noexcept;
+
+/**
+ * Zeichnet das Overlay (Panel + Heatmap + Marker). Setzt zuvor immer den ROI
+ * via updateInterestFromGrid(...). Wenn ctx.heatmapOverlayEnabled == false,
+ * wird nur der ROI gesetzt und der Draw-Teil übersprungen.
+ */
 void drawOverlay(const std::vector<float>& entropy,
                  const std::vector<float>& contrast,
-                 int width, int height,
-                 int tileSize,
-                 GLuint textureId,
+                 int width, int height, int tileSize,
+                 unsigned int textureId,
                  RendererState& ctx);
 
 } // namespace HeatmapOverlay

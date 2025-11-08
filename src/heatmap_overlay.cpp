@@ -34,6 +34,138 @@ static constexpr double kBendStartZ    = 1.0;
 static constexpr double kBendFullZ     = 18.0;
 static constexpr double kBendExp       = 0.5;
 
+// ---- interner Helfer: ROI aus Entropy/Contrast berechnen --------------------
+struct ROIResult {
+    int tilesX=0, tilesY=0, bestIdx=0;
+    double ndcX=0.0, ndcY=0.0, rNdc=0.15;
+    float  bestRaw=0.0f;
+};
+
+// Kern-Scoring (ohne GL); liefert auch NDC & Radius (mit CoM-Bend)
+static bool computeROI(const std::vector<float>& entropy,
+                       const std::vector<float>& contrast,
+                       int width, int height, int tileSize,
+                       double zoom,
+                       ROIResult& out)
+{
+    out = ROIResult{};
+    if(width<=0 || height<=0 || tileSize<=0) return false;
+
+    const int tilesX = (width  + tileSize - 1) / tileSize;
+    const int tilesY = (height + tileSize - 1) / tileSize;
+    const size_t nTiles = (size_t)tilesX * (size_t)tilesY;
+    if(entropy.size()<nTiles || contrast.size()<nTiles) return false;
+
+    const double sigmaNdc = Settings::TargetBias::sigmaNdc;
+    const double mix      = Settings::TargetBias::mix;
+    const bool   nearOn   = Settings::TargetBias::enabled && (mix > 0.0);
+
+    const float wE = Settings::Ai::wE;
+    const float wC = Settings::Ai::wC;
+
+    float  currentMax = 1e-6f;
+    int    bestIdx    = 0;
+    float  bestRaw    = -1e30f;
+    double bestScore  = -1e300;
+
+    // rohes Grid nur für lokale CoM
+    static thread_local std::vector<float> grid;
+    grid.assign(nTiles, 0.0f);
+
+    for(int i=0;i<(int)nTiles;++i){
+        const float e = entropy[(size_t)i];
+        const float c = contrast[(size_t)i];
+        const float raw = wE * e + wC * c;
+        grid[(size_t)i] = raw;
+        if (raw > currentMax) currentMax = raw;
+
+        double score = (double)raw;
+        if (nearOn) {
+            const int tx = i % tilesX, ty = i / tilesX;
+            const double cxp = ((double)tx + 0.5) * (double)width  / (double)tilesX;
+            const double cyp = ((double)ty + 0.5) * (double)height / (double)tilesY;
+            const double ndcX = (cxp / (double)width) * 2.0 - 1.0;
+            const double ndcY = 1.0 - (cyp / (double)height) * 2.0;
+            const double r2   = ndcX*ndcX + ndcY*ndcY;
+            const double w    = std::exp(- r2 / (sigmaNdc*sigmaNdc));
+            score = (1.0 - mix) * score + mix * score * w;
+        }
+        if(score > bestScore){ bestScore=score; bestIdx=i; if(raw>bestRaw) bestRaw=raw; }
+    }
+
+    const int bx = bestIdx % tilesX, by = bestIdx / tilesX;
+
+    // 3x3-CoM (baryzentrisch)
+    double cx_com = bx + 0.5, cy_com = by + 0.5;
+    {
+        const int r = 1; const double sigma2 = 0.75*0.75; const double gammaW = 3.0;
+        double wsum=0.0, xsum=0.0, ysum=0.0;
+        for (int dy=-r; dy<=r; ++dy){
+            const int ty = by + dy; if (ty < 0 || ty >= tilesY) continue;
+            for (int dx=-r; dx<=r; ++dx){
+                const int tx = bx + dx; if (tx < 0 || tx >= tilesX) continue;
+                const size_t idx = (size_t)ty*(size_t)tilesX + (size_t)tx;
+                const double v = (double)grid[idx];
+                const double g = std::exp(-(dx*dx + dy*dy)/(2.0*sigma2));
+                const double w = std::pow(std::max(0.0, v), gammaW) * g;
+                wsum += w; xsum += w * (tx + 0.5); ysum += w * (ty + 0.5);
+            }
+        }
+        if (wsum > 1e-9) { cx_com = xsum / wsum; cy_com = ysum / wsum; }
+    }
+
+    // Bend zum CoM mit wachsendem Zoom
+    double bendT = 0.0;
+    if (zoom > kBendStartZ) {
+        bendT = std::min(1.0, (zoom - kBendStartZ) / (kBendFullZ - kBendStartZ));
+        bendT = std::pow(bendT, kBendExp);
+    }
+
+    const double cx_tile = (1.0 - bendT)*(bx + 0.5) + bendT*cx_com;
+    const double cy_tile = (1.0 - bendT)*(by + 0.5) + bendT*cy_com;
+
+    const float tileWPx_screen  = (float)width  / std::max(1, tilesX);
+    const float tileHPx_screen  = (float)height / std::max(1, tilesY);
+    const float centerPxX_screen= (float)cx_tile * tileWPx_screen;
+    const float centerPxY_screen= (float)cy_tile * tileHPx_screen;
+    const float ringRpx_screen  = 0.70f * 0.5f * std::sqrt(tileWPx_screen*tileWPx_screen + tileHPx_screen*tileHPx_screen);
+
+    out.tilesX = tilesX; out.tilesY = tilesY; out.bestIdx = bestIdx; out.bestRaw = bestRaw;
+    out.ndcX = (centerPxX_screen / (double)width)  * 2.0 - 1.0;
+    out.ndcY = 1.0 - (centerPxY_screen / (double)height) * 2.0;
+    out.rNdc = 0.5 * (((double)ringRpx_screen / (double)width ) * 2.0
+                    + ((double)ringRpx_screen / (double)height) * 2.0);
+    return true;
+}
+
+// ---- neue Compute-API (exportiert via Header): setzt ctx.interest, kein GL ---
+bool updateInterestFromGrid(const std::vector<float>& entropy,
+                            const std::vector<float>& contrast,
+                            int width, int height, int tileSize,
+                            double zoom,
+                            RendererState& ctx) noexcept
+{
+    ctx.interest.valid = false;
+    ROIResult r;
+    if(!computeROI(entropy,contrast,width,height,tileSize,zoom,r)) return false;
+
+    ctx.interest.ndcX     = r.ndcX;
+    ctx.interest.ndcY     = r.ndcY;
+    ctx.interest.radiusNdc= r.rNdc;
+    ctx.interest.strength = 1.0;
+    ctx.interest.valid    = true;
+
+    if constexpr(Settings::debugLogging){
+        static int sPrevTX=-1, sPrevTY=-1;
+        if (sPrevTX!=r.tilesX || sPrevTY!=r.tilesY) {
+            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d rawMax=%.6f ndc=(%.6f,%.6f)",
+                           r.tilesX, r.tilesY, r.bestIdx, r.bestRaw, r.ndcX, r.ndcY);
+            sPrevTX=r.tilesX; sPrevTY=r.tilesY;
+        }
+    }
+    return true;
+}
+
 // --- API ---------------------------------------------------------------------
 void toggle(RendererState& ctx){
 #if defined(USE_HEATMAP_OVERLAY)
@@ -67,115 +199,10 @@ void drawOverlay(const std::vector<float>& entropy,
                  [[maybe_unused]] unsigned int textureId,
                  RendererState& ctx)
 {
-    // Phase-1: ROI wird IMMER vorgeschrieben – auch wenn das Overlay unsichtbar ist.
-    ctx.interest.valid = false;
+    // --- NEU: ROI immer zuerst setzen (Compute-API), unabhängig von Sichtbarkeit
+    (void)updateInterestFromGrid(entropy, contrast, width, height, tileSize, (double)ctx.zoom, ctx);
 
-    if(width<=0 || height<=0 || tileSize<=0) return;
-
-    const int tilesX = (width  + tileSize - 1) / tileSize;
-    const int tilesY = (height + tileSize - 1) / tileSize;
-    const int nTiles = tilesX * tilesY;
-    if((int)entropy.size()<nTiles || (int)contrast.size()<nTiles) return;
-
-    // ----------------------- Scoring (ohne GL) -------------------------------
-    float  currentMax = 1e-6f;
-    int    bestIdx    = 0;
-    float  bestRaw    = -1e30f;
-    double bestScore  = -1e300;
-
-    static thread_local std::vector<float> grid; // für optionales Draw (Heatmap)
-    grid.assign((size_t)nTiles, 0.0f);
-
-    const double sigmaNdc = Settings::TargetBias::sigmaNdc;
-    const double mix      = Settings::TargetBias::mix;
-    const bool   nearOn   = Settings::TargetBias::enabled && (mix > 0.0);
-
-    const float wE = Settings::Ai::wE;
-    const float wC = Settings::Ai::wC;
-
-    for(int i=0;i<nTiles;++i){
-        const float e = entropy[(size_t)i];
-        const float c = contrast[(size_t)i];
-        const float raw = wE * e + wC * c;     // vereinheitlichte Wertung
-        if (raw > currentMax) currentMax = raw;
-        grid[(size_t)i] = raw;
-
-        double score = (double)raw;
-        if (nearOn) {
-            const int tx = i % tilesX, ty = i / tilesX;
-            const double cxp = ((double)tx + 0.5) * (double)width  / (double)tilesX;
-            const double cyp = ((double)ty + 0.5) * (double)height / (double)tilesY;
-            const double ndcX = (cxp / (double)width) * 2.0 - 1.0;
-            const double ndcY = 1.0 - (cyp / (double)height) * 2.0;
-            const double r2   = ndcX*ndcX + ndcY*ndcY;
-            const double w    = std::exp(- r2 / (sigmaNdc*sigmaNdc));
-            score = (1.0 - mix) * score + mix * score * w;
-        }
-        if(score > bestScore){ bestScore=score; bestIdx=i; if(raw>bestRaw) bestRaw=raw; }
-    }
-
-    // ----------------------- ROI schreiben (immer) ---------------------------
-    {
-        const int bx = bestIdx % tilesX, by = bestIdx / tilesX;
-
-        // lokale 3x3-CoM (auf grid, aktuell noch unnormalisiert – OK für baryzentrisch)
-        double cx_com = bx + 0.5, cy_com = by + 0.5;
-        {
-            const int r = 1; const double sigma2 = 0.75*0.75; const double gammaW = 3.0;
-            double wsum=0.0, xsum=0.0, ysum=0.0;
-            for (int dy=-r; dy<=r; ++dy){
-                const int ty = by + dy; if (ty < 0 || ty >= tilesY) continue;
-                for (int dx=-r; dx<=r; ++dx){
-                    const int tx = bx + dx; if (tx < 0 || tx >= tilesX) continue;
-                    const size_t idx = (size_t)ty*(size_t)tilesX + (size_t)tx;
-                    const double v = (double)grid[idx];
-                    const double g = std::exp(-(dx*dx + dy*dy)/(2.0*sigma2));
-                    const double w = std::pow(std::max(0.0, v), gammaW) * g;
-                    wsum += w; xsum += w * (tx + 0.5); ysum += w * (ty + 0.5);
-                }
-            }
-            if (wsum > 1e-9) { cx_com = xsum / wsum; cy_com = ysum / wsum; }
-        }
-
-        // sanfter Bend hin zum CoM bei höherem Zoom
-        double bendT = 0.0;
-        { const double z=(double)ctx.zoom;
-          if (z > kBendStartZ) bendT = std::min(1.0, (z-kBendStartZ)/(kBendFullZ-kBendStartZ));
-          bendT = std::pow(bendT, kBendExp);
-        }
-
-        const double cx_tile = (1.0 - bendT)*(bx + 0.5) + bendT*cx_com;
-        const double cy_tile = (1.0 - bendT)*(by + 0.5) + bendT*cy_com;
-
-        // screen-space Interest (NDC, -1..+1)
-        const float tileWPx_screen  = (float)width  / std::max(1, tilesX);
-        const float tileHPx_screen  = (float)height / std::max(1, tilesY);
-        const float centerPxX_screen= (float)cx_tile * tileWPx_screen;
-        const float centerPxY_screen= (float)cy_tile * tileHPx_screen;
-        const float ringRpx_screen  = 0.70f * 0.5f * std::sqrt(tileWPx_screen*tileWPx_screen + tileHPx_screen*tileHPx_screen);
-
-        const double ndcX = (centerPxX_screen / (double)width)  * 2.0 - 1.0;
-        const double ndcY = 1.0 - (centerPxY_screen / (double)height) * 2.0;
-        const double rNdc = 0.5 * (((double)ringRpx_screen / (double)width ) * 2.0
-                                 + ((double)ringRpx_screen / (double)height) * 2.0);
-
-        ctx.interest.ndcX=ndcX; ctx.interest.ndcY=ndcY; ctx.interest.radiusNdc=rNdc;
-        ctx.interest.strength=1.0; ctx.interest.valid=true;
-
-        // Diagnose: sparsam (nur Grid-Änderung oder 120er Takt)
-        if constexpr(Settings::debugLogging){
-            static int sPrevTilesX=-1, sPrevTilesY=-1;
-            const bool gridChanged = (sPrevTilesX!=tilesX) || (sPrevTilesY!=tilesY);
-            if (gridChanged || (ctx.frameCount % 120) == 0) {
-                LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d rawMax=%.6f nearMix=%.2f sig=%.2f ndc=(%.6f,%.6f)",
-                               tilesX,tilesY,bestIdx,bestRaw,Settings::TargetBias::mix,Settings::TargetBias::sigmaNdc, ndcX, ndcY);
-                sPrevTilesX = tilesX; sPrevTilesY = tilesY;
-            }
-        }
-    }
-
-    // Falls Overlay unsichtbar: hier enden – ROI bleibt gesetzt.
-    if(!ctx.heatmapOverlayEnabled) return;
+    if(!ctx.heatmapOverlayEnabled) return; // unsichtbar → nur ROI gesetzt, kein Draw
 
     // ----------------------- Ab hier NUR Draw/GL -----------------------------
     // Programme & VAOs
@@ -210,15 +237,29 @@ void drawOverlay(const std::vector<float>& entropy,
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     }
 
-    // Normalize 0..1 + floor; update EMA (nur für Darstellung)
-    {
-        const float emaDecay = (sExposureEMA<=0.0f) ? currentMax : std::max(currentMax, kExposureDecay*sExposureEMA);
-        sExposureEMA = std::max(1e-6f, emaDecay);
-        for(int i=0;i<nTiles;++i){
-            float v = grid[(size_t)i] / sExposureEMA;
-            v = std::clamp(v + kValueFloor, 0.0f, 1.0f);
-            grid[(size_t)i] = v;
-        }
+    // Für die Darstellung normalisieren (EMA); wir brauchen dazu das rohe Grid erneut
+    // → computeROI hat es intern, daher hier die leichte Duplizierung für die reine Visualisierung
+    const int tilesX = (width  + tileSize - 1) / tileSize;
+    const int tilesY = (height + tileSize - 1) / tileSize;
+    const size_t nTiles = (size_t)tilesX * (size_t)tilesY;
+    static thread_local std::vector<float> grid;
+    grid.assign(nTiles, 0.0f);
+
+    const float wE = Settings::Ai::wE;
+    const float wC = Settings::Ai::wC;
+    float currentMax = 1e-6f;
+    for(int i=0;i<(int)nTiles;++i){
+        const float v = wE*entropy[(size_t)i] + wC*contrast[(size_t)i];
+        grid[(size_t)i] = v;
+        if(v > currentMax) currentMax = v;
+    }
+
+    const float emaDecay = (sExposureEMA<=0.0f) ? currentMax : std::max(currentMax, kExposureDecay*sExposureEMA);
+    sExposureEMA = std::max(1e-6f, emaDecay);
+    for(size_t i=0;i<nTiles;++i){
+        float v = grid[i] / sExposureEMA;
+        v = std::clamp(v + kValueFloor, 0.0f, 1.0f);
+        grid[i] = v;
     }
 
     glBindTexture(GL_TEXTURE_2D, sHeatTex);
@@ -316,42 +357,13 @@ void drawOverlay(const std::vector<float>& entropy,
         glBindTexture(GL_TEXTURE_2D, sHeatTex);
         if(uHGridTex>=0) glUniform1i(uHGridTex, 0);
 
-        // Ring-Markierung: bereits oben bestIdx/CoM berechnet → hier nur Uniforms
-        const int bx = bestIdx % tilesX, by = bestIdx / tilesX;
-
-        // lokale 3x3-CoM (wie oben; identisch halten für visuelle Kongruenz)
-        double cx_com = bx + 0.5, cy_com = by + 0.5;
-        {
-            const int r = 1; const double sigma2 = 0.75*0.75; const double gammaW = 3.0;
-            double wsum=0.0, xsum=0.0, ysum=0.0;
-            for (int dy=-r; dy<=r; ++dy){
-                const int ty = by + dy; if (ty < 0 || ty >= tilesY) continue;
-                for (int dx=-r; dx<=r; ++dx){
-                    const int tx = bx + dx; if (tx < 0 || tx >= tilesX) continue;
-                    const size_t idx = (size_t)ty*(size_t)tilesX + (size_t)tx;
-                    const double v = (double)grid[idx];
-                    const double g = std::exp(-(dx*dx + dy*dy)/(2.0*sigma2));
-                    const double w = std::pow(std::max(0.0, v), gammaW) * g;
-                    wsum += w; xsum += w * (tx + 0.5); ysum += w * (ty + 0.5);
-                }
-            }
-            if (wsum > 1e-9) { cx_com = xsum / wsum; cy_com = ysum / wsum; }
-        }
-
-        double bendT = 0.0;
-        { const double z=(double)ctx.zoom;
-          if (z > kBendStartZ) bendT = std::min(1.0, (z-kBendStartZ)/(kBendFullZ-kBendStartZ));
-          bendT = std::pow(bendT, kBendExp);
-        }
-
-        const double cx_tile = (1.0 - bendT)*(bx + 0.5) + bendT*cx_com;
-        const double cy_tile = (1.0 - bendT)*(by + 0.5) + bendT*cy_com;
-
-        const float tileWPx_panel = (float)(contentX1 - contentX0) / std::max(1, tilesX);
-        const float tileHPx_panel = (float)(contentY1 - contentY0) / std::max(1, tilesY);
-        const float centerPxX_panel = (float)contentX0 + (float)cx_tile * tileWPx_panel;
-        const float centerPxY_panel = (float)contentY0 + (float)cy_tile * tileHPx_panel;
-        const float ringRpx_panel   = 0.70f * 0.5f * std::sqrt(tileWPx_panel*tileWPx_panel + tileHPx_panel*tileHPx_panel);
+        // Markierungs-Ring: nutze HUD-Panel-Koordinaten (konsistent zur ROI-Berechnung)
+        // Für die Mitte genügt die NDC-Interest aus ctx → rücktransformieren in Panel-Px:
+        const float ndcX = (float)ctx.interest.ndcX;
+        const float ndcY = (float)ctx.interest.ndcY;
+        const float centerPxX_panel = contentX0 + (0.5f*(ndcX+1.0f))* (contentX1-contentX0);
+        const float centerPxY_panel = contentY0 + (0.5f*(1.0f-ndcY))* (contentY1-contentY0);
+        const float ringRpx_panel   = 0.5f * std::min(contentX1-contentX0, contentY1-contentY0) * 0.35f;
 
         if(uHMarkEnable>=0)   glUniform1f(uHMarkEnable,   1.0f);
         if(uHMarkCenterPx>=0) glUniform2f(uHMarkCenterPx, centerPxX_panel, centerPxY_panel);
