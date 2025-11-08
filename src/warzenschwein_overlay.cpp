@@ -18,6 +18,16 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <cstdio>   // snprintf
+
+// ----- Phase-1 Telemetry (from AOP controller) -------------------------------
+namespace AOP_Telemetry {
+    extern float g_ai_last_delta;
+    extern float g_ai_ndc_pol_x, g_ai_ndc_pol_y;
+    extern float g_ai_ndc_ovl_x, g_ai_ndc_ovl_y;
+    extern int   g_ai_ov_valid;
+    extern unsigned long long g_ai_frame_id;
+} // namespace AOP_Telemetry
 
 namespace WarzenschweinOverlay {
 
@@ -176,11 +186,77 @@ static void generateOverlayQuadsDefault(const std::string& t, int viewportW, int
                            snap(marginY + Pfau::UI_PADDING), 0, vOut, pOut);
 }
 
+// Small helper: append a single-line label at bottom-left as a compact badge
+static void appendBottomLeftBadge(const std::string& label, int vpW, int vpH,
+                                  std::vector<float>& vOut, std::vector<Box>& boxes)
+{
+    if(label.empty()) return;
+    const float scalePx = std::max(1.0f, Settings::hudPixelSize);
+    const float pad     = Pfau::UI_PADDING;
+    const float margin  = Pfau::UI_MARGIN;
+    const float advX=(glyphW+1)*scalePx, advY=(glyphH+2)*scalePx;
+
+    const float boxW = (float)label.size() * advX;
+    const float boxH = 1.0f * advY;
+
+    const float x0 = snap(margin + Pfau::UI_PADDING);
+    const float y0 = snap((float)vpH - margin - Pfau::UI_PADDING - boxH);
+
+    // Panel box
+    const float x1 = x0 + boxW;
+    const float y1 = y0 + boxH;
+    boxes.push_back(Box{ x0 - pad, y0 - pad, x1 + pad, y1 + pad });
+
+    // Text quads
+    const float r=1.0f,g=0.82f,b=0.32f;
+    const float yBase=y0;
+    for(size_t col=0; col<label.size(); ++col){
+        const auto& glyph=WarzenschweinFont::get(label[col]);
+        const float xBase=x0+col*advX;
+        for(int gy=0; gy<glyphH; ++gy){
+            const uint8_t bits=glyph[gy];
+            for(int gx=0; gx<glyphW; ++gx){
+                if((bits>>(7-gx))&1){
+                    const float x=xBase+gx*scalePx, y=yBase+gy*scalePx;
+                    const float q[30]={ x,y,r,g,b, x+scalePx,y,r,g,b,
+                                        x+scalePx,y+scalePx,r,g,b, x,y,r,g,b,
+                                        x+scalePx,y+scalePx,r,g,b, x,y+scalePx,r,g,b };
+                    vOut.insert(vOut.end(), q, q+30);
+                }
+            }
+        }
+    }
+}
+
+// Format AI delta line from telemetry
+static std::string makeAiLine()
+{
+    if(!(Settings::Ai::enabled && Settings::Ai::aopEnabled)) return {};
+
+    // Use the last values as-is; display even if ov_valid==0 (delta = -1.000)
+    char buf[160];
+    const float d  = AOP_Telemetry::g_ai_last_delta;
+    const float px = AOP_Telemetry::g_ai_ndc_pol_x;
+    const float py = AOP_Telemetry::g_ai_ndc_pol_y;
+    const float ox = AOP_Telemetry::g_ai_ndc_ovl_x;
+    const float oy = AOP_Telemetry::g_ai_ndc_ovl_y;
+    const int   vv = AOP_Telemetry::g_ai_ov_valid;
+
+    // Clamp formatting to 3 decimals; fixed width for readability
+    std::snprintf(buf, sizeof(buf),
+                  "[AI] d=% .3f  pol=(% .3f,% .3f)  ovl=(% .3f,% .3f)  v=%d",
+                  d, px, py, ox, oy, vv);
+    return std::string(buf);
+}
+
 void drawOverlay(float /*zoom*/){
     const bool help = DachsHUD::help_enabled();
 
     if(!Settings::warzenschweinOverlayEnabled || !visible) return;
-    if(!help && text.empty()) return;
+    if(!help && text.empty()) {
+        // even if no legacy text, still show AI badge if available
+        // (fall through)
+    }
 
     GLint vp[4]={0,0,0,0}; glGetIntegerv(GL_VIEWPORT,vp);
     const int vpW=vp[2], vpH=vp[3];
@@ -188,8 +264,8 @@ void drawOverlay(float /*zoom*/){
     initGL(); if(!prog) return;
 
     // Decide placement:
-    //  - Dachs-HUD active: tri-pane (Left | Center | Right) with equal-height boxes
-    //  - Legacy: single panel top-left using internal 'text'
+    //  - Dachs-HUD active: tri-pane model draws panes; we add AI badge bottom-left
+    //  - Legacy: single panel top-left + optional F1 hint + AI badge bottom-left
     std::vector<Box> panelBoxes;
     panelBoxes.clear();
     verts.clear();
@@ -267,15 +343,21 @@ void drawOverlay(float /*zoom*/){
                 }
             }
         }
-        // NOTE: panel[] unused in tri-pane path; we draw panels per-box below.
+
+        // Add AI delta badge (bottom-left), independent of panes
+        const std::string ai = makeAiLine();
+        if(!ai.empty()) appendBottomLeftBadge(ai, vpW, vpH, verts, panelBoxes);
+
     } else {
         // Legacy single top-left box for internal 'text'
-        generateOverlayQuadsDefault(text, vpW, vpH, verts, panel);
-        // synthesize single bounding box for shader round-rect
-        float xMin= std::numeric_limits<float>::max(), yMin=xMin, xMax=-xMin, yMax=-yMin;
-        for(size_t i=0;i+4<panel.size();i+=5){ xMin=std::min(xMin,panel[i]); yMin=std::min(yMin,panel[i+1]);
-                                               xMax=std::max(xMax,panel[i]); yMax=std::max(yMax,panel[i+1]); }
-        panelBoxes.push_back(Box{ xMin, yMin, xMax, yMax });
+        if(!text.empty()) {
+            generateOverlayQuadsDefault(text, vpW, vpH, verts, panel);
+            // synthesize single bounding box for shader round-rect
+            float xMin= std::numeric_limits<float>::max(), yMin=xMin, xMax=-xMin, yMax=-yMin;
+            for(size_t i=0;i+4<panel.size();i+=5){ xMin=std::min(xMin,panel[i]); yMin=std::min(yMin,panel[i+1]);
+                                                   xMax=std::max(xMax,panel[i]); yMax=std::max(yMax,panel[i+1]); }
+            panelBoxes.push_back(Box{ xMin, yMin, xMax, yMax });
+        }
 
         // Kleines Hint-Badge unten links ("F1 - Help"), nur wenn Help nicht aktiv ist
         if (DachsHUD::help_hint_enabled()) {
@@ -315,6 +397,10 @@ void drawOverlay(float /*zoom*/){
                 }
             }
         }
+
+        // Add AI delta badge (bottom-left), independent of legacy text
+        const std::string ai = makeAiLine();
+        if(!ai.empty()) appendBottomLeftBadge(ai, vpW, vpH, verts, panelBoxes);
     }
 
     // State sichern

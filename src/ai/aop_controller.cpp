@@ -13,6 +13,18 @@
 #include <cstddef>
 #include <cmath>
 
+// ----- Phase-1 Telemetry (externally readable by HUD) ------------------------
+namespace AOP_Telemetry {
+    // Last policy/overlay comparison
+    float g_ai_last_delta   = -1.0f;
+    float g_ai_ndc_pol_x    = 0.0f;
+    float g_ai_ndc_pol_y    = 0.0f;
+    float g_ai_ndc_ovl_x    = 0.0f;
+    float g_ai_ndc_ovl_y    = 0.0f;
+    int   g_ai_ov_valid     = 0;
+    unsigned long long g_ai_frame_id = 0ULL;
+} // namespace AOP_Telemetry
+
 namespace Repl { namespace Policy {
 
 Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& state) {
@@ -93,7 +105,6 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
                 );
 
                 // NEU (Phase-1 Telemetrie): Delta zwischen Policy-NDC und Overlay-Interest-NDC
-                // Keine Verhaltensänderung – reine Ein-Zeilen-Telemetrie.
                 {
                     const int ovValid = state.interest.valid ? 1 : 0;
                     float ovX = 0.0f, ovY = 0.0f;
@@ -109,6 +120,15 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
                         "[REPL/POLICY] delta=%.4f ndc_pol=(%.3f,%.3f) ndc_ovl=(%.3f,%.3f) ov_valid=%d",
                         delta, ndcX, ndcY, ovX, ovY, ovValid
                     );
+
+                    // Write HUD-readable telemetry
+                    AOP_Telemetry::g_ai_last_delta = delta;
+                    AOP_Telemetry::g_ai_ndc_pol_x  = ndcX;
+                    AOP_Telemetry::g_ai_ndc_pol_y  = ndcY;
+                    AOP_Telemetry::g_ai_ndc_ovl_x  = ovX;
+                    AOP_Telemetry::g_ai_ndc_ovl_y  = ovY;
+                    AOP_Telemetry::g_ai_ov_valid   = ovValid;
+                    AOP_Telemetry::g_ai_frame_id   = static_cast<unsigned long long>(state.frameCount);
                 }
             }
         }
