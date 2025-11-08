@@ -14,6 +14,20 @@
 #include <algorithm>
 #include <cmath>
 
+// --- lokale UI-Helfer (fallback, ohne externe Pfau-Abhängigkeit) ------------
+namespace {
+    // konservative Defaults für Layout (Panel, Abstände, Radius)
+    constexpr float kUI_PADDING  = 12.0f;
+    constexpr float kUI_MARGIN   = 12.0f;
+    constexpr float kUI_RADIUS   = 8.0f;
+    constexpr float kUI_BORDER   = 1.0f;
+    constexpr float kPANEL_ALPHA = 0.85f;
+
+    inline int snapToPixel(float v) {
+        return static_cast<int>(std::lround(v));
+    }
+}
+
 namespace HeatmapOverlay {
 
 // --- GL handles / uniforms (kompakt) -----------------------------------------
@@ -202,7 +216,8 @@ void drawOverlay(const std::vector<float>& entropy,
     // --- NEU: ROI immer zuerst setzen (Compute-API), unabhängig von Sichtbarkeit
     (void)updateInterestFromGrid(entropy, contrast, width, height, tileSize, (double)ctx.zoom, ctx);
 
-    if(!ctx.heatmapOverlayEnabled) return; // unsichtbar → nur ROI gesetzt, kein Draw
+    // Falls Overlay unsichtbar: hier enden – ROI bleibt gesetzt.
+    if(!ctx.heatmapOverlayEnabled) return;
 
     // ----------------------- Ab hier NUR Draw/GL -----------------------------
     // Programme & VAOs
@@ -237,8 +252,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     }
 
-    // Für die Darstellung normalisieren (EMA); wir brauchen dazu das rohe Grid erneut
-    // → computeROI hat es intern, daher hier die leichte Duplizierung für die reine Visualisierung
+    // Für die Darstellung normalisieren (EMA); re-kalkuliere Anzeigegrid
     const int tilesX = (width  + tileSize - 1) / tileSize;
     const int tilesY = (height + tileSize - 1) / tileSize;
     const size_t nTiles = (size_t)tilesX * (size_t)tilesY;
@@ -284,11 +298,11 @@ void drawOverlay(const std::vector<float>& entropy,
     const float aspect  = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
     const int   contentWPx = std::max(1, (int)std::round(contentHPx*aspect));
     const float sPanelScale = std::clamp(std::min(contentWPx,contentHPx)/160.0f, 0.60f, 1.0f);
-    const int padPx = snapToPixel(Pfau::UI_PADDING * 0.75f);
+    const int padPx = snapToPixel(kUI_PADDING * 0.75f);
     const int panelW = contentWPx + padPx*2, panelH = contentHPx + padPx*2;
-    const int panelX1 = width  - snapToPixel(Pfau::UI_MARGIN);
+    const int panelX1 = width  - snapToPixel(kUI_MARGIN);
     const int panelX0 = panelX1 - panelW;
-    const int panelY0 = snapToPixel(Pfau::UI_MARGIN);
+    const int panelY0 = snapToPixel(kUI_MARGIN);
     const int panelY1 = panelY0 + panelH;
     const int contentX0 = panelX0 + padPx, contentY0 = panelY0 + padPx;
     const int contentX1 = contentX0 + contentWPx, contentY1 = contentY0 + contentHPx;
@@ -315,9 +329,9 @@ void drawOverlay(const std::vector<float>& entropy,
             (float)panelX1,(float)panelY1, base[0],base[1],base[2],
             (float)panelX0,(float)panelY1, base[0],base[1],base[2],
         };
-        const float panelAlpha = std::min(1.0f, Pfau::PANEL_ALPHA * 0.86f);
-        const float radiusPx   = Pfau::UI_RADIUS * (0.85f * sPanelScale);
-        const float borderPx   = Pfau::UI_BORDER * (0.35f * sPanelScale);
+        const float panelAlpha = std::min(1.0f, kPANEL_ALPHA * 0.86f);
+        const float radiusPx   = kUI_RADIUS * (0.85f * sPanelScale);
+        const float borderPx   = kUI_BORDER * (0.35f * sPanelScale);
 
         glUseProgram(sPanelProg);
         if(uViewportPx>=0) glUniform2f(uViewportPx,(float)width,(float)height);
@@ -350,15 +364,14 @@ void drawOverlay(const std::vector<float>& entropy,
         if(uHViewportPx>=0)    glUniform2f(uHViewportPx,(float)width,(float)height);
         if(uHContentRectPx>=0) glUniform4f(uHContentRectPx,(float)contentX0,(float)contentY0,(float)contentX1,(float)contentY1);
 
-        float alphaBase = std::min(1.0f, Pfau::PANEL_ALPHA * 1.10f);
+        float alphaBase = std::min(1.0f, kPANEL_ALPHA * 1.10f);
         if(uHAlphaBase>=0)     glUniform1f(uHAlphaBase, alphaBase);
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, sHeatTex);
         if(uHGridTex>=0) glUniform1i(uHGridTex, 0);
 
-        // Markierungs-Ring: nutze HUD-Panel-Koordinaten (konsistent zur ROI-Berechnung)
-        // Für die Mitte genügt die NDC-Interest aus ctx → rücktransformieren in Panel-Px:
+        // Marker-Position aus NDC-Interest zurück in Panel-Pixel
         const float ndcX = (float)ctx.interest.ndcX;
         const float ndcY = (float)ctx.interest.ndcY;
         const float centerPxX_panel = contentX0 + (0.5f*(ndcX+1.0f))* (contentX1-contentX0);
