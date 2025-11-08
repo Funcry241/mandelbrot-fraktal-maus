@@ -1,7 +1,7 @@
 ##### Otter: Provider-Factories für ORT (CUDA/DML) buildseitig verdrahtet; CPU bleibt Fallback.
-##### Schneefuchs: Robust: Paket-Targets ODER manuelle IMPORTED Targets inkl. DLL-Abgriff für $<TARGET_RUNTIME_DLLS>.
-##### Maus: ASCII-Logs; /WX-safe; keine GLU; PS5.1-unabhängig; klare STATUS-Echos.
-###### Datei: CMakeLists.txt
+/#### Schneefuchs: Robust: Paket-Targets ODER manuelle IMPORTED Targets inkl. DLL-Abgriff für $<TARGET_RUNTIME_DLLS>.
+/#### Maus: ASCII-Logs; /WX-safe; keine GLU; PS5.1-unabhängig; klare STATUS-Echos.
+///## Datei: CMakeLists.txt
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
