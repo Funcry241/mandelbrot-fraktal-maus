@@ -1,13 +1,9 @@
-///// Otter: Quiet & deterministic – Texel-Center-Recenter via textureSize() (ROOT-FIX).
-///// Schneefuchs: Saubere Koordinaten (Panel oben-links, Texture unten-links); keine Heuristik.
-///// Maus: Stil C = „Corner-Holo“ (dezent): vier kurze Bogen-Segmente + sanfter Glow, kein Vollring.
-///// Flip: uv.y = 1.0 - uv.y; danach Half-Texel-Recenter in X und Y.
-///// Datei: src/heatmap_shaders.hpp
-///// Vertrag: CPU/ROI bleiben in Panel-Pixeln; Shader übernimmt Texel-Alignment.
+///// Otter: Final – „Nano-Halo Reticle“: Punkt + feine Diamant-Klammer, sehr dezent, futuristisch.
+///// Schneefuchs: Texel-Center-Fix via textureSize(); saubere Panel→UV-Koordinaten, kein Vollring.
+///// Maus: Keine Animation, nur sanfter Halo; Marker in Panel-Pixeln, ASCII-sauber; /WX-safe.
+// /// Datei: src/heatmap_shaders.hpp
 
 #pragma once
-// Header-only: enthält nur GLSL-Quellen.
-// Kein C++-Code, keine GL-Includes.
 
 namespace HeatmapShaders {
 
@@ -51,17 +47,16 @@ uniform vec4   uContentRectPx;
 uniform sampler2D uGrid;
 uniform float  uAlphaBase;
 
+// Marker-Uniforms
 uniform float  uMarkEnable;
 uniform vec2   uMarkCenterPx;
-uniform float  uMarkRadiusPx;
 uniform float  uMarkAlpha;
 
-// Stil-Uniforms
-uniform int    uHStyle;       // 2 = Corner-Holo (dieser Build)
-uniform float  uHTime;        // Sekunden
-uniform float  uHStrokePx;    // Strichstärke am Bogen
-uniform float  uHGlowPx;      // Glow-Breite
-uniform float  uHArcSpanDeg;  // Spannweite je Segment in Grad
+// Stil „Final“ Parameter (alle in Pixel)
+uniform float  uDotPx;        // Punkt-Radius
+uniform float  uRDiamondPx;   // „Halb-Diagonale“ der Diamant-Klammer
+uniform float  uStrokePx;     // Strichstärke Diamant
+uniform float  uHaloPx;       // Halo-Falloff-Radius
 
 vec3 mapGold(float v){
   float g = clamp(v,0.0,1.0);
@@ -70,22 +65,14 @@ vec3 mapGold(float v){
   return mix(vec3(0.08,0.08,0.10), vec3(0.98,0.78,0.30), g);
 }
 
-float arcMaskDeg(float thetaDeg, float centerDeg, float spanDeg){
-  // kleinste Winkel-Differenz (0..180)
-  float diff = abs(((thetaDeg - centerDeg + 540.0) - 360.0));
-  float halfSpan = max(4.0, 0.5*spanDeg);
-  // weiche Flanken für dezente Kanten
-  return smoothstep(halfSpan+8.0, halfSpan, diff);
-}
-
 void main(){
-  // Panel-Pixel -> [0,1] -> Flip Y (OpenGL-UV) -------------------------------
+  // Panel-Pixel -> [0,1], Flip Y
   vec2 sizePx = uContentRectPx.zw - uContentRectPx.xy;
   vec2 uv = (vPx - uContentRectPx.xy) / sizePx;
   uv.y = 1.0 - uv.y;
 
-  // Texel-Center-Alignment (Half-Texel Recenter) -----------------------------
-  vec2 texDim = vec2(textureSize(uGrid, 0)); // (W, H)
+  // Texel-Center Recenter (Half-Texel in X/Y)
+  vec2 texDim = vec2(textureSize(uGrid, 0));
   uv = ((texDim - 1.0) * uv + 0.5) / texDim;
 
   if(any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))){
@@ -97,36 +84,28 @@ void main(){
   float a = smoothstep(0.05, 0.65, v) * uAlphaBase;
   vec4 base = vec4(mapGold(v), a);
 
-  // Marker: Stil C – Corner-Holo (vier kurze Bogen-Segmente) -----------------
+  // „Nano-Halo Reticle“ -------------------------------------------------------
   float m = 0.0;
   if(uMarkEnable > 0.5){
-    vec2  d2   = vPx - uMarkCenterPx;
-    float r    = length(d2);
-    float edge = abs(r - uMarkRadiusPx);
-    float aa   = fwidth(edge) + 0.75;
+    vec2  d   = vPx - uMarkCenterPx;
+    float r   = length(d);
 
-    // Grund-Stroke + sanfter Glow am Radius
-    float stroke = 1.0 - smoothstep(uHStrokePx+aa, uHStrokePx, edge);
-    float glow   = 1.0 - smoothstep(uHStrokePx+2.0, uHStrokePx + max(4.0, uHGlowPx), edge);
+    // Punkt (kleiner Kern)
+    float aa  = fwidth(r) + 0.75;
+    float dot = 1.0 - smoothstep(uDotPx+aa, uDotPx, r);
 
-    // Winkel in Grad [0,360)
-    float theta = degrees(atan(d2.y, d2.x));
-    if(theta < 0.0) theta += 360.0;
+    // Diamant-Klammer: |x| + |y| ≈ r_diamond (L1-Norm)
+    float dDiamond = (abs(d.x) + abs(d.y)) - uRDiamondPx;
+    float stroke   = 1.0 - smoothstep(uStrokePx+aa, uStrokePx, abs(dDiamond));
 
-    // Corner-Bögen bei 45/135/225/315°
-    float arc =
-        max(arcMaskDeg(theta,  45.0, uHArcSpanDeg),
-        max(arcMaskDeg(theta, 135.0, uHArcSpanDeg),
-        max(arcMaskDeg(theta, 225.0, uHArcSpanDeg),
-            arcMaskDeg(theta, 315.0, uHArcSpanDeg))));
+    // Sehr dezenter Halo (gaussähnlich)
+    float h = exp(- (r*r) / max(1.0, uHaloPx*uHaloPx));
 
-    // Leichtes „Breathing“ für Futurismus
-    float breath = 0.88 + 0.12 * sin(uHTime * 2.4);
-
-    m = (breath * stroke + 0.30 * glow) * arc * uMarkAlpha;
+    // Mischung: vor allem Klammer, leichter Punkt, zarter Halo
+    m = uMarkAlpha * (0.65 * stroke + 0.25 * dot + 0.10 * h);
   }
 
-  // dezentes Cyan für HUD-Akzent
+  // kühles Holo-Cyan als Akzent
   vec3 markCol = vec3(0.55, 0.95, 1.00);
   vec4 outCol  = mix(base, vec4(markCol, 1.0), m);
   outCol.a     = max(base.a, max(outCol.a, m));
