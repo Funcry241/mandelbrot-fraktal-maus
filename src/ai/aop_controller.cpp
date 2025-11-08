@@ -1,6 +1,6 @@
 ///// Otter: AOP controller — centralizes [REPL/POLICY] logging (shadow only, no side-effects)
-///// Schneefuchs: /WX-safe; ASCII-only; no snprintf, no %zu; minimal includes; ZIP-konform (RendererState)
-///// Maus: Uses size_t-safe math, casts to unsigned long long for printf; stable one-liner
+///// Schneefuchs: /WX-safe; ASCII-only; no %zu; minimal includes; kein Bezug auf Ai.shadowMode
+///// Maus: size_t-safe Math, Casts auf unsigned long long für printf; stabile One-Liner
 ///// Datei: src/ai/aop_controller.cpp
 
 #include "pch.hpp"
@@ -25,9 +25,8 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     (void)fctx; // ZIP-Stand: Metriken liegen im RendererState
     Decision d{};
 
-    // Runtime-gate (kein if constexpr): Shadow/AOP + Perf-Logging + Cadence
-    if (!(Settings::Ai::shadowMode && Settings::Ai::aopEnabled &&
-          Settings::performanceLogging && Settings::PerfLog::enabled)) {
+    // Runtime-Gate: nur Performance-Log-Cadence (kein Zugriff auf Ai.shadowMode)
+    if (!(Settings::performanceLogging && Settings::PerfLog::enabled)) {
         return d;
     }
 
@@ -38,7 +37,7 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
         return d;
     }
 
-    // --- Grid-Ableitung auf Basis gewünschter Tile-Pixelgröße ----------------
+    // --- Grid-Ableitung anhand gewünschter Tile-Pixelgröße -------------------
     const int desiredPx_i = std::max(1, Settings::Kolibri::desiredTilePx);
     if (state.width <= 0 || state.height <= 0) {
         LUCHS_LOG_HOST("[REPL/POLICY] dry-run: invalid dims w=%d h=%d", state.width, state.height);
@@ -52,19 +51,15 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     const size_t tilesY = (h + desiredPx - 1) / desiredPx;
     const size_t nGrid  = tilesX * tilesY;
 
-    // Host-Metriken defensiv holen (ZIP: im RendererState)
+    // Host-Metriken aus RendererState (defensiv prüfen)
     const float* E = nullptr;
     const float* C = nullptr;
     size_t nE = 0, nC = 0;
-    try {
-        E  = state.h_entropy.data();
-        C  = state.h_contrast.data();
-        nE = state.h_entropy.size();
-        nC = state.h_contrast.size();
-    } catch (...) {
-        E = C = nullptr;
-        nE = nC = 0;
-    }
+
+    E  = state.h_entropy.data();
+    C  = state.h_contrast.data();
+    nE = state.h_entropy.size();
+    nC = state.h_contrast.size();
 
     const size_t N = std::min(nGrid, std::min(nE, nC));
     if (N == 0 || tilesX == 0 || tilesY == 0 || E == nullptr || C == nullptr) {
