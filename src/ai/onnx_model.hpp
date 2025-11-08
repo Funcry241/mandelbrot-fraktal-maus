@@ -1,7 +1,7 @@
-///// Otter: Lightweight ORT wrapper (real session load, CPU default), ASCII logs, dry-run safe.
-///// Schneefuchs: Header stays clean (no ORT includes), /WX-safe, implementation gated via OTTER_USE_ORT in .cpp.
-/// / Maus: On OTTER_USE_ORT=0 → graceful fallback with clear log; no API changes for AOP controller.
-/// / Datei: src/ai/onnx_model.hpp
+///// Otter: Lightweight ORT wrapper (real session load, CPU default), ASCII logs, dry-run safe
+///// Schneefuchs: Header stays clean (no ORT includes), /WX-safe, implementation gated via OTTER_USE_ORT in .cpp
+///// Maus: On OTTER_USE_ORT=0 → graceful fallback with clear log; no API changes for AOP controller
+///// Datei: src/ai/onnx_model.hpp
 
 #pragma once
 #include <string>

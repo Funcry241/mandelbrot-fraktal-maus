@@ -171,6 +171,7 @@ add_executable(mandelbrot_otterdream
   src/ai/aop_controller.cpp
   src/ai/onnx_model.cpp 
   src/ai/aop_telemetry.cpp 
+  src/ai/feature_packer.cpp
 )
 
 # /WX locker nur für onnx_model.cpp (Third-Party-Headers etc.)

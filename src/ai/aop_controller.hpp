@@ -1,6 +1,6 @@
-///// Otter: AOP controller — single source for [REPL/POLICY] logging cadence
-///// Schneefuchs: Canonical 4-line header; /WX-safe; forward decls only
-///// Maus: Use Settings::PerfLog cadence; no duplicate logs in frame pipeline
+///// Otter: AOP controller — single source for [REPL/POLICY] logging cadence (shadow only) + ORT lazy-load hooks
+///// Schneefuchs: Canonical 4-line header; /WX-safe; forward decls only; header/source in sync
+///// Maus: Uses Settings::PerfLog cadence; no duplicate logs in frame pipeline; statsPx comes from FrameContext
 ///// Datei: src/ai/aop_controller.hpp
 
 #pragma once
@@ -16,7 +16,7 @@ namespace Repl { namespace Policy {
         bool enablePerturb = false;
     };
 
-    // Evaluierung pro Frame (Stub). Enthält die EINZIGE [REPL/POLICY]-Logik.
+    // Evaluierung pro Frame (Stub). Enthält die EINZIGE [REPL/POLICY]-Logik (shadow-only).
     Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& state);
 
 }} // namespace Repl::Policy

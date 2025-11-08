@@ -1,6 +1,6 @@
-///// Otter: AOP controller — centralizes [REPL/POLICY] logging (shadow only, no side-effects)
-///// Schneefuchs: /WX-safe; ASCII-only; C4127 via if constexpr; nutzt AOP_Telemetry-Header
-///// Maus: size_t-safe Math; casts für printf; stabile One-Liner
+///// Otter: AOP controller — centralizes [REPL/POLICY] logging (shadow only, no side-effects) + ORT lazy-load + feature packing
+///// Schneefuchs: /WX-safe; ASCII-only; if constexpr for gates; uses AOP_Telemetry; statsPx from FrameContext
+///// Maus: Size-safe math; casts für printf; stabile One-Liner; ENV OTTER_AI_MODEL; dry-run only (no inference)
 ///// Datei: src/ai/aop_controller.cpp
 
 #include "pch.hpp"
@@ -9,11 +9,15 @@
 #include "luchs_log_host.hpp"
 #include "renderer_state.hpp"
 #include "ai/aop_telemetry.hpp"
+#include "ai/feature_packer.hpp"
+#include "ai/onnx_model.hpp"
 
 #include <algorithm>
 #include <cstddef>
 #include <cmath>
 #include <cfloat>
+#include <cstdlib>   // std::getenv
+#include <string>
 
 namespace Repl { namespace Policy {
 
@@ -21,55 +25,89 @@ static inline float clamp01(float v) {
     return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
 }
 
+static inline Ep parse_ep(const char* s) {
+    if (!s) return Ep::CPU;
+    // lower-case compare (inputs are constant strings in Settings)
+    if (std::strcmp(s, "cuda") == 0) return Ep::CUDA;
+    if (std::strcmp(s, "dml")  == 0) return Ep::DML;
+    return Ep::CPU;
+}
+
+static OrtModel& ort_model_singleton() {
+    static OrtModel m;
+    return m;
+}
+
 Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& state)
 {
-    (void)fctx; // Metriken aus RendererState
     Decision d{};
 
-    // Compile-time gate, um C4127 zu vermeiden (falls als konstante Flags implementiert)
+    // Compile-time/logging cadence gate stays as before (shadow/preview frequency).
     if constexpr (!(Settings::performanceLogging && Settings::PerfLog::enabled)) {
         return d;
     }
 
-    // Runtime cadence
+    // Runtime cadence (tie preview to PERF cadence)
     const int warmupFrames = Settings::PerfLog::warmupFrames;
     const int everyN       = (Settings::PerfLog::everyN > 0) ? Settings::PerfLog::everyN : 1;
-
     if (!(state.frameCount > warmupFrames && (state.frameCount % everyN) == 0)) {
         return d;
     }
 
-    // Grid-Ableitung
-    const int desiredPx_i = std::max(1, Settings::Kolibri::desiredTilePx);
+    // Grid choice: prefer fctx.statsTileSize (post-metrics), fallback to desired screen-constant grid
+    const int statsPx_i = (fctx.statsTileSize > 0) ? fctx.statsTileSize : Settings::Kolibri::desiredTilePx;
+    const int px_i      = std::max(1, statsPx_i);
+
     if (state.width <= 0 || state.height <= 0) {
         LUCHS_LOG_HOST("[REPL/POLICY] dry-run: invalid dims w=%d h=%d", state.width, state.height);
         return d;
     }
-    const size_t desiredPx = static_cast<size_t>(desiredPx_i);
-    const size_t w = static_cast<size_t>(state.width);
-    const size_t h = static_cast<size_t>(state.height);
 
-    const size_t tilesX = (w + desiredPx - 1) / desiredPx;
-    const size_t tilesY = (h + desiredPx - 1) / desiredPx;
+    const size_t px = static_cast<size_t>(px_i);
+    const size_t w  = static_cast<size_t>(state.width);
+    const size_t h  = static_cast<size_t>(state.height);
+
+    const size_t tilesX = (w + px - 1) / px;
+    const size_t tilesY = (h + px - 1) / px;
     const size_t nGrid  = tilesX * tilesY;
 
-    // Metriken
+    // Metrics
     const float* E = state.h_entropy.data();
     const float* C = state.h_contrast.data();
     const size_t nE = state.h_entropy.size();
     const size_t nC = state.h_contrast.size();
+    const size_t N  = std::min(nGrid, std::min(nE, nC));
 
-    const size_t N = std::min(nGrid, std::min(nE, nC));
     if (N == 0 || tilesX == 0 || tilesY == 0 || E == nullptr || C == nullptr) {
         const unsigned long long uu_tilesX = static_cast<unsigned long long>(tilesX);
         const unsigned long long uu_tilesY = static_cast<unsigned long long>(tilesY);
-        const unsigned long long uu_px     = static_cast<unsigned long long>(desiredPx);
+        const unsigned long long uu_px     = static_cast<unsigned long long>(px);
         const unsigned long long uu_N      = static_cast<unsigned long long>(N);
         LUCHS_LOG_HOST("[REPL/POLICY] dry-run: no-metrics N=%llu tiles=%llux%llu statsPx=%llu",
                        uu_N, uu_tilesX, uu_tilesY, uu_px);
         return d;
     }
 
+    // ---- NEW: Feature packing (logs [REPL/FEAT] internally) ----------------
+    {
+        using namespace Repl::Feat;
+        (void)pack_heatmap_features(state.h_entropy, state.h_contrast,
+                                    static_cast<int>(w), static_cast<int>(h), px_i);
+    }
+
+    // ---- NEW: ORT lazy-load (logs [REPL/ORT] in onnx_model.cpp) -------------
+    {
+        OrtModel& model = ort_model_singleton();
+        if (!model.is_loaded()) {
+            const char* envPath = std::getenv("OTTER_AI_MODEL");
+            const std::string modelPath = (envPath && envPath[0]) ? std::string(envPath)
+                                                                  : std::string("assets/policy.onnx");
+            (void)model.load(modelPath, parse_ep(Settings::Ai::ep));
+            // No inference yet (Phase-1/2): dry-run only, preview continues below.
+        }
+    }
+
+    // -------------------- Simple z-score scoring (unchanged) -----------------
     struct Scored { size_t idx; float s; };
     Scored top[3] = { {0, -FLT_MAX}, {0, -FLT_MAX}, {0, -FLT_MAX} };
 
@@ -106,8 +144,8 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     const size_t tx = tilesX ? (best % tilesX) : 0;
     const size_t ty = tilesY ? (best / tilesX) : 0;
 
-    const float pxCenterX = (static_cast<float>(tx) + 0.5f) * static_cast<float>(desiredPx);
-    const float pxCenterY = (static_cast<float>(ty) + 0.5f) * static_cast<float>(desiredPx);
+    const float pxCenterX = (static_cast<float>(tx) + 0.5f) * static_cast<float>(px_i);
+    const float pxCenterY = (static_cast<float>(ty) + 0.5f) * static_cast<float>(px_i);
 
     const float ndcX = clamp01(pxCenterX / static_cast<float>(state.width))  * 2.0f - 1.0f;
     const float ndcY = clamp01(pxCenterY / static_cast<float>(state.height)) * 2.0f - 1.0f;
@@ -127,7 +165,7 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     // Log
     const unsigned long long uu_tilesX = static_cast<unsigned long long>(tilesX);
     const unsigned long long uu_tilesY = static_cast<unsigned long long>(tilesY);
-    const unsigned long long uu_px     = static_cast<unsigned long long>(desiredPx);
+    const unsigned long long uu_px     = static_cast<unsigned long long>(px);
     const unsigned long long uu_best   = static_cast<unsigned long long>(best);
 
     LUCHS_LOG_HOST("[REPL/POLICY] dry-run tiles=%llux%llu statsPx=%llu best=%llu score=%.3f ndc=(%.3f,%.3f)",

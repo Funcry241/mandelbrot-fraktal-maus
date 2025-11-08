@@ -1,7 +1,7 @@
-///// Otter: ORT session creation with safe fallbacks; logs what EP is requested vs. used; no side effects beyond load.
-/// / Schneefuchs: Provider-append intentionally neutral for cross-ORT builds; CPU is default until provider wiring is added.
-/// / Maus: If OTTER_USE_ORT=0 → clear ASCII log and return false; exceptions are caught and logged.
-/// / Datei: src/ai/onnx_model.cpp
+///// Otter: ORT session creation with safe fallbacks; logs requested vs. used EP; no side effects beyond load
+///// Schneefuchs: Provider-append intentionally neutral for cross-ORT builds; CPU is default until provider wiring is added
+///// Maus: If OTTER_USE_ORT=0 → clear ASCII log and return false; exceptions are caught and logged
+///// Datei: src/ai/onnx_model.cpp
 
 #include "pch.hpp"
 #include "ai/onnx_model.hpp"
@@ -31,7 +31,7 @@ static const char* ep_name(Ep ep) {
   // explicit provider-append is added later in a targeted patch.
   static Ort::SessionOptions make_session_options(const char* requested_ep, const char** out_used_ep) {
       Ort::SessionOptions opts;
-      // Conservative defaults; let ORT decide threads. Keep deterministic behavior.
+      // Conservative defaults; deterministic-enough behavior.
       opts.SetLogSeverityLevel(3);   // WARNING
       opts.SetLogVerbosityLevel(0);
 
@@ -57,32 +57,32 @@ bool OrtModel::load(const std::string& modelPath, Ep preferredEp) {
         // Try to create a real session to validate the model path.
         Ort::Session session(env, path.c_str(), opts);
 
-        // Optional: probe a tiny bit for diagnostics (kept minimal, ASCII-only).
+        // Optional: probe IO counts for diagnostics.
         size_t in_count  = session.GetInputCount();
         size_t out_count = session.GetOutputCount();
 
         loaded = true;
         ep = used;
 
-        LUCHS_LOG_HOST("[REPL/POLICY] ORT loaded path=%s ep_used=%s ep_requested=%s io=%zu/%zu",
-            path.c_str(), ep.c_str(), requested, in_count, out_count);
+        LUCHS_LOG_HOST("[REPL/ORT] load req_ep=%s used_ep=%s ok=1 path=%s io=%zu/%zu",
+                       requested, ep.c_str(), path.c_str(), in_count, out_count);
         return true;
     } catch (const std::exception& e) {
         loaded = false;
         ep.clear();
-        LUCHS_LOG_HOST("[REPL/POLICY] ORT load failed path=%s err=%s", path.c_str(), e.what());
+        LUCHS_LOG_HOST("[REPL/ORT] load failed path=%s err=%s", path.c_str(), e.what());
         return false;
     } catch (...) {
         loaded = false;
         ep.clear();
-        LUCHS_LOG_HOST("[REPL/POLICY] ORT load failed path=%s err=unknown", path.c_str());
+        LUCHS_LOG_HOST("[REPL/ORT] load failed path=%s err=unknown", path.c_str());
         return false;
     }
 #else
     (void)preferredEp;
     ep.clear();
     loaded = false;
-    LUCHS_LOG_HOST("[REPL/POLICY] ORT disabled at build time (OTTER_USE_ORT=0)");
+    LUCHS_LOG_HOST("[REPL/ORT] disabled (OTTER_USE_ORT=0) path=%s", path.c_str());
     return false;
 #endif
 }
