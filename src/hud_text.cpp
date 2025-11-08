@@ -15,6 +15,13 @@
 #include <algorithm>
 #include <string>
 
+namespace AOP_Telemetry {
+    // Phase-1 Telemetrie (extern definiert im AOP-Controller / Warzenschwein-Overlay)
+    extern float            g_ai_last_delta;
+    extern int              g_ai_ov_valid;
+    extern unsigned long long g_ai_frame_id;
+}
+
 namespace HudText {
 
 static inline double safe_fps_from_ms(double ms) noexcept {
@@ -31,6 +38,14 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
     const int    w    = fctx.width;
     const int    h    = fctx.height;
 
+    // Heatmap-Infos (spiegeln die [PERF]-Zeile)
+    const size_t hmN     = state.h_entropy.size();
+    const int    statsPx = std::max(1, fctx.statsTileSize);
+
+    // ROI/Policy-Delta (P1 mini – nur Anzeige)
+    const int   roiValid = AOP_Telemetry::g_ai_ov_valid;
+    const float delta    = AOP_Telemetry::g_ai_last_delta;
+
     // FPS primär aus gemessener Framezeit, sonst aus dt schätzen
     double fps = safe_fps_from_ms(state.lastTimings.frameTotalMs);
     if (fps <= 0.0 && fctx.deltaSeconds > 0.0f) {
@@ -38,13 +53,27 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
     }
 
     // Kompakt & stabil formatiert (ASCII; C-Locale erwartet)
-    char line1[96], line2[96], line3[96];
+    char line1[96], line2[128], line3[128];
+
+    // Zeile 1: Center
     std::snprintf(line1, sizeof(line1), "cx=%.9f cy=%.9f", cx, cy);
-    std::snprintf(line2, sizeof(line2), "z=%.3e it=%d tile=%d", zoom, it, tile);
-    std::snprintf(line3, sizeof(line3), "res=%dx%d fps=%.1f", w, h, fps);
+
+    // Zeile 2: Zoom/Iter/Tile + hmN/statsPx (P0-Erweiterung)
+    std::snprintf(line2, sizeof(line2), "z=%.3e it=%d tile=%d hmN=%zu statsPx=%d",
+                  zoom, it, tile, hmN, statsPx);
+
+    // Zeile 3: Auflösung/FPS + ROI/Delta (Delta nur bei gültigem ROI – sonst "--")
+    char dstr[16];
+    if (roiValid) {
+        std::snprintf(dstr, sizeof(dstr), "%.3f", static_cast<double>(delta));
+    } else {
+        std::snprintf(dstr, sizeof(dstr), "--");
+    }
+    std::snprintf(line3, sizeof(line3), "res=%dx%d fps=%.1f ROI=%d d=%s",
+                  w, h, fps, roiValid, dstr);
 
     std::string out;
-    out.reserve(96 + 96 + 96);
+    out.reserve(sizeof(line1) + sizeof(line2) + sizeof(line3));
     out.append(line1);
     out.push_back('\n');
     out.append(line2);
