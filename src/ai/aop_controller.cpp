@@ -1,6 +1,6 @@
 ///// Otter: AOP controller — centralizes [REPL/POLICY] logging (shadow only, no side-effects)
-///// Schneefuchs: /WX-safe; ASCII-only; no %zu; minimal includes; kein Bezug auf Ai.shadowMode
-///// Maus: size_t-safe Math, Casts auf unsigned long long für printf; stabile One-Liner
+///// Schneefuchs: /WX-safe; ASCII-only; C4127 fix via `if constexpr`; minimal includes
+///// Maus: size_t-safe Math; cast to unsigned long long for printf; stabile One-Liner
 ///// Datei: src/ai/aop_controller.cpp
 
 #include "pch.hpp"
@@ -25,11 +25,12 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     (void)fctx; // ZIP-Stand: Metriken liegen im RendererState
     Decision d{};
 
-    // Runtime-Gate: nur Performance-Log-Cadence (kein Zugriff auf Ai.shadowMode)
-    if (!(Settings::performanceLogging && Settings::PerfLog::enabled)) {
-        return d;
+    // --- Compile-time gate to silence C4127 (constant condition) -------------
+    if constexpr (!(Settings::performanceLogging && Settings::PerfLog::enabled)) {
+        return d; // Logging bzw. AOP-Preview global deaktiviert → sofort raus
     }
 
+    // --- Runtime cadence gate ------------------------------------------------
     const int warmupFrames = Settings::PerfLog::warmupFrames;
     const int everyN       = (Settings::PerfLog::everyN > 0) ? Settings::PerfLog::everyN : 1;
 
