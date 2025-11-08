@@ -349,7 +349,7 @@ void drawOverlay(const std::vector<float>& entropy,
         glDrawArrays(GL_TRIANGLES,0,6);
     }
 
-    // Heat + Z0 sticker (Ring deutlich dezenter)
+    // Heat + Z0 sticker
     {
         const float quad[12]={
             (float)contentX0,(float)contentY0,
@@ -376,16 +376,12 @@ void drawOverlay(const std::vector<float>& entropy,
         const float ndcY = (float)ctx.interest.ndcY;
         const float centerPxX_panel = contentX0 + (0.5f*(ndcX+1.0f))* (contentX1-contentX0);
         const float centerPxY_panel = contentY0 + (0.5f*(1.0f-ndcY))* (contentY1-contentY0);
-
-        // Dezent: etwas kleinerer Ringradius
-        const float ringRpx_panel   = 0.5f * std::min(contentX1-contentX0, contentY1-contentY0) * 0.28f;
+        const float ringRpx_panel   = 0.5f * std::min(contentX1-contentX0, contentY1-contentY0) * 0.35f;
 
         if(uHMarkEnable>=0)   glUniform1f(uHMarkEnable,   1.0f);
         if(uHMarkCenterPx>=0) glUniform2f(uHMarkCenterPx, centerPxX_panel, centerPxY_panel);
         if(uHMarkRadiusPx>=0) glUniform1f(uHMarkRadiusPx, ringRpx_panel);
-
-        // Dezent: deutlich geringeres Marker-Alpha
-        if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.28f);
+        if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.95f);
 
         glBindVertexArray(sHeatVAO);
         glBindBuffer(GL_ARRAY_BUFFER,sHeatVBO);

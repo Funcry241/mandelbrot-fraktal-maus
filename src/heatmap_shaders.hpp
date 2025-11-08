@@ -1,9 +1,13 @@
-///// Otter: Dezent – dünner, weicher Ring + minimaler Crosshair/Glow (subtiler Marker).
-///// Schneefuchs: Texel-Center-Fix via textureSize(); Panel→UV sauber; /WX-safe, ASCII-only.
-/// /// Maus: Keine neuen Uniforms; nur Ring-Formel weicher + dünner; Alpha wird extern gesetzt.
-/// /// Datei: src/heatmap_shaders.hpp
+///// Otter: Quiet & deterministic - Root-fix: re-center UVs to texel centers via textureSize.
+///// Schneefuchs: Koordinaten sauber (Panel oben-links, Texture unten-links); keine Heuristik.
+///// Maus: Einzeilige Freude; hübsches Gold; Kreuz bleibt in Panel-Pixeln (kein Extra-Flip).
+///// Flip: uv.y = 1.0 - uv.y (Orientation); danach Half-Texel-Recenter in X und Y.
+///// Datei: heatmap_shaders.hpp
+///// Vertrag: CPU/ROI nutzen weiterhin Buffer-/Panel-Pixel; Shader übernimmt Alignment.
 
 #pragma once
+// Header-only: hält nur GLSL-Quellen zusammen.
+// Kein C++-Code, keine GL-Abhängigkeit.
 
 namespace HeatmapShaders {
 
@@ -46,8 +50,6 @@ in vec2 vPx; out vec4 FragColor;
 uniform vec4   uContentRectPx;
 uniform sampler2D uGrid;
 uniform float  uAlphaBase;
-
-// Marker-Uniforms (unverändert)
 uniform float  uMarkEnable;
 uniform vec2   uMarkCenterPx;
 uniform float  uMarkRadiusPx;
@@ -61,49 +63,41 @@ vec3 mapGold(float v){
 }
 
 void main(){
-  // Panel-Pixel -> [0,1], Flip Y
+  // Panel-Pixel -> [0,1] -> Flip Y (OpenGL-UV) -------------------------------
   vec2 sizePx = uContentRectPx.zw - uContentRectPx.xy;
   vec2 uv = (vPx - uContentRectPx.xy) / sizePx;
   uv.y = 1.0 - uv.y;
 
-  // Texel-Center Recenter (Half-Texel in X/Y)
-  vec2 texDim = vec2(textureSize(uGrid, 0));
+  // ROOT FIX: Vertex-zu-Texel-Zentren re-centern (half-texel Korrektur) ------
+  // Wenn das Grid als N Kanten-Samples (0..N-1) erzeugt wurde, liegen die
+  // texel-Zentren bei (j + 0.5)/N. Das Mapping unten sorgt dafür, dass
+  // uv=0..1 genau diese Zentren trifft (und nicht die Kanten).
+  vec2 texDim = vec2(textureSize(uGrid, 0));         // (W, H)
   uv = ((texDim - 1.0) * uv + 0.5) / texDim;
 
+  // Out-of-bounds? (durch AA am Rand) ----------------------------------------
   if(any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))){
     FragColor = vec4(0.0); return;
   }
 
-  // Heat + Gold
+  // Heat-Sampling + Gold-Mapping ---------------------------------------------
   float v = texture(uGrid, uv).r;
   float a = smoothstep(0.05, 0.65, v) * uAlphaBase;
   vec4 base = vec4(mapGold(v), a);
 
-  // ——— Subtiler Ring (dünn + weich) -----------------------------------------
+  // Marker (Fadenkreuz/Ring) in Panel-Pixeln – KEIN zusätzlicher Flip --------
   float m = 0.0;
   if(uMarkEnable > 0.5){
-    vec2  d    = vPx - uMarkCenterPx;
-    float r    = length(d);
+    vec2  d2   = vPx - uMarkCenterPx;
+    float r    = length(d2);
     float edge = abs(r - uMarkRadiusPx);
-
-    // Dünner, weicher Strich: Stärke ~ fwidth(edge), mit engerer Kernzone
-    float aa   = max(0.5, fwidth(edge));
-    float t    = max(0.6, 0.9 * aa);            // Basisdicke (dezent)
-    float ring = 1.0 - smoothstep(t, t + 2.5*aa, edge);
-           ring *= 0.35;                         // niedrigere Intensität
-
-    // Sehr zartes Crosshair (optional, stark gedämpft)
-    float cx   = 1.0 - smoothstep(1.2, 1.2 + 2.0*aa, abs(d.x));
-    float cy   = 1.0 - smoothstep(1.2, 1.2 + 2.0*aa, abs(d.y));
-    float cross= max(cx, cy) * 0.12;
-
-    // Weicher Rand-Glow entlang des Rings (sehr schwach)
-    float halo = exp(-(edge*edge) / max(1.0, (6.0*aa)*(6.0*aa))) * 0.15;
-
-    m = uMarkAlpha * (ring + cross + halo);
+    float aa   = fwidth(edge) + 0.75;
+    float ring = 1.0 - smoothstep(1.5, 1.5+aa, edge);
+    float cx   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.x));
+    float cy   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.y));
+    m = max(ring, max(cx, cy)) * uMarkAlpha;
   }
 
-  // Akzentfarbe
   vec3 markCol = vec3(0.60, 1.00, 0.60);
   vec4 outCol  = mix(base, vec4(markCol, 1.0), m);
   outCol.a     = max(base.a, max(outCol.a, m));
