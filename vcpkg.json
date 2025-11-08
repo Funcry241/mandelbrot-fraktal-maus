@@ -8,5 +8,17 @@
       "features": []
     },
     "glfw3"
-  ]
+  ],
+  "features": {
+    "ai-ort-cuda": {
+      "description": "Enable ONNX Runtime with the native CUDA execution provider",
+      "dependencies": [
+        {
+          "name": "onnxruntime",
+          "default-features": false,
+          "features": [ "core", "cuda" ]
+        }
+      ]
+    }
+  }
 }
