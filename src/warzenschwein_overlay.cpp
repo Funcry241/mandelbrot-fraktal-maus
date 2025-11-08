@@ -231,7 +231,10 @@ static void appendBottomLeftBadge(const std::string& label, int vpW, int vpH,
 // Format AI delta line from telemetry
 static std::string makeAiLine()
 {
-    if(!(Settings::Ai::enabled && Settings::Ai::aopEnabled)) return {};
+    // compile-time gate to avoid /WX C4127 (“conditional expression is constant”)
+    if constexpr (!(Settings::Ai::enabled && Settings::Ai::aopEnabled)) {
+        return {};
+    }
 
     // Use the last values as-is; display even if ov_valid==0 (delta = -1.000)
     char buf[160];
