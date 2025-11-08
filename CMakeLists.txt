@@ -1,5 +1,5 @@
 ##### Otter: Phase-1 Replikatoren aktiv (Stubs/Logs), Build bleibt ohne ORT/NVRTC-Link
-##### Schneefuchs: Dynamisches GLEW; **harter Anti-GLU-Filter** (auch Pfad-Tokens & importierte Targets)
+##### Schneefuchs: Dynamisches GLEW; Anti-GLU-Filter; ORT-Status-Echo + providers_shared (Win) für DLL-Kopie
 ##### Maus: ASCII-only; configure-Echo der OTTER_USE_*-Schalter; /WX-safe unverändert
 ##### Datei: CMakeLists.txt
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
@@ -302,6 +302,9 @@ if(OTTER_USE_ORT)
   # Link core ORT
   target_link_libraries(mandelbrot_otterdream PRIVATE ${_OTTER_ORT_TGT})
 
+  # Echo which ORT backend was wired (imported target or manual path)
+  message(STATUS "OTTER: ONNX Runtime wired via '${_OTTER_ORT_TGT}' (provider=${OTTER_ORT_PROVIDER})")
+
   # Optional CUDA provider
   if(OTTER_ORT_PROVIDER STREQUAL "cuda")
     if(TARGET onnxruntime_providers_cuda)
@@ -314,6 +317,13 @@ if(OTTER_USE_ORT)
       else()
         message(FATAL_ERROR "OTTER_ORT_PROVIDER=cuda gewählt, aber 'onnxruntime_providers_cuda' nicht gefunden.")
       endif()
+    endif()
+  endif()
+
+  # Ensure provider-shared DLLs are copied on Windows when available
+  if(WIN32)
+    if(TARGET onnxruntime_providers_shared)
+      target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime_providers_shared)
     endif()
   endif()
 endif()
