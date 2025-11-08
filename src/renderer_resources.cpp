@@ -67,6 +67,26 @@ namespace {
         return false;
     #endif
     }
+
+    // --- Safe labeling helpers (nur wenn Objekt existiert) ------------------
+#if defined(GL_KHR_debug)
+    inline void labelTextureSafe(GLuint tex, int w, int h) {
+        if (!hasKHRDebug()) return;
+        if (!tex) return;
+        if (!glIsTexture(tex)) return;
+        char label[64];
+        std::snprintf(label, sizeof(label), "OTR_tex_%dx%d_%s", w, h, g_resourceContext);
+        glObjectLabel(GL_TEXTURE, tex, -1, label);
+    }
+    inline void labelBufferSafe(GLuint buf, int w, int h) {
+        if (!hasKHRDebug()) return;
+        if (!buf) return;
+        if (!glIsBuffer(buf)) return;
+        char label[64];
+        std::snprintf(label, sizeof(label), "OTR_pbo_%dx%d_%s", w, h, g_resourceContext);
+        glObjectLabel(GL_BUFFER, buf, -1, label);
+    }
+#endif
 } // anon ns
 
 void setGLResourceContext(const char* context) {
@@ -101,11 +121,7 @@ unsigned int createTexture(int width, int height) {
         // ---- DSA-Pfad: keine Bindings, keine globalen Seiteneffekte
         glCreateTextures(GL_TEXTURE_2D, 1, &tex);
     #if defined(GL_KHR_debug)
-        if (hasKHRDebug()) {
-            char label[64];
-            std::snprintf(label, sizeof(label), "OTR_tex_%dx%d_%s", width, height, g_resourceContext);
-            glObjectLabel(GL_TEXTURE, tex, -1, label);
-        }
+        labelTextureSafe(tex, width, height);
     #endif
         glTextureParameteri(tex, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTextureParameteri(tex, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -138,11 +154,7 @@ unsigned int createTexture(int width, int height) {
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
 #if defined(GL_KHR_debug)
-    if (hasKHRDebug()) {
-        char label[64];
-        std::snprintf(label, sizeof(label), "OTR_tex_%dx%d_%s", width, height, g_resourceContext);
-        glObjectLabel(GL_TEXTURE, tex, -1, label);
-    }
+    labelTextureSafe(tex, width, height);
 #endif
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -195,11 +207,7 @@ unsigned int createPBO(int width, int height) {
     glGenBuffers(1, &pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 #if defined(GL_KHR_debug)
-    if (hasKHRDebug()) {
-        char label[64];
-        std::snprintf(label, sizeof(label), "OTR_pbo_%dx%d_%s", width, height, g_resourceContext);
-        glObjectLabel(GL_BUFFER, pbo, -1, label);
-    }
+    labelBufferSafe(pbo, width, height);
 #endif
 
     // Persistentes Mapping vermeiden – CUDA-Interop ist mit STREAM_DRAW am robustesten.
@@ -246,7 +254,10 @@ void updateTextureFromPBO(unsigned int pboU, unsigned int texU, int width, int h
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 
     if (haveInvalidateSubData()) {
-        glInvalidateTexImage(tex, 0);
+        // Kein Label/Bind notwendig – nur invalidieren, wenn Textur existiert
+        if (glIsTexture(tex)) {
+            glInvalidateTexImage(tex, 0);
+        }
     }
 
     if (haveDSA()) {
