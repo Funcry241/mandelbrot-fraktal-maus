@@ -13,7 +13,8 @@
 #include <cuda_runtime.h>
 #include <cmath>
 #include <algorithm>
-#include <cstring> // std::memcpy
+#include <cstring>   // std::memcpy
+#include <cstdint>   // uint16_t
 
 // integer helpers (avoid <algorithm> overload ambiguity in device code)
 static __device__ __forceinline__ int i_min(int a, int b) { return a < b ? a : b; }

@@ -461,15 +461,18 @@ void execute(RendererState& state) {
         const unsigned pbo = state.currentPBO().id();
         const unsigned tex = state.currentDrawTex().id();
 
-        char line[512];
+        const size_t hmN = state.h_entropy.size();
+        const int statsPx = std::max(1, g_ctx.statsTileSize);
+
+        char line[640];
         const int n = std::snprintf(
             line, sizeof(line),
             "[PERF] t=%lld frame=%d res=%dx%d zoom=%.6f it=%d fps=%.2f maxfps=%.2f "
             "mand=%.2f ent=%.2f con=%.2f up=%.2f ovl=%.2f tot=%.2f "
-            "e0=%.4f c0=%.4f ring=%d skip=%d pbo=%u tex=%u",
+            "e0=%.4f c0=%.4f ring=%d skip=%d pbo=%u tex=%u hmN=%zu statsPx=%d",
             tEpoch, g_frame, resX, resY, (double)g_ctx.zoom, it, fps, maxfps,
             g_mandMs, g_entMs, g_conMs, g_texMs, g_ovlMs, g_totMs,
-            e0, c0, ringIx, (int)state.skipUploadThisFrame, pbo, tex
+            e0, c0, ringIx, (int)state.skipUploadThisFrame, pbo, tex, hmN, statsPx
         );
         line[(n >= 0 && n < (int)sizeof(line)) ? n : (int)sizeof(line) - 1] = '\0';
         LUCHS_LOG_HOST("%s", line);
