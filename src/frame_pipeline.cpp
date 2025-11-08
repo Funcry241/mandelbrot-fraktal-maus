@@ -59,6 +59,12 @@ namespace {
     static double g_ovlMs  = 0.0;
     static double g_totMs  = 0.0;
 
+    // --- NEW: stale-forwarding for metrics + age counter --------------------
+    static int   g_metricsAge = 0;   // frames since last metrics compute
+    static float g_lastE0     = 0.f; // last known entropy[0]
+    static float g_lastC0     = 0.f; // last known contrast[0]
+    static bool  g_haveLast   = false;
+
     inline bool perfShouldLog(int frameIdx) {
         if constexpr (Settings::performanceLogging) {
             if (!Settings::PerfLog::enabled) return false;
@@ -152,9 +158,12 @@ namespace {
                 g_entMs = 0.0;
                 g_conMs = 0.0;
             }
+            // age++ on reuse
+            ++g_metricsAge;
+
             if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[HM][SKIP] reuse metrics frame=%d everyN=%d",
-                               g_frame, Settings::StatsCadence::heatmapEveryN);
+                LUCHS_LOG_HOST("[HM][SKIP] reuse metrics frame=%d everyN=%d age=%d",
+                               g_frame, Settings::StatsCadence::heatmapEveryN, g_metricsAge);
             }
             return;
         }
@@ -189,6 +198,11 @@ namespace {
         fctx.entropy       = state.h_entropy;
         fctx.contrast      = state.h_contrast;
 
+        // Reset age & capture last known e0/c0
+        g_metricsAge = 0;
+        if (!state.h_entropy.empty()) { g_lastE0 = state.h_entropy[0]; g_haveLast = true; }
+        if (!state.h_contrast.empty()) { g_lastC0 = state.h_contrast[0]; g_haveLast = true; }
+
         if constexpr (Settings::performanceLogging) {
             const int compPx = std::max(1, fctx.tileSize);
             const int ovTx   = (fctx.width  + statsPx - 1) / statsPx;
@@ -198,7 +212,7 @@ namespace {
             LUCHS_LOG_HOST("[GRID] statsPx=%d stats=%dx%d computePx=%d compute=%dx%d res=%dx%d",
                            statsPx, ovTx, ovTy, compPx, cTx, cTy, fctx.width, fctx.height);
 
-            // ---- NEW: Sanity line for metrics payload -----------------------
+            // ---- Sanity line for metrics payload -----------------------------
             if (!state.h_entropy.empty() && !state.h_contrast.empty()) {
                 auto mmE = std::minmax_element(state.h_entropy.begin(),  state.h_entropy.end());
                 auto mmC = std::minmax_element(state.h_contrast.begin(), state.h_contrast.end());
@@ -456,8 +470,12 @@ void execute(RendererState& state) {
         const double fps    = (g_totMs > 1e-3) ? (1000.0 / g_totMs) : 0.0;
         const double maxfps = (g_texMs > 1e-3) ? (1000.0 / g_texMs) : 0.0;
 
-        const float e0 = state.h_entropy.empty()  ? 0.f : state.h_entropy[0];
-        const float c0 = state.h_contrast.empty() ? 0.f : state.h_contrast[0];
+        // --- NEW: stale-forward e0/c0 + age marker --------------------------
+        const float e0 = !state.h_entropy.empty()  ? state.h_entropy[0]
+                        : (g_haveLast ? g_lastE0 : 0.f);
+        const float c0 = !state.h_contrast.empty() ? state.h_contrast[0]
+                        : (g_haveLast ? g_lastC0 : 0.f);
+
         const int   ringIx = state.pboIndex;
         const unsigned pbo = state.currentPBO().id();
         const unsigned tex = state.currentDrawTex().id();
@@ -465,22 +483,22 @@ void execute(RendererState& state) {
         const size_t hmN = state.h_entropy.size();
         const int statsPx = std::max(1, g_ctx.statsTileSize);
 
-        // --- NEW: other-time (oth) closes the budget to tot (clamped >= 0) ---
+        // --- other-time (oth) closes the budget to tot (clamped >= 0) ---
         double oth = g_totMs - (g_mandMs + g_entMs + g_conMs + g_texMs + g_ovlMs);
         if (oth < 0.0) {
             // swallow tiny negative noise from timers
             if (oth > -0.01) oth = 0.0;
         }
 
-        char line[700];
+        char line[740];
         const int n = std::snprintf(
             line, sizeof(line),
             "[PERF] t=%lld frame=%d res=%dx%d zoom=%.6f it=%d fps=%.2f maxfps=%.2f "
             "mand=%.2f ent=%.2f con=%.2f up=%.2f ovl=%.2f oth=%.2f tot=%.2f "
-            "e0=%.4f c0=%.4f ring=%d skip=%d pbo=%u tex=%u hmN=%zu statsPx=%d",
+            "e0=%.4f c0=%.4f hmAge=%d ring=%d skip=%d pbo=%u tex=%u hmN=%zu statsPx=%d",
             tEpoch, g_frame, resX, resY, (double)g_ctx.zoom, it, fps, maxfps,
             g_mandMs, g_entMs, g_conMs, g_texMs, g_ovlMs, oth, g_totMs,
-            e0, c0, ringIx, (int)state.skipUploadThisFrame, pbo, tex, hmN, statsPx
+            e0, c0, g_metricsAge, ringIx, (int)state.skipUploadThisFrame, pbo, tex, hmN, statsPx
         );
         line[(n >= 0 && n < (int)sizeof(line)) ? n : (int)sizeof(line) - 1] = '\0';
         LUCHS_LOG_HOST("%s", line);
