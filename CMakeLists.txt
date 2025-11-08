@@ -1,7 +1,7 @@
-##### Otter: Provider-Factories für ORT (CUDA/DML) buildseitig verdrahtet; CPU bleibt Fallback.
-##### Schneefuchs: Robust: Paket-Targets ODER manuelle IMPORTED Targets inkl. DLL-Abgriff für $<TARGET_RUNTIME_DLLS>.
-##### Maus: ASCII-Logs; /WX-safe; keine GLU; PS5.1-unabhängig; klare STATUS-Echos.
-###### Datei: CMakeLists.txt
+##### Otter: ORT-Provider (CUDA/DML) buildseitig verdrahtet, CPU bleibt Fallback; robust ohne harte Abhängigkeit.
+///### Schneefuchs: Paket-Targets ODER manueller Import (IMPORTED SHARED) inkl. $<TARGET_RUNTIME_DLLS>-Support (Win).
+##### Maus: ASCII-STATUS/WARN; /WX-safe; keine GLU; PS5.1-unabhängig; optionale Strictness für Provider.
+///### Datei: CMakeLists.txt
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
@@ -68,11 +68,15 @@ set(OTTER_ORT_ROOT "" CACHE PATH "Root directory of ONNX Runtime (optional if CM
 set(OTTER_ORT_PROVIDER "cuda" CACHE STRING "ONNX Runtime execution provider: cuda|dml|cpu")
 set_property(CACHE OTTER_ORT_PROVIDER PROPERTY STRINGS cuda dml cpu)
 
-# Configure-time echo for visibility (Phase-1: both OFF is expected)
+# Optional: Strict provider enforcement (OFF = warn+fallback to CPU; ON = FATAL if chosen provider not found)
+option(OTTER_ORT_STRICT_PROVIDER "Fail configure if chosen ORT provider is not found" OFF)
+
+# Configure-time echo for visibility
 message(STATUS "OTTER_USE_NVRTC = ${OTTER_USE_NVRTC}")
 message(STATUS "OTTER_USE_ORT   = ${OTTER_USE_ORT}")
 message(STATUS "OTTER_ORT_ROOT  = ${OTTER_ORT_ROOT}")
 message(STATUS "OTTER_ORT_PROVIDER = ${OTTER_ORT_PROVIDER}")
+message(STATUS "OTTER_ORT_STRICT_PROVIDER = ${OTTER_ORT_STRICT_PROVIDER}")
 
 # ---------------------- Packages ---------------------------
 set(OpenGL_GL_PREFERENCE GLVND)
@@ -275,7 +279,7 @@ if(OTTER_USE_NVRTC)
   endif()
 endif()
 
-# ORT (robust conditional wiring; default OFF keeps build w/o ORT)
+# ---------------------- ORT wiring (robust, provider optional) -------------
 if(OTTER_USE_ORT)
   set(_OTTER_ORT_TGT "")
   # 1) Try a CMake package that exports targets
@@ -291,6 +295,7 @@ if(OTTER_USE_ORT)
     if(OTTER_ORT_ROOT)
       find_path(_OTTER_ORT_INC onnxruntime_c_api.h
         HINTS "${OTTER_ORT_ROOT}/include" "${OTTER_ORT_ROOT}/include/onnxruntime" REQUIRED)
+      # also search in root (NuGet/ZIP sometimes flattens)
       find_library(_OTTER_ORT_LIB onnxruntime
         HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}" REQUIRED)
       target_include_directories(mandelbrot_otterdream PRIVATE "${_OTTER_ORT_INC}")
@@ -302,128 +307,137 @@ if(OTTER_USE_ORT)
 
   # Link core ORT
   target_link_libraries(mandelbrot_otterdream PRIVATE ${_OTTER_ORT_TGT})
-
-  # ---- Provider wiring (CUDA / DML) -----------------------
-  # Helper: try to create imported SHARED target from implib+DLL (so $<TARGET_RUNTIME_DLLS> can copy the DLLs).
-  function(_otter_make_imported_shared tgt_name implib_var dll_name_hint)
-    if(TARGET ${tgt_name})
-      return()
-    endif()
-    set(_implib "${${implib_var}}")
-    if(NOT _implib)
-      return()
-    endif()
-    # Guess DLL path alongside implib or in common 'bin' locations
-    get_filename_component(_libdir "${_implib}" DIRECTORY)
-    get_filename_component(_basename "${_implib}" NAME_WE)
-    # Typical names: onnxruntime_providers_cuda.lib -> onnxruntime_providers_cuda.dll
-    set(_candidates
-      "${_libdir}/${_basename}.dll"
-      "${OTTER_ORT_ROOT}/bin/${_basename}.dll"
-      "${OTTER_ORT_ROOT}/${_basename}.dll"
-      "${OTTER_ORT_ROOT}/runtimes/win-x64/native/${_basename}.dll"
-    )
-    set(_dll_path "")
-    foreach(_c ${_candidates})
-      if(EXISTS "${_c}")
-        set(_dll_path "${_c}")
-        break()
-      endif()
-    endforeach()
-    # Create imported target; use implib and (if present) the DLL for runtime copying
-    add_library(${tgt_name} SHARED IMPORTED)
-    set_target_properties(${tgt_name} PROPERTIES
-      IMPORTED_IMPLIB "${_implib}"
-    )
-    if(_dll_path)
-      set_target_properties(${tgt_name} PROPERTIES
-        IMPORTED_LOCATION "${_dll_path}"
-      )
-    endif()
-    # Optional: mark interface include dirs if needed later
-  endfunction()
-
-  # Echo which ORT backend was wired (imported target or manual path)
   message(STATUS "OTTER: ONNX Runtime wired via '${_OTTER_ORT_TGT}' (provider=${OTTER_ORT_PROVIDER})")
 
-  # Provider: CUDA
+  # --- Helper: create imported SHARED target from implib (+optional dll) ----
+  if(WIN32)
+    function(_otter_make_imported_shared tgt_name implib_var)
+      if(TARGET ${tgt_name})
+        return()
+      endif()
+      set(_implib "${${implib_var}}")
+      if(NOT _implib)
+        return()
+      endif()
+      get_filename_component(_libdir "${_implib}" DIRECTORY)
+      get_filename_component(_basename "${_implib}" NAME_WE)
+      set(_candidates
+        "${_libdir}/${_basename}.dll"
+        "${OTTER_ORT_ROOT}/bin/${_basename}.dll"
+        "${OTTER_ORT_ROOT}/${_basename}.dll"
+        "${OTTER_ORT_ROOT}/runtimes/win-x64/native/${_basename}.dll"
+      )
+      set(_dll_path "")
+      foreach(_c ${_candidates})
+        if(EXISTS "${_c}")
+          set(_dll_path "${_c}")
+          break()
+        endif()
+      endforeach()
+      add_library(${tgt_name} SHARED IMPORTED)
+      set_target_properties(${tgt_name} PROPERTIES IMPORTED_IMPLIB "${_implib}")
+      if(_dll_path)
+        set_target_properties(${tgt_name} PROPERTIES IMPORTED_LOCATION "${_dll_path}")
+      endif()
+    endfunction()
+  endif()
+
+  # ---------------- Provider: CUDA --------------------------
+  set(_OTTER_HAS_CUDA_PROVIDER OFF)
   if(OTTER_ORT_PROVIDER STREQUAL "cuda")
-    set(_OTTER_HAS_PROVIDER OFF)
     if(TARGET onnxruntime_providers_cuda)
       target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime_providers_cuda)
-      set(_OTTER_HAS_PROVIDER ON)
+      set(_OTTER_HAS_CUDA_PROVIDER ON)
     elseif(TARGET onnxruntime::providers_cuda)
       target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_cuda)
-      set(_OTTER_HAS_PROVIDER ON)
+      set(_OTTER_HAS_CUDA_PROVIDER ON)
     else()
-      # Manual import via OTTER_ORT_ROOT
       if(OTTER_ORT_ROOT)
-        find_library(_OTTER_ORT_CUDA_IMPLIB onnxruntime_providers_cuda
-          HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}" )
-        if(_OTTER_ORT_CUDA_IMPLIB)
-          _otter_make_imported_shared(onnxruntime::providers_cuda _OTTER_ORT_CUDA_IMPLIB onnxruntime_providers_cuda)
-          target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_cuda)
-          set(_OTTER_HAS_PROVIDER ON)
+        # Windows: implib (plus imported SHARED for DLL copy)
+        if(WIN32)
+          find_library(_OTTER_ORT_CUDA_IMPLIB onnxruntime_providers_cuda
+            HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}")
+          if(_OTTER_ORT_CUDA_IMPLIB)
+            _otter_make_imported_shared(onnxruntime::providers_cuda _OTTER_ORT_CUDA_IMPLIB)
+            target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_cuda)
+            set(_OTTER_HAS_CUDA_PROVIDER ON)
+          endif()
+          # providers_shared (optional, improves runtime wiring in some dists)
+          find_library(_OTTER_ORT_SHARED_IMPLIB onnxruntime_providers_shared
+            HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}")
+          if(_OTTER_ORT_SHARED_IMPLIB)
+            _otter_make_imported_shared(onnxruntime::providers_shared _OTTER_ORT_SHARED_IMPLIB)
+            target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_shared)
+          endif()
+        else()
+          # Linux: direct .so linkage if available
+          find_library(_OTTER_ORT_CUDA_SO onnxruntime_providers_cuda
+            HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}")
+          if(_OTTER_ORT_CUDA_SO)
+            target_link_libraries(mandelbrot_otterdream PRIVATE "${_OTTER_ORT_CUDA_SO}")
+            set(_OTTER_HAS_CUDA_PROVIDER ON)
+          endif()
+          find_library(_OTTER_ORT_SHARED_SO onnxruntime_providers_shared
+            HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}")
+          if(_OTTER_ORT_SHARED_SO)
+            target_link_libraries(mandelbrot_otterdream PRIVATE "${_OTTER_ORT_SHARED_SO}")
+          endif()
         endif()
       endif()
     endif()
-    # Shared helper (Windows)
-    if(WIN32)
-      if(TARGET onnxruntime_providers_shared)
-        target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime_providers_shared)
-      elseif(OTTER_ORT_ROOT)
-        find_library(_OTTER_ORT_SHARED_IMPLIB onnxruntime_providers_shared
-          HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}" )
-        if(_OTTER_ORT_SHARED_IMPLIB)
-          _otter_make_imported_shared(onnxruntime::providers_shared _OTTER_ORT_SHARED_IMPLIB onnxruntime_providers_shared)
-          target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_shared)
-        endif()
+
+    if(_OTTER_HAS_CUDA_PROVIDER)
+      target_compile_definitions(mandelbrot_otterdream PRIVATE OTTER_HAS_CUDA_EP=1)
+      message(STATUS "OTTER: CUDA provider linked.")
+    else()
+      if(OTTER_ORT_STRICT_PROVIDER)
+        message(FATAL_ERROR "OTTER_ORT_PROVIDER=cuda gewählt, aber 'onnxruntime_providers_cuda' nicht gefunden.")
+      else()
+        message(WARNING "OTTER: CUDA provider not found → falling back to CPU at runtime.")
       endif()
-    endif()
-    if(NOT _OTTER_HAS_PROVIDER)
-      message(FATAL_ERROR "OTTER_ORT_PROVIDER=cuda gewählt, aber 'onnxruntime_providers_cuda' nicht gefunden (Paket oder OTTER_ORT_ROOT prüfen).")
     endif()
   endif()
 
-  # Provider: DML
+  # ---------------- Provider: DML (Windows only) -----------
+  set(_OTTER_HAS_DML_PROVIDER OFF)
   if(OTTER_ORT_PROVIDER STREQUAL "dml")
-    set(_OTTER_HAS_PROVIDER OFF)
-    if(TARGET onnxruntime_providers_dml)
-      target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime_providers_dml)
-      set(_OTTER_HAS_PROVIDER ON)
-    elseif(TARGET onnxruntime::providers_dml)
-      target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_dml)
-      set(_OTTER_HAS_PROVIDER ON)
-    else()
-      if(OTTER_ORT_ROOT)
-        find_library(_OTTER_ORT_DML_IMPLIB onnxruntime_providers_dml
-          HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}" )
-        if(_OTTER_ORT_DML_IMPLIB)
-          _otter_make_imported_shared(onnxruntime::providers_dml _OTTER_ORT_DML_IMPLIB onnxruntime_providers_dml)
-          target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_dml)
-          set(_OTTER_HAS_PROVIDER ON)
-        endif()
-      endif()
-    endif()
-    # Shared helper (Windows)
     if(WIN32)
-      if(TARGET onnxruntime_providers_shared)
-        target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime_providers_shared)
-      elseif(OTTER_ORT_ROOT)
-        find_library(_OTTER_ORT_SHARED_IMPLIB onnxruntime_providers_shared
-          HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}" )
-        if(_OTTER_ORT_SHARED_IMPLIB)
-          _otter_make_imported_shared(onnxruntime::providers_shared _OTTER_ORT_SHARED_IMPLIB onnxruntime_providers_shared)
-          target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_shared)
+      if(TARGET onnxruntime_providers_dml)
+        target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime_providers_dml)
+        set(_OTTER_HAS_DML_PROVIDER ON)
+      elseif(TARGET onnxruntime::providers_dml)
+        target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_dml)
+        set(_OTTER_HAS_DML_PROVIDER ON)
+      else()
+        if(OTTER_ORT_ROOT)
+          find_library(_OTTER_ORT_DML_IMPLIB onnxruntime_providers_dml
+            HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}")
+          if(_OTTER_ORT_DML_IMPLIB)
+            _otter_make_imported_shared(onnxruntime::providers_dml _OTTER_ORT_DML_IMPLIB)
+            target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_dml)
+            set(_OTTER_HAS_DML_PROVIDER ON)
+          endif()
+          find_library(_OTTER_ORT_SHARED_IMPLIB onnxruntime_providers_shared
+            HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}")
+          if(_OTTER_ORT_SHARED_IMPLIB)
+            _otter_make_imported_shared(onnxruntime::providers_shared _OTTER_ORT_SHARED_IMPLIB)
+            target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_shared)
+          endif()
         endif()
       endif()
     endif()
-    if(NOT _OTTER_HAS_PROVIDER)
-      message(FATAL_ERROR "OTTER_ORT_PROVIDER=dml gewählt, aber 'onnxruntime_providers_dml' nicht gefunden (Paket oder OTTER_ORT_ROOT prüfen).")
+
+    if(_OTTER_HAS_DML_PROVIDER)
+      target_compile_definitions(mandelbrot_otterdream PRIVATE OTTER_HAS_DML_EP=1)
+      message(STATUS "OTTER: DML provider linked.")
+    else()
+      if(OTTER_ORT_STRICT_PROVIDER)
+        message(FATAL_ERROR "OTTER_ORT_PROVIDER=dml gewählt, aber 'onnxruntime_providers_dml' nicht gefunden (nur Windows).")
+      else()
+        message(WARNING "OTTER: DML provider not found → falling back to CPU at runtime.")
+      endif()
     endif()
   endif()
-
-  # Provider: CPU ⇒ nichts weiter zu tun; Session läuft auf CPU.
 endif()
 
 # --- Anti-GLU Filter für Windows (erzwingt "no GLU") ------------------------
