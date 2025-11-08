@@ -209,7 +209,7 @@ fn git_exists() -> bool {
 fn ensure_repo(root: &Path) -> io::Result<()> {
     let dotgit = root.join(".git");
     if !dotgit.exists() {
-        logc("[AUTOGIT] no .git found — init new repo");
+        logc("[AUTOGIT] no .git found - init new repo");
         let code = run_cmd_in(root, "git", &["init"])?;
         if code != 0 {
             return Err(io::Error::new(io::ErrorKind::Other, "git init failed"));
@@ -433,7 +433,7 @@ pub fn run(
     if code_push == 0 {
         pushed = true;
     } else if auto_https_fallback {
-        logc("[AUTOGIT][WARN] initial push failed; trying HTTPS fallback…");
+        logc("[AUTOGIT][WARN] initial push failed; trying HTTPS fallback...");
         if let Some(old) = remote_get_url(root, remote) {
             if let Some(https_url) = ssh_to_https(&old) {
                 let su = run_cmd_in(root, "git", &["remote", "set-url", remote, &https_url])?;
