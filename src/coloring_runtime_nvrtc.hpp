@@ -1,21 +1,17 @@
-///// OtterDream — Replikatoren
-///// File: src/coloring_runtime_nvrtc.hpp
-///// Purpose: NVRTC Coloring Runtime – Austauschbarer color_pixel() (Stub)
-///// Phase: 3 (Color-Replikatoren)
-///// Hooks: cuda_interop.cu vor colorize_iterations_to_pbo(...)
-///// Depends: <stdint.h>, <cuda_runtime.h>
-///// Build: /WX-safe ; Header bleibt leicht
-///// Log-Tags: [REPL/COLOR]  (Alias: [NVRTC])
-///// Created: 2025-11-06 (Europe/Berlin)
-///// Notes: Rückgabe true ⇒ NVRTC-Pfad genutzt; false ⇒ Fallback.
+///// Otter: Nacktmull — NVRTC coloring runtime header (lightweight); returns true if JIT path used
+///// Schneefuchs: Stabile API; keine schweren Includes; /WX-safe; ASCII-Logs
+///// Maus: Aktiv nur bei OTTER_USE_NVRTC && Settings::Luchs::{enabled,nvrtc}; sonst Fallback
+///// Datei: src/coloring_runtime_nvrtc.hpp
 
 #pragma once
 #include <stdint.h>
-#include <cuda_runtime.h>
+#include <cuda_runtime.h> // for uchar4, cudaStream_t
 
 namespace ColoringNVRTC {
 
-    // Gibt true zurück, wenn ein NVRTC-Shader gestartet wurde (Stub).
+    // Startet (falls aktiv) den NVRTC-JIT-Coloring-Kernel.
+    // Rückgabe: true  => NVRTC-Pfad wurde genutzt (Kernel gestartet)
+    //           false => Fallback im Aufrufer verwenden (kein NVRTC)
     bool launch_if_active(const uint16_t* d_it,
                           uchar4*         d_out,
                           int             w,
