@@ -1,7 +1,7 @@
-##### Otter: ORT-Provider (CUDA/DML) buildseitig verdrahtet, CPU bleibt Fallback; robust ohne harte Abhängigkeit.
-///### Schneefuchs: Paket-Targets ODER manueller Import (IMPORTED SHARED) inkl. $<TARGET_RUNTIME_DLLS>-Support (Win).
-##### Maus: ASCII-STATUS/WARN; /WX-safe; keine GLU; PS5.1-unabhängig; optionale Strictness für Provider.
-///### Datei: CMakeLists.txt
+##### Otter: ORT-Provider (CUDA/DML) buildseitig verdrahtet; CPU ist Fallback; robust & /WX-safe.
+##### Schneefuchs: Paket-Targets ODER manueller Import (IMPORTED SHARED) mit $<TARGET_RUNTIME_DLLS> (Win).
+##### Maus: Keine "///" im CMake(!); nur '#' Kommentare; klare STATUS/WARN/FATAL Echos.
+##### Datei: CMakeLists.txt
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
@@ -11,8 +11,6 @@ if(POLICY CMP0091)
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-# Map imported RELWITHDEBINFO -> Release for imported targets that don't provide it
 set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release)
 
 # ---------------------- Ninja QoL --------------------------
@@ -68,10 +66,10 @@ set(OTTER_ORT_ROOT "" CACHE PATH "Root directory of ONNX Runtime (optional if CM
 set(OTTER_ORT_PROVIDER "cuda" CACHE STRING "ONNX Runtime execution provider: cuda|dml|cpu")
 set_property(CACHE OTTER_ORT_PROVIDER PROPERTY STRINGS cuda dml cpu)
 
-# Optional: Strict provider enforcement (OFF = warn+fallback to CPU; ON = FATAL if chosen provider not found)
+# Optional: Strict provider enforcement (OFF=warn+fallback; ON=FATAL if chosen provider missing)
 option(OTTER_ORT_STRICT_PROVIDER "Fail configure if chosen ORT provider is not found" OFF)
 
-# Configure-time echo for visibility
+# Configure-time echo
 message(STATUS "OTTER_USE_NVRTC = ${OTTER_USE_NVRTC}")
 message(STATUS "OTTER_USE_ORT   = ${OTTER_USE_ORT}")
 message(STATUS "OTTER_ORT_ROOT  = ${OTTER_ORT_ROOT}")
@@ -258,8 +256,6 @@ target_link_libraries(mandelbrot_otterdream PRIVATE
   OpenGL::GL
   ${GLEW_LINK_ITEM}
   ${GLFW_LINK_ITEM}
-  # Do NOT link CUDA::cudart manually — CMake wires cudart for CUDA targets;
-  # explicit linking breaks on RelWithDebInfo when that config isn't exported.
   $<$<TARGET_EXISTS:CUDA::cudadevrt>:CUDA::cudadevrt>
   Threads::Threads
 )
@@ -271,7 +267,6 @@ if(OTTER_USE_NVRTC)
   else()
     message(FATAL_ERROR "OTTER_USE_NVRTC=ON, but CUDA::nvrtc target not found (install CUDA Toolkit with NVRTC).")
   endif()
-  # CUDA driver is required for module loading/launch via driver API
   if(TARGET CUDA::cuda_driver)
     target_link_libraries(mandelbrot_otterdream PRIVATE CUDA::cuda_driver)
   else()
@@ -295,7 +290,6 @@ if(OTTER_USE_ORT)
     if(OTTER_ORT_ROOT)
       find_path(_OTTER_ORT_INC onnxruntime_c_api.h
         HINTS "${OTTER_ORT_ROOT}/include" "${OTTER_ORT_ROOT}/include/onnxruntime" REQUIRED)
-      # also search in root (NuGet/ZIP sometimes flattens)
       find_library(_OTTER_ORT_LIB onnxruntime
         HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}" REQUIRED)
       target_include_directories(mandelbrot_otterdream PRIVATE "${_OTTER_ORT_INC}")
@@ -353,7 +347,6 @@ if(OTTER_USE_ORT)
       set(_OTTER_HAS_CUDA_PROVIDER ON)
     else()
       if(OTTER_ORT_ROOT)
-        # Windows: implib (plus imported SHARED for DLL copy)
         if(WIN32)
           find_library(_OTTER_ORT_CUDA_IMPLIB onnxruntime_providers_cuda
             HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}")
@@ -362,7 +355,6 @@ if(OTTER_USE_ORT)
             target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_cuda)
             set(_OTTER_HAS_CUDA_PROVIDER ON)
           endif()
-          # providers_shared (optional, improves runtime wiring in some dists)
           find_library(_OTTER_ORT_SHARED_IMPLIB onnxruntime_providers_shared
             HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}")
           if(_OTTER_ORT_SHARED_IMPLIB)
@@ -370,7 +362,6 @@ if(OTTER_USE_ORT)
             target_link_libraries(mandelbrot_otterdream PRIVATE onnxruntime::providers_shared)
           endif()
         else()
-          # Linux: direct .so linkage if available
           find_library(_OTTER_ORT_CUDA_SO onnxruntime_providers_cuda
             HINTS "${OTTER_ORT_ROOT}/lib" "${OTTER_ORT_ROOT}/lib64" "${OTTER_ORT_ROOT}")
           if(_OTTER_ORT_CUDA_SO)
@@ -442,11 +433,9 @@ endif()
 
 # --- Anti-GLU Filter für Windows (erzwingt "no GLU") ------------------------
 if(WIN32)
-  # 1) Strip GLU from this target's link interface (handles absolute/relative tokens).
   get_target_property(_OTTER_LINK_LIBS mandelbrot_otterdream LINK_LIBRARIES)
   if(_OTTER_LINK_LIBS)
     set(_OTTER_LINK_LIBS_FILTERED "${_OTTER_LINK_LIBS}")
-    # Match elements that end with 'glu32' or 'glu32.lib' (case-insensitive), possibly with a path.
     list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX "([/\\\\]|^)[Gg][Ll][Uu]32(\\.lib)?$")
     list(FILTER _OTTER_LINK_LIBS_FILTERED EXCLUDE REGEX "OpenGL::GLU")
     if(NOT _OTTER_LINK_LIBS_FILTERED STREQUAL "${_OTTER_LINK_LIBS}")
@@ -454,7 +443,6 @@ if(WIN32)
     endif()
   endif()
 
-  # 2) Patch common GLEW imported targets if they transitively add GLU.
   foreach(_glew_tgt IN ITEMS GLEW::GLEW GLEW::glew GLEW::glew32)
     if(TARGET ${_glew_tgt})
       get_target_property(_GLEW_LIBS ${_glew_tgt} INTERFACE_LINK_LIBRARIES)
@@ -470,7 +458,7 @@ if(WIN32)
   endforeach()
 endif()
 
-# Optional: /VERBOSE:LIB für Diagnose (einmalig einschalten, dann zurück)
+# Optional: /VERBOSE:LIB
 option(OTTER_LINK_VERBOSE "Add /VERBOSE:LIB to MSVC link for diagnostics" OFF)
 if(MSVC AND OTTER_LINK_VERBOSE)
   target_link_options(mandelbrot_otterdream PRIVATE /VERBOSE:LIB)
@@ -512,7 +500,6 @@ if(NOT CUDA_GL_INTEROP_HEADER)
 endif()
 
 # ---------------------- Defaults ---------------------------
-# Default for single-config generators; with multi-config, you still build e.g. RelWithDebInfo explicitly.
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
