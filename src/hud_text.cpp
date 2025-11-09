@@ -1,6 +1,6 @@
 ///// Otter: HUD-Text – kompakte Center-Statistik (3 Zeilen), deterministisch formatiert.
 ///// Schneefuchs: ASCII-only; pch zuerst; keine GL-/Device-Abhängigkeiten; /WX clean; C-Locale nicht vorausgesetzt (ASCII-Dezimalpunkt erzwungen).
-///// Maus: Slim-Classic Layout – Zeile1: zoom/FPS/ROI/d | Zeile2: Iter/Tile/spx/N | Zeile3: center/res; schmale feste Breiten (FPS fix %5.1f).
+///// Maus: Slim-Classic kompakter – Separatoren ohne Leerzeichen; feste Breiten (zoom %9.3e, FPS %5.1f); Center 9 Nachkommastellen.
 ///// Datei: src/hud_text.cpp
 
 #include "pch.hpp"
@@ -60,11 +60,10 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
         fps = 1.0 / static_cast<double>(fctx.deltaSeconds);
     }
 
-    // Kompakt & stabil formatiert (ASCII; schmale Breiten, feste FPS-Breite)
+    // Kompakt & stabil formatiert (ASCII; schmale Breiten, enge Separatoren)
     char line1[160], line2[160], line3[160];
 
-    // ── Zeile 1: zoom / FPS / ROI / d ───────────────────────────────────────
-    // zoom %9.3e spart Breite; FPS fix %5.1f.
+    // Zeile 1: zoom / FPS / ROI / d  (Separatoren ohne Leerzeichen)
     char dstr[16];
     if (roiValid) {
         std::snprintf(dstr, sizeof(dstr), "%4.3f", static_cast<double>(delta));
@@ -72,20 +71,19 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
         std::snprintf(dstr, sizeof(dstr), "--");
     }
     std::snprintf(line1, sizeof(line1),
-                  "zoom %9.3e x | FPS %5.1f | ROI %d | d %s",
+                  "zoom %9.3e x|FPS %5.1f|ROI %d|d %s",
                   zoom, fps, roiValid, dstr);
     enforce_ascii_decimal(line1);
 
-    // ── Zeile 2: Iter / Tile / spx / N ──────────────────────────────────────
-    // spx = statsPx (Grid-Px); N = Tile-Anzahl.
+    // Zeile 2: Iter / Tile / spx / N  (Separatoren ohne Leerzeichen)
     std::snprintf(line2, sizeof(line2),
-                  "Iter %4d | Tile %2dpx | spx %2d | N %4zu",
+                  "Iter %4d|Tile %2dpx|spx %2d|N %4zu",
                   it, tile, statsPx, hmN);
     enforce_ascii_decimal(line2);
 
-    // ── Zeile 3: center / res ───────────────────────────────────────────────
+    // Zeile 3: center / res  (Separatoren ohne Leerzeichen)
     std::snprintf(line3, sizeof(line3),
-                  "center %.9f,%.9f | res %dx%d",
+                  "center %.9f,%.9f|res %dx%d",
                   cx, cy, w, h);
     enforce_ascii_decimal(line3);
 
