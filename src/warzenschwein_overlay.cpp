@@ -252,6 +252,13 @@ static std::string makeAiLine()
     return std::string(buf);
 }
 
+// Empfohlener Lift für das F1-Badge (in Pixeln), skaliert mit HUD-Pixelgröße.
+// (Wir binden nicht hart an DachsHUD::help_hint_offset_px, um Header-Abhängigkeit zu vermeiden.)
+static inline int badge_lift_px(){
+    const float hud = std::max(1.0f, Settings::hudPixelSize);
+    return (int)std::lround(96.0f * hud);
+}
+
 void drawOverlay(float /*zoom*/){
     const bool help = DachsHUD::help_enabled();
 
@@ -372,8 +379,16 @@ void drawOverlay(float /*zoom*/){
 
             const float boxW = (float)label.size() * advX;
             const float boxH = 1.0f * advY;
-            const float x0 = snap(margin + Pfau::UI_PADDING);
-            const float y0 = snap((float)vpH - margin - Pfau::UI_PADDING - boxH);
+
+            // NEU: Lift anwenden, damit das Badge nicht vom unteren Overlay überdeckt wird
+            const int lift = badge_lift_px();
+
+            float x0 = snap(margin + Pfau::UI_PADDING);
+            float y0 = snap((float)vpH - margin - Pfau::UI_PADDING - boxH - (float)lift);
+
+            // Sicherheits-Clamp (nie außerhalb des Bildschirms)
+            y0 = std::max(y0, snap(margin + Pfau::UI_PADDING));
+            y0 = std::min(y0, snap((float)vpH - margin - Pfau::UI_PADDING - boxH));
 
             // Panelbox fürs Badge
             const float x1 = x0 + boxW;
