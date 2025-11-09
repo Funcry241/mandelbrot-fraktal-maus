@@ -1,6 +1,6 @@
 ///// Otter: HUD-Text – kompakte Center-Statistik (3 Zeilen), deterministisch formatiert.
 ///// Schneefuchs: ASCII-only; pch zuerst; keine GL-/Device-Abhängigkeiten; /WX clean; C-Locale nicht vorausgesetzt (ASCII-Dezimalpunkt erzwungen).
-///// Maus: Narrow-Classic Layout – Zeile1: Zoom/FPS/ROI/d | Zeile2: Iter/Tile/Grid/Tiles | Zeile3: Center/Res; feste Feldbreiten; FPS-Fallback über dt.
+///// Maus: Narrow-Classic kompakter – schmalere Feldbreiten; Center ohne Leerzeichen nach dem Komma; FPS fix (%5.1f).
 ///// Datei: src/hud_text.cpp
 
 #include "pch.hpp"
@@ -60,33 +60,34 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
         fps = 1.0 / static_cast<double>(fctx.deltaSeconds);
     }
 
-    // Kompakt & stabil formatiert (ASCII; feste Feldbreiten)
+    // Kompakt & stabil formatiert (ASCII; schmale feste Feldbreiten)
     char line1[160], line2[160], line3[160];
 
-    // ── Zeile 1: Zoom / FPS / ROI / d ───────────────────────────────────────
-    // Zoom: %11.3e (feste Breite), FPS: %6.1f, ROI: %d, d: %5.3f (oder "--")
+    // ── Zeile 1: zoom / FPS / ROI / d ───────────────────────────────────────
+    // Zoom minimal-fest: %10.3e (reicht auch für negatives Vorzeichen)
+    // FPS fix: %5.1f  → " 99.9", "130.6", "999.9"
     char dstr[16];
     if (roiValid) {
-        std::snprintf(dstr, sizeof(dstr), "%5.3f", static_cast<double>(delta));
+        std::snprintf(dstr, sizeof(dstr), "%4.3f", static_cast<double>(delta)); // kompakt, bleibt stabil
     } else {
         std::snprintf(dstr, sizeof(dstr), "--");
     }
     std::snprintf(line1, sizeof(line1),
-                  "Zoom  %11.3e x | FPS %6.1f | ROI %d | d %s",
+                  "zoom %10.3e x | FPS %5.1f | ROI %d | d %s",
                   zoom, fps, roiValid, dstr);
     enforce_ascii_decimal(line1);
 
     // ── Zeile 2: Iter / Tile / Grid / Tiles ─────────────────────────────────
-    // Iter: %5d, Tile: %3dpx, Grid: %3d, Tiles: %5zu
+    // Leicht verengte Breiten; Tiles bleibt %5zu (Sicherheit >9.999)
     std::snprintf(line2, sizeof(line2),
-                  "Iter %5d | Tile %3dpx | Grid %3d | Tiles %5zu",
+                  "Iter %5d | Tile %2dpx | Grid %2d | Tiles %5zu",
                   it, tile, statsPx, hmN);
     enforce_ascii_decimal(line2);
 
     // ── Zeile 3: Center / Res ───────────────────────────────────────────────
-    // Center mit 9 Nachkommastellen, Res als W×H (ASCII 'x')
+    // Kein Leerzeichen nach dem Komma → schmaler
     std::snprintf(line3, sizeof(line3),
-                  "Center  %.9f, %.9f | Res %dx%d",
+                  "center %.9f,%.9f | res %dx%d",
                   cx, cy, w, h);
     enforce_ascii_decimal(line3);
 
