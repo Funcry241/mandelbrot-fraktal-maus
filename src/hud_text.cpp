@@ -58,8 +58,8 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
     // Zeile 1: Center
     std::snprintf(line1, sizeof(line1), "cx=%.9f cy=%.9f", cx, cy);
 
-    // Zeile 2: Zoom/Iter/Tile + hmN/statsPx (P0-Erweiterung)
-    std::snprintf(line2, sizeof(line2), "z=%.3e it=%d tile=%d hmN=%zu statsPx=%d",
+    // Zeile 2: Zoom/Iter/Tile + hmN/statsPx (nur Zoom dezent selbsterklärend)
+    std::snprintf(line2, sizeof(line2), "zoom=%.3e x it=%d tile=%d hmN=%zu statsPx=%d",
                   zoom, it, tile, hmN, statsPx);
 
     // Zeile 3: Auflösung/FPS + ROI/Delta (Delta nur bei gültigem ROI – sonst "--")
