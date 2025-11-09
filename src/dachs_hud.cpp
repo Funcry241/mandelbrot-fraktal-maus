@@ -1,7 +1,7 @@
 ///// Otter: Dachs-HUD -- tri-pane top layout (Left | Center | Right) with centered help; persistent hint-badge state.
-// ///// Schneefuchs: ASCII-only; pixel-snapped; DPI-scaled; no GL deps; zero hot-path allocs.
-// ///// Maus: implements set_text/visible/style, toggle_help; adds help-hint controls (enable_help_hint/set_help_hint_text) + lift px.
-// ///// Datei: src/dachs_hud.cpp
+///// Schneefuchs: ASCII-only; pixel-snapped; DPI-scaled; no GL deps; zero hot-path allocs.
+///// Maus: implements set_text/visible/style, toggle_help; adds help-hint controls (enable_help_hint/set_help_hint_text).
+///// Datei: src/dachs_hud.cpp
 
 #include "dachs_hud.hpp"
 
@@ -25,8 +25,9 @@ namespace {
     bool        g_help_hint_enabled = true;
     std::string g_help_hint_text    = "F1 - Help";
 
-    // NEU: Standard-Lift, damit die Badge nicht vom unteren HUD überdeckt wird
-    int         g_help_hint_lift_px = 72; // DPI-skalierter Pixelwert (vor DPI-Scaling angeben)
+    // Empfohlener vertikaler Sicherheitsabstand für das F1-Hint unten links,
+    // damit es nicht vom Eye/Glow überlappt wird (Pixel vor DPI).
+    constexpr int kHelpHintYOffsetPx = 96;
 
     inline int iround(float v) {
         return static_cast<int>(std::lround(v));
@@ -148,16 +149,6 @@ RenderModel build_render_model(int vpW, int vpH, float dpiScale) {
     // height is left at 0; the concrete text renderer should measure text
     // (lines * lineHeight + padY*2) and draw equal-height boxes if requested.
 
-    // --- Hint-Badge: empfohlene Position (unten links) mit Lift ---------------
-    // Falls dein Renderer diese Position nutzt, wird die Badge automatisch höher gesetzt.
-    model.hint.enabled   = g_help_hint_enabled;
-    model.hint.text      = g_help_hint_text;
-    model.hint.anchor.x  = iround(12.0f * dpiScale); // links-Padding
-    model.hint.anchor.y  = std::max(
-        0,
-        vpH - iround(12.0f * dpiScale) - iround(g_help_hint_lift_px * dpiScale)
-    );
-
     return model;
 }
 
@@ -173,12 +164,10 @@ void set_help_hint_text(std::string s) {
 
 const std::string& help_hint_text() { return g_help_hint_text; }
 
-// NEU: Lift-Getter/Setter (Pixel vor DPI-Scaling)
-void set_help_hint_lift_px(int px) noexcept {
-    g_help_hint_lift_px = std::max(0, px);
-}
-int help_hint_lift_px() noexcept {
-    return g_help_hint_lift_px;
+// Empfohlene Y-Verschiebung (Pixel) für das F1-Hint unten links.
+// Konsumiere im Renderer z.B. so:  hintPanelY = vpH - badgeH - DachsHUD::help_hint_offset_px(dpi);
+[[maybe_unused]] int help_hint_offset_px(float dpiScale){
+    return iround(static_cast<float>(kHelpHintYOffsetPx) * dpiScale);
 }
 
 } // namespace DachsHUD
