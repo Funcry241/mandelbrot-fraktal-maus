@@ -1,9 +1,6 @@
 ///// Otter: Dachs-HUD -- tri-pane top layout (Left | Center | Right) with centered "Dachs-HUD" help + tiny bottom-left "F1 - Help" hint API.
 ///// Schneefuchs: ASCII-only; pixel-snapped; DPI-scaled metrics; no GL deps; zero hot-path allocs.
 ///// Maus: state API incl. set_text/visible/style, toggle_help, enable_help_hint/set_help_hint_text; renderer builds boxes from model.
-///// Ziel: symmetrische Top-HUDs; Mitte priorisiert; 6–8 lines onboarding; stable across resizes.
-///// Perf: layout math is O(1); text measuring left to existing renderer; equal-height optional.
-///// Log: [HELP] only on toggle; no spam; header belongs to caller.
 ///// Datei: src/dachs_hud.hpp
 
 #pragma once
@@ -29,7 +26,7 @@ struct Rect {
 // visual and metric style; renderer interprets these fields
 struct Style {
     // metrics (pre-DPI; multiplied by dpiScale)
-    int   topMarginPx     = 8;
+    int   topMarginPx     = 12;     // höher gesetzt, damit nichts überlappt
     int   padX            = 8;
     int   padY            = 6;
     float fontPx          = 14.0f;
@@ -83,9 +80,13 @@ std::array<Rect,3> compute_tri_columns(int vpW, int vpH, float dpiScale);
 RenderModel build_render_model(int vpW, int vpH, float dpiScale);
 
 // --- kleines Hint-Badge unten links ("F1 - Help") ---
-void enable_help_hint(bool on) noexcept;
-bool help_hint_enabled() noexcept;
-void set_help_hint_text(std::string s);
+void        enable_help_hint(bool on) noexcept;
+bool        help_hint_enabled() noexcept;
+void        set_help_hint_text(std::string s);
 const std::string& help_hint_text();
+
+// empfohlene vertikale Verschiebung (DPI-skaliert) für das Badge,
+// damit es nicht von Effekten überdeckt wird (Renderer liest diesen Wert aus)
+int help_hint_offset_px(float dpiScale);
 
 } // namespace DachsHUD
