@@ -69,7 +69,8 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
     } else {
         std::snprintf(dstr, sizeof(dstr), "--");
     }
-    std::snprintf(line3, sizeof(line3), "res=%dx%d fps=%.1f ROI=%d d=%s",
+    // FPS jetzt feste Breite: %6.1f (z.B. "  94.6", " 999.9")
+    std::snprintf(line3, sizeof(line3), "res=%dx%d fps=%6.1f ROI=%d d=%s",
                   w, h, fps, roiValid, dstr);
 
     std::string out;
