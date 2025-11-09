@@ -1,6 +1,6 @@
 ///// Otter: HUD-Text – kompakte Center-Statistik (3 Zeilen), deterministisch formatiert.
 ///// Schneefuchs: ASCII-only; pch zuerst; keine GL- oder Device-Abhängigkeiten; /WX clean; C-Locale wird vorausgesetzt.
-///// Maus: Feste Präzision (cx/cy 9, z wissenschaftlich %.3e, fps 1); Fallback auf dt für FPS falls nötig.
+///// Maus: Feste Spaltenbreiten; „Zoom“ ausgeschrieben; ASCII 'x' statt Sonderzeichen; FPS-Fallback über dt.
 ///// Datei: src/hud_text.cpp
 
 #include "pch.hpp"
@@ -17,8 +17,8 @@
 
 namespace AOP_Telemetry {
     // Phase-1 Telemetrie (extern definiert im AOP-Controller / Warzenschwein-Overlay)
-    extern float            g_ai_last_delta;
-    extern int              g_ai_ov_valid;
+    extern float              g_ai_last_delta;
+    extern int                g_ai_ov_valid;
     extern unsigned long long g_ai_frame_id;
 }
 
@@ -53,24 +53,33 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
     }
 
     // Kompakt & stabil formatiert (ASCII; C-Locale erwartet)
-    char line1[96], line2[128], line3[128];
+    char line1[128], line2[160], line3[144];
 
-    // Zeile 1: Center
-    std::snprintf(line1, sizeof(line1), "cx=%.9f cy=%.9f", cx, cy);
+    // ── Zeile 1: View ────────────────────────────────────────────────────────
+    // "Zoom  Z x    Center  cx, cy"
+    // Z fest: %11.3e  | cx,cy mit 9 Nachkommastellen
+    std::snprintf(line1, sizeof(line1),
+                  "Zoom  %11.3e x    Center  %.9f, %.9f",
+                  zoom, cx, cy);
 
-    // Zeile 2: Zoom/Iter/Tile + hmN/statsPx – feste Feldbreiten gegen Layout-Shifts
+    // ── Zeile 2: Compute/Grid ───────────────────────────────────────────────
+    // "Iter  I    Tile  Tpx    Tiles  N    Grid  spx"
+    // I=%5d  T=%2d  N=%5zu  spx=%2d  → feste Spalten, keine Layout-Shifts
     std::snprintf(line2, sizeof(line2),
-                  "z=%+11.3e it=%6d tile=%3d hmN=%6zu statsPx=%3d",
-                  zoom, it, tile, hmN, statsPx);
+                  "Iter  %5d    Tile  %2dpx    Tiles  %5zu    Grid  %2d",
+                  it, tile, hmN, statsPx);
 
-    // Zeile 3: Auflösung/FPS + ROI/Delta – FPS mit fixer Breite
+    // ── Zeile 3: Perf/ROI ───────────────────────────────────────────────────
+    // "Res  W x H    FPS  f    ROI  r    d  Δ"
+    // f=%5.1f, Δ als Text (ASCII) – bei ungültigem ROI → "--"
     char dstr[16];
     if (roiValid) {
         std::snprintf(dstr, sizeof(dstr), "%.3f", static_cast<double>(delta));
     } else {
         std::snprintf(dstr, sizeof(dstr), "--");
     }
-    std::snprintf(line3, sizeof(line3), "res=%dx%d fps=%6.1f ROI=%d d=%s",
+    std::snprintf(line3, sizeof(line3),
+                  "Res  %d x %d    FPS  %5.1f    ROI  %d    d  %s",
                   w, h, fps, roiValid, dstr);
 
     std::string out;
