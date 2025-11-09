@@ -1,6 +1,6 @@
 ///// Otter: HUD-Text – kompakte Center-Statistik (3 Zeilen), deterministisch formatiert.
-///// Schneefuchs: ASCII-only; pch zuerst; keine GL- oder Device-Abhängigkeiten; /WX clean; C-Locale wird vorausgesetzt.
-///// Maus: Feste Präzision (cx/cy 9, z wissenschaftlich %.3e, fps 1); Fallback auf dt für FPS falls nötig.
+///// Schneefuchs: ASCII-only; pch zuerst; keine GL-/Device-Abhängigkeiten; /WX clean; C-Locale nicht vorausgesetzt (ASCII-Dezimalpunkt erzwungen).
+///// Maus: Narrow-Classic Layout – Zeile1: Zoom/FPS/ROI/d | Zeile2: Iter/Tile/Grid/Tiles | Zeile3: Center/Res; feste Feldbreiten; FPS-Fallback über dt.
 ///// Datei: src/hud_text.cpp
 
 #include "pch.hpp"
@@ -17,8 +17,8 @@
 
 namespace AOP_Telemetry {
     // Phase-1 Telemetrie (extern definiert im AOP-Controller / Warzenschwein-Overlay)
-    extern float            g_ai_last_delta;
-    extern int              g_ai_ov_valid;
+    extern float              g_ai_last_delta;
+    extern int                g_ai_ov_valid;
     extern unsigned long long g_ai_frame_id;
 }
 
@@ -26,6 +26,14 @@ namespace HudText {
 
 static inline double safe_fps_from_ms(double ms) noexcept {
     return (ms > 1e-9) ? (1000.0 / ms) : 0.0;
+}
+
+// Erzwingt ASCII-Dezimalpunkt, falls die C-Locale Kommas liefert.
+static inline void enforce_ascii_decimal(char* s) noexcept {
+    if (!s) return;
+    for (char* p = s; *p; ++p) {
+        if (*p == ',') *p = '.';
+    }
 }
 
 std::string build(const FrameContext& fctx, const RendererState& state) {
@@ -52,26 +60,35 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
         fps = 1.0 / static_cast<double>(fctx.deltaSeconds);
     }
 
-    // Kompakt & stabil formatiert (ASCII; C-Locale erwartet)
-    char line1[96], line2[128], line3[128];
+    // Kompakt & stabil formatiert (ASCII; feste Feldbreiten)
+    char line1[160], line2[160], line3[160];
 
-    // Zeile 1: Center
-    std::snprintf(line1, sizeof(line1), "cx=%.9f cy=%.9f", cx, cy);
-
-    // Zeile 2: Zoom/Iter/Tile + hmN/statsPx (nur Zoom dezent selbsterklärend)
-    std::snprintf(line2, sizeof(line2), "zoom=%.3e x it=%d tile=%d hmN=%zu statsPx=%d",
-                  zoom, it, tile, hmN, statsPx);
-
-    // Zeile 3: Auflösung/FPS + ROI/Delta (Delta nur bei gültigem ROI – sonst "--")
+    // ── Zeile 1: Zoom / FPS / ROI / d ───────────────────────────────────────
+    // Zoom: %11.3e (feste Breite), FPS: %6.1f, ROI: %d, d: %5.3f (oder "--")
     char dstr[16];
     if (roiValid) {
-        std::snprintf(dstr, sizeof(dstr), "%.3f", static_cast<double>(delta));
+        std::snprintf(dstr, sizeof(dstr), "%5.3f", static_cast<double>(delta));
     } else {
         std::snprintf(dstr, sizeof(dstr), "--");
     }
-    // FPS jetzt feste Breite: %6.1f (z.B. "  94.6", " 999.9")
-    std::snprintf(line3, sizeof(line3), "res=%dx%d fps=%6.1f ROI=%d d=%s",
-                  w, h, fps, roiValid, dstr);
+    std::snprintf(line1, sizeof(line1),
+                  "Zoom  %11.3e x | FPS %6.1f | ROI %d | d %s",
+                  zoom, fps, roiValid, dstr);
+    enforce_ascii_decimal(line1);
+
+    // ── Zeile 2: Iter / Tile / Grid / Tiles ─────────────────────────────────
+    // Iter: %5d, Tile: %3dpx, Grid: %3d, Tiles: %5zu
+    std::snprintf(line2, sizeof(line2),
+                  "Iter %5d | Tile %3dpx | Grid %3d | Tiles %5zu",
+                  it, tile, statsPx, hmN);
+    enforce_ascii_decimal(line2);
+
+    // ── Zeile 3: Center / Res ───────────────────────────────────────────────
+    // Center mit 9 Nachkommastellen, Res als W×H (ASCII 'x')
+    std::snprintf(line3, sizeof(line3),
+                  "Center  %.9f, %.9f | Res %dx%d",
+                  cx, cy, w, h);
+    enforce_ascii_decimal(line3);
 
     std::string out;
     out.reserve(sizeof(line1) + sizeof(line2) + sizeof(line3));
