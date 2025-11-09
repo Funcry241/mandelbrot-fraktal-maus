@@ -83,7 +83,7 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
 
     // Zeile 3: center / res  (Separatoren ohne Leerzeichen)
     std::snprintf(line3, sizeof(line3),
-                  "center %.9f,%.9f|res %dx%d",
+                  "center %.6f,%.6f|res %dx%d",
                   cx, cy, w, h);
     enforce_ascii_decimal(line3);
 
