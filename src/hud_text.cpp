@@ -67,7 +67,6 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
     // zoom %9.3e spart Breite; FPS fix %5.1f.
     char dstr[16];
     if (roiValid) {
-        std::snprintf(dstr, sizeof(dstr), "%4.3f"); // Platzhalter, gleich überschrieben
         std::snprintf(dstr, sizeof(dstr), "%4.3f", static_cast<double>(delta));
     } else {
         std::snprintf(dstr, sizeof(dstr), "--");
@@ -78,7 +77,7 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
     enforce_ascii_decimal(line1);
 
     // ── Zeile 2: Iter / Tile / spx / N ──────────────────────────────────────
-    // spx = statsPx (Grid-Px); N = Tile-Anzahl (breitet bei >9999 automatisch auf).
+    // spx = statsPx (Grid-Px); N = Tile-Anzahl.
     std::snprintf(line2, sizeof(line2),
                   "Iter %4d | Tile %2dpx | spx %2d | N %4zu",
                   it, tile, statsPx, hmN);
