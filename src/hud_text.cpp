@@ -1,6 +1,6 @@
 ///// Otter: HUD-Text – kompakte Center-Statistik (3 Zeilen), deterministisch formatiert.
-///// Schneefuchs: ASCII-only; pch zuerst; keine GL- oder Device-Abhängigkeiten; /WX clean; C-Locale wird vorausgesetzt.
-///// Maus: Feste Spaltenbreiten; „Zoom“ ausgeschrieben; ASCII 'x' statt Sonderzeichen; FPS-Fallback über dt.
+///// Schneefuchs: ASCII-only; pch zuerst; keine GL-/Device-Abhängigkeiten; /WX clean; C-Locale nicht vorausgesetzt.
+///// Maus: Variante A3 – Trenner " | ", feste Spaltenbreiten, ASCII-Dezimalpunkt erzwungen; FPS-Fallback über dt.
 ///// Datei: src/hud_text.cpp
 
 #include "pch.hpp"
@@ -28,6 +28,14 @@ static inline double safe_fps_from_ms(double ms) noexcept {
     return (ms > 1e-9) ? (1000.0 / ms) : 0.0;
 }
 
+// Erzwingt ASCII-Dezimalpunkt, falls die C-Locale Kommas liefert.
+static inline void enforce_ascii_decimal(char* s) noexcept {
+    if (!s) return;
+    for (char* p = s; *p; ++p) {
+        if (*p == ',') *p = '.';
+    }
+}
+
 std::string build(const FrameContext& fctx, const RendererState& state) {
     // Daten einsammeln (nur Host-Seite; keine GL/CUDA-Aufrufe)
     const double cx   = static_cast<double>(state.center.x);
@@ -52,26 +60,28 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
         fps = 1.0 / static_cast<double>(fctx.deltaSeconds);
     }
 
-    // Kompakt & stabil formatiert (ASCII; C-Locale erwartet)
-    char line1[128], line2[160], line3[144];
+    // Kompakt & stabil formatiert (ASCII; Dezimalpunkt erzwungen)
+    char line1[160], line2[160], line3[160];
 
     // ── Zeile 1: View ────────────────────────────────────────────────────────
-    // "Zoom  Z x    Center  cx, cy"
+    // "Zoom: Z x | Center: cx, cy"
     // Z fest: %11.3e  | cx,cy mit 9 Nachkommastellen
     std::snprintf(line1, sizeof(line1),
-                  "Zoom  %11.3e x    Center  %.9f, %.9f",
+                  "Zoom: %11.3e x | Center: %.9f, %.9f",
                   zoom, cx, cy);
+    enforce_ascii_decimal(line1);
 
     // ── Zeile 2: Compute/Grid ───────────────────────────────────────────────
-    // "Iter  I    Tile  Tpx    Tiles  N    Grid  spx"
-    // I=%5d  T=%2d  N=%5zu  spx=%2d  → feste Spalten, keine Layout-Shifts
+    // "Iter: I | Tile: Tpx | Tiles: N | Grid: spx"
+    // I=%5d  T=%3d  N=%5zu  spx=%2d  → feste Spalten, keine Layout-Shifts
     std::snprintf(line2, sizeof(line2),
-                  "Iter  %5d    Tile  %2dpx    Tiles  %5zu    Grid  %2d",
+                  "Iter: %5d | Tile: %3dpx | Tiles: %5zu | Grid: %2d",
                   it, tile, hmN, statsPx);
+    enforce_ascii_decimal(line2);
 
     // ── Zeile 3: Perf/ROI ───────────────────────────────────────────────────
-    // "Res  W x H    FPS  f    ROI  r    d  Δ"
-    // f=%5.1f, Δ als Text (ASCII) – bei ungültigem ROI → "--"
+    // "Res: W×H | FPS: f | ROI: r | d: Δ"
+    // f=%6.1f, Δ als Text (ASCII) – bei ungültigem ROI → "--"
     char dstr[16];
     if (roiValid) {
         std::snprintf(dstr, sizeof(dstr), "%.3f", static_cast<double>(delta));
@@ -79,8 +89,9 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
         std::snprintf(dstr, sizeof(dstr), "--");
     }
     std::snprintf(line3, sizeof(line3),
-                  "Res  %d x %d    FPS  %5.1f    ROI  %d    d  %s",
+                  "Res: %dx%d | FPS: %6.1f | ROI: %d | d: %s",
                   w, h, fps, roiValid, dstr);
+    enforce_ascii_decimal(line3);
 
     std::string out;
     out.reserve(sizeof(line1) + sizeof(line2) + sizeof(line3));
