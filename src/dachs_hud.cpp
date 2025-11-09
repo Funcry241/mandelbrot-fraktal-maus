@@ -25,6 +25,10 @@ namespace {
     bool        g_help_hint_enabled = true;
     std::string g_help_hint_text    = "F1 - Help";
 
+    // Empfohlener vertikaler Sicherheitsabstand für das F1-Hint unten links,
+    // damit es nicht vom Eye/Glow überlappt wird (Pixel vor DPI).
+    constexpr int kHelpHintYOffsetPx = 96;
+
     inline int iround(float v) {
         return static_cast<int>(std::lround(v));
     }
@@ -159,5 +163,11 @@ void set_help_hint_text(std::string s) {
 }
 
 const std::string& help_hint_text() { return g_help_hint_text; }
+
+// Empfohlene Y-Verschiebung (Pixel) für das F1-Hint unten links.
+// Konsumiere im Renderer z.B. so:  hintPanelY = vpH - badgeH - DachsHUD::help_hint_offset_px(dpi);
+[[maybe_unused]] int help_hint_offset_px(float dpiScale){
+    return iround(static_cast<float>(kHelpHintYOffsetPx) * dpiScale);
+}
 
 } // namespace DachsHUD

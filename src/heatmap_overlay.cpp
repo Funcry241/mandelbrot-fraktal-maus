@@ -38,6 +38,7 @@ static GLint  uViewportPx=-1, uPanelRectPx=-1, uRadiusPx=-1, uAlpha=-1, uBorderP
 static GLuint sHeatVAO=0, sHeatVBO=0, sHeatProg=0, sHeatTex=0;
 static GLint  uHViewportPx=-1, uHContentRectPx=-1, uHGridTex=-1, uHAlphaBase=-1;
 static GLint  uHMarkEnable=-1, uHMarkCenterPx=-1, uHMarkRadiusPx=-1, uHMarkAlpha=-1;
+static GLint  uHMarkThicknessPx=-1; // << NEU
 
 static int    sTexW=0, sTexH=0;
 static float  sExposureEMA = 0.0f;
@@ -117,7 +118,7 @@ static bool computeROI(const std::vector<float>& entropy,
         double wsum=0.0, xsum=0.0, ysum=0.0;
         for (int dy=-r; dy<=r; ++dy){
             const int ty = by + dy; if (ty < 0 || ty >= tilesY) continue;
-            for (int dx=-r; dx<=r; ++dx){
+            for (int dx=-r; dx<=r){
                 const int tx = bx + dx; if (tx < 0 || tx >= tilesX) continue;
                 const size_t idx = (size_t)ty*(size_t)tilesX + (size_t)tx;
                 const double v = (double)grid[idx];
@@ -204,6 +205,7 @@ void cleanup(){
     sHeatVAO=sHeatVBO=sHeatProg=sHeatTex=0;
     uHViewportPx=uHContentRectPx=uHGridTex=uHAlphaBase=-1;
     uHMarkEnable=uHMarkCenterPx=uHMarkRadiusPx=uHMarkAlpha=-1;
+    uHMarkThicknessPx=-1;
 
     sTexW=sTexH=0; sExposureEMA=0.0f;
 }
@@ -234,14 +236,15 @@ void drawOverlay(const std::vector<float>& entropy,
     if(!sHeatProg){
         sHeatProg = UiGL::makeProgram(HeatmapShaders::HeatVS, HeatmapShaders::HeatFS);
         if(!sHeatProg){ if constexpr(Settings::debugLogging) LUCHS_LOG_HOST("[UI/Pfau][HM] heat program==0"); return; }
-        uHViewportPx    = glGetUniformLocation(sHeatProg, "uViewportPx");
-        uHContentRectPx = glGetUniformLocation(sHeatProg, "uContentRectPx");
-        uHGridTex       = glGetUniformLocation(sHeatProg, "uGrid");
-        uHAlphaBase     = glGetUniformLocation(sHeatProg, "uAlphaBase");
-        uHMarkEnable    = glGetUniformLocation(sHeatProg, "uMarkEnable");
-        uHMarkCenterPx  = glGetUniformLocation(sHeatProg, "uMarkCenterPx");
-        uHMarkRadiusPx  = glGetUniformLocation(sHeatProg, "uMarkRadiusPx");
-        uHMarkAlpha     = glGetUniformLocation(sHeatProg, "uMarkAlpha");
+        uHViewportPx        = glGetUniformLocation(sHeatProg, "uViewportPx");
+        uHContentRectPx     = glGetUniformLocation(sHeatProg, "uContentRectPx");
+        uHGridTex           = glGetUniformLocation(sHeatProg, "uGrid");
+        uHAlphaBase         = glGetUniformLocation(sHeatProg, "uAlphaBase");
+        uHMarkEnable        = glGetUniformLocation(sHeatProg, "uHMarkEnable");
+        uHMarkCenterPx      = glGetUniformLocation(sHeatProg, "uHMarkCenterPx");
+        uHMarkRadiusPx      = glGetUniformLocation(sHeatProg, "uHMarkRadiusPx");
+        uHMarkAlpha         = glGetUniformLocation(sHeatProg, "uHMarkAlpha");
+        uHMarkThicknessPx   = glGetUniformLocation(sHeatProg, "uHMarkThicknessPx"); // NEU
     }
     UiGL::ensurePanelVAO(sPanelVAO, sPanelVBO);
     UiGL::ensureHeatVAO (sHeatVAO,  sHeatVBO);
@@ -389,11 +392,12 @@ void drawOverlay(const std::vector<float>& entropy,
         const float centerPxY_panel = contentY0 + (0.5f*(1.0f-ndcY))* (contentY1-contentY0);
         const float ringRpx_panel   = 0.5f * std::min(contentX1-contentX0, contentY1-contentY0) * 0.35f;
 
-        if(uHMarkEnable>=0)   glUniform1f(uHMarkEnable,   markEnabled ? 1.0f : 0.0f);
+        if(uHMarkEnable>=0)       glUniform1f(uHMarkEnable,   markEnabled ? 1.0f : 0.0f);
         if (markEnabled) {
-            if(uHMarkCenterPx>=0) glUniform2f(uHMarkCenterPx, centerPxX_panel, centerPxY_panel);
-            if(uHMarkRadiusPx>=0) glUniform1f(uHMarkRadiusPx, ringRpx_panel);
-            if(uHMarkAlpha>=0)    glUniform1f(uHMarkAlpha,    0.95f);
+            if(uHMarkCenterPx>=0)     glUniform2f(uHMarkCenterPx, centerPxX_panel, centerPxY_panel);
+            if(uHMarkRadiusPx>=0)     glUniform1f(uHMarkRadiusPx, ringRpx_panel);
+            if(uHMarkAlpha>=0)        glUniform1f(uHMarkAlpha,    0.95f);
+            if(uHMarkThicknessPx>=0)  glUniform1f(uHMarkThicknessPx, 1.15f * sPanelScale); // dünner Ring
         }
 
         glBindVertexArray(sHeatVAO);

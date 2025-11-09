@@ -50,10 +50,13 @@ in vec2 vPx; out vec4 FragColor;
 uniform vec4   uContentRectPx;
 uniform sampler2D uGrid;
 uniform float  uAlphaBase;
-uniform float  uMarkEnable;
-uniform vec2   uMarkCenterPx;
-uniform float  uMarkRadiusPx;
-uniform float  uMarkAlpha;
+
+// Marker-Uniforms (H-Präfix wie im C++-Overlay)
+uniform float  uHMarkEnable;
+uniform vec2   uHMarkCenterPx;
+uniform float  uHMarkRadiusPx;
+uniform float  uHMarkAlpha;
+uniform float  uHMarkThicknessPx; // << NEU: Linienstärke in Pixeln
 
 vec3 mapGold(float v){
   float g = clamp(v,0.0,1.0);
@@ -69,9 +72,6 @@ void main(){
   uv.y = 1.0 - uv.y;
 
   // ROOT FIX: Vertex-zu-Texel-Zentren re-centern (half-texel Korrektur) ------
-  // Wenn das Grid als N Kanten-Samples (0..N-1) erzeugt wurde, liegen die
-  // texel-Zentren bei (j + 0.5)/N. Das Mapping unten sorgt dafür, dass
-  // uv=0..1 genau diese Zentren trifft (und nicht die Kanten).
   vec2 texDim = vec2(textureSize(uGrid, 0));         // (W, H)
   uv = ((texDim - 1.0) * uv + 0.5) / texDim;
 
@@ -87,15 +87,18 @@ void main(){
 
   // Marker (Fadenkreuz/Ring) in Panel-Pixeln – KEIN zusätzlicher Flip --------
   float m = 0.0;
-  if(uMarkEnable > 0.5){
-    vec2  d2   = vPx - uMarkCenterPx;
+  if(uHMarkEnable > 0.5){
+    vec2  d2   = vPx - uHMarkCenterPx;
     float r    = length(d2);
-    float edge = abs(r - uMarkRadiusPx);
-    float aa   = fwidth(edge) + 0.75;
-    float ring = 1.0 - smoothstep(1.5, 1.5+aa, edge);
-    float cx   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.x));
-    float cy   = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.y));
-    m = max(ring, max(cx, cy)) * uMarkAlpha;
+    float edge = abs(r - uHMarkRadiusPx);
+
+    float aa     = fwidth(edge) + 0.5;
+    float halfT  = max(0.5, 0.5 * uHMarkThicknessPx);     // mind. ~1px Gesamtbreite
+    float ring   = 1.0 - smoothstep(halfT, halfT + aa, edge);
+
+    float cx     = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.x));
+    float cy     = 1.0 - smoothstep(0.6, 0.6+aa, abs(d2.y));
+    m = max(ring, max(cx, cy)) * uHMarkAlpha;
   }
 
   vec3 markCol = vec3(0.60, 1.00, 0.60);
