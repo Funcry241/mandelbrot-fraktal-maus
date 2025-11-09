@@ -256,7 +256,7 @@ static std::string makeAiLine()
 // (Wir binden nicht hart an DachsHUD::help_hint_offset_px, um Header-Abhängigkeit zu vermeiden.)
 static inline int badge_lift_px(){
     const float hud = std::max(1.0f, Settings::hudPixelSize);
-    return (int)std::lround(36.0f * hud);
+    return (int)std::lround(38.0f * hud);
 }
 
 void drawOverlay(float /*zoom*/){
