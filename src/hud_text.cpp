@@ -58,18 +58,19 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
     // Zeile 1: Center
     std::snprintf(line1, sizeof(line1), "cx=%.9f cy=%.9f", cx, cy);
 
-    // Zeile 2: Zoom/Iter/Tile + hmN/statsPx (P0-Erweiterung)
-    std::snprintf(line2, sizeof(line2), "z=%.3e it=%d tile=%d hmN=%zu statsPx=%d",
+    // Zeile 2: Zoom/Iter/Tile + hmN/statsPx – feste Feldbreiten gegen Layout-Shifts
+    std::snprintf(line2, sizeof(line2),
+                  "z=%+11.3e it=%6d tile=%3d hmN=%6zu statsPx=%3d",
                   zoom, it, tile, hmN, statsPx);
 
-    // Zeile 3: Auflösung/FPS + ROI/Delta (Delta nur bei gültigem ROI – sonst "--")
+    // Zeile 3: Auflösung/FPS + ROI/Delta – FPS mit fixer Breite
     char dstr[16];
     if (roiValid) {
         std::snprintf(dstr, sizeof(dstr), "%.3f", static_cast<double>(delta));
     } else {
         std::snprintf(dstr, sizeof(dstr), "--");
     }
-    std::snprintf(line3, sizeof(line3), "res=%dx%d fps=%.1f ROI=%d d=%s",
+    std::snprintf(line3, sizeof(line3), "res=%dx%d fps=%6.1f ROI=%d d=%s",
                   w, h, fps, roiValid, dstr);
 
     std::string out;
