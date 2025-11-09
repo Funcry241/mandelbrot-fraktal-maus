@@ -118,7 +118,7 @@ static bool computeROI(const std::vector<float>& entropy,
         double wsum=0.0, xsum=0.0, ysum=0.0;
         for (int dy=-r; dy<=r; ++dy){
             const int ty = by + dy; if (ty < 0 || ty >= tilesY) continue;
-            for (int dx=-r; dx<=r){
+            for (int dx=-r; dx<=r; ++dx){ // << Fix: fehlendes ++dx
                 const int tx = bx + dx; if (tx < 0 || tx >= tilesX) continue;
                 const size_t idx = (size_t)ty*(size_t)tilesX + (size_t)tx;
                 const double v = (double)grid[idx];
@@ -397,7 +397,7 @@ void drawOverlay(const std::vector<float>& entropy,
             if(uHMarkCenterPx>=0)     glUniform2f(uHMarkCenterPx, centerPxX_panel, centerPxY_panel);
             if(uHMarkRadiusPx>=0)     glUniform1f(uHMarkRadiusPx, ringRpx_panel);
             if(uHMarkAlpha>=0)        glUniform1f(uHMarkAlpha,    0.95f);
-            if(uHMarkThicknessPx>=0)  glUniform1f(uHMarkThicknessPx, 1.15f * sPanelScale); // dünner Ring
+            if(uHMarkThicknessPx>=0)  glUniform1f(uHMarkThicknessPx, 0.75f * sPanelScale); // dünner Ring
         }
 
         glBindVertexArray(sHeatVAO);
