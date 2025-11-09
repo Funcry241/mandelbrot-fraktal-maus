@@ -19,4 +19,7 @@ namespace AOP_Telemetry
 
     // Letzte Distanz (diagnostisch; -1.0f wenn nicht berechnet)
     extern float g_ai_last_delta;
+
+    // Monoton steigende Zähler-ID für Policy-Evaluierungen (diagnostisch)
+    extern unsigned long long g_ai_frame_id;
 }

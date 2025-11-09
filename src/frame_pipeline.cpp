@@ -437,7 +437,8 @@ void execute(RendererState& state) {
         const int fresh = (g_metricsAge == 0) ? 1 : 0;
         const int valid = (AOP_Telemetry::g_ai_ov_valid ? 1 : 0);
         LUCHS_LOG_HOST(
-            "[REPL/COUPLE] ndc=(%.3f,%.3f) ov=(%.3f,%.3f) hmAge=%d fresh=%d valid=%d",
+            "[REPL/COUPLE] d=%.3f ndc=(%.3f,%.3f) ov=(%.3f,%.3f) hmAge=%d fresh=%d valid=%d",
+            AOP_Telemetry::g_ai_last_delta,
             AOP_Telemetry::g_ai_ndc_pol_x, AOP_Telemetry::g_ai_ndc_pol_y,
             AOP_Telemetry::g_ai_ndc_ovl_x, AOP_Telemetry::g_ai_ndc_ovl_y,
             g_metricsAge, fresh, valid
@@ -496,7 +497,7 @@ void execute(RendererState& state) {
         const size_t hmN = state.h_entropy.size();
         const int statsPx = std::max(1, g_ctx.statsTileSize);
 
-        // --- other-time (oth) closes the budget to tot (clamped >= 0) ---
+        // --- other-time (oth) schließt Budget zu tot (geclamped >= 0) ---
         double oth = g_totMs - (g_mandMs + g_entMs + g_conMs + g_texMs + g_ovlMs);
         if (oth < 0.0) {
             // swallow tiny negative noise from timers

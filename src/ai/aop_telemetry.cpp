@@ -15,4 +15,6 @@ namespace AOP_Telemetry
     int   g_ai_ov_valid  = 0;
 
     float g_ai_last_delta = -1.0f;
+
+    unsigned long long g_ai_frame_id = 0ull;
 }

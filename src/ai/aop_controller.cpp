@@ -180,8 +180,11 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     AOP_Telemetry::g_ai_ndc_ovl_y = ndcY * 0.75f;
     AOP_Telemetry::g_ai_ov_valid  = 1;
 
-    // Keine Crosshair-Delta-Berechnung verfügbar → sentinel
-    AOP_Telemetry::g_ai_last_delta = -1.0f;
+    // NEW (Fix B): NDC-Center (0,0) → Policy-NDC Distanz (L2)
+    AOP_Telemetry::g_ai_last_delta = std::sqrt(ndcX * ndcX + ndcY * ndcY);
+
+    // NEW (Fix A – optional Diagnose): monotone Frame-ID
+    ++AOP_Telemetry::g_ai_frame_id;
 
     // Log
     const unsigned long long uu_tilesX = static_cast<unsigned long long>(tilesX);
