@@ -145,7 +145,7 @@ add_executable(mandelbrot_otterdream
   src/ai/aop_controller.cpp
   src/ai/aop_telemetry.cpp
   src/ai/feature_packer.cpp
-  src/ai/otter_bandit.cpp
+  src/ai/otter_bandit.cpp  
 )
 
 if(MSVC)

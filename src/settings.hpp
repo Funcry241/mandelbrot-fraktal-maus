@@ -310,6 +310,10 @@ namespace AiBandit {
     // Deterministische RNG-Quelle.
     inline constexpr unsigned int seed      = 0xC0FFEEu;
 
+    // Persistenz: alle N Updates speichern (0 = aus).
+    // Range: 0 .. 100000 | Default: 0 | ↑ seltener I/O, ↓ mehr Datenverlust bei Crash
+    inline constexpr int  persistEvery      = 0;
+
     // Optionaler Persistenzpfad (derzeit nicht genutzt).
     inline constexpr const char* persistPath = "dist/ai/otter_bandit.bin";
 }
