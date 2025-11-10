@@ -1,134 +1,109 @@
-///// Otter: Fehler-Diagnose – schreibt bei Build-Fails einen kompakten Report (Markdown).
-///// Schneefuchs: heuristisch, keine Extra-Deps; ASCII-only; dedupliziert Top-Fehler.
-///// Maus: Pfad out/logs/otter_fail_report.md; speichert Log-Tail (≤120 Zeilen).
+///// Otter: Diagnose – schreibt Fail-Reports (voll + minimal) bei Exit≠0, inkl. Log-Tail.
+/// //// Schneefuchs: Keine Dead-Code-Warnungen; robuste Pfade; ASCII-only; Windows/Linux sicher.
+/// //// Maus: Speichert unter `.build_metrics/fail/<ts>_<phase>_<code>.txt` + Kurzfassung `out/last_fail.txt`.
 ///// Datei: rust/otter_proc/src/runner/runner_diagnose.rs
 
-use std::collections::HashMap;
-use std::fs::{create_dir_all, File};
-use std::io::Write;
+use std::fs::{self, File};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-pub fn try_write_on_failure(
-    root: &Path,
+use crate::utils;
+
+/// Schreibt den **kompletten** Report in eine datierte Datei im Fail-Ordner.
+fn write_fail_report_full(
+    workdir: &Path,
     phase: &str,
     sig: &str,
-    exit_code: i32,
-    snapshot: Option<&[String]>,
-) -> Option<PathBuf> {
-    let lines: Vec<String> = snapshot
-        .map(|s| s.iter().cloned().collect())
-        .unwrap_or_default();
+    code: i32,
+    tail: Option<&[String]>,
+) -> io::Result<PathBuf> {
+    let ts = utils::epoch_ms();
+    let fail_dir = workdir.join(".build_metrics").join("fail");
+    fs::create_dir_all(&fail_dir)?;
 
-    write_fail_report(root, phase, sig, exit_code, &lines).ok()
-}
-
-pub fn write_fail_report_min(
-    root: &Path,
-    phase: &str,
-    sig: &str,
-    exit_code: i32,
-) -> std::io::Result<PathBuf> {
-    write_fail_report(root, phase, sig, exit_code, &[])
-}
-
-pub fn write_fail_report(
-    root: &Path,
-    phase: &str,
-    sig: &str,
-    exit_code: i32,
-    lines: &[String],
-) -> std::io::Result<PathBuf> {
-    let logs_dir = root.join("out").join("logs");
-    create_dir_all(&logs_dir)?;
-    let report_path = logs_dir.join("otter_fail_report.md");
-
-    let mut counts: HashMap<String, usize> = HashMap::new();
-    let mut last_lines: Vec<String> = Vec::new();
-    let keep_tail: usize = 120;
-
-    for raw in lines {
-        let l = raw.trim();
-        if l.is_empty() { continue; }
-
-        last_lines.push(truncate_ascii(l, 400));
-        if last_lines.len() > keep_tail {
-            let _ = last_lines.remove(0);
-        }
-
-        if looks_like_error(l) {
-            let key = normalize_for_counting(l);
-            *counts.entry(key).or_insert(0) += 1;
-        }
+    // Dateiname: <ts>_<phase>_<code>.txt – nur ASCII, unsichere Zeichen filtern
+    fn sanitize_token(s: &str) -> String {
+        s.chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect()
     }
+    let fname = format!(
+        "{}_{}_{}.txt",
+        ts,
+        sanitize_token(phase),
+        code
+    );
+    let fpath = fail_dir.join(fname);
+    let mut f = File::create(&fpath)?;
 
-    let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1));
+    // Header
+    writeln!(f, "FAIL REPORT")?;
+    writeln!(f, "ts_ms: {}", ts)?;
+    writeln!(f, "phase: {}", phase)?;
+    writeln!(f, "sig: {}", sig)?;
+    writeln!(f, "exit_code: {}", code)?;
+    writeln!(f, "cwd: {}", workdir.display())?;
+    writeln!(f, "------------------------------------------------------------")?;
 
-    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-    let mut f = File::create(&report_path)?;
-
-    writeln!(f, "# OtterFail Report")?;
-    writeln!(f)?;
-    writeln!(f, "- timestamp: {}", ts)?;
-    writeln!(f, "- phase: `{}`", phase)?;
-    writeln!(f, "- sig: `{}`", sig)?;
-    writeln!(f, "- exit_code: {}", exit_code)?;
-    writeln!(f)?;
-
-    writeln!(f, "## Most frequent error lines")?;
-    if ranked.is_empty() {
-        writeln!(f, "_No classified error lines found. The build failed without obvious error patterns._")?;
+    // Inhalt (Tail)
+    if let Some(lines) = tail {
+        writeln!(f, "LOG TAIL ({} lines):", lines.len())?;
+        for line in lines {
+            // ASCII-only: nicht druckbare Zeichen ersetzen
+            let cleaned: String = line.chars().map(|c| if c.is_ascii() { c } else { '?' }).collect();
+            writeln!(f, "{}", cleaned)?;
+        }
     } else {
-        for (i, (line, cnt)) in ranked.iter().take(10).enumerate() {
-            writeln!(f, "{}. (x{}) `{}`", i + 1, cnt, line)?;
+        writeln!(f, "No log tail available.")?;
+    }
+
+    Ok(fpath)
+}
+
+/// Schreibt eine **Kurzfassung** (1–2 Zeilen + ein paar letzte Zeilen) für schnelle Sichtung.
+/// Achtung: **wird verwendet** (keine dead_code-Warnung).
+pub fn write_fail_report_min(
+    workdir: &Path,
+    phase: &str,
+    sig: &str,
+    code: i32,
+    tail: Option<&[String]>,
+) -> io::Result<PathBuf> {
+    let out_dir = workdir.join("out");
+    fs::create_dir_all(&out_dir)?;
+    let fpath = out_dir.join("last_fail.txt");
+
+    let mut f = File::create(&fpath)?;
+    let ts = utils::epoch_ms();
+
+    writeln!(f, "FAIL phase={} sig=\"{}\" code={} ts_ms={}", phase, sig, code, ts)?;
+
+    // Eine sehr knappe Tail-Zusammenfassung (max. 20 Zeilen)
+    if let Some(lines) = tail {
+        writeln!(f, "tail: {} lines (showing last 20)", lines.len())?;
+        let n = lines.len();
+        let start = if n > 20 { n - 20 } else { 0 };
+        for line in &lines[start..] {
+            let cleaned: String = line.chars().map(|c| if c.is_ascii() { c } else { '?' }).collect();
+            writeln!(f, "{}", cleaned)?;
         }
+    } else {
+        writeln!(f, "tail: none")?;
     }
-    writeln!(f)?;
 
-    writeln!(f, "## Quick hints")?;
-    writeln!(f, "- **MSVC C/C++ error** (`error Cxxxx`): erster Fund ist der relevante. Namespace/Include prüfen.")?;
-    writeln!(f, "- **CMake Error**: lokal mit `-Wdev`/Toolchain prüfen (CUDA, OpenGL, GLEW, GLFW).")?;
-    writeln!(f, "- **Ninja/FAILED**: zur *ersten* Fehlerstelle scrollen; spätere Zeilen sind oft Rauschen.")?;
-    writeln!(f, "- **Linker (LNKxxxx)**: fehlende Lib oder CRT-Mix; `LINK_LIBRARIES` & /MD prüfen.")?;
-    writeln!(f, "- **CUDA**: Toolkit ≥13.0 und `CMAKE_CUDA_ARCHITECTURES=80;86;89;90`.")?;
-    writeln!(f)?;
-
-    writeln!(f, "## Last {} console lines", last_lines.len())?;
-    writeln!(f, "```text")?;
-    for l in &last_lines {
-        writeln!(f, "{}", l)?;
-    }
-    writeln!(f, "```")?;
-
-    Ok(report_path)
+    Ok(fpath)
 }
 
-fn looks_like_error(s: &str) -> bool {
-    let l = s.to_ascii_lowercase();
-    l.contains(" cmake error")
-        || l.contains("error c")              // MSVC Cxxxx
-        || l.contains(" fatal error")
-        || l.contains(" error:")              // GCC/Clang
-        || l.contains("ninja: build stopped")
-        || l.contains(" failed with exit code")
-        || l.starts_with("failed:")
-        || l.starts_with("linker error")
-        || l.contains(" unresolved external symbol")
-        || l.contains("undefined reference to")
-        || l.contains(" ist kein member von ") // DE-Ausgabe MSVC
-        || l.contains(" is not a member of ")
-}
-
-fn normalize_for_counting(s: &str) -> String {
-    let mut out = s.trim().to_string();
-    if let Some(pos) = out.rfind('\\') { out = out[pos+1..].to_string(); }
-    if let Some(pos) = out.rfind('/')  { out = out[pos+1..].to_string(); }
-    truncate_ascii(&out, 180)
-}
-
-fn truncate_ascii(s: &str, max: usize) -> String {
-    if s.len() <= max { return s.to_string(); }
-    let mut t = s.chars().take(max.saturating_sub(3)).collect::<String>();
-    t.push_str("...");
-    t
+/// Öffentliche API: Beim Fehlschlag beide Reports versuchen (voll + minimal).
+/// Fehler beim Schreiben werden bewusst **ignoriert** (Runner soll nicht zusätzlich scheitern).
+pub fn try_write_on_failure(
+    workdir: &Path,
+    phase: &str,
+    sig: &str,
+    code: i32,
+    tail: Option<&[String]>,
+) -> io::Result<()> {
+    let _ = write_fail_report_full(workdir, phase, sig, code, tail);
+    let _ = write_fail_report_min(workdir, phase, sig, code, tail);
+    Ok(())
 }
