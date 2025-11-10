@@ -1,6 +1,6 @@
-///// Otter: AOP controller — centralizes [REPL/POLICY] logging (shadow only) + ORT lazy-load + feature packing
+///// Otter: AOP controller — centralizes [REPL/POLICY] logging (shadow only) + feature packing (no ORT)
 ///// Schneefuchs: /WX-safe; ASCII-only; if constexpr gates; uses AOP_Telemetry; statsPx from FrameContext
-///// Maus: Size-safe math; MSVC-safe getenv via _dupenv_s; stabile One-Liner; ENV OTTER_AI_MODEL; dry-run only
+///// Maus: Size-safe math; stabile One-Liner; dry-run only; Kolibri desiredTilePx fallback
 ///// Datei: src/ai/aop_controller.cpp
 
 #include "pch.hpp"
@@ -8,53 +8,19 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "renderer_state.hpp"
-#include "frame_context.hpp"     // <-- FIX: vollständige Definition von FrameContext nötig
+#include "frame_context.hpp"     // vollständige Definition von FrameContext nötig
 #include "ai/aop_telemetry.hpp"
 #include "ai/feature_packer.hpp"
-#include "ai/onnx_model.hpp"
 
 #include <algorithm>
 #include <cstddef>
 #include <cmath>
 #include <cfloat>
-#include <string>
-#include <cstring>   // std::strcmp
-#include <cstdlib>   // getenv / _dupenv_s
-#include <memory>
 
 namespace Repl { namespace Policy {
 
 static inline float clamp01(float v) {
     return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
-}
-
-// --- MSVC-sichere ENV-Abfrage (vermeidet C4996 für getenv) -------------------
-static std::string get_env_string(const char* key) {
-#if defined(_MSC_VER) && !defined(__clang__)
-    char* buf = nullptr;
-    size_t len = 0;
-    if (_dupenv_s(&buf, &len, key) == 0 && buf) {
-        std::string s(buf);
-        std::free(buf);
-        return s;
-    }
-    return {};
-#else
-    const char* v = std::getenv(key);
-    return v ? std::string(v) : std::string();
-#endif
-}
-
-static inline Ep parse_ep(const char* s) {
-    if (!s) return Ep::CPU;
-    if (std::strcmp(s, "cuda") == 0) return Ep::CUDA;
-    if (std::strcmp(s, "dml")  == 0) return Ep::DML;
-    return Ep::CPU;
-}
-
-static OrtModel& ort_model_singleton() {
-    static OrtModel m;
-    return m;
 }
 
 Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& state)
@@ -75,7 +41,7 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
 
     // Grid: bevorzugt fctx.statsTileSize (post-metrics), sonst desiredTilePx
     int statsPx_i = fctx.statsTileSize;
-    if (statsPx_i <= 0) statsPx_i = Settings::Kolibri::desiredTilePx;  // <-- FIX: konstante muss initialisiert sein (MSVC)
+    if (statsPx_i <= 0) statsPx_i = Settings::Kolibri::desiredTilePx;  // konstante muss initialisiert sein (MSVC)
     const int px_i = std::max(1, statsPx_i);
 
     if (state.width <= 0 || state.height <= 0) {
@@ -113,19 +79,6 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
         using namespace Repl::Feat;
         (void)pack_heatmap_features(state.h_entropy, state.h_contrast,
                                     static_cast<int>(w), static_cast<int>(h), px_i);
-    }
-
-    // ---- ORT lazy-load (logs [REPL/ORT] in onnx_model.cpp) -----------------
-    {
-        OrtModel& model = ort_model_singleton();
-        if (!model.is_loaded()) {
-            const std::string modelPath = [&]{
-                auto s = get_env_string("OTTER_AI_MODEL");
-                return !s.empty() ? s : std::string("assets/policy.onnx");
-            }();
-            (void)model.load(modelPath, parse_ep(Settings::Ai::ep));
-            // Phase-1/2: weiterhin keine Inferenz; nur Preview/Logs.
-        }
     }
 
     // -------------------- Simple z-score scoring (preview) -------------------
@@ -180,10 +133,10 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     AOP_Telemetry::g_ai_ndc_ovl_y = ndcY * 0.75f;
     AOP_Telemetry::g_ai_ov_valid  = 1;
 
-    // NEW (Fix B): NDC-Center (0,0) → Policy-NDC Distanz (L2)
+    // Diagnose: NDC-Center (0,0) → Policy-NDC Distanz (L2)
     AOP_Telemetry::g_ai_last_delta = std::sqrt(ndcX * ndcX + ndcY * ndcY);
 
-    // NEW (Fix A – optional Diagnose): monotone Frame-ID
+    // Monotone Frame-ID
     ++AOP_Telemetry::g_ai_frame_id;
 
     // Log
