@@ -1,9 +1,4 @@
-///// Otter: Runner – robustes Streaming, Trailer, **Fail-Report mit Log-Tail (300 Zeilen)**.
-///// Schneefuchs: dedupliziert Rauschen, Trailer-Aggregat, ANSI sicher; /WX-safe.
-/// // Maus: Heartbeat wenn kein Output; CMake/Ninja-Signature für Metriken; Diagnose-Hook bei Exit≠0.
-/// ///// Datei: rust/otter_proc/src/runner.rs
-
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::env;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -18,7 +13,8 @@ use crate::build_metrics::BuildMetrics;
 pub mod runner_term;
 mod runner_progress;
 mod runner_classify;
-mod runner_diagnose; // Diagnose-Report bei Exit≠0
+// optionales Diagnose-Modul (nicht zwingend genutzt, bleibt importfrei)
+mod runner_diagnose;
 
 use runner_classify::{classify_line, Sev};
 use runner_progress::{
@@ -35,19 +31,26 @@ pub struct RunResult { pub code: i32 }
 
 static METRICS_PRINTED_ONCE: AtomicBool = AtomicBool::new(false);
 
-struct PhaseDetect { phase: String, sig: String }
+struct PhaseDetect {
+    phase: String,
+    sig: String,
+}
 
 fn detect_phase_and_sig(exe: &str, args: &[String]) -> PhaseDetect {
     let mut phase = "proc".to_string();
+
+    // Heuristic: try to infer build vs configure
     let mut is_build = false;
     for a in args {
         if a.eq_ignore_ascii_case("build") || a.contains("cmake --build") {
-            is_build = true; break;
+            is_build = true;
+            break;
         }
     }
-    if exe.eq_ignore_ascii_case("cmake") && !is_build { phase = "configure".into(); }
-    if is_build { phase = "build".into(); }
+    if exe.eq_ignore_ascii_case("cmake") && !is_build { phase = "configure".to_string(); }
+    if is_build { phase = "build".to_string(); }
 
+    // Signal used for metrics key
     let sig = if exe.eq_ignore_ascii_case("cmake") {
         format!("cmake:{}", phase)
     } else if exe.eq_ignore_ascii_case("cmd") {
@@ -60,19 +63,35 @@ fn detect_phase_and_sig(exe: &str, args: &[String]) -> PhaseDetect {
         }
         format!("{}:{}", exe, short)
     };
+
     PhaseDetect { phase, sig }
 }
 
+/// Trailer standardmäßig **an**.
+/// Nur wenn OTTER_TRAILER=0|off gesetzt ist, wird er unterdrückt.
 fn trailer_enabled() -> bool {
     match env::var("OTTER_TRAILER") {
         Ok(v) => {
             let t = v.trim().to_ascii_lowercase();
             !(t == "0" || t == "off" || t == "no")
         }
-        Err(_) => true,
+        Err(_) => true, // Default: an
     }
 }
 
+/// Link-Rausch-Kompressor standardmäßig **an**.
+/// Mit OTTER_NOISE_LINK=0|off deaktivierbar.
+fn link_noise_enabled() -> bool {
+    match env::var("OTTER_NOISE_LINK") {
+        Ok(v) => {
+            let t = v.trim().to_ascii_lowercase();
+            !(t == "0" || t == "off" || t == "no")
+        }
+        Err(_) => true, // Default: an
+    }
+}
+
+/// Aggregiert Artefakt- & Git-Infos aus Kindprozess-Logs für den hübschen Trailer.
 #[derive(Default)]
 struct TrailerAgg {
     artifact: Option<String>,
@@ -83,17 +102,21 @@ struct TrailerAgg {
     git_rules_bypassed: bool,
 }
 impl TrailerAgg {
-    fn feed(&mut self, line: &str) -> bool {
+    fn feed(&mut self, line: &str) -> bool /* suppress printing? */ {
         let l = line.trim();
 
+        // Artefakte
         if let Some(idx) = l.find("[RUNNER] artifact:") {
             if let Some(path) = l.get(idx + 19..).map(|s| s.trim()) {
                 if !path.is_empty() { self.artifact = Some(path.to_string()); }
             }
-            return true;
+            return true; // leise sammeln
         }
-        if l.contains("[RUNNER] artifact-candidate:") { return true; }
+        if l.contains("[RUNNER] artifact-candidate:") {
+            return true; // Rauschen unterdrücken
+        }
 
+        // AUTOGIT Start/Kommandos-Rauschen
         if l.starts_with("[AUTOGIT] start")
             || l.starts_with("[AUTOGIT][RUN] git")
             || l.starts_with("Enumerating objects:")
@@ -103,12 +126,18 @@ impl TrailerAgg {
             || l.starts_with("Writing objects:")
             || l.starts_with("Total ")
             || l.starts_with("remote: Resolving deltas:")
-        { return true; }
+        {
+            return true;
+        }
 
         if l.starts_with("remote: Bypassed rule violations")
             || l.contains("Cannot update this protected ref")
-        { self.git_rules_bypassed = true; return true; }
+        {
+            self.git_rules_bypassed = true;
+            return true;
+        }
 
+        // Push-Ziel / Remote
         if l.starts_with("To ") {
             self.git_pushed_ok = true;
             if let Some(pos) = l.rfind("->") {
@@ -121,17 +150,22 @@ impl TrailerAgg {
             return true;
         }
 
+        // Commit-Zeile: "[main abc1234] ..."
         if l.starts_with("[main ") && l.contains(']') {
             if let Some(end) = l.find(']') {
-                let body = &l[1..end];
+                let body = &l[1..end]; // "main abc1234"
                 let mut it = body.split_whitespace();
                 self.git_branch = it.next().map(|s| s.to_string());
                 self.git_commit_short = it.next().map(|s| s.to_string());
             }
-            return false;
+            return false; // nützlich sichtbar
         }
 
-        if l.starts_with("[AUTOGIT] done status=OK") { self.git_pushed_ok = true; return true; }
+        if l.starts_with("[AUTOGIT] done status=OK") {
+            self.git_pushed_ok = true;
+            return true;
+        }
+
         if l.starts_with("branch '") && l.contains(" set up to track ") {
             let name = l.trim_start_matches("branch '")
                 .split('\'').next().unwrap_or("").trim();
@@ -146,19 +180,137 @@ impl TrailerAgg {
         let mut parts: Vec<String> = Vec::new();
 
         if let Some(p) = &self.artifact {
-            let base = Path::new(p).file_name().and_then(|o| o.to_str()).unwrap_or(p);
+            let base = Path::new(p).file_name()
+                .and_then(|o| o.to_str()).unwrap_or(p);
             parts.push(format!("artifact={}", base));
         }
 
         if self.git_pushed_ok {
             let mut s = String::from("git: pushed ✓");
-            if let Some(b) = &self.git_branch    { s.push(' '); s.push_str(b); }
-            if let Some(c) = &self.git_commit_short { s.push_str(" @"); s.push_str(c); }
-            if self.git_rules_bypassed { s.push_str(" (rules)"); }
+            if let Some(b) = &self.git_branch {
+                s.push(' ');
+                s.push_str(b);
+            }
+            if let Some(c) = &self.git_commit_short {
+                s.push_str(" @");
+                s.push_str(c);
+            }
+            if self.git_rules_bypassed {
+                s.push_str(" (rules)");
+            }
             parts.push(s);
         }
 
         if parts.is_empty() { None } else { Some(parts.join(" • ")) }
+    }
+}
+
+/// Erkennt reine Link-Item-Zeilen (Objekte/Libs) und liefert deren Extension-Kategorie.
+/// Beispiele aus deinem Log: "main.cpp.obj", "opengl32.lib".
+fn link_item_kind(line: &str) -> Option<&'static str> {
+    let l = line.trim();
+    if l.is_empty() { return None; }
+    // reine Dateiname-Zeilen ohne Leerzeichen bevorzugen (wie in MSVC-Link-Listen üblich)
+    // tolerieren aber Pfade/Backslashes.
+    let has_ws = l.chars().any(|c| c.is_whitespace());
+    if has_ws && !(l.ends_with(".lib") || l.ends_with(".obj")) {
+        return None;
+    }
+    if l.ends_with(".obj") { return Some("obj"); }
+    if l.ends_with(".lib") { return Some("lib"); }
+    if l.ends_with(".o")   { return Some("obj"); }
+    if l.ends_with(".a")   { return Some("lib"); }
+    // andere Dateiendungen unterdrücken wir nicht; nur die typischen Rauschquellen
+    None
+}
+
+/// Aggregator für Link-Listen; fasst viele .obj/.lib-Zeilen zu einem Summensatz zusammen.
+struct LinkNoiseAgg {
+    enabled: bool,
+    active: bool,
+    cnt_obj: u32,
+    cnt_lib: u32,
+}
+impl LinkNoiseAgg {
+    fn new(enabled: bool) -> Self {
+        Self { enabled, active: false, cnt_obj: 0, cnt_lib: 0 }
+    }
+
+    /// Füttert eine Zeile. Rückgabewert:
+    /// - Some(Ok(summary))  => vor *dieser* Zeile eine Summary ausgeben, Zeile anschließend normal verarbeiten
+    /// - Some(Err(()))      => Zeile *unterdrücken* (als Rauschen gezählt)
+    /// - None               => keine Aktion
+    fn feed(&mut self, line: &str) -> Option<Result<String, ()>> {
+        if !self.enabled { return None; }
+        match link_item_kind(line) {
+            Some("obj") => { self.active = true; self.cnt_obj = self.cnt_obj.saturating_add(1); return Some(Err(())); }
+            Some("lib") => { self.active = true; self.cnt_lib = self.cnt_lib.saturating_add(1); return Some(Err(())); }
+            _ => {
+                if self.active {
+                    let mut parts = Vec::new();
+                    if self.cnt_obj > 0 { parts.push(format!("+{} .obj", self.cnt_obj)); }
+                    if self.cnt_lib > 0 { parts.push(format!("+{} .lib", self.cnt_lib)); }
+                    let summary = if parts.is_empty() {
+                        "(link) compressed".to_string()
+                    } else {
+                        format!("(link) compressed: {}", parts.join(", "))
+                    };
+                    // reset für nächste Sequenz
+                    self.active = false;
+                    self.cnt_obj = 0;
+                    self.cnt_lib = 0;
+                    return Some(Ok(summary));
+                }
+            }
+        }
+        None
+    }
+
+    /// Am Ende der Phase ggf. Summary ausgeben.
+    fn flush(&mut self) -> Option<String> {
+        if !self.enabled || !self.active { return None; }
+        self.active = false;
+        let mut parts = Vec::new();
+        if self.cnt_obj > 0 { parts.push(format!("+{} .obj", self.cnt_obj)); }
+        if self.cnt_lib > 0 { parts.push(format!("+{} .lib", self.cnt_lib)); }
+        self.cnt_obj = 0;
+        self.cnt_lib = 0;
+        Some(if parts.is_empty() {
+            "(link) compressed".to_string()
+        } else {
+            format!("(link) compressed: {}", parts.join(", "))
+        })
+    }
+}
+
+// Hilfsfunktion: eine bereinigte Zeile in Progress/Logs einspeisen
+fn process_line(cleaned: &str, tag: &str, pstate: &mut ProgressState, trailer: &mut TrailerAgg) {
+    if cleaned.is_empty() { return; }
+
+    // Trailers sammeln / Rauschen ggf. unterdrücken
+    if trailer.feed(cleaned) {
+        return; // nichts ausgeben
+    }
+
+    // Progress aus den Inhalten schätzen
+    let ratio = parse_ratio_percent(cleaned);
+    let pct = parse_percent(cleaned).or(ratio);
+
+    if let Some(p) = pct {
+        pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
+    }
+    if ratio.is_some() {
+        pstate.runtime_phase = "build".into();
+    }
+
+    let snip = last_nonempty_snippet(cleaned, 120);
+    if !snip.is_empty() { pstate.last_snippet = snip; }
+
+    let _ = end_ephemeral();
+    match classify_line(cleaned) {
+        Sev::Err  => out_err (tag, cleaned),
+        Sev::Warn => out_warn(tag, cleaned),
+        Sev::Info => out_info(tag, cleaned),
     }
 }
 
@@ -174,137 +326,166 @@ pub fn run_streamed_with_env(
     };
 
     enable_ansi();
+
+    // Sofortiger Start-Heartbeat, damit der Beginn nie „stuck“ wirkt.
     print_ephemeral("[proc] starting...");
 
+    // Metrics: load or seed, log only once per process
     let (mut metrics, metrics_file, seed_src) = BuildMetrics::load_or_seed(&workdir);
     if !METRICS_PRINTED_ONCE.swap(true, Ordering::SeqCst) {
         out_info("RUST", &format!("metrics={}", metrics_file.display()));
-        if let Some(src) = seed_src { out_info("RUST", &format!("metrics-seeded-from={}", src.display())); }
+        if let Some(src) = seed_src {
+            out_info("RUST", &format!("metrics-seeded-from={}", src.display()));
+        }
     }
 
+    // Spawn child
     let mut cmd = Command::new(exe);
-    cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if let Some(d) = cwd { cmd.current_dir(d); }
-    if let Some(envmap) = env_overlay { for (k,v) in envmap.iter() { cmd.env(k, v); } }
+    if let Some(envmap) = env_overlay {
+        for (k,v) in envmap.iter() { cmd.env(k, v); }
+    }
 
     let phase_sig = detect_phase_and_sig(exe, args);
     out_info("RUST", &format!("RUN exe=\"{}\" phase={} sig={}", exe, phase_sig.phase, phase_sig.sig));
 
+    // Spawn-Latenz messen (z. B. Smartscreen/AV)
     let t_spawn0 = Instant::now();
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) => { end_ephemeral().ok(); out_err("RUST", &format!("spawn failed exe={} err={}", exe, e)); return RunResult { code: 1 }; }
+        Err(e) => { let _ = end_ephemeral(); out_err("RUST", &format!("spawn failed exe={} err={}", exe, e)); return RunResult { code: 1 }; }
     };
     let spawn_ms = t_spawn0.elapsed().as_millis();
-    if spawn_ms > 400 { end_ephemeral().ok(); out_info("RUST", &format!("spawn-latency={}ms", spawn_ms)); }
+    if spawn_ms > 400 {
+        let _ = end_ephemeral();
+        out_info("RUST", &format!("spawn-latency={}ms", spawn_ms));
+    }
 
-    let stdout = match child.stdout.take() { Some(s) => s, None => { out_err("RUST", "failed to take stdout"); return RunResult { code: 1 }; } };
-    let stderr = match child.stderr.take() { Some(s) => s, None => { out_err("RUST", "failed to take stderr"); return RunResult { code: 1 }; } };
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => { let _ = end_ephemeral(); out_err("RUST", "failed to take stdout"); return RunResult { code: 1 }; }
+    };
+    let stderr = match child.stderr.take() {
+        Some(s) => s,
+        None => { let _ = end_ephemeral(); out_err("RUST", "failed to take stderr"); return RunResult { code: 1 }; }
+    };
 
     let predicted_ms = metrics.get_last_ms(&phase_sig.sig, &phase_sig.phase).unwrap_or(0);
 
+    // Progress
     let mut pstate = ProgressState::new(&phase_sig.phase);
+
+    // Trailer-Aggregator
     let mut trailer = TrailerAgg::default();
 
-    // --- Tail-Puffer für Diagnose ------------------------------------------------
-    const TAIL_KEEP: usize = 300;
-    let mut tail: VecDeque<String> = VecDeque::with_capacity(TAIL_KEEP);
-    // ----------------------------------------------------------------------------
+    // Link-Rausch-Kompressor
+    let mut linkagg = LinkNoiseAgg::new(link_noise_enabled());
 
+    // Tag for child streams in logs
     let tag = if exe.eq_ignore_ascii_case("cmd") { "PS" } else { "PROC" };
+
+    // Non-blocking design: two reader threads feed a channel; main loop ticks UI.
     let (tx, rx) = mpsc::channel::<String>();
 
+    // stdout reader
     {
         let tx = tx.clone();
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
-                if let Ok(l) = line { let _ = tx.send(l); } else { break; }
+                match line {
+                    Ok(l) => { let _ = tx.send(l); }
+                    Err(_) => break,
+                }
             }
         });
     }
+
+    // stderr reader
     {
         let tx = tx.clone();
         thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines() {
-                if let Ok(l) = line { let _ = tx.send(l); } else { break; }
+                match line {
+                    Ok(l) => { let _ = tx.send(l); }
+                    Err(_) => break,
+                }
             }
         });
     }
-    drop(tx);
+    drop(tx); // main thread keeps only rx
 
-    let heartbeat_enabled = !progress_enabled();
+    // ---- Heartbeat/Spinner (falls zu Beginn keine Ausgaben kommen) -----------------
+    let heartbeat_enabled = !progress_enabled(); // Falls Progress-Renderer aus ist -> Spinner aktivieren
     let spinner: [char; 4] = ['-', '\\', '|', '/'];
     let mut hb_idx: usize = 0;
     let mut hb_last = Instant::now();
     let mut saw_any_child_output = false;
+    // -------------------------------------------------------------------------------
+
+    // Initial ephemeral or start line
+    if progress_enabled() {
+        render_and_print(&mut pstate, predicted_ms);
+    } else {
+        let _ = end_ephemeral();
+        out_info("RUST", &format!("RUN phase={} started", pstate.runtime_phase));
+    }
 
     let mut readers_done = false;
     let mut exit_code: Option<i32> = None;
 
-    if progress_enabled() {
-        render_and_print(&mut pstate, predicted_ms);
-    } else {
-        end_ephemeral().ok();
-        out_info("RUST", &format!("RUN phase={} started", pstate.runtime_phase));
-    }
-
-    // Hilfsfunktion statt Closure – vermeidet Borrow-Konflikte
-    fn handle_line(
-        pstate: &mut ProgressState,
-        trailer: &mut TrailerAgg,
-        tail: &mut VecDeque<String>,
-        cleaned: &str,
-        tag: &str,
-    ) {
-        if cleaned.is_empty() { return; }
-
-        if trailer.feed(cleaned) { return; }
-
-        if let Some(r) = parse_ratio_percent(cleaned) {
-            pstate.runtime_phase = "build".into();
-            pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(r)).unwrap_or(r));
-        } else if let Some(p) = parse_percent(cleaned) {
-            pstate.best_builder_pct = Some(pstate.best_builder_pct.map(|b| b.max(p)).unwrap_or(p));
-        }
-
-        let snip = last_nonempty_snippet(cleaned, 120);
-        if !snip.is_empty() { pstate.last_snippet = snip; }
-
-        // Tail auffüllen
-        tail.push_back(cleaned.to_string());
-        if tail.len() > TAIL_KEEP { tail.pop_front(); }
-
-        let _ = end_ephemeral();
-        match classify_line(cleaned) {
-            Sev::Err  => out_err (tag, cleaned),
-            Sev::Warn => out_warn(tag, cleaned),
-            Sev::Info => out_info(tag, cleaned),
-        }
-    }
-
     loop {
+        // Drain currently available lines
         let mut drained_any = false;
         loop {
             match rx.try_recv() {
                 Ok(raw) => {
                     let cleaned = sanitize_line(&raw);
                     if !cleaned.is_empty() {
-                        saw_any_child_output = true;
-                        handle_line(&mut pstate, &mut trailer, &mut tail, &cleaned, tag);
+                        saw_any_child_output = true; // mindestens eine Zeile gesehen
+
+                        // 1) Link-Rauschen: ggf. Summary vorab ausgeben oder die Zeile schlucken
+                        match linkagg.feed(&cleaned) {
+                            Some(Ok(summary)) => {
+                                let _ = end_ephemeral();
+                                out_info(tag, &summary);
+                                // danach normal weiterverarbeiten (cleaned ist *keine* Link-Item-Zeile)
+                                process_line(&cleaned, tag, &mut pstate, &mut trailer);
+                            }
+                            Some(Err(())) => {
+                                // Zeile ist Link-Rauschen -> unterdrücken
+                            }
+                            None => {
+                                // keine Link-Aktion -> normaler Weg
+                                process_line(&cleaned, tag, &mut pstate, &mut trailer);
+                            }
+                        }
                     }
                     drained_any = true;
                 }
                 Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => { readers_done = true; break; }
+                Err(TryRecvError::Disconnected) => {
+                    readers_done = true;
+                    break;
+                }
             }
         }
 
+        // Keep animation alive (Renderer) …
         if progress_enabled() && due(&pstate) {
             render_and_print(&mut pstate, predicted_ms);
         }
-        if heartbeat_enabled && exit_code.is_none() && !saw_any_child_output && hb_last.elapsed() >= Duration::from_millis(120) {
+        // … oder minimalistischer Heartbeat, wenn (noch) keine Ausgaben kommen.
+        if heartbeat_enabled
+            && exit_code.is_none()
+            && !saw_any_child_output
+            && hb_last.elapsed() >= Duration::from_millis(120)
+        {
             hb_idx = (hb_idx + 1) & 3;
             let secs = pstate.start.elapsed().as_secs_f32();
             let spin = spinner[hb_idx];
@@ -312,34 +493,33 @@ pub fn run_streamed_with_env(
             hb_last = Instant::now();
         }
 
+        // Poll child exit
         match child.try_wait() {
             Ok(Some(st)) => { exit_code = Some(st.code().unwrap_or(1)); }
             Ok(None) => {}
-            Err(e) => { end_ephemeral().ok(); out_err("RUST", &format!("wait failed: {}", e)); return RunResult { code: 1 }; }
+            Err(e) => {
+                let _ = end_ephemeral();
+                out_err("RUST", &format!("wait failed: {}", e));
+                return RunResult { code: 1 };
+            }
         }
 
+        // Finish condition: child exited AND all readers done
         if let Some(code) = exit_code {
             if readers_done {
-                end_ephemeral().ok();
+                let _ = end_ephemeral();
 
-                // Diagnose-Hook: Fail-Report vor Metriken/Trailer schreiben
-                if code != 0 {
-                    let snapshot: Vec<String> = tail.iter().cloned().collect();
-                    let _ = runner_diagnose::try_write_on_failure(
-                        &workdir,
-                        &pstate.runtime_phase,
-                        &phase_sig.sig,
-                        code,
-                        Some(&snapshot),
-                    );
+                // evtl. noch offene Link-Sequence zusammenfassen
+                if let Some(summary) = linkagg.flush() {
+                    out_info(tag, &summary);
                 }
 
-                // Dauer persistieren
+                // Dauer erfassen & persistieren
                 let elapsed_ms = pstate.start.elapsed().as_millis() as u128;
                 metrics.upsert_phase_ms(&phase_sig.sig, &pstate.runtime_phase, elapsed_ms);
                 let _ = metrics.save(&workdir);
 
-                // Trailer
+                // Hübsches Ende: farbiger Trailer + kompakte Extras
                 if trailer_enabled() {
                     let secs = (elapsed_ms as f32) / 1000.0;
                     let ok = code == 0;
@@ -363,6 +543,7 @@ pub fn run_streamed_with_env(
     }
 }
 
+// Legacy name kept for back-compat (if externally used)
 #[allow(dead_code)]
 pub fn run_streamed(exe: &str, args: &[String]) -> RunResult {
     run_streamed_with_env(exe, args, None, None)
