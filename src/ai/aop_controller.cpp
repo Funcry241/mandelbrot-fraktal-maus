@@ -192,9 +192,13 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
         RB.lastSignal = compute_signal(e_cur, c_cur);
         RB.lastUpdateFrame = frame;
         static int s_updateCount = 0; ++s_updateCount;
-        if (Settings::AiBandit::persistEvery > 0 && (s_updateCount % Settings::AiBandit::persistEvery) == 0) {
-            const bool okSave = RB.bandit.save(Settings::AiBandit::persistPath);
-            LUCHS_LOG_HOST(okSave ? "[AI/SAVE] path=%s" : "[AI/SAVE] failed path=%s", Settings::AiBandit::persistPath);
+
+        // /WX-safe: constexpr-Gate verhindert C4127 („Bedingter Ausdruck ist konstant“)
+        if constexpr (Settings::AiBandit::persistEvery > 0) {
+            if ((s_updateCount % Settings::AiBandit::persistEvery) == 0) {
+                const bool okSave = RB.bandit.save(Settings::AiBandit::persistPath);
+                LUCHS_LOG_HOST(okSave ? "[AI/SAVE] path=%s" : "[AI/SAVE] failed path=%s", Settings::AiBandit::persistPath);
+            }
         }
     }
 
