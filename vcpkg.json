@@ -1,24 +1,8 @@
 {
   "name": "mandelbrot-fraktal",
-  "version": "1.0.0",
+  "version-string": "1.0.1",
   "dependencies": [
-    {
-      "name": "glew",
-      "default-features": false,
-      "features": []
-    },
+    { "name": "glew", "default-features": false },
     "glfw3"
-  ],
-  "features": {
-    "ai-ort-cuda": {
-      "description": "Enable ONNX Runtime with the native CUDA execution provider",
-      "dependencies": [
-        {
-          "name": "onnxruntime",
-          "default-features": false,
-          "features": [ "cuda" ]
-        }
-      ]
-    }
-  }
+  ]
 }

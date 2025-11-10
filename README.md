@@ -5,7 +5,7 @@
 
 [![Build Status](https://github.com/Funcry241/mandelbrot-fraktal-maus/actions/workflows/ci.yml/badge.svg)](https://github.com/Funcry241/mandelbrot-fraktal-maus/actions/workflows/ci.yml)
 ![CUDA](https://img.shields.io/badge/CUDA-13%2B-76b900?logo=nvidia)
-![C%2B%2B](https://img.shields.io/badge/C%2B%2B-20-blue)
+![C%2B%2B](https://img.shields.io/badge/C%2B%2B-23-blue)
 ![OpenGL](https://img.shields.io/badge/OpenGL-4.3%2B-3D9DD6)
 ![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-informational)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -20,8 +20,7 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom –
 > **Neu (Phase‑1 „Replikatoren sichtbar“)**  
 > – **Orbit/Perturb-Gate: _ON_** (Ctrl+P toggelt zur Laufzeit).  
 > – **AOP Policy (Dry‑Run): _ON_** – zeigt Zielvorschau als **[REPL/POLICY]**‑Zeilen; keine Steuerwirkung.  
-> – **Luchs‑Logging: _ON_** – ASCII‑only, Host/Device getrennt.  
-> – **ONNX Runtime** ist optional (*OFF by default*).
+> – **Luchs‑Logging: _ON_** – ASCII‑only, Host/Device getrennt.
 
 ---
 
@@ -35,10 +34,11 @@ dist\
   mandelbrot_otterdream.exe   ← doppelklicken & starten
   glew32.dll                  ← bereits mitgeliefert
   glfw3.dll                   ← bereits mitgeliefert
+  cudart64_130.dll            ← falls erforderlich, bereits mitgeliefert
 ```
 
 **Voraussetzung zum Ausführen:** Ein aktueller **NVIDIA‑Grafiktreiber** und OpenGL 4.3.  
-**Nicht nötig zum Ausführen:** Visual Studio, vcpkg oder das CUDA Toolkit (wir linken die CUDA Runtime statisch).
+**Nicht nötig zum Ausführen:** Visual Studio, vcpkg oder das CUDA Toolkit (Runtime‑DLLs liegen bei).
 
 > Falls `dist\mandelbrot_otterdream.exe` fehlt: einmal bauen (siehe unten „Automatischer Build“) – der Build füllt `dist\` automatisch.
 
@@ -144,17 +144,6 @@ Settings::Ai::enabled      = true; // AOP Dry-Run aktiv
 Settings::Luchs::enabled   = true; // Host/Device ASCII-Logs
 ```
 
-**ONNX Runtime (optional, default OFF):**
-
-```bash
-# CMake
--DOTTER_USE_ORT=ON -DOTTER_ORT_PROVIDER=cuda   # oder dml/cpu
-# Falls kein systemweites Package:
--DOTTER_ORT_ROOT="C:/path/to/onnxruntime"
-```
-
-> In Phase‑1 wird ORT nur geladen/geloggt (Lazy‑Init), **keine Inferenz**. Policy bleibt **Dry‑Run**.
-
 ---
 
 ## 🧪 Logging‑Formate (Kern)
@@ -162,13 +151,12 @@ Settings::Luchs::enabled   = true; // Host/Device ASCII-Logs
 **Eine feste ASCII‑Zeile pro Cadence:**
 
 ```
-[PERF] t=<epoch-ms> frame=<i> res=<WxH> zoom=<z> it=<n> fps=<f> ...
-       mand=<ms> ent=<ms> con=<ms> up=<ms> ovl=<ms> oth=<ms> tot=<ms>
-       e0=<v> c0=<v> hmN=<N> statsPx=<px> hmAge=<k> ring=<r> ...
+[<epoch-ms>][cuda_interop.cu][line]: [PERF] capy=<ms> col=<ms> b=<budget-ms> ema=<x.xxx> bh=<0/1>
 ```
 
-* `e0/c0` werden zwischen Berechnungsframes **stale‑weitergetragen**.  
-* `hmAge` gibt die Anzahl **Frames seit letzter Metric‑Berechnung** an (0/1/2 bei `everyN=3`).
+**Legende (Kurz):** `capy` Render via Capybara, `col` Colorizer, `b` Budget, `ema` geglättete Budget-Auslastung, `bh` Budget-Hit (1 = Budget erschöpft).
+
+> EC-spezifische Metriken sind derzeit **entfernt**.
 
 **Policy‑Preview:**
 
@@ -224,9 +212,12 @@ Header und Source bleiben **synchron**. Kein Drift, kein API‑Bruch. Die Robbe 
 
 ---
 
-## 📄 Lizenz
+## ❓ Troubleshooting (Kurz)
 
-MIT‑Lizenz – siehe [LICENSE](LICENSE).
+* **`nvcc` fehlt** -> **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen  
+* **GLEW-Mismatch** (z. B. `glew32d.lib`) -> **dynamisches GLEW** sicherstellen und Triplet/Cache prüfen  
+* **Schwarze Frames** bei extremem Pan/Zoom -> Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs  
+* **CUDA-Interop Stalls** -> PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences
 
 ---
 

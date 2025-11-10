@@ -1,5 +1,5 @@
 <!-- Datei: AGENTS.md -->
-<!-- 🐭 Maus-Kommentar: Dokumentiert Buildprozesse und Toolchains für OtterDream. Aktualisiert: Single-Path-Render (Capybara), kein EC/Wrapper, core_kernel entfernt, LUCHS_LOG-Trennung, kompakte PERF-Logs (Epoch-Millis). Schneefuchs flüstert: „Ein Agent kennt die versteckten Knöpfe und sorgt für saubere Übergänge.“ -->
+<!-- 🐭 Maus-Kommentar: Dokumentiert Buildprozesse und Toolchains für OtterDream. Aktualisiert: Single-Path-Render (Capybara), LUCHS_LOG-Trennung, kompakte PERF-Logs (Epoch-Millis). Schneefuchs flüstert: „Ein Agent kennt die versteckten Knöpfe und sorgt für saubere Übergänge.“ -->
 
 # 👩‍💻 OtterDream Build Agents
 
@@ -7,7 +7,7 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 **Seit Alpha 41** gilt das **Robbe-Prinzip**: *Header & Source bleiben synchron. Kein Drift, kein API-Bruch.*  
 **Seit Alpha 81** zusätzlich relevant: *Silk-Lite Zoom*, *Frame-Budget-Pacing* und **ASCII-only Logs** ohne Seiteneffekt.  
-**Neu (Renderer-Pfad)**: Einziger aktiver Pfad ist **Capybara -> Iterationen -> Colorizer -> PBO** (kein Referenz-Orbit, **keine Perturbation**, **kein EC/Wrapper**).
+**Aktiver Renderer-Pfad:** **Capybara → Iterationen → Colorizer → PBO** (ein Pfad).
 
 ---
 
@@ -15,10 +15,10 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 | Agent/Tool               | Zweck                           | Trigger                 | Aktionen                                                             |
 | ------------------------ | ------------------------------- | ----------------------- | -------------------------------------------------------------------- |
-| **GitHub Actions (CI)**  | Build-, Test-, Install-Check    | Push/PR auf `main`      | CMake Configure -> Ninja Build -> `cmake --install`                    |
+| **GitHub Actions (CI)**  | Build-, Test-, Install-Check    | Push/PR auf `main`      | CMake Configure → Ninja Build → `cmake --install`                    |
 | **Dependabot**           | Abhängigkeits-Updates (vcpkg)   | Wöchentlich             | PRs für `vcpkg.json`, CI baut PR                                     |
 | **Waschbär-Watchdog**    | Hygiene & Auto-Fixes (lokal)    | On-Demand               | Räumt CMake-Caches, fixt typische GLEW/vcpkg-Fallen                  |
-| **Autogit (lokal)**      | Mini-CI für Commits/Push        | Nach erfolgreichem Build| `git add -A` -> `git commit -m "<msg>"` -> `git push` (https Fallback) |
+| **Autogit (lokal)**      | Mini-CI für Commits/Push        | Nach erfolgreichem Build| `git add -A` → `git commit -m "<msg>"` → `git push` (https Fallback) |
 | **Rust Runner (lokal)**  | Komfort-Build mit Live-Progress | Manuell (CLI/PS)        | Farben/Spinner/%/ETA, Log-Tags `[PS]/[RUST]/[PROC]`, ETA aus Metrics |
 
 > CI stellt sicher, dass **Debug-/Perf-Logging keine Seiteneffekte** erzeugt (keine erzwungenen Synchronisationen im Hot-Path).
@@ -40,9 +40,9 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 - Zeitbasierte Fortschritts-Absicherung (Zeit-Prozent max mit Builder-Prozent fusioniert).
 
 **Env-Toggles:**  
-- `OTTER_PROGRESS=0` -> Progress-UI aus (Default: **an**)  
-- `OTTER_COLOR=0` -> Farben aus (Default: **an**)  
-- `OTTER_ASCII=1` -> ASCII-Spinner/Balken erzwingen
+- `OTTER_PROGRESS=0` → Progress-UI aus (Default: **an**)  
+- `OTTER_COLOR=0` → Farben aus (Default: **an**)  
+- `OTTER_ASCII=1` → ASCII-Spinner/Balken erzwingen
 
 **Cache-Schutz:**  
 - Erkanntes **CMake-Cache-Mismatch** (Repo-Root-Wechsel) ⇒ Runner löscht `build/` sicher und konfiguriert neu.
@@ -74,8 +74,6 @@ Standard: `80;86;89;90` (Ampere+). Abweichungen pro Preset überschreiben:
 cmake --preset windows-release -DCMAKE_CUDA_ARCHITECTURES=90
 ```
 
-Die passende Compute Capability deiner GPU findest du in NVIDIAs Übersicht.
-
 ---
 
 ## 🧯 Host/Device-Logging (LUCHS_LOG)
@@ -83,10 +81,10 @@ Die passende Compute Capability deiner GPU findest du in NVIDIAs Übersicht.
 * **Host**: `LUCHS_LOG_HOST(...)` – ASCII-only, **eine Zeile pro Event**, Zeitstempel als **Epoch-Millis**.
 * **Device**: `LUCHS_LOG_DEVICE(msg)` – schreibt in den Device-Puffer; Flush auf Host **außerhalb** des Hot-Paths.  
   *Hinweis:* Nachricht mit `snprintf` zusammenbauen ist ok – der **finale** Aufruf ist genau **ein** `LUCHS_LOG_DEVICE(const char*)`.
-* **Kein `printf/fprintf`** im Produktionspfad. Logs dürfen **keine** impliziten Synchronisationen auslösen.
+* **Keine** `printf/fprintf` im Produktionspfad. Logs dürfen **keine** impliziten Synchronisationen auslösen.
 * **Schalter (Settings)**:  
-  `performanceLogging` -> kompakte Messwerte via CUDA-Events (ASCII)  
-  `debugLogging` -> detaillierter, ggf. langsamer
+  `performanceLogging` → kompakte Messwerte via CUDA-Events (ASCII)  
+  `debugLogging` → detaillierter, ggf. langsamer
 
 ---
 
@@ -100,13 +98,11 @@ Der Mandelbrot-Pfad hält sich an ein weiches **Zeitbudget** pro Frame. Silk-Lit
 ## 🎨 Renderer-Pfad & Farbgebung (Status)
 
 * **Aktiver Pfad:** **Capybara-Iteration** (Float), Escape-Test **vor** dem Update (`|z|^2 > 4`).  
-  -> *Innen* schreibt `iterOut = maxIter`, *Escape* schreibt den Iterationsindex.  
-* **Pipeline:** `capy_render(...)` (Iterations) -> `colorize_iterations_to_pbo(...)` -> PBO (GL-Interop).  
-* **Palette:** **GT (Cyan->Amber)**, Interpolation im **Linearraum** (Banding-mindernd).  
+  – *Innen* schreibt `iterOut = maxIter`, *Escape* schreibt den Iterationsindex.  
+* **Pipeline:** `capy_render(...)` (Iterations) → `colorize_iterations_to_pbo(...)` → PBO (GL-Interop).  
+* **Palette:** **GT (Cyan→Amber)**, Interpolation im **Linearraum** (Banding-mindernd).  
   **Stripes** sind **standardmäßig aus** (`stripes = 0.0f`) für ringfreie Darstellung.  
 * **Mapping:** Projektweit über `screenToComplex(...)` (Koordinaten-Harmonisierung, „Eule“).
-
-> Hinweis: Entropie/Kontrast (EC) ist **deaktiviert/entfernt**. Heatmap-Overlay existiert optional, liefert derzeit **kein** Signal.
 
 ---
 
@@ -114,69 +110,18 @@ Der Mandelbrot-Pfad hält sich an ein weiches **Zeitbudget** pro Frame. Silk-Lit
 
 | Taste   | Funktion                               |
 | ------- | -------------------------------------- |
-| `P`     | Auto-Zoom pausieren/fortsetzen         |
-| `H`     | Heatmap-Overlay toggeln (ohne EC-Daten)|
+| `P`     | Auto‑Zoom pausieren/fortsetzen         |
+| `H`     | Heatmap‑Overlay toggeln                |
 | `T`     | HUD (Warzenschwein) toggeln            |
-
-> Hinweis: `Space` ist derzeit **nicht** gemappt (kein Alias zu `P`).
-
----
-
-## ⚙️ Lokaler Build
-
-### 🪟 Windows
-
-**A) Komfort (optional, falls vorhanden)**
-
-```powershell
-./build.ps1
-```
-
-**B) Manuell mit Presets**
-
-```powershell
-cmake --preset windows-msvc
-cmake --build --preset windows-msvc
-cmake --install --preset windows-msvc --prefix .\dist
-.\dist\mandelbrot_otterdream.exe
-```
-
-> Hinweis: In manchen Repos ist `build.ps1` absichtlich **nicht** eingecheckt. Dann bitte Weg **B)** verwenden.
-
-### 🐧 Linux
-
-1. Pakete (Beispiel Debian/Ubuntu):
-
-```bash
-sudo apt update
-sudo apt install build-essential cmake git ninja-build libglfw3-dev libglew-dev libxmu-dev libxi-dev libglu1-mesa-dev xorg-dev pkg-config
-```
-
-2. Klonen & vcpkg bootstrap (wie in der README):
-
-```bash
-git clone --recurse-submodules https://github.com/Funcry241/mandelbrot-fraktal-maus.git
-cd mandelbrot-fraktal-maus
-git clone https://github.com/microsoft/vcpkg.git
-./vcpkg/bootstrap-vcpkg.sh
-```
-
-3. Bauen & installieren:
-
-```bash
-cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
-cmake --install build --prefix ./dist
-./dist/mandelbrot_otterdream
-```
+| `Ctrl+P`| **Perturb‑Gate** toggeln               |
 
 ---
 
 ## 🧷 Toolchain & Hardening (Windows)
 
-* **CRT vereinheitlicht**: `/MT` (inkl. NVCC-Host) -> keine LNK2038-Mismatches.  
-* **`CUDA::cudart_static`**: passt zum `/MT`-CRT.  
-* **GLEW dynamisch**: **kein** `GLEW_STATIC`; vcpkg-Triplet passend wählen.  
+* **CRT**: `/MD` (DLL) – konsistent zum Host-Link; keine LNK2038-Mismatches.  
+* **CUDA Runtime**: **Shared**; Runtime‑DLL wird in `dist\` kopiert (falls nötig).  
+* **GLEW dynamisch**: kein `GLEW_STATIC`; vcpkg‑Triplet entsprechend.  
 * **Hardening nur im Host-Link**: `/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf` über `$<HOST_LINK:...>`.  
 * **Separable Compilation** + **Device-Symbole** aktiviert (CMake Properties).
 
@@ -192,49 +137,18 @@ cmake --install build --prefix ./dist
 
 ---
 
-## 🧪 Logging-Formate (Kern, kompakt)
-
-* **ASCII-only**, **eine Zeile pro Logeintrag**.  
-* **Epoch-Millis** (UTC) als Zeitstempel.  
-* **Keine Seiteneffekte** im Hot-Path (keine globale Sync).
-
-### Kompakte PERF-Zeile (Render/Colorize)
-
-```
-[<epoch-ms>][cuda_interop.cu][line]: [PERF] capy=<ms> col=<ms> b=<budget-ms> ema=<x.xxx> bh=<0/1>
-```
-
-**Legende (Kurz):** `capy` Render via Capybara, `col` Colorizer, `b` Budget, `ema` geglättete Budget-Auslastung, `bh` Budget-Hit (1 = Budget erschöpft).
-
-> EC-spezifische Metriken sind derzeit **entfernt**.
-
----
-
 ## 🌐 CI/CD Pipelines
 
 **GitHub Actions** (`.github/workflows/ci.yml`)
 
-* Configure -> Build (Ninja) -> Install  
+* Configure → Build (Ninja) → Install  
 * Artefakte: Install-Tree unter `dist/`  
 * Prüfungen:
   * CUDA-Kompilation für Presets
   * konsistente CMake-Presets
-  * deterministische Builds (gleiche Inputs -> gleiche Outputs)
+  * deterministische Builds (gleiche Inputs → gleiche Outputs)
 
 **Dependabot**
 
 * PRs für `vcpkg.json` (wöchentlich)  
 * CI baut und verifiziert
-
----
-
-## ❓ Troubleshooting (Kurz)
-
-* **`nvcc` fehlt** -> **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen  
-* **GLEW-Mismatch** (z. B. `glew32d.lib`) -> **dynamisches GLEW** sicherstellen und Triplet/Cache prüfen  
-* **Schwarze Frames** bei extremem Pan/Zoom -> Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs  
-* **CUDA-Interop Stalls** -> PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences
-
----
-
-**Agenten-Motto:** Maus bringt Fokus 🐭, Schneefuchs Präzision 🦊, Robbe API-Disziplin 🦭, Waschbär Hygiene 🦝. 💫
