@@ -1,6 +1,6 @@
-##### Otter: CI baut CUDA 13 + vcpkg manifest (ORT via ai-ort-cuda), ohne GLU-Dev; nutzt Binary-Cache.
-##### Schneefuchs: Korrekte GitHub-Actions-Kontexte (${{
-##### Maus: CUDACXX/CUDA_HOME als env; vcpkg-Cache; Presets optional – hier direkte CMake-Flags.
+##### Otter: CI ohne ORT/ONNX; baut CUDA 13 + vcpkg; dynamisches GLEW; GLU-frei; Artefakt-Upload.
+##### Schneefuchs: Korrekte Actions-Kontexte; vcpkg Cache; Ninja; saubere Configure-Flags (keine ORT-Defines).
+##### Maus: Prüft nvcc-Version; installiert OpenGL/GLFW/GLEW Deps; nutzt Toolchain von vcpkg.
 ##### Datei: .github/workflows/ci.yml
 name: Build Validation
 
@@ -22,11 +22,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      # CUDA toolchain for CMake
       CUDA_HOME: /usr/local/cuda-13.0
       CUDACXX: /usr/local/cuda-13.0/bin/nvcc
-      # vcpkg manifest mode + ORT CUDA feature
-      VCPKG_MANIFEST_FEATURES: ai-ort-cuda
       VCPKG_FEATURE_FLAGS: manifests,versions,registries,binarycaching
       VCPKG_DEFAULT_TRIPLET: x64-linux
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
@@ -81,7 +78,7 @@ jobs:
           restore-keys: |
             vcpkg-bin-${{ runner.os }}-
 
-      - name: Configure project with vcpkg (CUDA 13, dynamic GLEW, ORT CUDA)
+      - name: Configure project (CUDA 13, dynamic GLEW)
         run: >
           cmake -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
@@ -91,8 +88,6 @@ jobs:
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           -DVCPKG_TARGET_TRIPLET=${{ env.VCPKG_DEFAULT_TRIPLET }}
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
-          -DOTTER_USE_ORT=ON
-          -DOTTER_ORT_PROVIDER=cuda
 
       - name: Build project
         run: cmake --build build --config Release --verbose

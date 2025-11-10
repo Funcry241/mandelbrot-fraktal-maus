@@ -1,9 +1,7 @@
-///// Otter: Central config – Nacktmull defaults consolidated; every value documented (purpose, range, default)
-///// Schneefuchs: No hidden macros; single source of truth for flags & cadences; ASCII-only policy
-///// Maus: performanceLogging=1, ForceAlwaysZoom=1 baseline; 32×8 blocks; no fast-math; deterministic logs
+///// Otter: Central config – Nacktmull + Replikatoren; alle Werte dokumentiert; deterministische ASCII-Logs.
+/***** Schneefuchs: Keine versteckten Makros; Header/Source synchron; /WX-safe Defaults; GLEW dynamisch. *****/
+/***** Maus: performanceLogging=1, ForceAlwaysZoom=1; Kolibri-Grid; AiBandit-Block (Shadow/Assisted/Auto Ready). *****/
 ///// Datei: src/settings.hpp
-// ///// Change: Phase-1 — Replikatoren sichtbar schalten: Perturb=ON, Luchs.enabled=ON (nvrtc=OFF)
-
 #pragma once
 
 // ============================================================================
@@ -15,245 +13,93 @@
 namespace Settings {
 
 // ============================== Zoom / Planner ===============================
-// Controls the auto-zoom planner’s global behavior.
-
-    // Force continuous zoom regardless of entropy/contrast signals.
-    // Use when exploring or for demos to avoid stalls.
-    // Range: {false, true} | Default: true
-    inline constexpr bool   ForceAlwaysZoom = true;
-
-    // After a new target is chosen, keep direction fixed for stability.
-    // Higher values = fewer direction flips but slower reaction.
-    // Range: 0.2 .. 2.0 seconds | Default: 1.0
-    inline constexpr double warmUpFreezeSeconds = 1.0;
+    inline constexpr bool   ForceAlwaysZoom      = true;
+    inline constexpr double warmUpFreezeSeconds  = 1.0;
 
 // ============================== Logging / Perf ===============================
-// Toggle targeted debug and compact perf logs. These do not change math;
-// they only affect I/O and timing jitter from printing.
+    inline constexpr bool debugLogging           = false;
+    inline constexpr bool performanceLogging     = true;
 
-    // Verbose diagnostics (host/device). Keep off for clean benchmarks.
-    // Range: {false, true} | Default: false
-    inline constexpr bool debugLogging  = false;
-
-    // Compact [PERF] lines along the frame pipeline (timings, FPS, ring).
-    // Range: {false, true} | Default: true
-    inline constexpr bool performanceLogging = true;
-
-    // --- ZoomLog --------------------------------------------------------------
-    // Telemetry for zoom stages (S1..Sn). Rate-limited, optional header.
     namespace ZoomLog {
-        // Emit zoom telemetry lines.
-        // Range: {false, true} | Default: true
         inline constexpr bool enabled       = true;
-
-        // Emit every Nth frame (1 = every frame). Larger N reduces log noise.
-        // Range: 1 .. 120 | Default: 16
         inline constexpr int  everyN        = 16;
-
-        // Print a single header explaining columns on first emission.
-        // Range: {false, true} | Default: true
         inline constexpr bool header        = true;
-
-        // Include current complex center in the log line (useful for replay).
-        // Range: {false, true} | Default: true
         inline constexpr bool includeCenter = true;
-    } // namespace ZoomLog
+    }
 
-    // --- PerfLog cadence (Nacktmull) -----------------------------------------
-    // Rate-limits hot-path [PERF] lines and defines a warm-up window.
-    // Does not affect computation; reduces I/O variance.
     namespace PerfLog {
-        // Enable [PERF] lines.
-        // Range: {false, true} | Default: true
         inline constexpr bool enabled      = true;
-
-        // Emit every Nth frame after warm-up (1 = every frame).
-        // Range: 1 .. 240 | Default: 20
         inline constexpr int  everyN       = 1;
-
-        // Suppress perf logs during first frames to avoid cold-start noise.
-        // Range: 0 .. 300 | Default: 60
         inline constexpr int  warmupFrames = 0;
-
-        // Emit a single header explaining columns on first emission.
-        // Range: {false, true} | Default: true
         inline constexpr bool header       = true;
-
-        // NEW: also emit the short CUDA-side [PERF] line (capy/color)?
-        // If false, cuda_interop.cu will not time or print its compact line.
-        // Range: {false, true} | Default: false
         inline constexpr bool emitCudaLine = false;
-
-        // Reserved: future compact formatting toggle for frame_pipeline [PERF].
-        // Range: {false, true} | Default: false
         inline constexpr bool compact      = false;
-    } // namespace PerfLog
+    }
 
 // ============================== Framerate / VSync ============================
-// Frame pacing. Prefer VSync for visual stability; cap for headroom.
-
-    // Hard cap in the main loop. Keep <= monitor refresh when preferVSync=true.
-    // Range: {false, true} | Default: true
     inline constexpr bool capFramerate = true;
-
-    // Target FPS when capFramerate=true.
-    // Range: 30 .. 240 | Default: 60
     inline constexpr int  capTargetFps = 60;
-
-    // Ask GL for VSync; driver may override. Turn off for raw perf tests.
-    // Range: {false, true} | Default: true
     inline constexpr bool preferVSync  = true;
 
 // ============================== Interop / Upload =============================
-// PBO ring for GL upload. Larger rings reduce stalls but use more VRAM.
-
-    // Number of PBOs in the ring buffer.
-    // Range: 3 .. 12 | Default: 8
     inline constexpr int pboRingSize = 8;
 
 // ============================== Overlays / HUD ===============================
-// Visual diagnostics on top of the fractal output.
-
-    // Heatmap overlay (entropy/contrast tiles).
-    // Range: {false, true} | Default: true
     inline constexpr bool  heatmapOverlayEnabled       = true;
-
-    // Warzenschwein HUD text (stats + status).
-    // Range: {false, true} | Default: true
     inline constexpr bool  warzenschweinOverlayEnabled = true;
-
-    // Text size in NDC; larger = bigger glyphs.
-    // Range: 0.0015 .. 0.004 | Default: 0.0025
     inline constexpr float hudPixelSize                = 0.0025f;
 
 // ============================== Start / Window ===============================
-// Initial window size/position and view parameters.
-
-    // Window resolution (pixels).
     inline constexpr int   width      = 1024;
     inline constexpr int   height     = 768;
-
-    // Initial window position (pixels).
     inline constexpr int   windowPosX = 100;
     inline constexpr int   windowPosY = 100;
-
-    // Initial view in complex plane.
     inline constexpr float initialZoom    = 1.5f;
     inline constexpr float initialOffsetX = 0.0f;
     inline constexpr float initialOffsetY = 0.0f;
 
 // ============================== Iterations / Tiles ===========================
-// Iteration budget and compute tile size clamps.
-
-    // Starting iteration budget; may ramp with zoom.
-    // Range: 50 .. 400 | Default: 100
     inline constexpr int INITIAL_ITERATIONS = 100;
-
-    // Absolute ceiling for iteration budget (safety).
-    // Range: 10000 .. 200000 | Default: 50000
     inline constexpr int MAX_ITERATIONS_CAP = 50000;
-
-    // Tile size baseline and clamps for compute kernels.
-    // Constraint: MIN <= BASE <= MAX
-    // Typical: 8..64 depending on zoom and occupancy.
     inline constexpr int BASE_TILE_SIZE = 32;
     inline constexpr int MIN_TILE_SIZE  = 8;
     inline constexpr int MAX_TILE_SIZE  = 64;
 
 // ============================== Mandelbrot Kernel ============================
-// Thread block geometry used by colorizer/metrics (render TU may override
-// via __launch_bounds__). Keep X a multiple of 32 for warp alignment.
-
-    // Threads in X (must be multiple of 32).
     inline constexpr int MANDEL_BLOCK_X = 32;
-
-    // Threads in Y.
     inline constexpr int MANDEL_BLOCK_Y = 8;
 
-    // Note: The render kernel translation unit can set its own launch_bounds
-    // for occupancy. MANDEL_BLOCK_* is the shared default for other launches.
-
 // ============================== Progressive / State ==========================
-// Persistent state across frames (resume iterations, etc.).
-
-    // Toggle progressive renderer features in RendererState.
-    // Range: {false, true} | Default: true
     inline constexpr bool progressiveEnabled = true;
 
 // ============================== Kolibri / Grid ===============================
-// Screen-constant analysis grid independent of zoom. The frame pipeline
-// picks tile size in pixels from window size for overlays/metrics.
-
 namespace Kolibri {
-    // Keep analysis grid constant in screen space (pixels) instead of world space.
-    // Range: {false, true} | Default: true
     inline constexpr bool gridScreenConstant = true;
-
-    // Desired tile size for the screen-constant grid (pixels).
-    // Range: 20 .. 40 | Default: 28
     inline constexpr int  desiredTilePx      = 28;
-
-    // NOTE: legacy Kolibri::metricsEveryN removed (moved to StatsCadence).
-} // namespace Kolibri
+}
 
 // ============================== Stats Cadence ================================
-// Rate-limit for analysis metrics (entropy/contrast) to save time without
-// changing visuals. Compute metrics only every Nth frame; reuse the last
-// results in between.
 namespace StatsCadence {
-    // Compute heatmap metrics every Nth frame.
-    // 1 = every frame; 3 = balanced default; larger = lighter load.
-    // Range: 1 .. 16 | Default: 3
     inline constexpr int heatmapEveryN = 3;
-} // namespace StatsCadence
+}
 
 // ============================== Target Bias ==================================
-// Center-weighted scoring for interest selection in overlays.
-// score_biased = raw * ((1 - mix) + mix * exp(-r_ndc^2 / sigmaNdc^2))
-// Smaller sigma ⇒ stronger center bias; mix blends raw vs. biased.
-
 namespace TargetBias {
-    // Enable bias toward the screen center.
-    // Range: {false, true} | Default: true
     inline constexpr bool   enabled  = true;
-
-    // Width of the Gaussian in NDC; smaller = tighter center pull.
-    // Range: 0.3 .. 1.2 | Default: 0.65
     inline constexpr double sigmaNdc = 0.65;
-
-    // Blend factor between raw and biased score.
-    // Range: 0 .. 1 | Default: 0.35
     inline constexpr double mix      = 0.35;
-} // namespace TargetBias
+}
 
 // ============================== Nav Bias (WASD/Arrows) =======================
-// Sanfter Tastatur-Bias in NDC für Auto-Pan/Nudge. Additiv – kein Override.
-// - build: Bias wächst mit gainPerSec, solange Taste(n) gehalten
-// - decay: Bias fällt mit Halbwertzeit halfLifeSec wieder ab
-// - clamp: radialer Cap, damit Tasten allein nicht die Richtung "flippen"
-
 namespace NavBias {
-    // Master-Switch
     inline constexpr bool   enabled     = true;
-
-    // Aufbau-Tempo (pro Sekunde), dt-invariant integriert.
-    // Fühlt sich knackig, aber nicht "hart" an.
     inline constexpr double gainPerSec  = 1.6;
-
-    // Halbwertzeit des Abklingens bei losgelassener Taste (Sekunden).
     inline constexpr double halfLifeSec = 0.8;
-
-    // Radialer Cap auf |bias| in NDC (vor Deadzone/Leashes).
-    // So drückt die Tastatur spürbar, aber dominiert nicht.
     inline constexpr double maxNdc      = 0.28;
-
-    // Optional: Y leicht dämpfen, passend zur bestehenden Nudge-Y-Skalierung.
     inline constexpr double yScale      = 0.94;
-} // namespace NavBias
+}
 
 // ============================== Sanity checks ================================
-// Guard obvious configuration errors at compile time.
-
 static_assert(pboRingSize > 0, "pboRingSize must be > 0");
 static_assert(MIN_TILE_SIZE <= BASE_TILE_SIZE && BASE_TILE_SIZE <= MAX_TILE_SIZE,
               "MIN_TILE_SIZE <= BASE_TILE_SIZE <= MAX_TILE_SIZE required");
@@ -271,29 +117,35 @@ static_assert(NavBias::halfLifeSec >  0.0, "halfLifeSec must be > 0");
 static_assert(NavBias::maxNdc      >= 0.0, "maxNdc must be >= 0");
 
 // ============================== Replikatoren ================================
-// Orbit / Policy / Color (stubs). Build flags: OTTER_USE_ORT / OTTER_USE_NVRTC.
-
 namespace Perturb {
-    inline constexpr bool   enabled       = true; // Ctrl+P toggelt zur Laufzeit intern
-    inline constexpr int    gatePixelSize = 12;    // unterhalb hiervon => Perturb on
-    inline constexpr double deltaScale    = 1.0;   // Skala der Δ-Fehlerakkumulation
-    inline constexpr int    sandboxTile   = -1;    // -1 = aus; sonst Tile-ID isoliert
+    inline constexpr bool   enabled       = true;   // Ctrl+P toggles runtime
+    inline constexpr int    gatePixelSize = 12;
+    inline constexpr double deltaScale    = 1.0;
+    inline constexpr int    sandboxTile   = -1;     // -1 off
 }
 
 namespace Ai {
-    inline constexpr bool        enabled    = true;    // Master-Switch (ON)
-    inline constexpr bool        aopEnabled = true;    // nur AOP-Controller
-    inline constexpr const char* ep         = "cuda";  // "cuda" | "dml" | "cpu"
-
-    // Unified weights for entropy/contrast scoring (used by overlay & AOP)
+    inline constexpr bool        enabled    = true;
+    inline constexpr bool        aopEnabled = true;
+    inline constexpr const char* ep         = "cuda";
     inline constexpr float wE = 0.60f;
     inline constexpr float wC = 0.40f;
 }
 
-namespace Luchs {
-    inline constexpr bool enabled        = true;  // Master (Phase-1 sichtbar)
-    inline constexpr bool nvrtc          = false; // bleibt AUS bis OTTER_USE_NVRTC=ON
-    inline constexpr int  compileTimeout = 200;   // ms Budget
+// *** Neu: selbstlernender Bandit (LinUCB/RLS), komplett on-device ***********
+// Stage: 0=Shadow (lernt, entscheidet nicht), 1=Assisted (Kandidaten), 2=Auto (steuert Ziel)
+namespace AiBandit {
+    inline constexpr int   stage            = 0;        // Start sicher im Shadow
+    inline constexpr int   topK             = 3;        // Kandidaten pro Takt
+    inline constexpr int   retargetInterval = 5;        // Frames pro Update
+    inline constexpr float alpha            = 0.8f;     // UCB-Exploration
+    inline constexpr float epsilon          = 0.05f;    // ε-Exploration
+    inline constexpr float lambda           = 1.0e-2f;  // RLS-Regularisierung
+    inline constexpr float beta             = 0.6f;     // Reward: E + β·C
+    inline constexpr float rewardClampLo    = -1.0f;    // Reward-Clamps
+    inline constexpr float rewardClampHi    = +1.0f;
+    inline constexpr unsigned int seed      = 0xC0FFEEu;// deterministische RNG-Quelle
+    inline constexpr const char* persistPath = "dist/ai/otter_bandit.bin"; // optional
 }
 
 } // namespace Settings
