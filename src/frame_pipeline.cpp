@@ -432,6 +432,39 @@ void execute(RendererState& state) {
         (void)d; // Entscheidungen folgen in Phase 2
     }
 
+    // ---- Stage 2: AUTO retarget (hart, mit Takt & Guards) -------------------
+    if constexpr (Settings::Ai::enabled) {
+        if constexpr (Settings::AiBandit::stage == 2) {
+            // Nur bei frischen Metrics und wenn Overlay/Policy gültig.
+            if (AOP_Telemetry::g_ai_ov_valid && g_metricsAge == 0 && !DachsHUD::help_enabled()) {
+                static int s_nextAllowFrame = 0; // Retarget-Takt (Hysterese)
+                if (g_frame >= s_nextAllowFrame) {
+                    const double ndcAx = static_cast<double>(AOP_Telemetry::g_ai_ndc_pol_x);
+                    const double ndcAy = static_cast<double>(AOP_Telemetry::g_ai_ndc_pol_y);
+                    // Clamp in [-1,1] zur Sicherheit.
+                    const auto clamp_ndc = [](double v) {
+                        return std::max(-1.0, std::min(1.0, v));
+                    };
+                    state.interest.ndcX = clamp_ndc(ndcAx);
+                    state.interest.ndcY = clamp_ndc(ndcAy);
+                    state.interest.valid = true;
+
+                    s_nextAllowFrame = g_frame + std::max(1, Settings::AiBandit::retargetInterval);
+
+                    if constexpr (Settings::performanceLogging) {
+                        LUCHS_LOG_HOST("[REPL/AUTO] retarget ndc=(%.3f,%.3f) next=%d",
+                                       (float)state.interest.ndcX, (float)state.interest.ndcY, s_nextAllowFrame);
+                    }
+                } else {
+                    if constexpr (Settings::performanceLogging) {
+                        const int left = s_nextAllowFrame - g_frame;
+                        LUCHS_LOG_HOST("[REPL/AUTO] skip-lock framesLeft=%d", left);
+                    }
+                }
+            }
+        }
+    }
+
     // ---- REPL/COUPLE Telemetrie (nur Log, keine Verhaltensänderung) --------
     if (perfShouldLog(g_frame)) {
         const int fresh = (g_metricsAge == 0) ? 1 : 0;

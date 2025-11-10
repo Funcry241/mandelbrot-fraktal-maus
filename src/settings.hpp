@@ -276,7 +276,7 @@ namespace Ai {
 namespace AiBandit {
     // Betriebsmodus.
     // Range: {0,1,2} | Default: 0 (Shadow sicher)
-    inline constexpr int   stage            = 1;
+    inline constexpr int   stage            = 2;
 
     // Anzahl Kandidaten je Takt (Top-k).
     // Range: 1 .. 8 | Default: 3
