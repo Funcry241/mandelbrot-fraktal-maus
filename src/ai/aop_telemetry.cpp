@@ -16,5 +16,7 @@ namespace AOP_Telemetry
 
     float g_ai_last_delta = -1.0f;
 
+    float g_ai_confidence = 0.0f;
+
     unsigned long long g_ai_frame_id = 0ull;
 }

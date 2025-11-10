@@ -23,29 +23,29 @@ namespace Repl { namespace Policy {
 
 static inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 
-// --- Statischer Bandit-Zustand (nur in diesem TU) ---------------------------
+// --- Statischer Bandit-State -------------------------------------------------
 struct ReplBanditState {
     otter::ai::OtterBandit bandit;
     int dim = 0;
-    int tilesX = 0, tilesY = 0;
+    int tilesX = 0;
+    int tilesY = 0;
     int lastPick = -1;
-    float lastSignal = 0.0f;     // S = E + beta*C am letzten Pick
-    std::vector<float> lastX;    // Featurezeile des letzten Picks
+    float lastSignal = 0.0f;
+    std::vector<float> lastX;
     int lastUpdateFrame = -9999;
     bool ready = false;
 };
-
-static ReplBanditState& gRB() {
+static ReplBanditState& RBs() {
     static ReplBanditState s;
     return s;
 }
 
-// --- Hilfen -----------------------------------------------------------------
+// --- Signal ------------------------------------------------------------------
 static inline float compute_signal(float e, float c) {
     return e + Settings::AiBandit::beta * c;
 }
 
-// Fallback z-Score (für Shadow-Vergleich)
+// --- z-Score Fallback --------------------------------------------------------
 static size_t pick_by_zscore(const float* E, const float* C, size_t N) {
     double sumE=0.0,sumC=0.0,sumE2=0.0,sumC2=0.0;
     for (size_t i=0;i<N;++i){ const double e=E[i], c=C[i]; sumE+=e; sumC+=c; sumE2+=e*e; sumC2+=c*c; }
@@ -53,14 +53,13 @@ static size_t pick_by_zscore(const float* E, const float* C, size_t N) {
     const double mE=sumE*invN, mC=sumC*invN;
     const double vE=std::max(0.0,sumE2*invN - mE*mE);
     const double vC=std::max(0.0,sumC2*invN - mC*mC);
-    const double sE=std::sqrt(vE), sC=std::sqrt(vC);
+    const double sE=(vE>0.0)?std::sqrt(vE):1.0;
+    const double sC=(vC>0.0)?std::sqrt(vC):1.0;
 
-    size_t best=0; float bestS=-FLT_MAX;
+    size_t best=0; double bestZ=-1e30;
     for (size_t i=0;i<N;++i){
-        const float zE = (sE>1e-12)? (float)(((double)E[i]-mE)/sE):0.f;
-        const float zC = (sC>1e-12)? (float)(((double)C[i]-mC)/sC):0.f;
-        const float s  = zE + zC;
-        if (s > bestS){ bestS = s; best = i; }
+        const double z = (E[i]-mE)/sE + (C[i]-mC)/sC;
+        if (z>bestZ){bestZ=z; best=i;}
     }
     return best;
 }
@@ -69,93 +68,66 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
 {
     Decision d{};
 
-    // Compile-time/logging cadence gate (shadow/preview frequency).
     if constexpr (!(Settings::performanceLogging && Settings::PerfLog::enabled)) {
         return d;
     }
 
-    // Runtime cadence (tie preview to PERF cadence)
-    const int warmupFrames = Settings::PerfLog::warmupFrames;
-    const int everyN       = (Settings::PerfLog::everyN > 0) ? Settings::PerfLog::everyN : 1;
-    if (!(state.frameCount > warmupFrames && (state.frameCount % everyN) == 0)) {
+    const int warm = Settings::PerfLog::warmupFrames;
+    const int every= (Settings::PerfLog::everyN > 0) ? Settings::PerfLog::everyN : 1;
+    if (!(state.frameCount > warm && (state.frameCount % every) == 0)) {
         return d;
     }
 
-    // Grid
-    int statsPx_i = fctx.statsTileSize;
-    if (statsPx_i <= 0) statsPx_i = Settings::Kolibri::desiredTilePx;
-    const int px_i = std::max(1, statsPx_i);
-
+    const int statsPx = std::max(1, (fctx.statsTileSize > 0) ? fctx.statsTileSize : Settings::Kolibri::desiredTilePx);
     if (state.width <= 0 || state.height <= 0) {
         LUCHS_LOG_HOST("[REPL/POLICY] dry-run: invalid dims w=%d h=%d", state.width, state.height);
         return d;
     }
 
-    const size_t w  = (size_t)state.width;
-    const size_t h  = (size_t)state.height;
-    const size_t tilesX = (w + (size_t)px_i - 1) / (size_t)px_i;
-    const size_t tilesY = (h + (size_t)px_i - 1) / (size_t)px_i;
-    const size_t N  = std::min(tilesX*tilesY,
-                        std::min(state.h_entropy.size(), state.h_contrast.size()));
+    const size_t w = (size_t)state.width, h = (size_t)state.height;
+    const size_t tilesX = (w + (size_t)statsPx - 1) / (size_t)statsPx;
+    const size_t tilesY = (h + (size_t)statsPx - 1) / (size_t)statsPx;
+    const size_t N = std::min(tilesX*tilesY, std::min(state.h_entropy.size(), state.h_contrast.size()));
 
-    if (N == 0 || tilesX == 0 || tilesY == 0 ||
-        state.h_entropy.empty() || state.h_contrast.empty())
-    {
-        LUCHS_LOG_HOST("[REPL/POLICY] dry-run: no-metrics N=%zu tiles=%zux%zu statsPx=%d",
-                       N, tilesX, tilesY, px_i);
+    if (N == 0 || tilesX == 0 || tilesY == 0 || state.h_entropy.empty() || state.h_contrast.empty()) {
+        LUCHS_LOG_HOST("[REPL/POLICY] dry-run: no-metrics N=%zu tiles=%zux%zu statsPx=%d", N, tilesX, tilesY, statsPx);
         return d;
     }
 
     const float* E = state.h_entropy.data();
     const float* C = state.h_contrast.data();
 
-    // ---- Feature packing (Heatmap + Bandit-Matrix) --------------------------
     using namespace Repl::Feat;
-    (void)pack_heatmap_features(state.h_entropy, state.h_contrast,
-                                (int)w, (int)h, px_i);
+    BanditMatrix X = make_bandit_feature_matrix(state.h_entropy, state.h_contrast, (int)w, (int)h, statsPx);
 
-    BanditMatrix X = make_bandit_feature_matrix(state.h_entropy, state.h_contrast,
-                                                (int)w, (int)h, px_i);
-
-    // --- Bandit initialisieren (einmalig oder bei Dim-Änderung) -------------
-    auto& RB = gRB();
+    auto& RB = RBs();
     if (!RB.ready || RB.dim != X.dim) {
         RB.bandit = otter::ai::OtterBandit(X.dim, otter::ai::BanditParams{
             Settings::AiBandit::alpha,
             Settings::AiBandit::epsilon,
             Settings::AiBandit::lambda,
             Settings::AiBandit::beta,
-            Settings::AiBandit::topK,
-            Settings::AiBandit::retargetInterval,
-            Settings::AiBandit::rewardClampLo,
-            Settings::AiBandit::rewardClampHi,
-            /*persist*/false,
-            otter::ai::BanditStage::Shadow
+            Settings::AiBandit::seed
         });
-        RB.bandit.set_seed(Settings::AiBandit::seed);
         RB.dim = X.dim;
-        RB.tilesX = X.tilesX; RB.tilesY = X.tilesY;
-        RB.lastPick = -1;
-        RB.lastX.clear();
-        RB.lastUpdateFrame = -9999;
         RB.ready = true;
         LUCHS_LOG_HOST("%s", RB.bandit.brief().c_str());
     }
 
-    // --- Auswahl per Bandit (Top-k); Shadow-Mode => nur Telemetrie ----------
-    std::vector<otter::ai::BanditScore> picks = RB.bandit.select_topk(
-        X.data.data(), (int)(X.tilesX * X.tilesY), X.stride);
+    // Auswahl (Top-k)
+    std::vector<otter::ai::BanditScore> picks = RB.bandit.select_topk(X.data.data(), (int)(X.tilesX*X.tilesY), X.stride);
 
-    // Fallback, falls irgendwas leer ist
+    // Fallback
     if (picks.empty()) {
         const size_t bestZ = pick_by_zscore(E, C, N);
         const size_t txz = (tilesX ? (bestZ % tilesX) : 0);
         const size_t tyz = (tilesX ? (bestZ / tilesX) : 0);
-        const float pxCenterX = ((float)txz + 0.5f) * (float)px_i;
-        const float pxCenterY = ((float)tyz + 0.5f) * (float)px_i;
-        const float ndcX = clamp01(pxCenterX / (float)state.width)  * 2.0f - 1.0f;
-        const float ndcY = clamp01(pxCenterY / (float)state.height) * 2.0f - 1.0f;
+        const float pxX = ((float)txz + 0.5f) * (float)statsPx;
+        const float pxY = ((float)tyz + 0.5f) * (float)statsPx;
+        const float ndcX = clamp01(pxX / (float)state.width)  * 2.0f - 1.0f;
+        const float ndcY = clamp01(pxY / (float)state.height) * 2.0f - 1.0f;
 
+        // Telemetrie
         AOP_Telemetry::g_ai_ndc_pol_x = ndcX;
         AOP_Telemetry::g_ai_ndc_pol_y = ndcY;
         AOP_Telemetry::g_ai_ndc_ovl_x = ndcX * 0.75f;
@@ -163,9 +135,10 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
         AOP_Telemetry::g_ai_ov_valid  = 1;
         AOP_Telemetry::g_ai_last_delta = std::sqrt(ndcX*ndcX + ndcY*ndcY);
         ++AOP_Telemetry::g_ai_frame_id;
+        AOP_Telemetry::g_ai_confidence = 0.5f; // neutral im Fallback
 
         LUCHS_LOG_HOST("[REPL/POLICY] zscore-fallback tiles=%zux%zu statsPx=%d best=%zu ndc=(%.3f,%.3f)",
-                       tilesX, tilesY, px_i, bestZ, ndcX, ndcY);
+                       tilesX, tilesY, statsPx, bestZ, ndcX, ndcY);
         d.order = 1; d.rebase=false; d.enablePerturb=false;
         return d;
     }
@@ -174,12 +147,12 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     const size_t tx = (tilesX ? ((size_t)best % tilesX) : 0);
     const size_t ty = (tilesX ? ((size_t)best / tilesX) : 0);
 
-    const float pxCenterX = ((float)tx + 0.5f) * (float)px_i;
-    const float pxCenterY = ((float)ty + 0.5f) * (float)px_i;
-    const float ndcX = clamp01(pxCenterX / (float)state.width)  * 2.0f - 1.0f;
-    const float ndcY = clamp01(pxCenterY / (float)state.height) * 2.0f - 1.0f;
+    const float pxX = ((float)tx + 0.5f) * (float)statsPx;
+    const float pxY = ((float)ty + 0.5f) * (float)statsPx;
+    const float ndcX = clamp01(pxX / (float)state.width)  * 2.0f - 1.0f;
+    const float ndcY = clamp01(pxY / (float)state.height) * 2.0f - 1.0f;
 
-    // Telemetrie (Shadow)
+    // Telemetrie
     AOP_Telemetry::g_ai_ndc_pol_x = ndcX;
     AOP_Telemetry::g_ai_ndc_pol_y = ndcY;
     AOP_Telemetry::g_ai_ndc_ovl_x = ndcX * 0.75f;
@@ -187,19 +160,22 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     AOP_Telemetry::g_ai_ov_valid  = 1;
     AOP_Telemetry::g_ai_last_delta = std::sqrt(ndcX*ndcX + ndcY*ndcY);
     ++AOP_Telemetry::g_ai_frame_id;
+    {
+        const float u = picks[0].ucb;
+        const float conf = std::fmax(0.0f, std::fmin(1.0f, 0.5f + 0.5f * std::tanh(u)));
+        AOP_Telemetry::g_ai_confidence = conf;
+    }
 
-    // -------------------- Reward-Proxy & Update (nur alle k Frames) ---------
+    // -------------------- Reward-Proxy & Update (nur alle k Frames) -----------
     const int frame = (int)state.frameCount;
     const bool doUpdate = ((frame - RB.lastUpdateFrame) >= Settings::AiBandit::retargetInterval);
 
     if (doUpdate) {
-        // Wenn wir schon einen Pick hatten, update mit ΔS
         if (RB.lastPick >= 0 && RB.lastPick < (int)N && !RB.lastX.empty()) {
             const float e_now = E[RB.lastPick];
             const float c_now = C[RB.lastPick];
-            const float S_now = compute_signal(e_now, c_now);
-            float r = S_now - RB.lastSignal;
-            // Clamp/Norm
+            float r = compute_signal(e_now, c_now) - RB.lastSignal;
+
             const float lo = Settings::AiBandit::rewardClampLo;
             const float hi = Settings::AiBandit::rewardClampHi;
             if (!(r==r)) r = 0.0f;
@@ -215,14 +191,17 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
         const float e_cur = E[best], c_cur = C[best];
         RB.lastSignal = compute_signal(e_cur, c_cur);
         RB.lastUpdateFrame = frame;
+        static int s_updateCount = 0; ++s_updateCount;
+        if (Settings::AiBandit::persistEvery > 0 && (s_updateCount % Settings::AiBandit::persistEvery) == 0) {
+            const bool okSave = RB.bandit.save(Settings::AiBandit::persistPath);
+            LUCHS_LOG_HOST(okSave ? "[AI/SAVE] path=%s" : "[AI/SAVE] failed path=%s", Settings::AiBandit::persistPath);
+        }
     }
 
     // --- Logline (Shadow) ----------------------------------------------------
-    LUCHS_LOG_HOST("[REPL/POLICY] shadow tiles=%zux%zu statsPx=%d best=%d score=%.3f ucb=%.3f ndc=(%.3f,%.3f) k=%d",
-                   tilesX, tilesY, px_i, best, picks[0].score, picks[0].ucb, ndcX, ndcY,
-                   (int)picks.size());
+    LUCHS_LOG_HOST("[REPL/POLICY] shadow tiles=%zux%zu statsPx=%d best=%d score=%.3f ucb=%.3f ndc=(%.3f,%.3f)",
+                   tilesX, tilesY, statsPx, best, picks[0].score, picks[0].ucb, ndcX, ndcY);
 
-    // Shadow: keine echte Steuerung
     d.order = 1;
     d.rebase = false;
     d.enablePerturb = false;

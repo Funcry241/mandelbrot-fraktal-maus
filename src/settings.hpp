@@ -260,6 +260,15 @@ namespace Ai {
     // Range: 0 .. 1 | Default: wE=0.60, wC=0.40
     inline constexpr float wE = 0.60f;
     inline constexpr float wC = 0.40f;
+
+    // --- NEU: Soft-Coupling Controls (AI-Hint → sanft in Interest/NDC) ------
+    // Master-Gate für sanftes Blending der AI-Empfehlung in die Zoom-Interest.
+    inline constexpr bool  coupleEnabled = true;
+    // Stärke des Blends bei „voller“ AI-Information (konstanter Faktor 0..1).
+    inline constexpr float hintBlend     = 0.25f;
+    // Mindestvertrauen (0..1), derzeit nur vorwärtskompatibel (ohne Effekt, wenn
+    // keine Confidence-Telemetrie vorliegt).
+    inline constexpr float minConfidence = 0.15f;
 }
 
 // *** Selbstlernender Bandit (LinUCB/RLS), on-device **************************

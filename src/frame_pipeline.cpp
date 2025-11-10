@@ -460,6 +460,40 @@ void execute(RendererState& state) {
         }
     }
 
+    // ---- AI Soft-Coupling into interest (gentle NDC blend) -------------------
+    // Nutzt nur NDC aus der Policy-Telemetrie. Confidence wird (noch) nicht
+    // ausgewertet; Stärke kommt aus Settings::Ai::hintBlend.
+    if constexpr (Settings::Ai::enabled) {
+        if (Settings::Ai::coupleEnabled &&
+            AOP_Telemetry::g_ai_ov_valid &&
+            g_metricsAge == 0) // nur mit frischen Metrics koppeln
+        {
+            const double ndcAx = static_cast<double>(AOP_Telemetry::g_ai_ndc_pol_x);
+            const double ndcAy = static_cast<double>(AOP_Telemetry::g_ai_ndc_pol_y);
+
+            if (!state.interest.valid) {
+                // Kein Heatmap-Interest → AI übernimmt sanft als Startpunkt
+                state.interest.ndcX = ndcAx;
+                state.interest.ndcY = ndcAy;
+                state.interest.valid = true;
+                if constexpr (Settings::performanceLogging) {
+                    LUCHS_LOG_HOST("[AI/BLEND] adopt ndc=(%.3f,%.3f)", (float)ndcAx, (float)ndcAy);
+                }
+            } else {
+                const double alpha = std::clamp((double)Settings::Ai::hintBlend, 0.0, 1.0);
+                const double inX = state.interest.ndcX;
+                const double inY = state.interest.ndcY;
+                state.interest.ndcX = inX * (1.0 - alpha) + ndcAx * alpha;
+                state.interest.ndcY = inY * (1.0 - alpha) + ndcAy * alpha;
+                if constexpr (Settings::performanceLogging) {
+                    LUCHS_LOG_HOST("[AI/BLEND] alpha=%.2f ndc=(%.3f,%.3f)->(%.3f,%.3f)",
+                                   (float)alpha, (float)inX, (float)inY,
+                                   (float)state.interest.ndcX, (float)state.interest.ndcY);
+                }
+            }
+        }
+    }
+
     // ---- Zoom (ein Pfad: ZoomLogic schreibt direkt in RendererState) ----
     if (!CudaInterop::getPauseZoom()) {
         ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, /*dtOverrideSeconds*/ dtScaled);
