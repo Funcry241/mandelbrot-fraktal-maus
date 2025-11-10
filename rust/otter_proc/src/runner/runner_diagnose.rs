@@ -1,109 +1,88 @@
-///// Otter: Diagnose – schreibt Fail-Reports (voll + minimal) bei Exit≠0, inkl. Log-Tail.
-/// //// Schneefuchs: Keine Dead-Code-Warnungen; robuste Pfade; ASCII-only; Windows/Linux sicher.
-/// //// Maus: Speichert unter `.build_metrics/fail/<ts>_<phase>_<code>.txt` + Kurzfassung `out/last_fail.txt`.
+///// Otter: Diagnose – schreibt bei Exit!=0 einen Report in .build_metrics/ (full/min).
+///// Schneefuchs: API stabil – tail: Option<&[String]>, last_snippet: Option<&str>, Rückgabe: Option<PathBuf>.
+///// Maus: ASCII-only, chrono(clock), leiser Fallback auf .min.log bei Problemen.
 ///// Datei: rust/otter_proc/src/runner/runner_diagnose.rs
 
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use chrono::Local;
 
-use crate::utils;
-
-/// Schreibt den **kompletten** Report in eine datierte Datei im Fail-Ordner.
 fn write_fail_report_full(
-    workdir: &Path,
+    root: &Path,
     phase: &str,
     sig: &str,
-    code: i32,
-    tail: Option<&[String]>,
-) -> io::Result<PathBuf> {
-    let ts = utils::epoch_ms();
-    let fail_dir = workdir.join(".build_metrics").join("fail");
-    fs::create_dir_all(&fail_dir)?;
+    exit_code: i32,
+    tail: &[String],
+    last_snippet: Option<&str>,
+) -> std::io::Result<PathBuf> {
+    let dir = root.join(".build_metrics");
+    fs::create_dir_all(&dir)?;
+    let ts = Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+    let name = format!("fail_{}_{}_{}.log", phase, exit_code, ts);
+    let path = dir.join(name);
+    let mut f = File::create(&path)?;
 
-    // Dateiname: <ts>_<phase>_<code>.txt – nur ASCII, unsichere Zeichen filtern
-    fn sanitize_token(s: &str) -> String {
-        s.chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect()
+    writeln!(f, "OTTER FAIL REPORT")?;
+    writeln!(f, "time   : {}", Local::now().format("%Y-%m-%d %H:%M:%S"))?;
+    writeln!(f, "phase  : {}", phase)?;
+    writeln!(f, "sig    : {}", sig)?;
+    writeln!(f, "exit   : {}", exit_code)?;
+    if let Some(s) = last_snippet {
+        if !s.is_empty() { writeln!(f, "snippet: {}", s)?; }
     }
-    let fname = format!(
-        "{}_{}_{}.txt",
-        ts,
-        sanitize_token(phase),
-        code
-    );
-    let fpath = fail_dir.join(fname);
-    let mut f = File::create(&fpath)?;
-
-    // Header
-    writeln!(f, "FAIL REPORT")?;
-    writeln!(f, "ts_ms: {}", ts)?;
-    writeln!(f, "phase: {}", phase)?;
-    writeln!(f, "sig: {}", sig)?;
-    writeln!(f, "exit_code: {}", code)?;
-    writeln!(f, "cwd: {}", workdir.display())?;
-    writeln!(f, "------------------------------------------------------------")?;
-
-    // Inhalt (Tail)
-    if let Some(lines) = tail {
-        writeln!(f, "LOG TAIL ({} lines):", lines.len())?;
-        for line in lines {
-            // ASCII-only: nicht druckbare Zeichen ersetzen
-            let cleaned: String = line.chars().map(|c| if c.is_ascii() { c } else { '?' }).collect();
-            writeln!(f, "{}", cleaned)?;
-        }
-    } else {
-        writeln!(f, "No log tail available.")?;
+    writeln!(f, "tail   : {} lines", tail.len())?;
+    for line in tail {
+        writeln!(f, "  > {}", line)?;
     }
-
-    Ok(fpath)
+    Ok(path)
 }
 
-/// Schreibt eine **Kurzfassung** (1–2 Zeilen + ein paar letzte Zeilen) für schnelle Sichtung.
-/// Achtung: **wird verwendet** (keine dead_code-Warnung).
-pub fn write_fail_report_min(
-    workdir: &Path,
+fn write_fail_report_min(
+    root: &Path,
     phase: &str,
     sig: &str,
-    code: i32,
-    tail: Option<&[String]>,
-) -> io::Result<PathBuf> {
-    let out_dir = workdir.join("out");
-    fs::create_dir_all(&out_dir)?;
-    let fpath = out_dir.join("last_fail.txt");
+    exit_code: i32,
+    last_snippet: Option<&str>,
+) -> std::io::Result<PathBuf> {
+    let dir = root.join(".build_metrics");
+    fs::create_dir_all(&dir)?;
+    let ts = Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+    let name = format!("fail_{}_{}_{}.min.log", phase, exit_code, ts);
+    let path = dir.join(name);
+    let mut f = File::create(&path)?;
 
-    let mut f = File::create(&fpath)?;
-    let ts = utils::epoch_ms();
-
-    writeln!(f, "FAIL phase={} sig=\"{}\" code={} ts_ms={}", phase, sig, code, ts)?;
-
-    // Eine sehr knappe Tail-Zusammenfassung (max. 20 Zeilen)
-    if let Some(lines) = tail {
-        writeln!(f, "tail: {} lines (showing last 20)", lines.len())?;
-        let n = lines.len();
-        let start = if n > 20 { n - 20 } else { 0 };
-        for line in &lines[start..] {
-            let cleaned: String = line.chars().map(|c| if c.is_ascii() { c } else { '?' }).collect();
-            writeln!(f, "{}", cleaned)?;
-        }
-    } else {
-        writeln!(f, "tail: none")?;
+    writeln!(f, "OTTER FAIL (MIN)")?;
+    writeln!(f, "time   : {}", Local::now().format("%Y-%m-%d %H:%M:%S"))?;
+    writeln!(f, "phase  : {}", phase)?;
+    writeln!(f, "sig    : {}", sig)?;
+    writeln!(f, "exit   : {}", exit_code)?;
+    if let Some(s) = last_snippet {
+        if !s.is_empty() { writeln!(f, "snippet: {}", s)?; }
     }
-
-    Ok(fpath)
+    Ok(path)
 }
 
-/// Öffentliche API: Beim Fehlschlag beide Reports versuchen (voll + minimal).
-/// Fehler beim Schreiben werden bewusst **ignoriert** (Runner soll nicht zusätzlich scheitern).
+/// Schreibe (bei code!=0) einen Diagnose-Report. Full, wenn Tail vorhanden & nicht leer; sonst Min.
+/// Rückgabe: Pfad der geschriebenen Datei oder None bei code==0 oder hartem IO-Fehler.
 pub fn try_write_on_failure(
-    workdir: &Path,
+    root: &Path,
     phase: &str,
     sig: &str,
-    code: i32,
+    exit_code: i32,
     tail: Option<&[String]>,
-) -> io::Result<()> {
-    let _ = write_fail_report_full(workdir, phase, sig, code, tail);
-    let _ = write_fail_report_min(workdir, phase, sig, code, tail);
-    Ok(())
+    last_snippet: Option<&str>,
+) -> Option<PathBuf> {
+    if exit_code == 0 { return None; }
+
+    if let Some(t) = tail {
+        if !t.is_empty() {
+            match write_fail_report_full(root, phase, sig, exit_code, t, last_snippet) {
+                Ok(p) => return Some(p),
+                Err(_) => { /* fallthrough → min */ }
+            }
+        }
+    }
+
+    write_fail_report_min(root, phase, sig, exit_code, last_snippet).ok()
 }
