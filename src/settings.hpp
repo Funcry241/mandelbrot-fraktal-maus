@@ -1,6 +1,6 @@
 ///// Otter: Zentral-Config – Replikatoren „Replikatoren“ (Bandit Shadow), Nacktmull-Perf; klar dokumentierte Werte.
-/// // Schneefuchs: /WX-safe; ASCII-Logs; keine versteckten Makros; Header/Source synchron; GLEW dynamisch.
-/// // Maus: ForceAlwaysZoom=1; PerfLog aktiv; Kolibri-Grid; Luchs-Kompatblock (enabled/nvrtc) wiederhergestellt.
+///// Schneefuchs: /WX-safe; ASCII-Logs; keine versteckten Makros; Header/Source synchron; GLEW dynamisch.
+///// Maus: ForceAlwaysZoom=1; PerfLog aktiv; Kolibri-Grid; Luchs-Kompatblock (enabled/nvrtc) wiederhergestellt.
 ///// Datei: src/settings.hpp
 #pragma once
 

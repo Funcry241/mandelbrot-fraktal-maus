@@ -1,6 +1,6 @@
 ///// Otter: Mini-Entrypoint – delegiert (full/clean/autogit/export) + ENV-Zweimodus OTTER_OP=branch|build.
-///// Schneefuchs: /branch committet & pusht -> dann Build; “wupp” Default-Branch.
-///// Maus: Null-Magie, deterministisch; remote=origin; /build pusht nach Full; ASCII-Logs.
+///// Schneefuchs: /branch committet & pusht -> dann Build; “wupp” Default-Branch; Fail-Report-Hinweis im Summary.
+///// Maus: Null-Magie, deterministisch; remote=origin; /build pusht nach Full; ASCII-Logs; Report-Pfad unter out/logs/.
 ///// Datei: rust/otter_proc/src/main.rs
 
 mod utils;         // minimales Helfer-Modul (epoch_ms)
@@ -221,6 +221,17 @@ fn main() {
         Ok(code) => (code == 0, code, Vec::<String>::new()),
         Err(e) => (false, 1, vec![format!("command failed: {}", e)]),
     };
+
+    // NEU: Expliziter Hinweis auf Fail-Report im End-Summary (falls vorhanden)
+    if !run_ok {
+        let report_path = root.join("out").join("logs").join("otter_fail_report.md");
+        let rp_disp = prockit::display_path(&report_path);
+        if std::fs::metadata(&report_path).is_ok() {
+            notes.push(format!("see fail-report: {}", rp_disp));
+        } else {
+            notes.push("no fail-report found (expected: out/logs/otter_fail_report.md)".to_string());
+        }
+    }
 
     // Post-Build-Autogit:
     // - bei normalem Build, wenn autogit_after_full==true (z.B. OTTER_OP=build oder OTTER_UPLOAD=1)

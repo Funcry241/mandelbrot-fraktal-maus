@@ -1,6 +1,6 @@
 ///// Otter: Dist-Sync — kopiert EXE + whitelisted DLLs nach /dist (copy-if-different), klare [DIST]-Logs.
-/// /// Schneefuchs: Ohne Extra-Dependencies; robustes FS-Handling; env-Override OTTER_DIST_DLLS (csv).
-/// /// Maus: Windows-first (".dll"); ignoriert System-DLLs; /WX-sicher dank #[allow(dead_code)] bis Runner-Hook.
+////// Schneefuchs: Ohne Extra-Dependencies; robustes FS-Handling; env-Override OTTER_DIST_DLLS (csv).
+////// Maus: Windows-first (".dll"); ignoriert System-DLLs; /WX-sicher dank #[allow(dead_code)] bis Runner-Hook.
 ///// Datei: rust/otter_proc/src/dist.rs
 
 use std::fs;
