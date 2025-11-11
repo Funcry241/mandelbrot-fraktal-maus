@@ -1,5 +1,5 @@
 ///// Otter: AOP controller – Replikatoren Shadow-Preview + Bandit-Scoring (LinUCB), rein on-device, deterministisch.
-///// Schneefuchs: Cadence via PerfLog; ASCII-One-Liner; keine Fremdlibs; Dry-Run/Shadow (keine Steuerung), nur Telemetrie.
+///// Schneefuchs: Cadence via PerfLog; ASCII-One-Liner; keine Fremdlibs; Stage-Labels (shadow/assist/auto) in allen Policy-Logs.
 ///// Maus: Nutzt FeaturePacker (NCHW & Bandit-Matrix); sicherer Reward-Proxy erst bei Retarget; Fallback auf z-Score.
 ///// Datei: src/ai/aop_controller.cpp
 
