@@ -23,6 +23,12 @@ namespace Repl { namespace Policy {
 
 static inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 
+// --- Stage-Label für Logs -----------------------------------------------------
+static inline const char* stage_name() {
+    const int s = Settings::AiBandit::stage;
+    return (s == 2) ? "auto" : (s == 1) ? "assist" : "shadow";
+}
+
 // --- Statischer Bandit-State -------------------------------------------------
 struct ReplBanditState {
     otter::ai::OtterBandit bandit;
@@ -80,7 +86,7 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
 
     const int statsPx = std::max(1, (fctx.statsTileSize > 0) ? fctx.statsTileSize : Settings::Kolibri::desiredTilePx);
     if (state.width <= 0 || state.height <= 0) {
-        LUCHS_LOG_HOST("[REPL/POLICY] dry-run: invalid dims w=%d h=%d", state.width, state.height);
+        LUCHS_LOG_HOST("[REPL/POLICY] stage=%s dry-run: invalid dims w=%d h=%d", stage_name(), state.width, state.height);
         return d;
     }
 
@@ -90,7 +96,8 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
     const size_t N = std::min(tilesX*tilesY, std::min(state.h_entropy.size(), state.h_contrast.size()));
 
     if (N == 0 || tilesX == 0 || tilesY == 0 || state.h_entropy.empty() || state.h_contrast.empty()) {
-        LUCHS_LOG_HOST("[REPL/POLICY] dry-run: no-metrics N=%zu tiles=%zux%zu statsPx=%d", N, tilesX, tilesY, statsPx);
+        LUCHS_LOG_HOST("[REPL/POLICY] stage=%s dry-run: no-metrics N=%zu tiles=%zux%zu statsPx=%d",
+                       stage_name(), N, tilesX, tilesY, statsPx);
         return d;
     }
 
@@ -147,8 +154,8 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
         ++AOP_Telemetry::g_ai_frame_id;
         AOP_Telemetry::g_ai_confidence = 0.5f; // neutral im Fallback
 
-        LUCHS_LOG_HOST("[REPL/POLICY] zscore-fallback tiles=%zux%zu statsPx=%d best=%zu ndc=(%.3f,%.3f)",
-                       tilesX, tilesY, statsPx, bestZ, ndcX, ndcY);
+        LUCHS_LOG_HOST("[REPL/POLICY] stage=%s zscore-fallback tiles=%zux%zu statsPx=%d best=%zu ndc=(%.3f,%.3f)",
+                       stage_name(), tilesX, tilesY, statsPx, bestZ, ndcX, ndcY);
         d.order = 1; d.rebase=false; d.enablePerturb=false;
         return d;
     }
@@ -211,9 +218,9 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
         }
     }
 
-    // --- Logline (Shadow) ----------------------------------------------------
-    LUCHS_LOG_HOST("[REPL/POLICY] shadow tiles=%zux%zu statsPx=%d best=%d score=%.3f ucb=%.3f ndc=(%.3f,%.3f)",
-                   tilesX, tilesY, statsPx, best, picks[0].score, picks[0].ucb, ndcX, ndcY);
+    // --- Logline (Stage-spezifisch) ------------------------------------------
+    LUCHS_LOG_HOST("[REPL/POLICY] stage=%s tiles=%zux%zu statsPx=%d best=%d score=%.3f ucb=%.3f ndc=(%.3f,%.3f)",
+                   stage_name(), tilesX, tilesY, statsPx, best, picks[0].score, picks[0].ucb, ndcX, ndcY);
 
     d.order = 1;
     d.rebase = false;
