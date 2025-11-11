@@ -21,22 +21,20 @@
   #elif __has_include(<glad/glad.h>)
     #include <glad/glad.h>
   #else
-    // Fallback: Erkläre klar, was fehlt – aber nur wenn dieser Header
-    // *ohne* vorherige GL-Header eingebunden wurde.
     #error "OpenGL loader not found. Include pch.hpp (GLEW) before ui_gl.hpp, or make <GL/glew.h> / <glad/glad.h> available."
   #endif
 #endif
 
-// Optionales Host-Logging ohne harte Abhängigkeit:
 #if __has_include("luchs_log_host.hpp")
   #include "luchs_log_host.hpp"
 #endif
 
 #include <cstdio>   // snprintf
+#include <cstring>  // strlen
 
 namespace UiGL {
 
-// --- Loader-/Extension-Utilities (GLEW/GLAD-agnostisch) ----------------------
+// -------- Loader-/Extension-Utilities (GLEW/GLAD-agnostisch) ------------------
 inline bool hasKHRDebug() {
 #if defined(GL_KHR_debug)
   #if defined(GLEW_VERSION)
@@ -51,22 +49,41 @@ inline bool hasKHRDebug() {
 #endif
 }
 
-// kompakte Shader/Program-Helfer ------------------------------------------------
-
-inline GLuint makeShader(GLenum type, const char* src){
-    GLuint sh = glCreateShader(type); if(!sh) return 0;
+// -------- Safe-Label: keine Invalid-Handle-Meldungen mehr ---------------------
+inline void safeObjectLabel(GLenum type, GLuint name, const char* label) {
 #if defined(GL_KHR_debug)
-    if (hasKHRDebug()) {
-        const char* kind = (type==GL_VERTEX_SHADER?"VS":type==GL_FRAGMENT_SHADER?"FS":"SH");
-        char label[64]; std::snprintf(label,sizeof(label),"OTR_%s", kind);
-        glObjectLabel(GL_SHADER, sh, -1, label);
+    if (!hasKHRDebug() || name == 0) return;
+    switch (type) {
+        case GL_VERTEX_ARRAY: if (!glIsVertexArray(name)) return; break;
+        case GL_BUFFER:       if (!glIsBuffer(name))       return; break;
+        case GL_PROGRAM:      if (!glIsProgram(name))      return; break;
+        case GL_SHADER:       if (!glIsShader(name))       return; break;
+        default: /* other types: best-effort */ break;
     }
+    const char* lab = (label && *label) ? label : "";
+    // KHR_debug erlaubt -1 (nullterminiert)
+    glObjectLabel(type, name, -1, lab);
+#else
+    (void)type; (void)name; (void)label;
 #endif
+}
+
+// -------- Safe-Delete Helpers -------------------------------------------------
+inline void safeDeleteVAO(GLuint& vao)   { if (vao && glIsVertexArray(vao)) glDeleteVertexArrays(1, &vao); vao = 0; }
+inline void safeDeleteBuf(GLuint& buf)   { if (buf && glIsBuffer(buf))       glDeleteBuffers(1, &buf);     buf = 0; }
+inline void safeDeletePrg(GLuint& prg)   { if (prg && glIsProgram(prg))      glDeleteProgram(prg);         prg = 0; }
+inline void safeDeleteQry(GLuint& qry)   { if (qry) glDeleteQueries(1, &qry); qry = 0; } // glIsQuery optional
+
+// -------- kompakte Shader/Program-Helfer -------------------------------------
+inline GLuint makeShader(GLenum type, const char* src){
+    GLuint sh = glCreateShader(type);
+    if(!sh) return 0;
+    safeObjectLabel(GL_SHADER, sh, (type==GL_VERTEX_SHADER)?"OTR_VS":(type==GL_FRAGMENT_SHADER)?"OTR_FS":"OTR_SH");
+
     glShaderSource(sh,1,&src,nullptr);
     glCompileShader(sh);
     GLint ok=0; glGetShaderiv(sh,GL_COMPILE_STATUS,&ok);
     if(!ok){
-        // kompakter Compile-Log (ASCII)
     #if defined(LUCHS_LOG_HOST)
         char log[1024] = {0};
         GLsizei n = 0;
@@ -80,12 +97,11 @@ inline GLuint makeShader(GLenum type, const char* src){
 }
 
 inline GLuint makeProgram(const char* vs, const char* fs){
-    GLuint v = makeShader(GL_VERTEX_SHADER,vs); if(!v) return 0;
-    GLuint f = makeShader(GL_FRAGMENT_SHADER,fs); if(!f){ glDeleteShader(v); return 0; }
+    GLuint v = makeShader(GL_VERTEX_SHADER,   vs); if(!v) return 0;
+    GLuint f = makeShader(GL_FRAGMENT_SHADER, fs); if(!f){ glDeleteShader(v); return 0; }
     GLuint p = glCreateProgram(); if(!p){ glDeleteShader(v); glDeleteShader(f); return 0; }
-#if defined(GL_KHR_debug)
-    if (hasKHRDebug()) glObjectLabel(GL_PROGRAM, p, -1, "OTR_prog");
-#endif
+
+    safeObjectLabel(GL_PROGRAM, p, "OTR_prog");
     glAttachShader(p,v); glAttachShader(p,f);
     glLinkProgram(p);
     glDeleteShader(v); glDeleteShader(f);
@@ -103,23 +119,20 @@ inline GLuint makeProgram(const char* vs, const char* fs){
     return p;
 }
 
-// VAO/VBO-Layouts einmalig konfigurieren (State-Restore + Labels) ----------------
-
+// -------- VAO/VBO-Layouts (State-Restore + Labels, keine Hotpath-Allokation) --
 inline void ensurePanelVAO(GLuint& vao, GLuint& vbo){
-    if(vao) return;
+    if (vao && glIsVertexArray(vao)) return;
 
     GLint prevVAO=0, prevBuf=0;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevBuf);
 
-    glGenVertexArrays(1,&vao);
-    glGenBuffers(1,&vbo);
-#if defined(GL_KHR_debug)
-    if (hasKHRDebug()) {
-        glObjectLabel(GL_VERTEX_ARRAY, vao, -1, "OTR_panelVAO");
-        glObjectLabel(GL_BUFFER,       vbo, -1, "OTR_panelVBO");
-    }
-#endif
+    if (!vao || !glIsVertexArray(vao)) glGenVertexArrays(1,&vao);
+    if (!vbo || !glIsBuffer(vbo))      glGenBuffers(1,&vbo);
+
+    safeObjectLabel(GL_VERTEX_ARRAY, vao, "OTR_panelVAO");
+    safeObjectLabel(GL_BUFFER,       vbo, "OTR_panelVBO");
+
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER,vbo);
     glEnableVertexAttribArray(0);
@@ -133,20 +146,18 @@ inline void ensurePanelVAO(GLuint& vao, GLuint& vbo){
 }
 
 inline void ensureHeatVAO(GLuint& vao, GLuint& vbo){
-    if(vao) return;
+    if (vao && glIsVertexArray(vao)) return;
 
     GLint prevVAO=0, prevBuf=0;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevBuf);
 
-    glGenVertexArrays(1,&vao);
-    glGenBuffers(1,&vbo);
-#if defined(GL_KHR_debug)
-    if (hasKHRDebug()) {
-        glObjectLabel(GL_VERTEX_ARRAY, vao, -1, "OTR_heatVAO");
-        glObjectLabel(GL_BUFFER,       vbo, -1, "OTR_heatVBO");
-    }
-#endif
+    if (!vao || !glIsVertexArray(vao)) glGenVertexArrays(1,&vao);
+    if (!vbo || !glIsBuffer(vbo))      glGenBuffers(1,&vbo);
+
+    safeObjectLabel(GL_VERTEX_ARRAY, vao, "OTR_heatVAO");
+    safeObjectLabel(GL_BUFFER,       vbo, "OTR_heatVBO");
+
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER,vbo);
     glEnableVertexAttribArray(0);

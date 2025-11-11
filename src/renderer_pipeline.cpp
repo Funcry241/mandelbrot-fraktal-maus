@@ -8,6 +8,7 @@
 #include "common.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
+#include "ui_gl.hpp"   // ← Safe-Label/Deletes & helpers
 
 #include <GL/glew.h>
 #include <cstdlib>
@@ -90,6 +91,14 @@ namespace {
         }
         return prog;
     }
+
+    inline void ensureDummyVAO() {
+        if (!sDummyVAO || !glIsVertexArray(sDummyVAO)) {
+            if (sDummyVAO) UiGL::safeDeleteVAO(sDummyVAO);
+            glGenVertexArrays(1, &sDummyVAO);
+            UiGL::safeObjectLabel(GL_VERTEX_ARRAY, sDummyVAO, "OTR_dummyVAO");
+        }
+    }
 } // namespace
 
 // --- Simple FSQ Shader (GLSL 430 core) ---------------------------------------
@@ -128,16 +137,17 @@ static void ensurePipeline() {
         std::exit(EXIT_FAILURE);
     }
 
+    UiGL::safeObjectLabel(GL_PROGRAM, sProgram, "OTR_fsqProg");
+
     bindProgram(sProgram);
     sUTex = glGetUniformLocation(sProgram, "uTex");
     if (sUTex >= 0) glUniform1i(sUTex, 0);
     bindProgram(0);
 
     // Dummy-VAO fuer Core Profile
-    glGenVertexArrays(1, &sDummyVAO);
+    ensureDummyVAO();
 
-    // Seed tracked fixed-function states and texture unit/bindings (one-time)
-    // Query once to initialize; later we track ourselves to avoid per-frame glGet*
+    // State-Tracker initialisieren (einmalig, keine per-frame glGet*)
     GLint activeTex = 0; 
     glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTex);
     s_lastActiveTex = (GLenum)activeTex;
@@ -146,7 +156,6 @@ static void ensurePipeline() {
     glActiveTexture(GL_TEXTURE0);
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &boundTex2D);
     s_lastTex2D = (GLuint)boundTex2D;
-    // restore previous active unit to avoid side effects
     glActiveTexture((GLenum)activeTex);
 
     s_depthEnabled = glIsEnabled(GL_DEPTH_TEST);
@@ -158,6 +167,7 @@ static void ensurePipeline() {
     if constexpr (Settings::performanceLogging || Settings::debugLogging) {
         if (GLEW_VERSION_3_3 || GLEW_ARB_timer_query) {
             glGenQueries(1, &sTimeQuery);
+            UiGL::safeObjectLabel(GL_QUERY, sTimeQuery, "OTR_timeQ"); // harmless if unsupported
         }
     }
 
@@ -168,6 +178,7 @@ static void ensurePipeline() {
 
 void drawFullscreenQuad(GLuint tex) {
     ensurePipeline();
+    ensureDummyVAO(); // ← falls extern gelöscht wurde (Debug-Tools etc.)
 
     // State sichern via TU-Tracker (keine per-frame glGet*)
     GLuint prevProg      = s_lastProgram;
@@ -226,9 +237,9 @@ void drawFullscreenQuad(GLuint tex) {
 // --- Thin wrappers to match header/API and keep headers & sources in sync -----
 void init()    { ensurePipeline(); }
 void cleanup() { 
-    if (sTimeQuery) { glDeleteQueries(1, &sTimeQuery); sTimeQuery = 0; }
-    if (sDummyVAO)  { glDeleteVertexArrays(1, &sDummyVAO); sDummyVAO = 0; }
-    if (sProgram)   { glDeleteProgram(sProgram); sProgram = 0; }
+    if (sTimeQuery) { UiGL::safeDeleteQry(sTimeQuery); }
+    if (sDummyVAO)  { UiGL::safeDeleteVAO(sDummyVAO); }
+    if (sProgram)   { UiGL::safeDeletePrg(sProgram);  }
 
     sUTex = -1;
     s_lastProgram = 0;
