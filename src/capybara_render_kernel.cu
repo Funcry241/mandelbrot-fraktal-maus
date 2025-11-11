@@ -45,11 +45,12 @@ static __device__ __forceinline__ uint16_t clamp_u16_from_int(int v) {
 
 // Analytic interior tests (exact): main cardioid and period-2 bulb
 static __device__ __forceinline__ bool in_main_cardioid(double2 c) {
-    const double x = c.x - 0.25;
-    const double y = c.y;
-    const double q = x * x + y * y;
+    const double x  = c.x - 0.25;
+    const double y  = c.y;
+    const double y2 = y * y;
+    const double q  = x * x + y2;
     // Inside if q * (q + x) <= 0.25 * y^2
-    return q * (q + x) <= 0.25 * (y * y);
+    return q * (q + x) <= 0.25 * y2;
 }
 static __device__ __forceinline__ bool in_period2_bulb(double2 c) {
     const double xr = c.x + 1.0;
@@ -77,10 +78,14 @@ void mandelbrotKernel_classic(
 
     const int idx = py * w + px;
 
-    // Map pixel -> complex plane (double). FMA-Form: identische Numerik, weniger Mul/Add.
-    const double x  = fma(static_cast<double>(px) - 0.5 * static_cast<double>(w), stepX, cx);
-    const double y  = fma(static_cast<double>(py) - 0.5 * static_cast<double>(h), stepY, cy);
-    const double2 cD = make_double2(x, y);
+    // Map pixel -> complex plane (double). FMA-Form, mit gecachten Halbmaßen.
+    const double halfW = 0.5 * static_cast<double>(w);
+    const double halfH = 0.5 * static_cast<double>(h);
+    const double pxD   = static_cast<double>(px);
+    const double pyD   = static_cast<double>(py);
+    const double x     = fma(pxD - halfW, stepX, cx);
+    const double y     = fma(pyD - halfH, stepY, cy);
+    const double2 cD   = make_double2(x, y);
 
     // 1) Analytic interior: exact membership -> it = maxIter
     if (in_cardioid_or_bulb(cD)) {
@@ -117,10 +122,14 @@ void mandelbrotKernel_capybara_deep(
 
     const int idx = py * w + px;
 
-    // FMA-Form für Mapping (identische Numerik)
-    const double x  = fma(static_cast<double>(px) - 0.5 * static_cast<double>(w), stepX, cx);
-    const double y  = fma(static_cast<double>(py) - 0.5 * static_cast<double>(h), stepY, cy);
-    const double2 cD = make_double2(x, y);
+    // FMA-Form für Mapping (identische Numerik), mit gecachten Halbmaßen.
+    const double halfW = 0.5 * static_cast<double>(w);
+    const double halfH = 0.5 * static_cast<double>(h);
+    const double pxD   = static_cast<double>(px);
+    const double pyD   = static_cast<double>(py);
+    const double x     = fma(pxD - halfW, stepX, cx);
+    const double y     = fma(pyD - halfH, stepY, cy);
+    const double2 cD   = make_double2(x, y);
 
     if (in_cardioid_or_bulb(cD)) {
         d_it[idx] = clamp_u16_from_int(maxIter);
