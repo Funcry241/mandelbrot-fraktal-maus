@@ -448,6 +448,7 @@ void execute(RendererState& state) {
                     state.interest.ndcX = clamp_ndc(ndcAx);
                     state.interest.ndcY = clamp_ndc(ndcAy);
                     state.interest.valid = true;
+                    g_forceMetricsNext = true; // eager fresh metrics after retarget
 
                     s_nextAllowFrame = g_frame + std::max(1, Settings::AiBandit::retargetInterval);
 
