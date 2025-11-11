@@ -25,6 +25,7 @@
   #endif
 #endif
 
+// Optionales Host-Logging ohne harte Abhängigkeit:
 #if __has_include("luchs_log_host.hpp")
   #include "luchs_log_host.hpp"
 #endif
@@ -32,11 +33,16 @@
 #include <cstdio>   // snprintf
 #include <cstring>  // strlen
 
+// Optionaler Kill-Switch: Labels komplett abschalten (z. B. bei Treiberbug).
+// #define OTTER_DISABLE_GL_LABELS 1
+
 namespace UiGL {
 
 // -------- Loader-/Extension-Utilities (GLEW/GLAD-agnostisch) ------------------
 inline bool hasKHRDebug() {
-#if defined(GL_KHR_debug)
+#if defined(OTTER_DISABLE_GL_LABELS)
+    return false;
+#elif defined(GL_KHR_debug)
   #if defined(GLEW_VERSION)
     return GLEW_KHR_debug != 0;
   #elif defined(GLAD_GL_H_)
@@ -51,14 +57,27 @@ inline bool hasKHRDebug() {
 
 // -------- Safe-Label: keine Invalid-Handle-Meldungen mehr ---------------------
 inline void safeObjectLabel(GLenum type, GLuint name, const char* label) {
-#if defined(GL_KHR_debug)
+#if defined(OTTER_DISABLE_GL_LABELS)
+    (void)type; (void)name; (void)label;
+#elif defined(GL_KHR_debug)
     if (!hasKHRDebug() || name == 0) return;
     switch (type) {
         case GL_VERTEX_ARRAY: if (!glIsVertexArray(name)) return; break;
         case GL_BUFFER:       if (!glIsBuffer(name))       return; break;
         case GL_PROGRAM:      if (!glIsProgram(name))      return; break;
         case GL_SHADER:       if (!glIsShader(name))       return; break;
-        default: /* other types: best-effort */ break;
+#ifdef GL_TEXTURE
+        case GL_TEXTURE:      if (!glIsTexture(name))      return; break;
+#endif
+#ifdef GL_QUERY
+        case GL_QUERY:
+        #if defined(GLEW_VERSION) || defined(GLAD_GL_H_) || !defined(_MSC_VER)
+            // glIsQuery ist seit GL 1.5 Core verfügbar; konservativ verwenden
+            if (!glIsQuery(name)) return;
+        #endif
+            break;
+#endif
+        default: /* other types: best-effort without glIs* */ break;
     }
     const char* lab = (label && *label) ? label : "";
     // KHR_debug erlaubt -1 (nullterminiert)
@@ -69,10 +88,25 @@ inline void safeObjectLabel(GLenum type, GLuint name, const char* label) {
 }
 
 // -------- Safe-Delete Helpers -------------------------------------------------
-inline void safeDeleteVAO(GLuint& vao)   { if (vao && glIsVertexArray(vao)) glDeleteVertexArrays(1, &vao); vao = 0; }
-inline void safeDeleteBuf(GLuint& buf)   { if (buf && glIsBuffer(buf))       glDeleteBuffers(1, &buf);     buf = 0; }
-inline void safeDeletePrg(GLuint& prg)   { if (prg && glIsProgram(prg))      glDeleteProgram(prg);         prg = 0; }
-inline void safeDeleteQry(GLuint& qry)   { if (qry) glDeleteQueries(1, &qry); qry = 0; } // glIsQuery optional
+inline void safeDeleteVAO(GLuint& vao) { 
+    if (vao && glIsVertexArray(vao)) glDeleteVertexArrays(1, &vao); 
+    vao = 0; 
+}
+inline void safeDeleteBuf(GLuint& buf) { 
+    if (buf && glIsBuffer(buf)) glDeleteBuffers(1, &buf);     
+    buf = 0; 
+}
+inline void safeDeletePrg(GLuint& prg) { 
+    if (prg && glIsProgram(prg)) glDeleteProgram(prg);       
+    prg = 0; 
+}
+inline void safeDeleteQry(GLuint& qry) { 
+#ifdef GL_QUERY
+    // glIsQuery ist optional per Guard oben geprüft; Delete ist idempotent
+    if (qry) glDeleteQueries(1, &qry);
+#endif
+    qry = 0; 
+}
 
 // -------- kompakte Shader/Program-Helfer -------------------------------------
 inline GLuint makeShader(GLenum type, const char* src){

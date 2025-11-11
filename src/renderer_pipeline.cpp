@@ -8,7 +8,7 @@
 #include "common.hpp"
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
-#include "ui_gl.hpp"   // ← Safe-Label/Deletes & helpers
+#include "ui_gl.hpp"   // Safe-Label/Deletes & helpers
 
 #include <GL/glew.h>
 #include <cstdlib>
@@ -178,7 +178,7 @@ static void ensurePipeline() {
 
 void drawFullscreenQuad(GLuint tex) {
     ensurePipeline();
-    ensureDummyVAO(); // ← falls extern gelöscht wurde (Debug-Tools etc.)
+    ensureDummyVAO(); // falls extern gelöscht wurde (Debug-Tools etc.)
 
     // State sichern via TU-Tracker (keine per-frame glGet*)
     GLuint prevProg      = s_lastProgram;
