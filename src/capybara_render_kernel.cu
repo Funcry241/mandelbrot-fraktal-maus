@@ -2,7 +2,6 @@
 ///// Schneefuchs: API unverändert; ASCII-Logs; optional CUDA-event timing; inclusive-iter semantics; no fast-math flags
 ///// Maus: Block 32x8; exact cardioid/bulb; deterministic; SM80–SM90 sweetspot; per-frame gating, zero per-thread mode branches
 ///// Datei: src/capybara_render_kernel.cu
-
 #include "pch.hpp"
 
 #include <cuda_runtime.h>
@@ -59,11 +58,12 @@ static __device__ __forceinline__ bool in_period2_bulb(double2 c) {
     return (xr * xr + yr * yr) <= (1.0 / 16.0);
 }
 static __device__ __forceinline__ bool in_cardioid_or_bulb(double2 c) {
-    return in_main_cardioid(c) || in_period2_bulb(c);
+    // Bulb-Test zuerst: gleicher Wahrheitswert, minimal günstiger im häufigen Outside-Fall.
+    return in_period2_bulb(c) || in_main_cardioid(c);
 }
 
 // ------------------------------ classic kernel --------------------------------
-__global__ __launch_bounds__(BX * BY, 2)
+__global__ __launch_bounds__(BX * BY, 2) // ggf. 3 testen, wenn Reg-Budget es zulässt
 void mandelbrotKernel_classic(
     uint16_t* __restrict__ d_it,
     int w, int h,
@@ -77,9 +77,9 @@ void mandelbrotKernel_classic(
 
     const int idx = py * w + px;
 
-    // Map pixel -> complex plane (double). Branch-free.
-    const double x  = cx + (static_cast<double>(px) - 0.5 * static_cast<double>(w)) * stepX;
-    const double y  = cy + (static_cast<double>(py) - 0.5 * static_cast<double>(h)) * stepY;
+    // Map pixel -> complex plane (double). FMA-Form: identische Numerik, weniger Mul/Add.
+    const double x  = fma(static_cast<double>(px) - 0.5 * static_cast<double>(w), stepX, cx);
+    const double y  = fma(static_cast<double>(py) - 0.5 * static_cast<double>(h), stepY, cy);
     const double2 cD = make_double2(x, y);
 
     // 1) Analytic interior: exact membership -> it = maxIter
@@ -103,7 +103,7 @@ void mandelbrotKernel_classic(
 }
 
 // ------------------------------- deep kernel ----------------------------------
-__global__ __launch_bounds__(BX * BY, 2)
+__global__ __launch_bounds__(BX * BY, 2) // ggf. 3 testen, wenn Reg-Budget es zulässt
 void mandelbrotKernel_capybara_deep(
     uint16_t* __restrict__ d_it,
     int w, int h,
@@ -117,8 +117,9 @@ void mandelbrotKernel_capybara_deep(
 
     const int idx = py * w + px;
 
-    const double x  = cx + (static_cast<double>(px) - 0.5 * static_cast<double>(w)) * stepX;
-    const double y  = cy + (static_cast<double>(py) - 0.5 * static_cast<double>(h)) * stepY;
+    // FMA-Form für Mapping (identische Numerik)
+    const double x  = fma(static_cast<double>(px) - 0.5 * static_cast<double>(w), stepX, cx);
+    const double y  = fma(static_cast<double>(py) - 0.5 * static_cast<double>(h), stepY, cy);
     const double2 cD = make_double2(x, y);
 
     if (in_cardioid_or_bulb(cD)) {
