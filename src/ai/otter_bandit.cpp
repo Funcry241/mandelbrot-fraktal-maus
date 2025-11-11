@@ -2,7 +2,7 @@
 ///// Schneefuchs: Numerik in double, deterministische xorshift32-RNG, ASCII-Logs via LUCHS_LOG_HOST.
 ///// Maus: Persistenz kleiner Binär-Blobs (A⁻¹,b); harte Clamps für Reward/NaN-Hygiene; keine Fremdabhängigkeiten.
 ///// Datei: src/ai/otter_bandit.cpp
-#include "otter_bandit.hpp"
+#include "ai/otter_bandit.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -50,7 +50,6 @@ void OtterBandit::init(int dim) {
 
 void OtterBandit::configure(const BanditParams& p) {
     m_params = p;
-    // Keine Neuinitialisierung der Gewichte; Stabilität: keep A⁻¹/b/w.
     if (m_params.lambda <= 0.0f) m_params.lambda = 1.0e-6f;
     if (m_params.topK <= 0) m_params.topK = 1;
     if (m_params.epsilon < 0.0f) m_params.epsilon = 0.0f;
@@ -90,7 +89,6 @@ std::vector<BanditScore> OtterBandit::select_topk(const float* X, int numTiles, 
     if (!is_initialized() || !X || numTiles <= 0 || stride != m_dim) return out;
 
     out.reserve((size_t)numTiles);
-    // Score jedes Tiles berechnen
     for (int i = 0; i < numTiles; ++i) {
         const float* xi = X + (size_t)i * (size_t)stride;
         double pred = dot_w(xi);
@@ -104,7 +102,6 @@ std::vector<BanditScore> OtterBandit::select_topk(const float* X, int numTiles, 
         out.push_back(sc);
     }
 
-    // Partial sort: Top-k nach score
     const int k = std::min(std::max(m_params.topK, 1), numTiles);
     std::partial_sort(out.begin(),
                       out.begin() + k,
@@ -113,13 +110,10 @@ std::vector<BanditScore> OtterBandit::select_topk(const float* X, int numTiles, 
 
     out.resize((size_t)k);
 
-    // ε-Exploration: mit Wahrscheinlichkeit ε ersetze den letzten Pick durch einen zufälligen Index
     if (m_params.epsilon > 0.0f && rng_uniform01() < m_params.epsilon && numTiles > k) {
-        // pick random index not already in top-k
         int replacement = (int)(rng_uniform01() * (float)numTiles);
         if (replacement >= numTiles) replacement = numTiles - 1;
 
-        // prüfen, ob replacement bereits in top-k ist
         bool unique = true;
         for (int i = 0; i < k; ++i) {
             if (out[(size_t)i].index == replacement) { unique = false; break; }
@@ -142,7 +136,6 @@ void OtterBandit::update(const float* x, float rewardIn) {
 
     const float rClamped = clampf(rewardIn, m_params.rewardClampLo, m_params.rewardClampHi);
 
-    // Hygiene: NaN-Check & Null-Vektor vermeiden
     bool anyFinite = false;
     for (int i = 0; i < m_dim; ++i) {
         if (std::isfinite((double)x[i])) { anyFinite = true; break; }
@@ -154,15 +147,12 @@ void OtterBandit::update(const float* x, float rewardIn) {
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    // A⁻¹ Update mit Sherman–Morrison
     sm_update_Ainv(x);
 
-    // b = b + r·x
     for (int i = 0; i < m_dim; ++i) {
         m_b[(size_t)i] += (double)rClamped * (double)x[i];
     }
 
-    // w = A⁻¹ b
     recompute_w();
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -178,12 +168,10 @@ bool OtterBandit::save(const char* path) const {
         LUCHS_LOG_HOST("[AOP/LIN] save failed: cannot open file");
         return false;
     }
-    // Header: magic + dim
-    const uint32_t magic = 0x4F42414Eu; // 'OBAN' (Otter BANdit)
+    const uint32_t magic = 0x4F42414Eu; // 'OBAN'
     f.write((const char*)&magic, sizeof(magic));
     f.write((const char*)&m_dim, sizeof(m_dim));
 
-    // payload: Ainv (double), b (double)
     f.write((const char*)m_Ainv.data(), sizeof(double) * m_Ainv.size());
     f.write((const char*)m_b.data(),    sizeof(double) * m_b.size());
     const bool ok = (bool)f;
@@ -206,7 +194,7 @@ bool OtterBandit::load(const char* path) {
         LUCHS_LOG_HOST("[AOP/LIN] load failed: bad header");
         return false;
     }
-    init(fileDim); // sets Ainv=(1/λ)I, b=0, w=0 with current params
+    init(fileDim);
 
     f.read((char*)m_Ainv.data(), sizeof(double) * m_Ainv.size());
     f.read((char*)m_b.data(),    sizeof(double) * m_b.size());
@@ -248,7 +236,6 @@ double OtterBandit::dot_w(const float* x) const {
 double OtterBandit::quadform_Ainv(const float* x) const {
     const int d = m_dim;
     const double* A = m_Ainv.data();
-    // tmp = A⁻¹ x
     std::vector<double> tmp((size_t)d, 0.0);
     for (int r = 0; r < d; ++r) {
         const double* Ar = A + (size_t)r * (size_t)d;
@@ -256,7 +243,6 @@ double OtterBandit::quadform_Ainv(const float* x) const {
         for (int c = 0; c < d; ++c) s += Ar[(size_t)c] * (double)x[c];
         tmp[(size_t)r] = s;
     }
-    // xᵀ tmp
     double q = 0.0;
     for (int i = 0; i < d; ++i) q += (double)x[i] * tmp[(size_t)i];
     return q;
@@ -264,9 +250,8 @@ double OtterBandit::quadform_Ainv(const float* x) const {
 
 void OtterBandit::sm_update_Ainv(const float* x) {
     const int d = m_dim;
-    double denom = 1.0 + quadform_Ainv(x); // 1 + xᵀ A⁻¹ x
+    double denom = 1.0 + quadform_Ainv(x);
     if (!(denom > 0.0) || !is_finite(denom)) {
-        // Numerik-Fallback: kleine Diagonalerhöhung
         const double jitter = 1e-9;
         for (int i = 0; i < d; ++i) {
             m_Ainv[(size_t)i * (size_t)d + (size_t)i] += jitter;
@@ -278,7 +263,6 @@ void OtterBandit::sm_update_Ainv(const float* x) {
         }
     }
 
-    // u = A⁻¹ x
     std::vector<double> u((size_t)d, 0.0);
     for (int r = 0; r < d; ++r) {
         const double* Ar = m_Ainv.data() + (size_t)r * (size_t)d;
@@ -287,7 +271,6 @@ void OtterBandit::sm_update_Ainv(const float* x) {
         u[(size_t)r] = s;
     }
 
-    // A⁻¹ := A⁻¹ − (u uᵀ) / denom
     const double scale = 1.0 / denom;
     for (int r = 0; r < d; ++r) {
         double* Ar = m_Ainv.data() + (size_t)r * (size_t)d;
@@ -299,7 +282,6 @@ void OtterBandit::sm_update_Ainv(const float* x) {
 }
 
 void OtterBandit::recompute_w() {
-    // w = A⁻¹ b
     const int d = m_dim;
     const double* A = m_Ainv.data();
     const double* b = m_b.data();
@@ -314,7 +296,6 @@ void OtterBandit::recompute_w() {
 // --- RNG ---------------------------------------------------------------------
 
 uint32_t OtterBandit::rng_next() const {
-    // xorshift32 (deterministisch, simpel)
     uint32_t x = m_rngState;
     x ^= x << 13;
     x ^= x >> 17;
@@ -324,7 +305,6 @@ uint32_t OtterBandit::rng_next() const {
 }
 
 float OtterBandit::rng_uniform01() const {
-    // map to (0,1)
     const uint32_t v = rng_next();
     const float f = (float)((v >> 8) & 0x00FFFFFFu) / (float)0x01000000u;
     return (f <= 0.0f) ? 1.0f / 16777216.0f : (f >= 1.0f ? (16777215.0f / 16777216.0f) : f);

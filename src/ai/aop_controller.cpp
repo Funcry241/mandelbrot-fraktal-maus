@@ -102,15 +102,25 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
 
     auto& RB = RBs();
     if (!RB.ready || RB.dim != X.dim) {
-        RB.bandit = otter::ai::OtterBandit(X.dim, otter::ai::BanditParams{
-            Settings::AiBandit::alpha,
-            Settings::AiBandit::epsilon,
-            Settings::AiBandit::lambda,
-            Settings::AiBandit::beta,
-            Settings::AiBandit::seed
-        });
-        RB.dim = X.dim;
-        RB.ready = true;
+        // ✔️ Parametrisierung an Settings angleichen + Seed sauber setzen
+        otter::ai::BanditParams bp{};
+        bp.alpha            = Settings::AiBandit::alpha;
+        bp.epsilon          = Settings::AiBandit::epsilon;
+        bp.lambda           = Settings::AiBandit::lambda;
+        bp.beta             = Settings::AiBandit::beta;
+        bp.topK             = Settings::AiBandit::topK;
+        bp.retargetInterval = Settings::AiBandit::retargetInterval;
+        bp.rewardClampLo    = Settings::AiBandit::rewardClampLo;
+        bp.rewardClampHi    = Settings::AiBandit::rewardClampHi;
+        bp.stage            = (otter::ai::BanditStage)Settings::AiBandit::stage;
+
+        RB.bandit = otter::ai::OtterBandit(X.dim, bp);
+        RB.bandit.set_seed((uint32_t)Settings::AiBandit::seed);
+
+        RB.dim    = X.dim;
+        RB.tilesX = (int)X.tilesX;
+        RB.tilesY = (int)X.tilesY;
+        RB.ready  = true;
         LUCHS_LOG_HOST("%s", RB.bandit.brief().c_str());
     }
 
@@ -193,7 +203,6 @@ Decision evaluate_tile_policy(const FrameContext& fctx, const RendererState& sta
         RB.lastUpdateFrame = frame;
         static int s_updateCount = 0; ++s_updateCount;
 
-        // /WX-safe: constexpr-Gate verhindert C4127 („Bedingter Ausdruck ist konstant“)
         if constexpr (Settings::AiBandit::persistEvery > 0) {
             if ((s_updateCount % Settings::AiBandit::persistEvery) == 0) {
                 const bool okSave = RB.bandit.save(Settings::AiBandit::persistPath);
