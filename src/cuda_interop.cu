@@ -2,7 +2,7 @@
 ///// Schneefuchs: Gate nutzt Settings::performanceLogging && PerfLog::*; Header einmalig; Events nur bei Gate
 ///// Maus: /WX clean; Debugdetails hinter debugLogging; Skip bei Ring-Sättigung
 ///// Datei: src/cuda_interop.cu
-///// Change: + Color-Replikatoren NVRTC-Hook vor colorize_iterations_to_pbo()
+///// Change: + Color-Replikatoren NVRTC-Hook vor colorize_iterations_to_pbo(); + direkte Nutzung von launch_mandelbrot_capybara (kein Shim)
 
 #include "pch.hpp"
 #include "luchs_log_host.hpp"
@@ -14,7 +14,7 @@
 #include "hermelin_buffer.hpp"
 #include "bear_CudaPBOResource.hpp"
 #include "colorize_iterations.cuh"
-#include "capybara_frame_pipeline.cuh"
+// #include "capybara_frame_pipeline.cuh" // entfernt: wir rufen direkt launch_mandelbrot_capybara()
 #include "capybara_mapping.cuh"    // capy_pixel_steps_from_zoom_scale(...)
 #include "heatmap_metrics.hpp"     // HeatmapMetrics::buildGPU
 #include "coloring_runtime_nvrtc.hpp" // [REPL/COLOR] NVRTC hook
@@ -28,6 +28,15 @@
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 #include <vector_types.h>
+
+// ---- Vorwärtsdeklaration des Host-Gates (kein Shim) --------------------------
+extern "C" void launch_mandelbrot_capybara(
+    uint16_t* d_it,
+    int w, int h,
+    double cx, double cy,
+    double stepX, double stepY,
+    int maxIter,
+    cudaStream_t stream);
 
 namespace {
 
@@ -284,26 +293,28 @@ static void render_to_pbo_core(RendererState& state,
         ensureEventsOnce();
     }
 
-    // 2) capybara render
+    // 2) capybara render — direkte Host-Funktion (kein Shim)
     if (measure) {
         auto rc = cudaEventRecord(s_evStart, renderStream);
         if (rc != cudaSuccess) throw_with_log("eventRecord(start) before capy_render", rc);
-        capy_render(static_cast<uint16_t*>(state.d_iterations.get()),
-                    width, height, cx, cy, stepX, stepY,
-                    maxIterations, renderStream, state.evEcDone);
+        launch_mandelbrot_capybara(
+            static_cast<uint16_t*>(state.d_iterations.get()),
+            width, height, cx, cy, stepX, stepY, maxIterations, renderStream
+        );
         rc = cudaPeekAtLastError();
-        if (rc != cudaSuccess) throw_with_log("capy_render launch", rc);
+        if (rc != cudaSuccess) throw_with_log("launch_mandelbrot_capybara launch", rc);
         rc = cudaEventRecord(s_evStop, renderStream);
         if (rc != cudaSuccess) throw_with_log("eventRecord(stop) after capy_render", rc);
         rc = cudaEventSynchronize(s_evStop);
         if (rc != cudaSuccess) throw_with_log("capy_render sync", rc);
         (void)cudaEventElapsedTime(&capyMs, s_evStart, s_evStop);
     } else {
-        capy_render(static_cast<uint16_t*>(state.d_iterations.get()),
-                    width, height, cx, cy, stepX, stepY,
-                    maxIterations, renderStream, state.evEcDone);
+        launch_mandelbrot_capybara(
+            static_cast<uint16_t*>(state.d_iterations.get()),
+            width, height, cx, cy, stepX, stepY, maxIterations, renderStream
+        );
         auto rc = cudaPeekAtLastError();
-        if (rc != cudaSuccess) throw_with_log("capy_render launch", rc);
+        if (rc != cudaSuccess) throw_with_log("launch_mandelbrot_capybara launch", rc);
     }
 
     // 3) colorize into mapped PBO (NVRTC hook first)
