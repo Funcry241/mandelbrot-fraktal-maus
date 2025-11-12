@@ -1,7 +1,7 @@
-///// Otter: Nacktmull — frame pipeline with Axolotel Coupler; draw-lag-1; perf warm-up; VISUAL FALLBACK removed; Dachs-HUD center handling, Warzenschwein-HUD off during Help (F1).
-///// Schneefuchs: ASCII logs; pch first; small deterministic diffs; centralized [REPL/*] logging (no local echoes).
-///// Maus: Compute -> Metrics -> Overlays -> Axolotel -> Zoom(dt·(1+βE)); Upload on Upload-Tex; Draw on Draw-Tex; center shows Help; WS hidden on Help.
-///// Datei: src/frame_pipeline.cpp
+///// Otter: Nacktmull — frame pipeline with Axolotel Coupler; draw-lag-1; pan works during Pause (zoom frozen).
+///// Schneefuchs: ASCII logs; pch first; deterministic diffs; [REPL/*] centralized logging.
+/// /// Maus: Compute → Metrics → Overlays → Axolotel → Zoom; if Pause: interest cleared, zoom restored to pre-call.
+/// /// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
 #include <GLFW/glfw3.h>       // glfwGetTime()
@@ -329,21 +329,17 @@ namespace {
         }
 
         // Warzenschwein-HUD:
-        // - normal anzeigen, wenn Help AUS ist
-        // - vollständig AUS, wenn Help AN ist (F1), damit nur das Dachs-HUD sichtbar ist.
         if constexpr (Settings::warzenschweinOverlayEnabled) {
             if (!DachsHUD::help_enabled()) {
-                // Klassischer Modus
                 state.warzenschweinText = HudText::build(fctx, state);
                 WarzenschweinOverlay::setText(state.warzenschweinText);
             } else {
-                // Help aktiv: WS-Overlay aus
                 WarzenschweinOverlay::setText("");
             }
             WarzenschweinOverlay::drawOverlay(fctx.zoom);
         }
 
-        // ✨ Axolotel: additive Glow-Pulse als Top-Layer (sichtbar nach jedem Key-Pulse)
+        // ✨ Axolotel: additive Glow-Pulse
         AxolotelHUD::draw(fctx.width, fctx.height, glfwGetTime());
 
         const auto tOv1 = Clock::now();
@@ -495,8 +491,6 @@ void execute(RendererState& state) {
     }
 
     // ---- AI Soft-Coupling into interest (gentle NDC blend) -------------------
-    // Nutzt nur NDC aus der Policy-Telemetrie. Confidence wird (noch) nicht
-    // ausgewertet; Stärke kommt aus Settings::Ai::hintBlend.
     if constexpr (Settings::Ai::enabled) {
         if (Settings::Ai::coupleEnabled &&
             AOP_Telemetry::g_ai_ov_valid &&
@@ -506,7 +500,6 @@ void execute(RendererState& state) {
             const double ndcAy = static_cast<double>(AOP_Telemetry::g_ai_ndc_pol_y);
 
             if (!state.interest.valid) {
-                // Kein Heatmap-Interest → AI übernimmt sanft als Startpunkt
                 state.interest.ndcX = ndcAx;
                 state.interest.ndcY = ndcAy;
                 state.interest.valid = true;
@@ -528,9 +521,23 @@ void execute(RendererState& state) {
         }
     }
 
-    // ---- Zoom (ein Pfad: ZoomLogic schreibt direkt in RendererState) ----
-    if (!CudaInterop::getPauseZoom()) {
-        ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, /*dtOverrideSeconds*/ dtScaled);
+    // ---- Zoom/Pan Anwendung -------------------------------------------------
+    const bool paused = CudaInterop::getPauseZoom();
+
+    // Falls pausiert: Autopilot-Pan verhindern → Interest invalidieren.
+    if (paused) {
+        state.interest.valid = false;
+    }
+
+    // evaluateAndApply IMMER ausführen:
+    //  - bei Pause: Pilot-Override-Pan erlaubt (Interest invalid), Zoom wird nachher zurückgesetzt.
+    //  - sonst: normales Verhalten.
+    const double preZoom = (double)state.zoom;
+    ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, /*dtOverrideSeconds*/ dtScaled);
+
+    // Zoom in Pause einfrieren (Pan bleibt erhalten, s.o.)
+    if (paused) {
+        state.zoom = (float)preZoom;
     }
 
     // Spiegel zurück in den Context (für HUD/Nächsten Frame)
@@ -568,7 +575,6 @@ void execute(RendererState& state) {
         // --- other-time (oth) schließt Budget zu tot (geclamped >= 0) ---
         double oth = g_totMs - (g_mandMs + g_entMs + g_conMs + g_texMs + g_ovlMs);
         if (oth < 0.0) {
-            // swallow tiny negative noise from timers
             if (oth > -0.01) oth = 0.0;
         }
 

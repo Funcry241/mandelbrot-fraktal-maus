@@ -1,7 +1,7 @@
-///// Otter: Rullmolder Step 2 - blunt zoom + gentle nudge toward Interest (dt-invariant); sub-pixel clamp to kill jitter.
-///// Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts (no ref-casts); [ZPERF] cadence-respecting.
-///// Maus: Stable ASCII keys; rate-limited; pch first; optional logs [ZPAN1]/[ZPERF]/[ZLEASH]/[ZJIT]/[ZANGL]/[ZDEF]/[ZPILOT]/[ZKEY]/[CAP].
-///// Datei: src/zoom_logic.cpp
+///// Otter: Rullmolder Step 2 - blunt zoom + gentle nudge; + Pilot-Override (Keys dominate with arm/linger); pan works even if interest is invalid.
+/// /// Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts; cadence-respecting logs.
+/// /// Maus: [ZPAN1]/[ZPERF]/[ZLEASH]/[ZJIT]/[ZANGL]/[ZDEF]/[ZPILOT]/[ZKEY]/[CAP]; Shift=Turbo, Ctrl=Fine.
+/// /// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
 #pragma warning(disable: 4100) // unreferenced formal parameter (API preserved)
@@ -84,6 +84,48 @@ static constexpr StartLeashCfg kStartLeash{};
 // Sanfter Tastatur-Bias in NDC; additiv, dt-invariant integriert.
 static double sKeyBiasX = 0.0, sKeyBiasY = 0.0;
 
+// Raw key dir (for Pilot-Override)
+struct KeyDir {
+    bool   pressed{false};
+    double x{0.0};
+    double y{0.0}; // screen-space up = negative NDC-Y (handled below)
+    bool   shift{false};
+    bool   ctrl{false};
+};
+
+static inline KeyDir read_key_dir() noexcept {
+    KeyDir kd{};
+    if (GLFWwindow* window = glfwGetCurrentContext()) {
+        const int xPos = (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+                       + (glfwGetKey(window, GLFW_KEY_D)     == GLFW_PRESS);
+        const int xNeg = (glfwGetKey(window, GLFW_KEY_LEFT)  == GLFW_PRESS)
+                       + (glfwGetKey(window, GLFW_KEY_A)     == GLFW_PRESS);
+        const int yPos = (glfwGetKey(window, GLFW_KEY_UP)    == GLFW_PRESS)
+                       + (glfwGetKey(window, GLFW_KEY_W)     == GLFW_PRESS);
+        const int yNeg = (glfwGetKey(window, GLFW_KEY_DOWN)  == GLFW_PRESS)
+                       + (glfwGetKey(window, GLFW_KEY_S)     == GLFW_PRESS);
+
+        const int txi = (xPos > 0) - (xNeg > 0);
+        const int tyi = (yPos > 0) - (yNeg > 0);
+
+        kd.shift = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT)  == GLFW_PRESS)
+                || (glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS);
+        kd.ctrl  = (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL)  == GLFW_PRESS)
+                || (glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS);
+
+        const double tx = static_cast<double>(txi);
+        const double ty = static_cast<double>(tyi);
+
+        const double L = std::sqrt(tx*tx + ty*ty);
+        if (L > 0.0) {
+            kd.pressed = true;
+            kd.x = tx / L;
+            kd.y = -(ty / L); // invert Y to match screen up
+        }
+    }
+    return kd;
+}
+
 static inline void update_key_nav_bias(float dt) noexcept
 {
     namespace NB = Settings::NavBias;
@@ -92,33 +134,10 @@ static inline void update_key_nav_bias(float dt) noexcept
     const double dtD = (dt > 0.0f) ? static_cast<double>(dt) : 0.0;
     const double lambda = (NB::halfLifeSec > 0.0) ? (std::log(2.0) / NB::halfLifeSec) : 0.0;
 
-    // Zielrichtung u aus Tastenzuständen, normiert (keine √2-Bevorzugung)
-    double ux = 0.0, uy = 0.0;
-
-    if constexpr (NB::enabled) {
-        if (GLFWwindow* window = glfwGetCurrentContext()) {
-            const int xPos = (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
-                           + (glfwGetKey(window, GLFW_KEY_D)     == GLFW_PRESS);
-            const int xNeg = (glfwGetKey(window, GLFW_KEY_LEFT)  == GLFW_PRESS)
-                           + (glfwGetKey(window, GLFW_KEY_A)     == GLFW_PRESS);
-            const int yPos = (glfwGetKey(window, GLFW_KEY_UP)    == GLFW_PRESS)
-                           + (glfwGetKey(window, GLFW_KEY_W)     == GLFW_PRESS);
-            const int yNeg = (glfwGetKey(window, GLFW_KEY_DOWN)  == GLFW_PRESS)
-                           + (glfwGetKey(window, GLFW_KEY_S)     == GLFW_PRESS);
-
-            const int txi = (xPos > 0) - (xNeg > 0);
-            const int tyi = (yPos > 0) - (yNeg > 0);
-
-            const double tx = static_cast<double>(txi);
-            const double ty = static_cast<double>(tyi);
-
-            const double L = std::sqrt(tx*tx + ty*ty);
-            if (L > 0.0) { 
-                ux = tx / L; 
-                uy = -(ty / L) * NB::yScale; // Y-Richtung invertiert
-            }
-        }
-    }
+    // Richtung aus Tasten
+    const KeyDir kd = read_key_dir();
+    const double ux = kd.x;
+    const double uy = kd.y * NB::yScale;
 
     // db/dt = gain*u − λ*b
     sKeyBiasX += dtD * (NB::gainPerSec * ux - lambda * sKeyBiasX);
@@ -195,6 +214,74 @@ static void ensure_seed_once() noexcept {
     sNoise.seeded = true;
 }
 
+// --- Pilot-Override FSM ------------------------------------------------------
+
+enum class PilotState : uint8_t { Idle=0, Armed=1, Active=2, Linger=3 };
+struct PilotFSM {
+    PilotState state{PilotState::Idle};
+    double     tMs{0.0};          // time in current state [ms]
+    double     lastDirX{0.0};     // latched, NDC-ish direction unit vector
+    double     lastDirY{0.0};
+};
+static PilotFSM sPilot{};
+
+static inline void pilot_transition(PilotState to) noexcept {
+    if constexpr (ZLOG_ON) {
+        const char* names[] = {"Idle","Armed","Active","Linger"};
+        LUCHS_LOG_HOST("[ZPILOT] %s->%s", names[(int)sPilot.state], names[(int)to]);
+    }
+    sPilot.state = to;
+    sPilot.tMs   = 0.0;
+}
+
+static inline void pilot_update(float dt, const KeyDir& kd) noexcept {
+    using namespace Settings::PilotOverride;
+    sPilot.tMs += (double)dt * 1000.0;
+
+    switch (sPilot.state) {
+        case PilotState::Idle:
+            if (enabled && kd.pressed) {
+                sPilot.lastDirX = kd.x; sPilot.lastDirY = kd.y;
+                pilot_transition(PilotState::Armed);
+            }
+            break;
+        case PilotState::Armed:
+            if (!enabled) { pilot_transition(PilotState::Idle); break; }
+            if (kd.pressed) {
+                if (sPilot.tMs >= (double)armMs) {
+                    sPilot.lastDirX = kd.x; sPilot.lastDirY = kd.y;
+                    pilot_transition(PilotState::Active);
+                }
+            } else {
+                pilot_transition(PilotState::Idle);
+            }
+            break;
+        case PilotState::Active:
+            if (!enabled) { pilot_transition(PilotState::Idle); break; }
+            if (kd.pressed) {
+                // refresh direction continuously while held
+                sPilot.lastDirX = kd.x; sPilot.lastDirY = kd.y;
+                sPilot.tMs = 0.0; // keep alive
+            } else {
+                pilot_transition(PilotState::Linger);
+            }
+            break;
+        case PilotState::Linger:
+            if (!enabled) { pilot_transition(PilotState::Idle); break; }
+            if (kd.pressed) {
+                sPilot.lastDirX = kd.x; sPilot.lastDirY = kd.y;
+                pilot_transition(PilotState::Active);
+            } else if (sPilot.tMs >= (double)lingerMs) {
+                pilot_transition(PilotState::Idle);
+            }
+            break;
+    }
+}
+
+static inline bool pilot_is_active_like() noexcept {
+    return sPilot.state == PilotState::Active || sPilot.state == PilotState::Linger;
+}
+
 // --- local telemetry state ---------------------------------------------------
 
 struct ZLogState {
@@ -249,6 +336,14 @@ static inline double clamp_abs(double v, double cap) noexcept {
     if (v >  cap) return cap;
     if (v < -cap) return -cap;
     return v;
+}
+
+// Compute dynamic px cap for Pilot-Override
+static inline double pilot_px_cap(int w, int h) noexcept {
+    using namespace Settings::PilotOverride;
+    const double minDim = (double)std::min(std::max(w,0), std::max(h,0));
+    const double dyn    = (fracOfMinDim > 0.0) ? (fracOfMinDim * minDim) : maxPxPerFrame;
+    return std::min(maxPxPerFrame, (dyn > 0.0 ? dyn : maxPxPerFrame));
 }
 
 // --- core --------------------------------------------------------------------
@@ -315,90 +410,161 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                               ? static_cast<uint64_t>(Settings::ZoomLog::everyN) : 1ULL;
     const bool     emitEveryN = ((zls.frame % modN) == 0);
 
-    // -------------------- Gentle Nudge (PAN) ---------------------------------
-    if (rs.interest.valid && rs.width > 0 && rs.height > 0) {
+    // -------------------- Pilot-Override read/update -------------------------
+    const KeyDir kd = read_key_dir();
+    pilot_update(dt, kd);
+    const bool pilotOn = pilot_is_active_like();
+
+    // -------------------- PAN: manual override branch ------------------------
+    if (pilotOn && rs.width > 0 && rs.height > 0) {
+        [[maybe_unused]] const auto tPanStart = Clock::now();
+        using namespace Settings::PilotOverride;
+
+        // Compose effective scalars
+        double turboMul = kd.shift ? shiftTurboMul : 1.0;
+        double fineMul  = kd.ctrl  ? ctrlFineMul   : 1.0;
+        const double pxCap = pilot_px_cap(rs.width, rs.height) * turboMul * fineMul;
+
+        // Manual ndc from pilot dir, with small deadzone & relaxed Y scaling
+        double ndcX = applyDeadzone(sPilot.lastDirX, deadzoneNdc);
+        double ndcY = applyDeadzone(sPilot.lastDirY, deadzoneNdc);
+
+        // No leashes in override → pure direction; optional Y scale
+        ndcY *= yScale;
+
+        const double halfW = 0.5 * static_cast<double>(rs.width);
+        const double halfH = 0.5 * static_cast<double>(rs.height);
+        double dx_px_goal = ndcX * halfW;
+        double dy_px_goal = ndcY * halfH;
+
+        // dt-invariant step fraction
+        const double a = gainPerSec * static_cast<double>(dt);
+        const double alpha = std::min(1.0, std::max(0.0, one_minus_expm_fast(a)));
+
+        double step_px_x = clamp_abs(dx_px_goal * alpha, pxCap);
+        double step_px_y = clamp_abs(dy_px_goal * alpha, pxCap);
+
+        // Subpixel clamp (override)
+        if (std::abs(step_px_x) < subPxClamp) step_px_x = 0.0;
+        if (std::abs(step_px_y) < subPxClamp) step_px_y = 0.0;
+
+        const double psx = static_cast<double>(rs.pixelScale.x);
+        const double psy = static_cast<double>(rs.pixelScale.y);
+        const bool scaleZero = (psx == 0.0 && psy == 0.0);
+
+        if (!scaleZero) {
+            const double z = static_cast<double>(RS_ZOOM(rs));
+            const double invZ = (z != 0.0) ? (1.0 / z) : 0.0;
+            const double dWorldX = step_px_x * psx * invZ;
+            const double dWorldY = step_px_y * psy * invZ;
+
+            RS_OFFSET_X(rs) += dWorldX;
+            RS_OFFSET_Y(rs) += dWorldY;
+
+            if constexpr (ZLOG_ON) {
+                if (emitEveryN) {
+                    LUCHS_LOG_HOST("[ZPAN1] f=%llu PILOT ndc=(%.3f,%.3f) a=%.3f goal_px=(%.2f,%.2f) step_px=(%.2f,%.2f) dWorld=(%.9f,%.9f) cap=%.1f",
+                                   (unsigned long long)zls.frame, ndcX, ndcY, alpha,
+                                   dx_px_goal, dy_px_goal, step_px_x, step_px_y,
+                                   dWorldX, dWorldY, pxCap);
+                }
+            }
+        }
+
+        pan_us += (long long)std::chrono::duration_cast<std::chrono::microseconds>(tPanStart - tUpdateStart).count();
+        // In override we skip any auto contributions below.
+        // Fall through to telemetry at end.
+    }
+    // -------------------- PAN: auto/interest branch --------------------------
+    else if (rs.interest.valid && rs.width > 0 && rs.height > 0) {
         [[maybe_unused]] const auto tPanStart = Clock::now();
 
         const double ndcX_raw0 = rs.interest.ndcX;
         const double ndcY_raw0 = rs.interest.ndcY;
 
-        // Early angle bias (±24°, fadet in ~2.2 s auf 0)
+        // Early angle bias (±24°) – suppressed while PilotOverride is on
         double ndcX_in = ndcX_raw0, ndcY_in = ndcY_raw0;
-        if (sNoise.seeded && sNoise.angleBiasRad != 0.0 && sNoise.angleDurSec > 0.0) {
-            const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.angleDurSec), 0.0, 1.0);
-            if (t > 0.0) {
-                const double ang = sNoise.angleBiasRad * t;
-                const double c = std::cos(ang), s = std::sin(ang);
-                const double rx = ndcX_in * c - ndcY_in * s;
-                const double ry = ndcX_in * s + ndcY_in * c;
-                ndcX_in = rx; ndcY_in = ry;
-                if constexpr (ZLOG_ON) {
-                    if (emitEveryN) {
-                        LUCHS_LOG_HOST("[ZANGL] f=%llu fade=%.2f ang=%.3f ndcRot=(%.3f,%.3f)",
-                                       (unsigned long long)zls.frame, t, ang, ndcX_in, ndcY_in);
+        if (!pilotOn) {
+            if (sNoise.seeded && sNoise.angleBiasRad != 0.0 && sNoise.angleDurSec > 0.0) {
+                const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.angleDurSec), 0.0, 1.0);
+                if (t > 0.0) {
+                    const double ang = sNoise.angleBiasRad * t;
+                    const double c = std::cos(ang), s = std::sin(ang);
+                    const double rx = ndcX_in * c - ndcY_in * s;
+                    const double ry = ndcX_in * s + ndcY_in * c;
+                    ndcX_in = rx; ndcY_in = ry;
+                    if constexpr (ZLOG_ON) {
+                        if (emitEveryN) {
+                            LUCHS_LOG_HOST("[ZANGL] f=%llu fade=%.2f ang=%.3f ndcRot=(%.3f,%.3f)",
+                                           (unsigned long long)zls.frame, t, ang, ndcX_in, ndcY_in);
+                        }
                     }
                 }
             }
-        }
 
-        // Orthogonale Deflektion – stark, aber ausfaded
-        if (sNoise.seeded && sNoise.deflectMax > 0.0 && sNoise.deflectDurSec > 0.0) {
-            const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.deflectDurSec), 0.0, 1.0);
-            if (t > 0.0) {
-                const double r2 = ndcX_in*ndcX_in + ndcY_in*ndcY_in;
-                if (r2 > 1e-16) {
-                    const double invLen = 1.0 / std::sqrt(r2);
-                    const double ox = -ndcY_in * invLen; // 90° links
-                    const double oy =  ndcX_in * invLen;
-                    const double amp = sNoise.deflectMax * t;
-                    ndcX_in += (double)sNoise.deflectSign * amp * ox;
-                    ndcY_in += (double)sNoise.deflectSign * amp * oy;
+            // Orthogonale Deflektion – ausfaded; suppressed while PilotOverride
+            if (sNoise.seeded && sNoise.deflectMax > 0.0 && sNoise.deflectDurSec > 0.0) {
+                const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.deflectDurSec), 0.0, 1.0);
+                if (t > 0.0) {
+                    const double r2 = ndcX_in*ndcX_in + ndcY_in*ndcY_in;
+                    if (r2 > 1e-16) {
+                        const double invLen = 1.0 / std::sqrt(r2);
+                        const double ox = -ndcY_in * invLen; // 90° links
+                        const double oy =  ndcX_in * invLen;
+                        const double amp = sNoise.deflectMax * t;
+                        ndcX_in += (double)sNoise.deflectSign * amp * ox;
+                        ndcY_in += (double)sNoise.deflectSign * amp * oy;
 
-                    if constexpr (ZLOG_ON) {
-                        if (emitEveryN) {
-                            LUCHS_LOG_HOST("[ZDEF] f=%llu fade=%.2f amp=%.3f sign=%+d ndcDef=(%.3f,%.3f)",
-                                           (unsigned long long)zls.frame, t, amp, sNoise.deflectSign, ndcX_in, ndcY_in);
+                        if constexpr (ZLOG_ON) {
+                            if (emitEveryN) {
+                                LUCHS_LOG_HOST("[ZDEF] f=%llu fade=%.2f amp=%.3f sign=%+d ndcDef=(%.3f,%.3f)",
+                                               (unsigned long long)zls.frame, t, amp, sNoise.deflectSign, ndcX_in, ndcY_in);
+                            }
                         }
                     }
                 }
             }
         }
 
-        // --- Keyboard Nav Bias (additiv) -------------------------------------
-        update_key_nav_bias(dt);
-        add_key_bias_to_ndc(ndcX_in, ndcY_in);
-        if constexpr (ZLOG_ON) {
-            if (emitEveryN && (sKeyBiasX != 0.0 || sKeyBiasY != 0.0)) {
-                LUCHS_LOG_HOST("[ZKEY] f=%llu keyBias=(%.4f,%.4f) ndc+key=(%.4f,%.4f)",
-                               (unsigned long long)zls.frame, sKeyBiasX, sKeyBiasY, ndcX_in, ndcY_in);
+        // --- Keyboard Nav Bias (additiv) – suppressed while PilotOverride ---
+        if (!pilotOn) {
+            update_key_nav_bias(dt);
+            add_key_bias_to_ndc(ndcX_in, ndcY_in);
+            if constexpr (ZLOG_ON) {
+                if (emitEveryN && (sKeyBiasX != 0.0 || sKeyBiasY != 0.0)) {
+                    LUCHS_LOG_HOST("[ZKEY] f=%llu keyBias=(%.4f,%.4f) ndc+key=(%.4f,%.4f)",
+                                   (unsigned long long)zls.frame, sKeyBiasX, sKeyBiasY, ndcX_in, ndcY_in);
+                }
             }
         }
 
-        // Pilot-Kick: kurzer Seitenimpuls in Pixeln
+        // Pilot-Kick: unterdrückt während PilotOverride
         double pilot_px_x = 0.0, pilot_px_y = 0.0;
-        if (sNoise.seeded && sNoise.pilotMaxPx > 0.0 && sNoise.pilotDurSec > 0.0) {
-            const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.pilotDurSec), 0.0, 1.0);
-            if (t > 0.0) {
-                const double f = t * t * (3.0 - 2.0 * t);
-                const double ampPx = sNoise.pilotMaxPx * f;
+        if (!pilotOn) {
+            if (sNoise.seeded && sNoise.pilotMaxPx > 0.0 && sNoise.pilotDurSec > 0.0) {
+                const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.pilotDurSec), 0.0, 1.0);
+                if (t > 0.0) {
+                    const double f = t * t * (3.0 - 2.0 * t);
+                    const double ampPx = sNoise.pilotMaxPx * f;
 
-                double ox = 0.0, oy = 0.0;
-                const double r2 = ndcX_in*ndcX_in + ndcY_in*ndcY_in;
-                if (r2 > 1e-12) {
-                    const double invLen = 1.0 / std::sqrt(r2);
-                    ox = -ndcY_in * invLen;
-                    oy =  ndcX_in * invLen;
-                } else {
-                    const double phi = 6.283185307179586 * (double)sNoise.rng.u01();
-                    ox = std::cos(phi); oy = std::sin(phi);
-                }
-                pilot_px_x = (double)sNoise.deflectSign * ampPx * ox;
-                pilot_px_y = (double)sNoise.deflectSign * ampPx * oy;
+                    double ox = 0.0, oy = 0.0;
+                    const double r2 = ndcX_in*ndcX_in + ndcY_in*ndcY_in;
+                    if (r2 > 1e-12) {
+                        const double invLen = 1.0 / std::sqrt(r2);
+                        ox = -ndcY_in * invLen;
+                        oy =  ndcX_in * invLen;
+                    } else {
+                        const double phi = 6.283185307179586 * (double)sNoise.rng.u01();
+                        ox = std::cos(phi); oy = std::sin(phi);
+                    }
+                    pilot_px_x = (double)sNoise.deflectSign * ampPx * ox;
+                    pilot_px_y = (double)sNoise.deflectSign * ampPx * oy;
 
-                if constexpr (ZLOG_ON) {
-                    if (emitEveryN) {
-                        LUCHS_LOG_HOST("[ZPILOT] f=%llu fade=%.2f ampPx=%.2f dir=(%.3f,%.3f) pilotPx=(%.2f,%.2f)",
-                                       (unsigned long long)zls.frame, t, ampPx, ox, oy, pilot_px_x, pilot_px_y);
+                    if constexpr (ZLOG_ON) {
+                        if (emitEveryN) {
+                            LUCHS_LOG_HOST("[ZPILOT] f=%llu fade=%.2f ampPx=%.2f dir=(%.3f,%.3f) pilotPx=(%.2f,%.2f)",
+                                           (unsigned long long)zls.frame, t, ampPx, ox, oy, pilot_px_x, pilot_px_y);
+                        }
                     }
                 }
             }
@@ -464,18 +630,9 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             const bool hitCAP_X = (step_px_x != dx_px_goal * alpha);
             const bool hitCAP_Y = (step_px_y != dy_px_goal * alpha * kNudge.yScale);
 
-            // ----- Dachs Phase 3: Sub-pixel clamp (kill micro-jitter) -----
+            // Sub-pixel clamp (auto path stricter)
             if (std::abs(step_px_x) < 1.0) step_px_x = 0.0;
             if (std::abs(step_px_y) < 1.0) step_px_y = 0.0;
-            if constexpr (ZLOG_ON) {
-                static double s_lastCapLog = 0.0;
-                const double now = glfwGetTime();
-                if ((std::abs(step_px_x) == 0.0 || std::abs(step_px_y) == 0.0) && (now - s_lastCapLog) > 1.0) {
-                    LUCHS_LOG_HOST("[CAP] subpx");
-                    s_lastCapLog = now;
-                }
-            }
-            // ----------------------------------------------------------------
 
             const double psx = static_cast<double>(rs.pixelScale.x);
             const double psy = static_cast<double>(rs.pixelScale.y);
@@ -498,7 +655,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
 
                 if constexpr (ZLOG_ON) {
                     if (emitEveryN) {
-                        LUCHS_LOG_HOST("[ZPAN1] f=%llu ndc=(%.4f,%.4f) a=%.3f s=%.2f "
+                        LUCHS_LOG_HOST("[ZPAN1] f=%llu AUTO ndc=(%.4f,%.4f) a=%.3f s=%.2f "
                                        "goal_px=(%.2f,%.2f) step_px=(%.2f,%.2f) dWorld=(%.9f,%.9f) invZ=%.6g flags=0x%02X",
                                        (unsigned long long)zls.frame,
                                        ndcX_in, ndcY_in, alpha, s,

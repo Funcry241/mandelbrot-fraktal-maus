@@ -1,4 +1,4 @@
-///// Otter: Zentral-Config – Replikatoren „Replikatoren“ (Bandit Shadow), Nacktmull-Perf; klar dokumentierte Werte.
+///// Otter: Zentral-Config – Replikatoren „Replikatoren“ (Bandit Shadow), Nacktmull-Perf; Pilot-Override für direkte Tastenpriorität.
 ///// Schneefuchs: /WX-safe; ASCII-Logs; keine versteckten Makros; Header/Source synchron; GLEW dynamisch.
 ///// Maus: ForceAlwaysZoom=1; PerfLog aktiv; Kolibri-Grid; Luchs-Kompatblock (enabled/nvrtc) wiederhergestellt.
 ///// Datei: src/settings.hpp
@@ -204,6 +204,50 @@ namespace NavBias {
 
     // Y leicht dämpfen (HUD-Lesbarkeit).
     inline constexpr double yScale      = 0.94;
+}
+
+// ============================== Pilot-Override ===============================
+// Harte Priorität für Richtungstasten: solange gehalten (und kurz danach) dominiert manuell.
+namespace PilotOverride {
+    // Master-Switch.
+    inline constexpr bool   enabled        = true;
+
+    // Zeit bis zur scharfen Übernahme nach Key-Down.
+    // Range: 0 .. 200 ms | Default: 60
+    inline constexpr int    armMs          = 60;
+
+    // Nachlaufzeit nach Key-Up (Easing-Out).
+    // Range: 0 .. 1000 ms | Default: 320
+    inline constexpr int    lingerMs       = 320;
+
+    // Gain (dt-invariant) für Override-Schritte.
+    // Range: 1.0 .. 8.0 | Default: 4.0
+    inline constexpr double gainPerSec     = 4.0;
+
+    // Pixel-Kappung pro Frame (Abs.-Cap).
+    // Range: 16 .. 256 | Default: 96
+    inline constexpr double maxPxPerFrame  = 96.0;
+
+    // Dynamischer Cap anteilig zur kleineren Bildkante.
+    // Range: 0.0 .. 0.2 | Default: 0.06 (0 = aus)
+    inline constexpr double fracOfMinDim   = 0.06;
+
+    // NDC-Deadzone nur im Override (kleiner = direkter).
+    // Range: 0.0 .. 0.2 | Default: 0.05
+    inline constexpr double deadzoneNdc    = 0.05;
+
+    // Subpixel-Clamp (Jitter kill).
+    // Range: 0.0 .. 1.0 px | Default: 0.25
+    inline constexpr double subPxClamp     = 0.25;
+
+    // Y-Dämpfung (1.0 = keine Dämpfung).
+    // Range: 0.8 .. 1.2 | Default: 1.0
+    inline constexpr double yScale         = 1.0;
+
+    // Modifikatoren über Modifier-Tasten:
+    // Shift = Turbo (multiplikativer Faktor), Ctrl = Fein (mult.)
+    inline constexpr double shiftTurboMul  = 3.0;
+    inline constexpr double ctrlFineMul    = 0.25;
 }
 
 // ============================== Sanity checks ================================
