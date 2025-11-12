@@ -77,6 +77,40 @@ namespace {
         }
     }
 
+    // --- NEW: zusätzlicher Gate NUR für die LANGE [PERF]-Zeile --------------
+    // Ziel: Auch wenn PerfLog::everyN klein ist (z.B. 1), wird die *lange* Zeile
+    // höchstens alle ~60 Frames ausgegeben – ODER sofort bei signifikanter Änderung
+    // (Resolution, Iterations, statsPx).
+    inline bool longPerfShouldLog(int frameIdx, const FrameContext& fctx) {
+        struct Sig { int w, h, it, statsPx; };
+        static bool s_init = false;
+        static Sig  s_last{0,0,0,0};
+        static int  s_lastEmitFrame = -1000000000;
+
+        const int statsPxCur = std::max(1, fctx.statsTileSize);
+        const Sig cur{ fctx.width, fctx.height, fctx.maxIterations, statsPxCur };
+
+        const bool sigChanged =
+            (!s_init) ||
+            (cur.w != s_last.w) || (cur.h != s_last.h) ||
+            (cur.it != s_last.it) || (cur.statsPx != s_last.statsPx);
+
+        // Zeit-Gate: mindestens alle 60 Frames (≈ 1 s @ 60 FPS), unabhängig von Settings
+        const int baseN   = std::max(1, Settings::PerfLog::everyN);
+        const int minN    = 60;                   // harte Unterkante für die lange Zeile
+        const int everyN  = std::max(minN, baseN); // falls baseN größer ist, respektieren
+
+        const bool timeGate = (frameIdx - s_lastEmitFrame) >= everyN;
+
+        if (sigChanged || timeGate) {
+            s_last = cur;
+            s_init = true;
+            s_lastEmitFrame = frameIdx;
+            return true;
+        }
+        return false;
+    }
+
     inline long long epochMillisNow() {
         using namespace std::chrono;
         return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
@@ -552,7 +586,8 @@ void execute(RendererState& state) {
     // HUD: FPS Meter füttern
     FpsMeter::updateCoreMs(g_totMs);
 
-    if (perfShouldLog(g_frame)) {
+    // --- LANGE [PERF]-Zeile jetzt *doppelt* gegated: PerfLog-Gate UND Long-Gate
+    if (perfShouldLog(g_frame) && longPerfShouldLog(g_frame, g_ctx)) {
         const long long tEpoch = epochMillisNow();
         const int resX = g_ctx.width, resY = g_ctx.height;
         const int it   = g_ctx.maxIterations;
