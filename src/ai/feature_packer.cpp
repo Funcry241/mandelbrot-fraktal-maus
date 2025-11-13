@@ -36,21 +36,32 @@ PackedFeatures pack_heatmap_features(const std::vector<float>& entropy,
         return static_cast<size_t>((ch * Ty + y) * Tx + x);
     };
 
+    float eMin = 0.0f, eMax = 0.0f, cMin = 0.0f, cMax = 0.0f;
+    bool  haveStats = false;
+
     for (size_t i = 0; i < use; ++i) {
-        const int y = static_cast<int>(i / Tx);
-        const int x = static_cast<int>(i % Tx);
-        out.data[idx(0, y, x)] = entropy[i];
-        out.data[idx(1, y, x)] = contrast[i];
+        const int y = static_cast<int>(i / static_cast<size_t>(Tx));
+        const int x = static_cast<int>(i % static_cast<size_t>(Tx));
+
+        const float e = entropy[i];
+        const float c = contrast[i];
+
+        out.data[idx(0, y, x)] = e;
+        out.data[idx(1, y, x)] = c;
+
+        if (!haveStats) {
+            eMin = eMax = e;
+            cMin = cMax = c;
+            haveStats = true;
+        } else {
+            if (e < eMin) eMin = e;
+            if (e > eMax) eMax = e;
+            if (c < cMin) cMin = c;
+            if (c > cMax) cMax = c;
+        }
     }
 
-    float eMin = 0.f, eMax = 0.f, cMin = 0.f, cMax = 0.f;
-    if (use > 0) {
-        auto mmE = std::minmax_element(entropy.begin(), entropy.begin() + static_cast<std::ptrdiff_t>(use));
-        auto mmC = std::minmax_element(contrast.begin(), contrast.begin() + static_cast<std::ptrdiff_t>(use));
-        eMin = *mmE.first; eMax = *mmE.second;
-        cMin = *mmC.first; cMax = *mmC.second;
-    }
-
+    // Bei use == 0 bleiben eMin/eMax/cMin/cMax auf 0.0f – Verhalten wie vorher.
     LUCHS_LOG_HOST("[REPL/FEAT] tiles=%dx%d statsPx=%d N=%zu used=%zu E[min=%.4f max=%.4f] C[min=%.4f max=%.4f]",
                    Tx, Ty, px, exp, use, eMin, eMax, cMin, cMax);
 
