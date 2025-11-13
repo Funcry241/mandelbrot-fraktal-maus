@@ -1,5 +1,5 @@
 ///// Otter: MAUS header normalized; ASCII-only; no functional changes.
-///// Schneefuchs: Header format per rules #60–62; path normalized.
+///// Schneefuchs: Header format per rules #60-62; path normalized.
 ///// Maus: Keep this as the only top header block; exact four lines.
 ///// Datei: src/renderer_pipeline.cpp
 

@@ -1,4 +1,4 @@
-///// Otter: ASCII/ANSI-Endblock – kompakte, deterministische Abschlusszusammenfassung mit Farbhilfe.
+///// Otter: ASCII/ANSI-Endblock - kompakte, deterministische Abschlusszusammenfassung mit Farbhilfe.
 ///// Schneefuchs: Keine Win32-FFI-Doppler; nutzt runner_term::{enable_ansi,color_enabled}; OTTER_COLOR=0 schaltet Farbe aus.
 ///// Maus: Minimalistisch; sauberer Fallback auf Plain-ASCII (kein NO_COLOR-Zwang).
 ///// Datei: rust/otter_proc/src/summary.rs

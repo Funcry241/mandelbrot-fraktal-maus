@@ -1,4 +1,4 @@
-///// Otter: Toolchain-Finder & CMake/NVCC-Argumente – cl.exe/Windows SDK (rc/mt) + Host-Compiler-Setup.
+///// Otter: Toolchain-Finder & CMake/NVCC-Argumente - cl.exe/Windows SDK (rc/mt) + Host-Compiler-Setup.
 ////// Schneefuchs: Keine externen Crates; Pfade CMake-sicher (forward slashes); Spaces sauber gequotet.
 ////// Maus: Rückgabewerte für Pipeline nutzbar: (args, prepend_PATH, extra_env) für cmake.
 ////// Datei: rust/otter_proc/src/toolchain.rs

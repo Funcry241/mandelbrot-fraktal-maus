@@ -1,6 +1,6 @@
 ///// OtterDream — Replikatoren
 ///// File: src/perturb_core.hpp
-///// Purpose: Orbit-Replikatoren (Perturbation) – Gate/Rebase Entry Points (Stubs)
+///// Purpose: Orbit-Replikatoren (Perturbation) - Gate/Rebase Entry Points (Stubs)
 ///// Phase: 1 (Orbit-Replikatoren)
 ///// Hooks: frame_pipeline (vor Compute) ; Hotkeys in renderer_loop (Ctrl+P/F9)
 ///// Depends: FrameContext, RendererState, settings.hpp (im .cpp zusätzlich luchs_log_host.hpp)
@@ -11,7 +11,7 @@
 
 #pragma once
 
-// Forward Declarations – wir binden hier keine schweren Header ein,
+// Forward Declarations - wir binden hier keine schweren Header ein,
 // damit dieses Header leichtgewichtig bleibt und /WX-sicher ist.
 struct FrameContext;
 struct RendererState;

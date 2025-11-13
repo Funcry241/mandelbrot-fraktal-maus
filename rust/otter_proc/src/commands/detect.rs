@@ -1,4 +1,4 @@
-///// Otter: Toolchain-Detektion (cl.exe, Windows SDK) – optionale Helpers, ASCII-only.
+///// Otter: Toolchain-Detektion (cl.exe, Windows SDK) - optionale Helpers, ASCII-only.
 ///// Schneefuchs: Getrennt, keine Seiteneffekte; darf ungenutzt bleiben (dead_code erlaubt).
 ///// Maus: Minimal, robust gegen fehlende Pfade; kein panic.
 ///// Datei: rust/otter_proc/src/commands/detect.rs

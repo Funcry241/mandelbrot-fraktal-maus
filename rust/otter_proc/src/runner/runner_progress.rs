@@ -138,7 +138,7 @@ pub fn parse_ratio_percent(s: &str) -> Option<f32> {
 }
 
 /// Rendert eine einzelne, ephemere Statuszeile (inkl. ETA) und schreibt sie über `print_ephemeral`.
-/// `predicted_ms` stammt aus den Metriken – wir fusionieren es konservativ mit Builder-Fortschritt.
+/// `predicted_ms` stammt aus den Metriken - wir fusionieren es konservativ mit Builder-Fortschritt.
 pub fn render_and_print(p: &mut ProgressState, predicted_ms: u128) {
     // 1) Prozent bestimmen (Builder-Signal vs. Zeit-Schätzung aus Metriken)
     let elapsed_ms = p.start.elapsed().as_millis() as u128;
@@ -158,7 +158,7 @@ pub fn render_and_print(p: &mut ProgressState, predicted_ms: u128) {
         let rem = ((1.0 - pct) / pct) * (elapsed_ms as f32 / 1000.0);
         rem.max(0.0)
     } else {
-        // keine sinnvolle Schätzung – nur "…" anzeigen
+        // keine sinnvolle Schätzung - nur "…" anzeigen
         -1.0
     };
 
@@ -231,8 +231,8 @@ pub fn render_and_print(p: &mut ProgressState, predicted_ms: u128) {
     };
 
     // Bar-Farbe (L2):
-    // PROC: 0–33% pink (bright magenta, 95), 34–66% gelb, 67–99% grün
-    // Andere Phasen: 0–33% rot, 34–66% gelb, 67–99% grün (unverändert)
+    // PROC: 0-33% pink (bright magenta, 95), 34-66% gelb, 67-99% grün
+    // Andere Phasen: 0-33% rot, 34-66% gelb, 67-99% grün (unverändert)
     let bar_col = if p.runtime_phase == "proc" {
         if pct < 0.34 {
             "\x1b[95m" // PINK (BRIGHT MAGENTA)

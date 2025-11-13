@@ -1,4 +1,4 @@
-///// Otter: Pipeline-API schlank – ein öffentlicher Einstiegspunkt: execute(RendererState&).
+///// Otter: Pipeline-API schlank - ein öffentlicher Einstiegspunkt: execute(RendererState&).
 ///// Schneefuchs: Header/Source synchron; keine schweren Includes; keine verdeckten Abhängigkeiten.
 ///// Maus: Zoom V2 bleibt intern in der .cpp (deterministische Reihenfolge, einheitliche Tiles/Upload).
 ///// Datei: src/frame_pipeline.hpp
@@ -7,7 +7,7 @@
 #ifndef FRAME_PIPELINE_HPP
 #define FRAME_PIPELINE_HPP
 
-// Bewusst nur Vorwärtsdeklaration – Header leichtgewichtig halten.
+// Bewusst nur Vorwärtsdeklaration - Header leichtgewichtig halten.
 struct RendererState;
 
 namespace FramePipeline {

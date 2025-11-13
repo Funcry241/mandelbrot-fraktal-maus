@@ -1,4 +1,4 @@
-///// Otter: Feature packer für Replikatoren – Heatmap-NCHW + Bandit-Featurematrix (d≈20), deterministisch.
+///// Otter: Feature packer für Replikatoren - Heatmap-NCHW + Bandit-Featurematrix (d≈20), deterministisch.
 ///// Schneefuchs: Bounds-safe, zero-fill, klare Shapes; Header/Source synchron; keine Fremdlibs, ASCII-Logs.
 ///// Maus: NCHW [1,2,Ty,Tx] für E/C; Bandit-Matrix row-major [Tiles × d]; Koords in NDC, Grad/Stats 3×3.
 ///// Datei: src/ai/feature_packer.hpp

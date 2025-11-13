@@ -1,4 +1,4 @@
-///// Otter: Terminal-Helfer – ANSI/VT + WinConsole-Fallback (PS 5.1-tauglich), **auto-on**.
+///// Otter: Terminal-Helfer - ANSI/VT + WinConsole-Fallback (PS 5.1-tauglich), **auto-on**.
 ///// Schneefuchs: Aktiviert VT auf stdout/stderr; Heuristiken (WT_SESSION/ANSICON/ConEmuANSI); kein doppeltes FFI anderswo.
 ///// Maus: Plain-ASCII nur mit OTTER_COLOR=0; Fallback färbt Tags **und** Warn/Fehlertext.
 ///// Datei: rust/otter_proc/src/runner/runner_term.rs
@@ -8,7 +8,7 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // -----------------------------------------------------------------------------
-// Globales VT/ANSI-Flag – enable_ansi() versucht es (Windows) zu aktivieren.
+// Globales VT/ANSI-Flag - enable_ansi() versucht es (Windows) zu aktivieren.
 // COLOR_ACTIVE signalisiert "VT wirklich aktiv" (nicht nur Wunsch).
 // -----------------------------------------------------------------------------
 static COLOR_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -74,7 +74,7 @@ pub fn enable_ansi() -> bool {
 ///
 /// Hintergrund: In Windows Terminal / ConPTY ignoriert die Konsole `SetConsoleTextAttribute`,
 /// daher brauchen wir **ANSI by default**. Auf alten ConHosts sieht man dann ggf. ESC-Sequenzen
-/// – was hier akzeptiert ist, solange `OTTER_COLOR=0` existiert.
+/// - was hier akzeptiert ist, solange `OTTER_COLOR=0` existiert.
 pub fn color_enabled() -> bool {
     if matches!(env::var("OTTER_COLOR"), Ok(v) if v.trim() == "0") {
         return false; // globaler Kill

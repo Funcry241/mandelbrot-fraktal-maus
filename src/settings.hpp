@@ -1,4 +1,4 @@
-///// Otter: Zentral-Config – Replikatoren „Replikatoren“ (Bandit Shadow), Nacktmull-Perf; Pilot-Override für direkte Tastenpriorität.
+///// Otter: Zentral-Config - Replikatoren „Replikatoren“ (Bandit Shadow), Nacktmull-Perf; Pilot-Override für direkte Tastenpriorität.
 ///// Schneefuchs: /WX-safe; ASCII-Logs; keine versteckten Makros; Header/Source synchron; GLEW dynamisch.
 ///// Maus: ForceAlwaysZoom=1; PerfLog aktiv; Kolibri-Grid; Luchs-Kompatblock (enabled/nvrtc) wiederhergestellt.
 ///// Datei: src/settings.hpp
@@ -17,7 +17,7 @@ namespace Settings {
 
 // ============================== Zoom / Planner ===============================
 // Steuert globales Zoomverhalten.
-    // Erzwingt kontinuierliches Zoomen – verhindert Stalls in ruhigen Bereichen.
+    // Erzwingt kontinuierliches Zoomen - verhindert Stalls in ruhigen Bereichen.
     // Range: {false,true} | Default: true | ↑ stärkerer Demo-Flow, ↓ signalgetriebener
     inline constexpr bool   ForceAlwaysZoom      = true;
 
@@ -268,7 +268,7 @@ static_assert(NavBias::halfLifeSec >  0.0, "halfLifeSec must be > 0");
 static_assert(NavBias::maxNdc      >= 0.0, "maxNdc must be >= 0");
 
 // ============================== Replikatoren ================================
-// Orbit/Policy/Color – Phase „Replikatoren“ (selbstlernend, Shadow aktiv).
+// Orbit/Policy/Color - Phase „Replikatoren“ (selbstlernend, Shadow aktiv).
 namespace Perturb {
     // Perturbation-Pfad (Ctrl+P toggelt zur Laufzeit intern).
     // Range: {false,true} | Default: true
@@ -320,7 +320,7 @@ namespace Ai {
 namespace AiBandit {
     // Betriebsmodus.
     // Range: {0,1,2} | Default: 0 (Shadow sicher)
-    inline constexpr int   stage            = 2;
+    inline constexpr int   stage            = 0;
 
     // Anzahl Kandidaten je Takt (Top-k).
     // Range: 1 .. 8 | Default: 3

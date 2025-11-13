@@ -1,4 +1,4 @@
-///// Otter: Modulbaum – Orchestrator (full), Cache-Wächter, Windows-Env, Pack + Export integriert.
+///// Otter: Modulbaum - Orchestrator (full), Cache-Wächter, Windows-Env, Pack + Export integriert.
 ///// Schneefuchs: Reihenfolge kompatibel; keine Fremd-Abhängigkeiten nach außen.
 ///// Maus: Minimale öffentliche Oberfläche.
 ///// Datei: rust/otter_proc/src/commands/mod.rs

@@ -1,6 +1,6 @@
-///// Otter: Nacktmull – Mandelbrot kernel split (Classic vs. Deep) with host-side mode gating; no logic change, just specialization
+///// Otter: Nacktmull - Mandelbrot kernel split (Classic vs. Deep) with host-side mode gating; no logic change, just specialization
 ///// Schneefuchs: API unverändert; ASCII-Logs; optional CUDA-event timing; inclusive-iter semantics; no fast-math flags
-///// Maus: Block 32x8; exact cardioid/bulb; deterministic; SM80–SM90 sweetspot; per-frame gating, zero per-thread mode branches
+///// Maus: Block 32x8; exact cardioid/bulb; deterministic; SM80-SM90 sweetspot; per-frame gating, zero per-thread mode branches
 ///// Datei: src/capybara_render_kernel.cu
 #include "pch.hpp"
 

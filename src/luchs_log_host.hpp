@@ -1,4 +1,4 @@
-///// Otter: Host-only logging – single source for CUDA_CHECK (+ non-throwing variant); deterministic, ASCII-only
+///// Otter: Host-only logging - single source for CUDA_CHECK (+ non-throwing variant); deterministic, ASCII-only
 ///// Schneefuchs: Header has no side effects; /WX-safe; one macro home; captures file/line for every log
 ///// Maus: Uniform format; optional Windows debugger mirror via impl; no hidden deps; stable API
 ///// Datei: src/luchs_log_host.hpp
@@ -25,7 +25,7 @@ namespace LuchsLogger {
 #endif
 
 // -----------------------------------------------------------------------------
-// CUDA error checks – single canonical home
+// CUDA error checks - single canonical home
 // -----------------------------------------------------------------------------
 
 // Throwing check: logs ASCII detail and throws std::runtime_error on failure.

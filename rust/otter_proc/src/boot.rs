@@ -1,4 +1,4 @@
-///// Otter: Bootstrap-Binary – baut `otter_proc` farbig und startet es mit allen CLI-Args.
+///// Otter: Bootstrap-Binary - baut `otter_proc` farbig und startet es mit allen CLI-Args.
 ///// Schneefuchs: Erzwingt Cargo-/rustc-Farben via ENV; aktiviert VT (Windows) ohne externe Crates; PS 5.1-tauglich.
 ///// Maus: Minimal, keine Extra-Parsinglogik; stdout/stderr werden durchgereicht (inherit).
 ///// Datei: rust/otter_proc/src/bin/boot.rs
@@ -49,7 +49,7 @@ fn main() {
     // Alles hinter `--` an otter_proc durchreichen:
     let pass_args: Vec<String> = std::env::args().skip(1).collect();
 
-    // 1) otter_proc bauen – farbige Ausgabe erzwingen und 1:1 anzeigen
+    // 1) otter_proc bauen - farbige Ausgabe erzwingen und 1:1 anzeigen
     println!("[BOOT] building otter_proc …");
     let status = Command::new("cargo")
         .args(["build", "--release", "--bin", "otter_proc"])
@@ -67,7 +67,7 @@ fn main() {
         std::process::exit(code);
     }
 
-    // 2) otter_proc starten – gibt seine eigene farbige/formatierte Ausgabe aus
+    // 2) otter_proc starten - gibt seine eigene farbige/formatierte Ausgabe aus
     #[cfg(windows)]
     let exe = "target\\release\\otter_proc.exe";
     #[cfg(not(windows))]

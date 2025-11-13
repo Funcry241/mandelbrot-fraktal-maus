@@ -78,9 +78,9 @@ cmake --preset windows-release -DCMAKE_CUDA_ARCHITECTURES=90
 
 ## 🧯 Host/Device-Logging (LUCHS_LOG)
 
-* **Host**: `LUCHS_LOG_HOST(...)` – ASCII-only, **eine Zeile pro Event**, Zeitstempel als **Epoch-Millis**.
-* **Device**: `LUCHS_LOG_DEVICE(msg)` – schreibt in den Device-Puffer; Flush auf Host **außerhalb** des Hot-Paths.  
-  *Hinweis:* Nachricht mit `snprintf` zusammenbauen ist ok – der **finale** Aufruf ist genau **ein** `LUCHS_LOG_DEVICE(const char*)`.
+* **Host**: `LUCHS_LOG_HOST(...)` - ASCII-only, **eine Zeile pro Event**, Zeitstempel als **Epoch-Millis**.
+* **Device**: `LUCHS_LOG_DEVICE(msg)` - schreibt in den Device-Puffer; Flush auf Host **außerhalb** des Hot-Paths.  
+  *Hinweis:* Nachricht mit `snprintf` zusammenbauen ist ok - der **finale** Aufruf ist genau **ein** `LUCHS_LOG_DEVICE(const char*)`.
 * **Keine** `printf/fprintf` im Produktionspfad. Logs dürfen **keine** impliziten Synchronisationen auslösen.
 * **Schalter (Settings)**:  
   `performanceLogging` → kompakte Messwerte via CUDA-Events (ASCII)  
@@ -98,7 +98,7 @@ Der Mandelbrot-Pfad hält sich an ein weiches **Zeitbudget** pro Frame. Silk-Lit
 ## 🎨 Renderer-Pfad & Farbgebung (Status)
 
 * **Aktiver Pfad:** **Capybara-Iteration** (Float), Escape-Test **vor** dem Update (`|z|^2 > 4`).  
-  – *Innen* schreibt `iterOut = maxIter`, *Escape* schreibt den Iterationsindex.  
+  - *Innen* schreibt `iterOut = maxIter`, *Escape* schreibt den Iterationsindex.  
 * **Pipeline:** `capy_render(...)` (Iterations) → `colorize_iterations_to_pbo(...)` → PBO (GL-Interop).  
 * **Palette:** **GT (Cyan→Amber)**, Interpolation im **Linearraum** (Banding-mindernd).  
   **Stripes** sind **standardmäßig aus** (`stripes = 0.0f`) für ringfreie Darstellung.  
@@ -119,7 +119,7 @@ Der Mandelbrot-Pfad hält sich an ein weiches **Zeitbudget** pro Frame. Silk-Lit
 
 ## 🧷 Toolchain & Hardening (Windows)
 
-* **CRT**: `/MD` (DLL) – konsistent zum Host-Link; keine LNK2038-Mismatches.  
+* **CRT**: `/MD` (DLL) - konsistent zum Host-Link; keine LNK2038-Mismatches.  
 * **CUDA Runtime**: **Shared**; Runtime‑DLL wird in `dist\` kopiert (falls nötig).  
 * **GLEW dynamisch**: kein `GLEW_STATIC`; vcpkg‑Triplet entsprechend.  
 * **Hardening nur im Host-Link**: `/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf` über `$<HOST_LINK:...>`.  
@@ -129,7 +129,7 @@ Der Mandelbrot-Pfad hält sich an ein weiches **Zeitbudget** pro Frame. Silk-Lit
 
 ## 🌊 Robbe-Prinzip (API-Synchronität)
 
-> Jede Änderung an Signaturen/Interfaces wird **zeitgleich** in Header **und** Source umgesetzt (und gemeinsam committed). Abweichungen sind Build-Fehler – Robbe sagt **OOU-OOU**.
+> Jede Änderung an Signaturen/Interfaces wird **zeitgleich** in Header **und** Source umgesetzt (und gemeinsam committed). Abweichungen sind Build-Fehler - Robbe sagt **OOU-OOU**.
 
 * Kein schleichender Drift  
 * Saubere öffentliche API  

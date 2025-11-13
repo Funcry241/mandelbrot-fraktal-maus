@@ -1,4 +1,4 @@
-///// Otter: Feature packer – E/C → NCHW & Bandit-Features (d≈20); deterministisch, robust gegenüber Rändern.
+///// Otter: Feature packer - E/C → NCHW & Bandit-Features (d≈20); deterministisch, robust gegenüber Rändern.
 ///// Schneefuchs: 3×3-Stats, Grad-Proxy, NDC-Koords, r/θ, center-bias; ASCII-Metalog; zero-fill bei Mismatch.
 ///// Maus: Keine Fremdlibs; nur LUCHS_LOG_HOST; Shapes exakt geloggt; stride==dim für Bandit-Matrix.
 ///// Datei: src/ai/feature_packer.cpp

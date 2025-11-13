@@ -5,7 +5,7 @@
 
 #pragma once
 
-// Forward declarations – kein schwerer GLFW-Header
+// Forward declarations - kein schwerer GLFW-Header
 struct GLFWwindow;
 class Renderer;
 

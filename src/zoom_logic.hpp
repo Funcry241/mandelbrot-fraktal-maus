@@ -1,4 +1,4 @@
-///// Otter: Public API for Rullmolder Step 2 – blunt zoom + gentle nudge; dt-invariant; no capture deps.
+///// Otter: Public API for Rullmolder Step 2 - blunt zoom + gentle nudge; dt-invariant; no capture deps.
 ///// Schneefuchs: Forward-Decls (FrameContext=struct, RendererState=struct), ASCII-only, /WX clean; C4099-frei.
 ///// Maus: API behält evaluateTarget() bei; zusätzlicher Wrapper evaluateZoomTarget() für Altaufrufe.
 ///// Datei: src/zoom_logic.hpp

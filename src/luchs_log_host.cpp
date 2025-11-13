@@ -1,4 +1,4 @@
-///// Otter: Host logging – precise epoch-ms timestamps; deterministic; ASCII-only
+///// Otter: Host logging - precise epoch-ms timestamps; deterministic; ASCII-only
 ///// Schneefuchs: Thread-safe; /WX-safe; no strncat; optional Windows debugger mirror
 ///// Maus: API: setMirrorToDebugger/flushLogs/logMessage; one implementation, no side effects
 ///// Datei: src/luchs_log_host.cpp

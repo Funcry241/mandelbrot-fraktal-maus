@@ -1,6 +1,6 @@
 ///// Otter: Einzige öffentliche Schnittstelle: updateTexture + drawFullscreenQuad; keine Doppelpipeline.
 ///// Schneefuchs: Header/Source synchron; minimaler Include (GLuint); ASCII-only.
-///// Maus: Altlast render() entfernt – Struktur klar, Zweck klar.
+///// Maus: Altlast render() entfernt - Struktur klar, Zweck klar.
 ///// Datei: src/renderer_pipeline.hpp
 
 #pragma once
@@ -8,7 +8,7 @@
 
 namespace RendererPipeline {
 
-// 🧱 Initialisiert Shader, VBO, VAO – Vorbereitung für Fullscreen-Quad
+// 🧱 Initialisiert Shader, VBO, VAO - Vorbereitung für Fullscreen-Quad
 void init();
 
 // 🧽 Gibt alle OpenGL-Ressourcen wieder frei

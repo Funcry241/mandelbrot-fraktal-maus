@@ -5,7 +5,7 @@
 
 #pragma once
 
-// Keine schweren CUDA-Includes im Header – nur Forward-Decl für cudaStream_t
+// Keine schweren CUDA-Includes im Header - nur Forward-Decl für cudaStream_t
 struct CUstream_st; using cudaStream_t = CUstream_st*;
 
 // Vorwärtsdeklarationen statt schwerer Includes

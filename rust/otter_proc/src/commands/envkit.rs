@@ -1,4 +1,4 @@
-///// Otter: Env-kit helpers (VS/SDK probing) – parked for future use.
+///// Otter: Env-kit helpers (VS/SDK probing) - parked for future use.
 ///// Schneefuchs: Entire module allows dead_code to silence warnings until wired.
 ///// Maus: Pure helpers; zero side-effects; ASCII-only.
 ///// Datei: rust/otter_proc/src/commands/envkit.rs

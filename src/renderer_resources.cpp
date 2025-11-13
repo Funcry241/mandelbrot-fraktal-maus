@@ -1,6 +1,6 @@
 ///// Otter: Immutable Texture-Storage; deterministischer Upload; DSA bevorzugt; weniger Roundtrips
 ///// Schneefuchs: Kein per-Frame PixelStore-Save/Restore im DSA-Pfad; klare Fehlerpfade; ASCII-Logs
-///// Maus: PBO/Texture Utils – robuste Init/Upload-Reihenfolge; keine versteckten Seiteneffekte
+///// Maus: PBO/Texture Utils - robuste Init/Upload-Reihenfolge; keine versteckten Seiteneffekte
 ///// Datei: src/renderer_resources.cpp
 
 #include "pch.hpp"
@@ -94,7 +94,7 @@ void setGLResourceContext(const char* context) {
 }
 
 // -----------------------------------------------------------------------------
-// Immutable 2D-Texture (RGBA8) anlegen – DSA-Fastpath wenn verfügbar
+// Immutable 2D-Texture (RGBA8) anlegen - DSA-Fastpath wenn verfügbar
 // -----------------------------------------------------------------------------
 unsigned int createTexture(int width, int height) {
     if (width <= 0 || height <= 0) {
@@ -186,7 +186,7 @@ unsigned int createTexture(int width, int height) {
 }
 
 // -----------------------------------------------------------------------------
-// PBO anlegen (GL_PIXEL_UNPACK_BUFFER) – Größe = width*height*4 (RGBA8)
+// PBO anlegen (GL_PIXEL_UNPACK_BUFFER) - Größe = width*height*4 (RGBA8)
 // -----------------------------------------------------------------------------
 unsigned int createPBO(int width, int height) {
     if (width <= 0 || height <= 0) {
@@ -210,11 +210,11 @@ unsigned int createPBO(int width, int height) {
     labelBufferSafe(pbo, width, height);
 #endif
 
-    // Persistentes Mapping vermeiden – CUDA-Interop ist mit STREAM_DRAW am robustesten.
+    // Persistentes Mapping vermeiden - CUDA-Interop ist mit STREAM_DRAW am robustesten.
     glBufferData(GL_PIXEL_UNPACK_BUFFER, static_cast<GLsizeiptr>(bytes), nullptr, GL_STREAM_DRAW);
 
     if constexpr (Settings::debugLogging) {
-        // Realgröße verifizieren (64-bit Query – große PBOs sicher)
+        // Realgröße verifizieren (64-bit Query - große PBOs sicher)
         GLint64 realSize = 0;
         glGetBufferParameteri64v(GL_PIXEL_UNPACK_BUFFER, GL_BUFFER_SIZE, &realSize);
         const GLenum err = glGetError();
@@ -233,7 +233,7 @@ unsigned int createPBO(int width, int height) {
 }
 
 // -----------------------------------------------------------------------------
-// Texture-Update aus UNPACK-PBO (Vollflächen-Upload) – DSA bevorzugt
+// Texture-Update aus UNPACK-PBO (Vollflächen-Upload) - DSA bevorzugt
 // -----------------------------------------------------------------------------
 void updateTextureFromPBO(unsigned int pboU, unsigned int texU, int width, int height) {
     if (!pboU || !texU || width <= 0 || height <= 0) {
@@ -247,14 +247,14 @@ void updateTextureFromPBO(unsigned int pboU, unsigned int texU, int width, int h
     const GLuint pbo = static_cast<GLuint>(pboU);
     const GLuint tex = static_cast<GLuint>(texU);
 
-    // Quelle: gebundener UNPACK-PBO – nur kurzzeitig binden; PixelStore
+    // Quelle: gebundener UNPACK-PBO - nur kurzzeitig binden; PixelStore
     // Policy wurde bei Resize/Init einmalig gesetzt (UNPACK_ALIGNMENT=1 etc.).
     GLint prevPBO = 0;
     glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevPBO);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 
     if (haveInvalidateSubData()) {
-        // Kein Label/Bind notwendig – nur invalidieren, wenn Textur existiert
+        // Kein Label/Bind notwendig - nur invalidieren, wenn Textur existiert
         if (glIsTexture(tex)) {
             glInvalidateTexImage(tex, 0);
         }
@@ -274,7 +274,7 @@ void updateTextureFromPBO(unsigned int pboU, unsigned int texU, int width, int h
             }
         }
     } else {
-        // Fallback: Bind/Unbind-Pfad – minimaler State-Touch
+        // Fallback: Bind/Unbind-Pfad - minimaler State-Touch
         GLint prevActiveTex = 0, prevTex0 = 0;
         glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
         glActiveTexture(GL_TEXTURE0);

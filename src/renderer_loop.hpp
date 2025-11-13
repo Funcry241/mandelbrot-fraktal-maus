@@ -1,4 +1,4 @@
-///// Otter: Render-Loop API – minimal & stable; kein beginFrame-Export.
+///// Otter: Render-Loop API - minimal & stable; kein beginFrame-Export.
 ///// Schneefuchs: Schlanker Header; GLFWwindow vorwärts deklariert; ASCII-only.
 ///// Maus: FPS/HUD/Auto-Zoom/Eingaben sauber gekapselt; Source definiert Verhalten.
 ///// Datei: src/renderer_loop.hpp

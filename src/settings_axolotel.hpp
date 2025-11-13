@@ -1,4 +1,4 @@
-///// Otter: Settings – Axolotel-HUD defaults (center-bottom anchor) + Zoom-Coupler tunables.
+///// Otter: Settings - Axolotel-HUD defaults (center-bottom anchor) + Zoom-Coupler tunables.
 ///// Schneefuchs: Documented ranges; monotonic clamps in code usage; ASCII-only comments; shader limit synced.
 ///// Maus: WOW-safe defaults; breath + ring feel; coupler gain modest; perf logs optional.
 ///// Datei: src/settings_axolotel.hpp

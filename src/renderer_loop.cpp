@@ -1,4 +1,4 @@
-///// Otter: Main loop – compact logs only; Silk-Lite motion + frame pacing; Axolotel key-pulse; Dachs-HUD toggle
+///// Otter: Main loop - compact logs only; Silk-Lite motion + frame pacing; Axolotel key-pulse; Dachs-HUD toggle
 ///// Schneefuchs: Flush device logs only on CUDA error; ASCII-only; Keybinds: F1(help), R(reset), Space(pause), Ctrl+C(copy), ESC(quit)
 ///// Maus: Keine periodischen [Loop]-Spamzeilen; /WX clean; deterministische Pfade
 ///// Datei: src/renderer_loop.cpp

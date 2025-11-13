@@ -1,4 +1,4 @@
-///// Otter: UI-GL-Helfer – kompakte Shader/Program-Utils, optionale KHR_debug-Labels, ASCII-Logs
+///// Otter: UI-GL-Helfer - kompakte Shader/Program-Utils, optionale KHR_debug-Labels, ASCII-Logs
 ///// Schneefuchs: /WX-safe; keine Seiteneffekte (State-Restore bei VAO/VBO); Loader optional nachladen
 ///// Maus: API = makeShader/makeProgram/ensurePanelVAO/ensureHeatVAO; keine Hotpath-Allokationen; deterministisch
 ///// Datei: src/ui_gl.hpp

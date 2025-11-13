@@ -1,4 +1,4 @@
-///// Otter: Split – GL-Fences, PBO- & TEX-Ring; Resize/Reset & Dtor; draw-lag-1 vorbereitet
+///// Otter: Split - GL-Fences, PBO- & TEX-Ring; Resize/Reset & Dtor; draw-lag-1 vorbereitet
 ///// Schneefuchs: EC-Pfade entfernt; GLsync-Abräumung zentral; DSA-freundliche PixelStore-Policy
 ///// Maus: PixelScale zoomfrei/isotrop; ASCII-Logs; kompakt
 ///// Datei: src/renderer_state_gl.cpp

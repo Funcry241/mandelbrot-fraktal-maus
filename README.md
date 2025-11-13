@@ -1,5 +1,5 @@
 <!-- Datei: README.md -->
-<!-- 🐭 Maus-Kommentar: README für Alpha 81+ – CI-validiert, Silk-Lite Zoom integriert, Nacktmull-Perf-Kadenz, AOP-Policy (Dry-Run) sichtbar. CUDA 13 Pflicht für den Build; zum Ausführen reicht der NVIDIA-Treiber. GLEW dynamisch, DIST enthält die nötigen DLLs. -->
+<!-- 🐭 Maus-Kommentar: README für Alpha 81+ - CI-validiert, Silk-Lite Zoom integriert, Nacktmull-Perf-Kadenz, AOP-Policy (Dry-Run) sichtbar. CUDA 13 Pflicht für den Build; zum Ausführen reicht der NVIDIA-Treiber. GLEW dynamisch, DIST enthält die nötigen DLLs. -->
 
 # 🦦 OtterDream Mandelbrot Renderer (CUDA + OpenGL)
 
@@ -11,16 +11,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 <p align="center">
-  <img src="assets/hero_russelwarze.jpg" alt="OtterDream Mandelbrot – Rüsselwarze Mode" width="85%">
+  <img src="assets/hero_russelwarze.jpg" alt="OtterDream Mandelbrot - Rüsselwarze Mode" width="85%">
 </p>
 
 Ein ultraschneller Mandelbrot-Renderer mit CUDA-Beschleunigung und OpenGL-Anzeige für moderne NVIDIA-GPUs. Der Renderer zoomt automatisch in interessante Regionen und erhöht fortlaufend die Detailtiefe.
-Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom – **Nacktmull**-Perf-Kadenz – und kompakte **Epoch-Millis**-Logs.
+Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom - **Nacktmull**-Perf-Kadenz - und kompakte **Epoch-Millis**-Logs.
 
 > **Neu (Phase‑1 „Replikatoren sichtbar“)**  
-> – **Orbit/Perturb-Gate: _ON_** (Ctrl+P toggelt zur Laufzeit).  
-> – **AOP Policy (Dry‑Run): _ON_** – zeigt Zielvorschau als **[REPL/POLICY]**‑Zeilen; keine Steuerwirkung.  
-> – **Luchs‑Logging: _ON_** – ASCII‑only, Host/Device getrennt.
+> - **Orbit/Perturb-Gate: _ON_** (Ctrl+P toggelt zur Laufzeit).  
+> - **AOP Policy (Dry‑Run): _ON_** - zeigt Zielvorschau als **[REPL/POLICY]**‑Zeilen; keine Steuerwirkung.  
+> - **Luchs‑Logging: _ON_** - ASCII‑only, Host/Device getrennt.
 
 ---
 
@@ -40,11 +40,11 @@ dist\
 **Voraussetzung zum Ausführen:** Ein aktueller **NVIDIA‑Grafiktreiber** und OpenGL 4.3.  
 **Nicht nötig zum Ausführen:** Visual Studio, vcpkg oder das CUDA Toolkit (Runtime‑DLLs liegen bei).
 
-> Falls `dist\mandelbrot_otterdream.exe` fehlt: einmal bauen (siehe unten „Automatischer Build“) – der Build füllt `dist\` automatisch.
+> Falls `dist\mandelbrot_otterdream.exe` fehlt: einmal bauen (siehe unten „Automatischer Build“) - der Build füllt `dist\` automatisch.
 
 ---
 
-## 🔧 Automatischer Build (Windows) – `build.ps1`
+## 🔧 Automatischer Build (Windows) - `build.ps1`
 
 Der einfachste Weg, den Build zu starten, ist das **PowerShell‑Skript** `build.ps1`.  
 Es orchestriert alles: vcpkg‑Abhängigkeiten, CMake‑Konfiguration/Build, und das **Befüllen von `dist\`** (EXE + benötigte DLLs).
@@ -115,17 +115,17 @@ cmake --install build --prefix ./dist
 
 ## 🧠 Features
 
-* **🚀 CUDA Rendering (Capybara)** – schnelle Iterationen, Event‑Timing via CUDA‑Events (keine globale `cudaDeviceSynchronize()` im Hot‑Path).
-* **🪶 Silk‑Lite Motion Planner (Auto‑Zoom)** – sanft, yaw‑limitiert, Hysterese/Lock; **ForceAlwaysZoom=ON**.
-* **🛡️ Anti‑Black‑Guard** – Warm‑up‑Drift + Void‑Bias: kein „Zoom ins Schwarze“.
-* **📈 Progressive Iterationen** – Zoom‑abhängig; **standardmäßig aktiv**.
-* **🎨 GT‑Palette + Smooth Coloring** – linearer Farbraum, `it - log2(log2(|z|))`; Stripes optional (off).
-* **🖼️ Echtzeit‑OpenGL + CUDA‑Interop** – PBO‑Interop (`cudaGraphicsGLRegisterBuffer`).
-* **📊 Heatmap‑Overlay (Eule)** – GPU‑Shader; **Metrics‑Kadenz** über `Settings::StatsCadence::heatmapEveryN` (Default **3**).
-* **🤖 AOP Policy (Dry‑Run)** – **[REPL/POLICY]**‑Zeilen mit Ziel‑Tile/Score/NDC‑Marker; **keine Steuerwirkung**.
-* **🌪️ Orbit/Perturb‑Gate** – sichtbar **ON** (Ctrl+P Runtime‑Toggle); Gategröße `Settings::Perturb::gatePixelSize`.
-* **🧰 HUD & ASCII‑Debug (Warzenschwein)** – FPS/Zoom/Offset; Logs sind **ASCII‑only**.
-* **🦔 Nacktmull‑Perf‑Kadenz** – `[PERF]`‑Zeile pro Cadence, **stale‑carry** von `e0/c0` + `hmAge`‑Marker.
+* **🚀 CUDA Rendering (Capybara)** - schnelle Iterationen, Event‑Timing via CUDA‑Events (keine globale `cudaDeviceSynchronize()` im Hot‑Path).
+* **🪶 Silk‑Lite Motion Planner (Auto‑Zoom)** - sanft, yaw‑limitiert, Hysterese/Lock; **ForceAlwaysZoom=ON**.
+* **🛡️ Anti‑Black‑Guard** - Warm‑up‑Drift + Void‑Bias: kein „Zoom ins Schwarze“.
+* **📈 Progressive Iterationen** - Zoom‑abhängig; **standardmäßig aktiv**.
+* **🎨 GT‑Palette + Smooth Coloring** - linearer Farbraum, `it - log2(log2(|z|))`; Stripes optional (off).
+* **🖼️ Echtzeit‑OpenGL + CUDA‑Interop** - PBO‑Interop (`cudaGraphicsGLRegisterBuffer`).
+* **📊 Heatmap‑Overlay (Eule)** - GPU‑Shader; **Metrics‑Kadenz** über `Settings::StatsCadence::heatmapEveryN` (Default **3**).
+* **🤖 AOP Policy (Dry‑Run)** - **[REPL/POLICY]**‑Zeilen mit Ziel‑Tile/Score/NDC‑Marker; **keine Steuerwirkung**.
+* **🌪️ Orbit/Perturb‑Gate** - sichtbar **ON** (Ctrl+P Runtime‑Toggle); Gategröße `Settings::Perturb::gatePixelSize`.
+* **🧰 HUD & ASCII‑Debug (Warzenschwein)** - FPS/Zoom/Offset; Logs sind **ASCII‑only**.
+* **🦔 Nacktmull‑Perf‑Kadenz** - `[PERF]`‑Zeile pro Cadence, **stale‑carry** von `e0/c0` + `hmAge`‑Marker.
 
 ---
 
@@ -179,17 +179,17 @@ Settings::Luchs::enabled   = true; // Host/Device ASCII-Logs
 
 ## 📦 Abhängigkeiten (via vcpkg)
 
-* [GLFW](https://www.glfw.org/) – Fenster/Eingabe  
-* [GLEW](http://glew.sourceforge.net/) – OpenGL‑Extensions (**dynamisch**, DLL im `dist\`)
+* [GLFW](https://www.glfw.org/) - Fenster/Eingabe  
+* [GLEW](http://glew.sourceforge.net/) - OpenGL‑Extensions (**dynamisch**, DLL im `dist\`)
 
 ---
 
 ### ⌨️ Keyboard Controls
 
-* `P` – Auto‑Zoom pausieren/fortsetzen  
-* `H` – Heatmap‑Overlay an/aus  
-* `T` – HUD (Warzenschwein) an/aus  
-* `Ctrl+P` – **Perturb‑Gate** toggeln (nur sichtbar in Logs/Overlays)
+* `P` - Auto‑Zoom pausieren/fortsetzen  
+* `H` - Heatmap‑Overlay an/aus  
+* `T` - HUD (Warzenschwein) an/aus  
+* `Ctrl+P` - **Perturb‑Gate** toggeln (nur sichtbar in Logs/Overlays)
 
 ---
 
@@ -221,7 +221,7 @@ Header und Source bleiben **synchron**. Kein Drift, kein API‑Bruch. Die Robbe 
 
 ---
 
-**OtterDream** – von der Raupe zum Fraktal‑Schmetterling 🦋  
+**OtterDream** - von der Raupe zum Fraktal‑Schmetterling 🦋  
 *Happy Zooming!*
 
 🐭 Maus sorgt für Fokus und ASCII‑Sauberkeit.  

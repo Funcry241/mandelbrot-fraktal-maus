@@ -1,4 +1,4 @@
-///// Otter: Replikatoren – LinUCB/RLS Implementierung mit Sherman–Morrison, ε-Exploration, Top-k Auswahl.
+///// Otter: Replikatoren - LinUCB/RLS Implementierung mit Sherman-Morrison, ε-Exploration, Top-k Auswahl.
 ///// Schneefuchs: Numerik in double, deterministische xorshift32-RNG, ASCII-Logs via LUCHS_LOG_HOST.
 ///// Maus: Persistenz kleiner Binär-Blobs (A⁻¹,b); harte Clamps für Reward/NaN-Hygiene; keine Fremdabhängigkeiten.
 ///// Datei: src/ai/otter_bandit.cpp

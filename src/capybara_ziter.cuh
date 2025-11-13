@@ -1,4 +1,4 @@
-///// Otter: Nacktmull – Early-Iter (Hi/Lo) with single-path warp-exit & renorm; ASCII telemetry intact
+///// Otter: Nacktmull - Early-Iter (Hi/Lo) with single-path warp-exit & renorm; ASCII telemetry intact
 ///// Schneefuchs: Header-only; device-inline; one runtime path; inclusive-iter semantics; no fast-math
 ///// Maus: Returns iterations performed; escape radius^2 = 4.0; fold-to-double handoff unchanged
 ///// Datei: src/capybara_ziter.cuh

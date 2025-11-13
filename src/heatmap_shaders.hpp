@@ -85,7 +85,7 @@ void main(){
   float a = smoothstep(0.05, 0.65, v) * uAlphaBase;
   vec4 base = vec4(mapGold(v), a);
 
-  // Marker (Fadenkreuz/Ring) in Panel-Pixeln – KEIN zusätzlicher Flip --------
+  // Marker (Fadenkreuz/Ring) in Panel-Pixeln - KEIN zusätzlicher Flip --------
   float m = 0.0;
   if(uHMarkEnable > 0.5){
     vec2  d2   = vPx - uHMarkCenterPx;

@@ -1,4 +1,4 @@
-///// Otter: CUDA interop – compact [PERF]-Zeile mit Kadenz/Warmup; kein per-frame Zeit-Spam
+///// Otter: CUDA interop - compact [PERF]-Zeile mit Kadenz/Warmup; kein per-frame Zeit-Spam
 ///// Schneefuchs: Gate nutzt Settings::performanceLogging && PerfLog::*; Header einmalig; Events nur bei Gate
 ///// Maus: /WX clean; Debugdetails hinter debugLogging; Skip bei Ring-Sättigung
 ///// Datei: src/cuda_interop.cu
@@ -199,7 +199,7 @@ static int choose_free_pbo_index(RendererState& state) {
         }
     }
     if constexpr (Settings::debugLogging) {
-        LUCHS_LOG_HOST("[ZK][PBO][SAT] ring saturated – skip upload this frame");
+        LUCHS_LOG_HOST("[ZK][PBO][SAT] ring saturated - skip upload this frame");
     }
     return -1;
 }
@@ -396,7 +396,7 @@ void renderCudaFrame(
                        (double)zoom, maxIterations, renderStream);
 }
 
-// Convenience overload (double offsets) – hohe Präzision, KEINE Zoom-Logik
+// Convenience overload (double offsets) - hohe Präzision, KEINE Zoom-Logik
 void renderCudaFrame(RendererState& state, const FrameContext& fctx,
                      double& newOffsetX, double& newOffsetY)
 {

@@ -1,6 +1,6 @@
 ///// OtterDream — Replikatoren
 ///// File: src/perturb_orbit_mp.cpp
-///// Purpose: CPU-MP Referenz-Orbit (Loader/Cache) – Stubs
+///// Purpose: CPU-MP Referenz-Orbit (Loader/Cache) - Stubs
 ///// Phase: 1 (Orbit-Replikatoren)
 ///// Hooks: F9 Orbit-Load ; frame_pipeline (optional Preload)
 ///// Depends: pch.hpp, luchs_log_host.hpp, perturb_orbit_mp.hpp

@@ -1,4 +1,4 @@
-///// Otter: CLI-Definition (Clap) – Full/Clean/Autogit/Export; mapping: PS '/build' ⇒ Full, PS '/branch' ⇒ Autogit --branch wupp, PS '/export' ⇒ Export.
+///// Otter: CLI-Definition (Clap) - Full/Clean/Autogit/Export; mapping: PS '/build' ⇒ Full, PS '/branch' ⇒ Autogit --branch wupp, PS '/export' ⇒ Export.
 ///// Schneefuchs: Defaults wie zuvor (cfg=RelWithDebInfo; Presets optional); ASCII-only; keine Logik.
 ///// Maus: Minimal-Signaturen, kompatibel zu bestehendem main.rs und commands::* (Export packt ZIP auch ohne Build).
 ///// Datei: rust/otter_proc/src/cli.rs

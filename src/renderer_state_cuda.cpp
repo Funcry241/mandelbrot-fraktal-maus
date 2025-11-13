@@ -1,5 +1,5 @@
-///// Otter: Streams mit Prioritäten – Render hoch, Copy niedrig; keine GL-Abhängigkeit; ASCII-Logs.
-///// Schneefuchs: EC/Wrapper entfernt – keine Entropy/Contrast-Alloc/Pin mehr; /WX-fest; Header/Source synchron.
+///// Otter: Streams mit Prioritäten - Render hoch, Copy niedrig; keine GL-Abhängigkeit; ASCII-Logs.
+///// Schneefuchs: EC/Wrapper entfernt - keine Entropy/Contrast-Alloc/Pin mehr; /WX-fest; Header/Source synchron.
 ///// Maus: Klare [STREAM]/[EVENT]/[ALLOC]/[DEBUG]-Logs; deterministisches Verhalten; unter 300 Zeilen.
 ///// Datei: src/renderer_state_cuda.cpp
 
@@ -232,7 +232,7 @@ void RendererState::setupCudaBuffers(int tileSize) {
             }
         }
 
-        // Deterministische Erstbelegung (nur bei Neu/Grow) – asynchron im Render-Stream
+        // Deterministische Erstbelegung (nur bei Neu/Grow) - asynchron im Render-Stream
         if (didAllocIt) {
             CUDA_CHECK(cudaMemsetAsync(d_iterations.get(), 0, it_bytes, renderStream));
             if constexpr (Settings::debugLogging) {

@@ -1,4 +1,4 @@
-///// Otter: HUD-Text Header – schlanke öffentliche API für kompakte Center-Statistik.
+///// Otter: HUD-Text Header - schlanke öffentliche API für kompakte Center-Statistik.
 ///// Schneefuchs: Einheitliche Forward-Decls (FrameContext=struct, RendererState=struct); ASCII-only; /WX clean.
 ///// Maus: Nur Signatur; Implementierung in hud_text.cpp.
 ///// Datei: src/hud_text.hpp

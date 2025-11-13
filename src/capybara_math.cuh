@@ -1,4 +1,4 @@
-///// Otter: Capybara scaffold – Hi/Lo arithmetic, renorm, and device ASCII telemetry.
+///// Otter: Capybara scaffold - Hi/Lo arithmetic, renorm, and device ASCII telemetry.
 ///// This file is additive and safe to include from device/host code.
 ///// Schneefuchs: Only one final LUCHS_LOG_DEVICE call per message; snprintf only for message construction.
 ///// Maus: No API break; rate-limited logs; compile-time defaults; ASCII-only.
@@ -26,7 +26,7 @@
 #define CAPY_EARLY_ITERS 64
 #endif
 
-// 2^-48 ~= 3.5527136788e-15 – threshold when the low part is considered "too large" relative to hi
+// 2^-48 ~= 3.5527136788e-15 - threshold when the low part is considered "too large" relative to hi
 #ifndef CAPY_RENORM_RATIO
 #define CAPY_RENORM_RATIO 3.5527136788005009e-15
 #endif

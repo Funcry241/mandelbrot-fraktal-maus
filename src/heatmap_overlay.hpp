@@ -1,4 +1,4 @@
-///// Otter: Heatmap overlay API – draw path + pure compute ROI setter (no GL).
+///// Otter: Heatmap overlay API - draw path + pure compute ROI setter (no GL).
 ///// Schneefuchs: Leichter Header; keine schweren Includes; ASCII-only; signaturstabil.
 ///// Maus: updateInterestFromGrid setzt ctx.interest früh im Frame; drawOverlay rendert optional.
 ///// Datei: src/heatmap_overlay.hpp

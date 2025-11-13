@@ -1,4 +1,4 @@
-///// Otter: FPS-Meter – glättet Framezeiten mit Ramp-EMA und Spike-Dämpfung für ruhige HUD-Anzeige.
+///// Otter: FPS-Meter - glättet Framezeiten mit Ramp-EMA und Spike-Dämpfung für ruhige HUD-Anzeige.
 ///// Schneefuchs: Lock-free Atomics; keine iostreams; ASCII-only; deterministisch.
 ///// Maus: Keine API-Änderungen; schnelle Konvergenz, dann stabil; NaN/Inf-Filter; minimale Includes.
 ///// Datei: src/fps_meter.cpp
@@ -33,7 +33,7 @@ namespace {
 namespace FpsMeter {
 
 void updateCoreMs(double coreMs) {
-    // 🦊 Schneefuchs: Robustheit – ignore NaN/Inf; clamp negatives to zero.
+    // 🦊 Schneefuchs: Robustheit - ignore NaN/Inf; clamp negatives to zero.
     if (!std::isfinite(coreMs)) return;
     coreMs = std::max(coreMs, 0.0);
 

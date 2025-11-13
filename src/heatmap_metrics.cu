@@ -1,4 +1,4 @@
-///// Otter: Nacktmull – GPU heatmap metrics (boundary + contrast), deterministic single-thread-per-tile + pinned host slab
+///// Otter: Nacktmull - GPU heatmap metrics (boundary + contrast), deterministic single-thread-per-tile + pinned host slab
 ///// Schneefuchs: One kernel path; 1×1 block per tile (stable FP sums); numeric rc logs; no GL; ASCII-only; reuse buffers
 ///// Maus: Identical results; no fast-math; device slab + pinned host slab; immediate sync then memcpy to vectors
 ///// Datei: src/heatmap_metrics.cu

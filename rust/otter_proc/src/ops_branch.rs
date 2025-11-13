@@ -1,4 +1,4 @@
-///// Otter: Branch-Orchestrator – Build -> pack ZIP (Rust) -> Autogit -> Summary -> pinker Run-Hint.
+///// Otter: Branch-Orchestrator - Build -> pack ZIP (Rust) -> Autogit -> Summary -> pinker Run-Hint.
 ///// Schneefuchs: Keine PowerShell; saubere Pfade ohne \\?\-Präfix; keine ungenutzten Imports; borrows statt Moves.
 ///// Maus: ASCII-Block am Ende; Branch default „wupp“; deterministische Logs.
 ///// Datei: rust/otter_proc/src/ops_branch.rs

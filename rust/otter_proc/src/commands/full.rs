@@ -1,4 +1,4 @@
-///// Otter: Voll-Build-Command – Cache-Guard (UNC/Case-Normalisierung) + CMake-Fahrt (+ Auto-Parallel).
+///// Otter: Voll-Build-Command - Cache-Guard (UNC/Case-Normalisierung) + CMake-Fahrt (+ Auto-Parallel).
 ///// Schneefuchs: Robust gegen \\?\-UNC, Slash-Normalisierung, case-insensitive Vergleich; setzt Kerne automatisch, wenn --parallel fehlt.
 ///// Maus: DIST-Pack findet ausschließlich in winenv.rs statt (keine Doppel-Implementierung).
 ///// Datei: rust/otter_proc/src/commands/full.rs

@@ -1,4 +1,4 @@
-///// Otter: BuildMetrics – Phasen-Metriken (HashMap) + runs.jsonl; atomische Writes; panic-sicheres Seeding.
+///// Otter: BuildMetrics - Phasen-Metriken (HashMap) + runs.jsonl; atomische Writes; panic-sicheres Seeding.
 ///// Schneefuchs: ASCII-JSON-Writer, keine Fremd-Deps; deterministische Pfade; Windows-safe.
 ///// Maus: Klare öffentliche API (load_or_seed, save, snapshot, write_extended_run).
 ///// Datei: rust/otter_proc/src/build_metrics.rs

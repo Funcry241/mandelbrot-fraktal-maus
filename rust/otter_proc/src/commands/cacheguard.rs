@@ -1,4 +1,4 @@
-///// Otter: CMake cache guard helpers – parked (not wired yet).
+///// Otter: CMake cache guard helpers - parked (not wired yet).
 ///// Schneefuchs: Dead-code allowed for now; functions remain tested later.
 ///// Maus: Pure helpers, no side-effects; ASCII-only.
 ///// Datei: rust/otter_proc/src/commands/cacheguard.rs

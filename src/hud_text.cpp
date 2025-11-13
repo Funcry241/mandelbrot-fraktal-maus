@@ -1,6 +1,6 @@
-///// Otter: HUD-Text – kompakte Center-Statistik (3 Zeilen), deterministisch formatiert.
+///// Otter: HUD-Text - kompakte Center-Statistik (3 Zeilen), deterministisch formatiert.
 ///// Schneefuchs: ASCII-only; pch zuerst; keine GL-/Device-Abhängigkeiten; /WX clean; C-Locale nicht vorausgesetzt (ASCII-Dezimalpunkt erzwungen).
-///// Maus: Slim-Classic kompakter – Separatoren ohne Leerzeichen; feste Breiten (zoom %9.3e, FPS %5.1f); Center 9 Nachkommastellen.
+///// Maus: Slim-Classic kompakter - Separatoren ohne Leerzeichen; feste Breiten (zoom %9.3e, FPS %5.1f); Center 9 Nachkommastellen.
 ///// Datei: src/hud_text.cpp
 
 #include "pch.hpp"
@@ -50,7 +50,7 @@ std::string build(const FrameContext& fctx, const RendererState& state) {
     const size_t hmN     = state.h_entropy.size();
     const int    statsPx = std::max(1, fctx.statsTileSize);
 
-    // ROI/Policy-Delta (P1 mini – nur Anzeige)
+    // ROI/Policy-Delta (P1 mini - nur Anzeige)
     const int   roiValid = AOP_Telemetry::g_ai_ov_valid;
     const float delta    = AOP_Telemetry::g_ai_last_delta;
 

@@ -79,7 +79,7 @@ namespace {
 
     // --- NEW: zusätzlicher Gate NUR für die LANGE [PERF]-Zeile --------------
     // Ziel: Auch wenn PerfLog::everyN klein ist (z.B. 1), wird die *lange* Zeile
-    // höchstens alle ~60 Frames ausgegeben – ODER sofort bei signifikanter Änderung
+    // höchstens alle ~60 Frames ausgegeben - ODER sofort bei signifikanter Änderung
     // (Resolution, Iterations, statsPx).
     inline bool longPerfShouldLog(int frameIdx, const FrameContext& fctx) {
         struct Sig { int w, h, it, statsPx; };
@@ -412,7 +412,7 @@ void execute(RendererState& state) {
 
     beginFrameLocal();
 
-    // Interest zu Framebeginn invalidieren – wird vom HeatmapOverlay bei Bedarf gesetzt
+    // Interest zu Framebeginn invalidieren - wird vom HeatmapOverlay bei Bedarf gesetzt
     state.interest.valid = false;
 
     // ---- Autoritative Double-Werte aus dem RendererState ----
@@ -424,7 +424,7 @@ void execute(RendererState& state) {
     g_ctx.newOffsetD    = g_ctx.offsetD;
     g_ctx.syncFloatFromDouble();
 
-    // Compute-Raster (Kernel) – nur für Logs/Overlays relevant
+    // Compute-Raster (Kernel) - nur für Logs/Overlays relevant
     g_ctx.tileSize = chooseComputeTileSize(g_ctx.zoom);
 
     if constexpr (Settings::Kolibri::gridScreenConstant) {
@@ -538,7 +538,9 @@ void execute(RendererState& state) {
                 state.interest.ndcY = ndcAy;
                 state.interest.valid = true;
                 if constexpr (Settings::performanceLogging) {
-                    LUCHS_LOG_HOST("[AI/BLEND] adopt ndc=(%.3f,%.3f)", (float)ndcAx, (float)ndcAy);
+                    if (perfShouldLog(g_frame)) {
+                        LUCHS_LOG_HOST("[AI/BLEND] adopt ndc=(%.3f,%.3f)", (float)ndcAx, (float)ndcAy);
+                    }
                 }
             } else {
                 const double alpha = std::clamp((double)Settings::Ai::hintBlend, 0.0, 1.0);
@@ -547,9 +549,11 @@ void execute(RendererState& state) {
                 state.interest.ndcX = inX * (1.0 - alpha) + ndcAx * alpha;
                 state.interest.ndcY = inY * (1.0 - alpha) + ndcAy * alpha;
                 if constexpr (Settings::performanceLogging) {
-                    LUCHS_LOG_HOST("[AI/BLEND] alpha=%.2f ndc=(%.3f,%.3f)->(%.3f,%.3f)",
-                                   (float)alpha, (float)inX, (float)inY,
-                                   (float)state.interest.ndcX, (float)state.interest.ndcY);
+                    if (perfShouldLog(g_frame)) {
+                        LUCHS_LOG_HOST("[AI/BLEND] alpha=%.2f ndc=(%.3f,%.3f)->(%.3f,%.3f)",
+                                       (float)alpha, (float)inX, (float)inY,
+                                       (float)state.interest.ndcX, (float)state.interest.ndcY);
+                    }
                 }
             }
         }

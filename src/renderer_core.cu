@@ -1,4 +1,4 @@
-///// Otter: Renderer-Core – GL init + window; enables filtered KHR_debug (noisy severities off); Axolotel-HUD init.
+///// Otter: Renderer-Core - GL init + window; enables filtered KHR_debug (noisy severities off); Axolotel-HUD init.
 ///// Schneefuchs: Strict CUDA/GL separation; deterministic ASCII logs; resources clearly owned; duplicate resize removed.
 ///// Maus: Progressive cooldown + Tatze 7 soft-invalidate on view jumps (post-pipeline, no memset).
 ///// Datei: src/renderer_core.cu
@@ -94,7 +94,7 @@ bool Renderer::initGL() {
         LUCHS_LOG_HOST("[INIT] KHR_debug not available");
     }
 
-    // SRGB default FB capability (info only) – robust gegen Token-Varianten
+    // SRGB default FB capability (info only) - robust gegen Token-Varianten
     {
         GLint srgbCap = 0;
         bool logged = false;

@@ -1,4 +1,4 @@
-///// Otter: Git-Utilities – Status, Branch-Existenz, Checkout (quiet) für den Runner.
+///// Otter: Git-Utilities - Status, Branch-Existenz, Checkout (quiet) für den Runner.
 ///// Schneefuchs: Nur std::process::Command; ASCII-stabil; keine Seiteneffekte außer Git.
 ///// Maus: pub(crate); minimal, deterministisch; -q für leise Checkouts.
 ///// Datei: rust/otter_proc/src/vcs.rs

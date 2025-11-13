@@ -1,5 +1,5 @@
-///// Otter: Zaunkönig [ZK] – PBO-Fences & Ring-Disziplin; Tex-Ring (draw-lag-1); Capybara Single-Path
-///// Schneefuchs: EC/Wrapper entfernt – Header schlank; GLsync fwd-decl; /WX-fest; State entkoppelt
+///// Otter: Zaunkönig [ZK] - PBO-Fences & Ring-Disziplin; Tex-Ring (draw-lag-1); Capybara Single-Path
+///// Schneefuchs: EC/Wrapper entfernt - Header schlank; GLsync fwd-decl; /WX-fest; State entkoppelt
 ///// Maus: Klare Flags (pboFence, skipUploadThisFrame); tileSize explizit; ASCII-only Logs
 ///// Datei: src/renderer_state.hpp
 
@@ -64,7 +64,7 @@ struct RendererState {
     bool                       progressiveEnabled = true;
     int                        progressiveCooldownFrames = 0;
 
-    // 🎥 OpenGL-Zielpuffer (Interop via CUDA) – PBO-Ring
+    // 🎥 OpenGL-Zielpuffer (Interop via CUDA) - PBO-Ring
     static constexpr int kPboRingSize = 8; // <- an Settings::pboRingSize angleichen
 
     std::array<Hermelin::GLBuffer, kPboRingSize> pboRing{};
@@ -124,7 +124,7 @@ struct RendererState {
     };
     ZoomInterest interest;
 
-    // 🎬 CUDA Streams (Ownership im State) – non-blocking
+    // 🎬 CUDA Streams (Ownership im State) - non-blocking
     cudaStream_t renderStream = nullptr;
     cudaStream_t copyStream   = nullptr;
 
@@ -132,7 +132,7 @@ struct RendererState {
     cudaEvent_t  evEcDone   = nullptr;
     cudaEvent_t  evCopyDone = nullptr;
 
-    // ⏱️ Timings – CUDA + HOST konsolidiert
+    // ⏱️ Timings - CUDA + HOST konsolidiert
     struct CudaPhaseTimings {
         bool   valid            = false;
         double mandelbrotTotal  = 0.0;

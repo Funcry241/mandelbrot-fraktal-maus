@@ -1,4 +1,4 @@
-///// Otter: Export – erzeugt immer ein ZIP aus out/.
+///// Otter: Export - erzeugt immer ein ZIP aus out/.
 ///// Schneefuchs: Dateiname enthält OP und STATUS; Self-exclude (robust via canonicalize); ASCII-Logs; E0716-Fix.
 ///// Maus: Pruning pro Sorte (OP+STATUS), max_keep je Sorte; kompatibel zu anyhow::Result.
 ///// Datei: rust/otter_proc/src/commands/export.rs
@@ -71,7 +71,7 @@ fn is_allowed_source_file(base_lower: &str, name_lower: &str) -> bool {
 }
 
 fn is_excluded_dir(rel_lower: &str) -> bool {
-    // Große/irrelevante Bäume raus – wir wollen NUR Quellcode/Build-Konfigs.
+    // Große/irrelevante Bäume raus - wir wollen NUR Quellcode/Build-Konfigs.
     const DIRS: &[&str] = &[
         "vcpkg/", "vcpkg_installed/", "vcpkg_downloads/", "vcpkg_buildtrees/", "vcpkg_packages/", "vcpkg_cache/",
         "build/", "build-",

@@ -1,4 +1,4 @@
-///// Otter: Projekt „Pfau“ – vereinheitlichte UI-Konstanten (Alpha/Margin/Radius) und Doku.
+///// Otter: Projekt „Pfau“ - vereinheitlichte UI-Konstanten (Alpha/Margin/Radius) und Doku.
 ///// Schneefuchs: MAUS-Header (#62) strikt; ASCII-only; Header nur deklarativ, keine API-Änderung.
 ///// Maus: Pfau-Werte sind final verdrahtet (keine Alternativen); Pixel-Snapping-Helfer bereit.
 ///// Datei: src/warzenschwein_overlay.hpp
@@ -27,7 +27,7 @@ inline constexpr Anchor ANCHOR = Anchor::TopLeft;
 // Pixel-Snapping-Helfer (ganzzahlige Device-Koordinaten; vermeidet Halbpixel-Weichzeichnung)
 inline int snapToPixel(float v) { return static_cast<int>(v + 0.5f); }
 
-// Overlay zeichnen – benötigt nur den aktuellen Zoom.
+// Overlay zeichnen - benötigt nur den aktuellen Zoom.
 // Pfau-Regeln: Panel halbtransparent (PANEL_ALPHA), einheitliche Abstände/Radien,
 // Blend: GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA (im .cpp gesetzt).
 void drawOverlay(float zoom);
@@ -43,7 +43,7 @@ void cleanup();
 
 // Erzeugt Vertex- und Hintergrund-Quads für die Textanzeige ohne RendererState.
 // Viewport-Größe und Zoom werden explizit übergeben.
-// Pfau-Anker: Top-Left, identische Top-Margin wie Heatmap (Top-Right) – symmetrische Höhe.
+// Pfau-Anker: Top-Left, identische Top-Margin wie Heatmap (Top-Right) - symmetrische Höhe.
 void generateOverlayQuads(
     const std::string& text,
     int viewportW,

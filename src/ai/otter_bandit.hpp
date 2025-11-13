@@ -1,5 +1,5 @@
-///// Otter: Replikatoren – selbstlernender Contextual Bandit (LinUCB/RLS), on-device, ohne Fremdlibraries.
-///// Schneefuchs: Deterministische ASCII-Telemetry, Budget-Guard via einfacher dt-Messung; A⁻¹-Update per Sherman–Morrison.
+///// Otter: Replikatoren - selbstlernender Contextual Bandit (LinUCB/RLS), on-device, ohne Fremdlibraries.
+///// Schneefuchs: Deterministische ASCII-Telemetry, Budget-Guard via einfacher dt-Messung; A⁻¹-Update per Sherman-Morrison.
 ///// Maus: Nur LUCHS_LOG_HOST fürs Logging; kleine API für AOP-Controller (score/select_topk/update/save/load).
 ///// Datei: src/ai/otter_bandit.hpp
 

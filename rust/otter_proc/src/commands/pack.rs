@@ -1,6 +1,6 @@
-///// Otter: Pack – exports/ strikt ausschließen (ZIP-Guard) + Selbstinklusion absichern; weiterhin nicht am CLI verdrahtet.
+///// Otter: Pack - exports/ strikt ausschließen (ZIP-Guard) + Selbstinklusion absichern; weiterhin nicht am CLI verdrahtet.
 ///// Schneefuchs: Deterministischer Walk; out_rel-Skip nur, falls Ziel im Repo-Baum liegt; nur verbose-Hinweis, sonst unverändert.
-///// Maus: Minimalinvasiv – dir_prefix „exports/“ ergänzt; optionale Skip-Prüfung für das Ziel-ZIP.
+///// Maus: Minimalinvasiv - dir_prefix „exports/“ ergänzt; optionale Skip-Prüfung für das Ziel-ZIP.
 ///// Datei: rust/otter_proc/src/commands/pack.rs
 #![allow(dead_code)]
 

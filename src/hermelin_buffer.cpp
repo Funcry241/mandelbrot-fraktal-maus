@@ -1,5 +1,5 @@
 ///// Otter: RAII für CUDA/GL-Buffer; deterministische ASCII-Logs; Only-Grow-Semantik.
-///// Schneefuchs: State-Restore um GL-Binds; /WX-fest; Header/Source synchron – keine Drift.
+///// Schneefuchs: State-Restore um GL-Binds; /WX-fest; Header/Source synchron - keine Drift.
 ///// Maus: Implementierung klar getrennt vom Interface; keine versteckten Allokationen.
 ///// Datei: src/hermelin_buffer.cpp
 

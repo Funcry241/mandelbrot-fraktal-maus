@@ -16,7 +16,7 @@
 
 namespace CudaInterop {
 
-// 🐻 Konstruktor – registriert PBO bei Erstellung
+// 🐻 Konstruktor - registriert PBO bei Erstellung
 bear_CudaPBOResource::bear_CudaPBOResource(GLuint pboId) {
     resource_ = nullptr;
     mapped_   = false;
@@ -49,7 +49,7 @@ bear_CudaPBOResource::bear_CudaPBOResource(GLuint pboId) {
     }
 }
 
-// 🐻 Destruktor – unmap (falls nötig) und deregistrieren
+// 🐻 Destruktor - unmap (falls nötig) und deregistrieren
 bear_CudaPBOResource::~bear_CudaPBOResource() {
     if (resource_) {
         if (mapped_) {
@@ -65,7 +65,7 @@ bear_CudaPBOResource::~bear_CudaPBOResource() {
     }
 }
 
-// 🐻 mapAndLog – mappt (idempotent), liefert DevPtr + Size (geloggt)
+// 🐻 mapAndLog - mappt (idempotent), liefert DevPtr + Size (geloggt)
 void* bear_CudaPBOResource::mapAndLog(size_t& sizeOut) {
     void* devPtr = nullptr;
     sizeOut = 0;
@@ -134,7 +134,7 @@ uchar4* bear_CudaPBOResource::mapAndLogExpect(size_t expectedBytes) {
     return p;
 }
 
-// 🐻 unmap – nur wenn gemappt
+// 🐻 unmap - nur wenn gemappt
 void bear_CudaPBOResource::unmap() {
     if (!resource_ || !mapped_) return;
     const cudaError_t err = cudaGraphicsUnmapResources(1, &resource_, 0);
@@ -144,7 +144,7 @@ void bear_CudaPBOResource::unmap() {
     }
 }
 
-// 🐻 unmapAndLog – symmetrische Zeitmessung
+// 🐻 unmapAndLog - symmetrische Zeitmessung
 void bear_CudaPBOResource::unmapAndLog() {
     if (!resource_ || !mapped_) return;
     auto t0 = std::chrono::high_resolution_clock::now();

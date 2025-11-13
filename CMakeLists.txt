@@ -198,7 +198,6 @@ target_include_directories(mandelbrot_otterdream PRIVATE
 target_compile_definitions(mandelbrot_otterdream PRIVATE
   GLEW_NO_IMAGING
   GLEW_NO_GLU
-  CAPY_DEFAULT_ON=1
   $<$<CXX_COMPILER_ID:MSVC>:NOMINMAX WIN32_LEAN_AND_MEAN>
 )
 target_compile_definitions(mandelbrot_otterdream PRIVATE

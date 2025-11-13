@@ -482,7 +482,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
         const double ndcX_raw0 = rs.interest.ndcX;
         const double ndcY_raw0 = rs.interest.ndcY;
 
-        // Early angle bias (±24°) – suppressed while PilotOverride is on
+        // Early angle bias (±24°) - suppressed while PilotOverride is on
         double ndcX_in = ndcX_raw0, ndcY_in = ndcY_raw0;
         if (!pilotOn) {
             if (sNoise.seeded && sNoise.angleBiasRad != 0.0 && sNoise.angleDurSec > 0.0) {
@@ -502,7 +502,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
                 }
             }
 
-            // Orthogonale Deflektion – ausfaded; suppressed while PilotOverride
+            // Orthogonale Deflektion - ausfaded; suppressed while PilotOverride
             if (sNoise.seeded && sNoise.deflectMax > 0.0 && sNoise.deflectDurSec > 0.0) {
                 const double t = std::clamp(1.0 - (zls.sinceStartSec / sNoise.deflectDurSec), 0.0, 1.0);
                 if (t > 0.0) {
@@ -526,7 +526,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
             }
         }
 
-        // --- Keyboard Nav Bias (additiv) – suppressed while PilotOverride ---
+        // --- Keyboard Nav Bias (additiv) - suppressed while PilotOverride ---
         if (!pilotOn) {
             update_key_nav_bias(dt);
             add_key_bias_to_ndc(ndcX_in, ndcY_in);

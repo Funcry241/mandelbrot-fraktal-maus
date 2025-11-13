@@ -1,5 +1,5 @@
-///// Otter: Diagnose – schreibt bei Exit!=0 einen Report in .build_metrics/ (full/min).
-///// Schneefuchs: API stabil – tail: Option<&[String]>, last_snippet: Option<&str>, Rückgabe: Option<PathBuf>.
+///// Otter: Diagnose - schreibt bei Exit!=0 einen Report in .build_metrics/ (full/min).
+///// Schneefuchs: API stabil - tail: Option<&[String]>, last_snippet: Option<&str>, Rückgabe: Option<PathBuf>.
 ///// Maus: ASCII-only, chrono(clock), leiser Fallback auf .min.log bei Problemen.
 ///// Datei: rust/otter_proc/src/runner/runner_diagnose.rs
 

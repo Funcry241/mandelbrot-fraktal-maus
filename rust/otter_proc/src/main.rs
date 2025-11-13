@@ -1,4 +1,4 @@
-///// Otter: Mini-Entrypoint – delegiert (full/clean/autogit/export) + ENV-Zweimodus OTTER_OP=branch|build.
+///// Otter: Mini-Entrypoint - delegiert (full/clean/autogit/export) + ENV-Zweimodus OTTER_OP=branch|build.
 ///// Schneefuchs: /branch committet & pusht -> dann Build; “wupp” Default-Branch; Fail-Report-Hinweis im Summary.
 ///// Maus: Null-Magie, deterministisch; remote=origin; /build pusht nach Full; ASCII-Logs; Report-Pfad unter out/logs/.
 ///// Datei: rust/otter_proc/src/main.rs
@@ -79,7 +79,7 @@ fn main() {
         autogit_after_full = matches!(command, Commands::Full { .. }) && env_truthy("OTTER_UPLOAD");
     }
 
-    // Startzeit – deterministisch im Log
+    // Startzeit - deterministisch im Log
     let start_ms = utils::epoch_ms();
     runner_term::out_info("RUNNER", &format!("ts_ms={} root={}", start_ms, prockit::display_path(&root)));
 

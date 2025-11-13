@@ -3,7 +3,7 @@
 ///// Maus: Regeln: eindeutig, ASCII, keine Doppelvergabe; Wiederbelebung = bewusste Reaktivierung mit Commit-Notiz.
 ///// Datei: Friedhof.md
 
-# Tierfriedhof – Archiv ungenutzter/retirierter Codenamen
+# Tierfriedhof - Archiv ungenutzter/retirierter Codenamen
 
 **Zweck.** Diese Datei hält Tier-Codenamen fest, die im aktuellen Fallback-Stand der Codebasis **nicht** aktiv im Code vorkommen.
 Sie verhindert Doppelvergabe, dokumentiert Historie und skizziert eine mögliche „Wiederbelebung“.
@@ -27,9 +27,9 @@ Sie verhindert Doppelvergabe, dokumentiert Historie und skizziert eine mögliche
 | **Eule** | reserviert (in Arbeit) | 2025-08-07 „Projekt Eule“, README Features | Koordinaten-/Heatmap-Thema, in README aktiv, im Codepfad noch nicht | „Eule v2“: zentrale Transform-Lib + GPU-Heatmap |
 | **Mücke** | archiviert | 2025-08-11 „Mücke“-Baseline | Perf-/Nerv-Codename; kein aktiver Codepfad im Fallback | Micro-Scheduler für Frame-Budget-Pacing |
 | **Ringelrobbe** | archiviert | früheres Debug-Zweiglein | Ehem. Visual-/Debug-Variante, im Fallback entfernt | Shader-Showcase-Branch (Palette/Param-Morph) |
-| **Biber** | reserviert | – | Noch nie aktiv vergeben; passt zu Persist/IO/Cache | Robuste Session-/Preset-Speicher („Biber“) |
-| **Dachs** | reserviert | – | Freigehalten für Stabilitäts-/Recovery-Module | Crash-Recovery + Auto-Restore Pipelines |
-| **Krähe** | reserviert | – | Monitoring/Watcher passend, noch ungenutzt | Event-Watchdog + Heuristik-Alarme im Loop |
+| **Biber** | reserviert | - | Noch nie aktiv vergeben; passt zu Persist/IO/Cache | Robuste Session-/Preset-Speicher („Biber“) |
+| **Dachs** | reserviert | - | Freigehalten für Stabilitäts-/Recovery-Module | Crash-Recovery + Auto-Restore Pipelines |
+| **Krähe** | reserviert | - | Monitoring/Watcher passend, noch ungenutzt | Event-Watchdog + Heuristik-Alarme im Loop |
 
 > **Nicht auf dem Friedhof:** Bereits **aktiv vergebene** oder **in Doku-Prinzipien aktive** Codenamen (z. B. *Otter, Schneefuchs, Maus, Warzenschwein, Hermelin, Nacktmull, Kolibri, Pfau, Bär, Robbe, Waschbär, Luchs*) gehören **nicht** hierher.
 

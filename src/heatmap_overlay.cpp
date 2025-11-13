@@ -219,7 +219,7 @@ void drawOverlay(const std::vector<float>& entropy,
     // --- NEU: ROI immer zuerst setzen (Compute-API), unabhängig von Sichtbarkeit
     (void)updateInterestFromGrid(entropy, contrast, width, height, tileSize, (double)ctx.zoom, ctx);
 
-    // Falls Overlay unsichtbar: hier enden – ROI bleibt gesetzt.
+    // Falls Overlay unsichtbar: hier enden - ROI bleibt gesetzt.
     if(!ctx.heatmapOverlayEnabled) return;
 
     // ----------------------- Ab hier NUR Draw/GL -----------------------------

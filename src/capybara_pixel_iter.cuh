@@ -1,4 +1,4 @@
-///// Otter: Nacktmull – single-path classic continuation with warp-exit (no fast-math, no API change)
+///// Otter: Nacktmull - single-path classic continuation with warp-exit (no fast-math, no API change)
 ///// Schneefuchs: Header-only; device-inline; one runtime path; ASCII-only; inclusive-iter semantics preserved
 ///// Maus: Escape radius^2 = 4.0; returns iters; early Hi/Lo unchanged; no redundant fallbacks
 ///// Datei: src/capybara_pixel_iter.cuh
