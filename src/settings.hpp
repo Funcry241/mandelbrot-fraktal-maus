@@ -319,8 +319,8 @@ namespace Ai {
 // Stages: 0=Shadow (lernt, steuert nicht), 1=Assisted (Kandidaten), 2=Auto (steuert Ziel).
 namespace AiBandit {
     // Betriebsmodus.
-    // Range: {0,1,2} | Default: 0 (Shadow sicher)
-    inline constexpr int   stage            = 0;
+    // Range: {0,1,2} | Default: 2 (Auto, aktives Retarget)
+    inline constexpr int   stage            = 2;
 
     // Anzahl Kandidaten je Takt (Top-k).
     // Range: 1 .. 8 | Default: 3

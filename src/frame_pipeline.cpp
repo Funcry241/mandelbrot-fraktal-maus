@@ -97,7 +97,7 @@ namespace {
 
         // Zeit-Gate: mindestens alle 60 Frames (≈ 1 s @ 60 FPS), unabhängig von Settings
         const int baseN   = std::max(1, Settings::PerfLog::everyN);
-        const int minN    = 60;                   // harte Unterkante für die lange Zeile
+        const int minN    = 60;                    // harte Unterkante für die lange Zeile
         const int everyN  = std::max(minN, baseN); // falls baseN größer ist, respektieren
 
         const bool timeGate = (frameIdx - s_lastEmitFrame) >= everyN;
@@ -204,7 +204,7 @@ namespace {
         }
 
         bool ok = false;
-        if constexpr (Settings::performanceLogging) {
+        if constexpr (Settings::performanceLogging && Settings::PerfLog::emitCudaLine) {
             cudaEvent_t evM0 = nullptr, evM1 = nullptr;
             (void)cudaEventCreateWithFlags(&evM0, cudaEventDefault);
             (void)cudaEventCreateWithFlags(&evM1, cudaEventDefault);
@@ -222,6 +222,10 @@ namespace {
             (void)cudaEventDestroy(evM1);
         } else {
             ok = CudaInterop::buildHeatmapMetrics(state, fctx.width, fctx.height, statsPx, state.renderStream);
+            if constexpr (Settings::performanceLogging) {
+                g_entMs = 0.0;
+                g_conMs = 0.0;
+            }
         }
 
         if (!ok || state.h_entropy.empty() || state.h_contrast.empty()) {
@@ -274,7 +278,7 @@ namespace {
         // Keep the computed tile size (no unconditional full-res fallback).
         FrameContext fctxRender = fctx;
 
-        if constexpr (Settings::performanceLogging) {
+        if constexpr (Settings::performanceLogging && Settings::PerfLog::emitCudaLine) {
             cudaEvent_t evStart = nullptr, evStop = nullptr;
             (void)cudaEventCreateWithFlags(&evStart, cudaEventDefault);
             (void)cudaEventCreateWithFlags(&evStop,  cudaEventDefault);
@@ -291,6 +295,9 @@ namespace {
             (void)cudaEventDestroy(evStop);
         } else {
             CudaInterop::renderCudaFrame(state, fctxRender, fctx.newOffsetD.x, fctx.newOffsetD.y);
+            if constexpr (Settings::performanceLogging) {
+                g_mandMs = 0.0;
+            }
         }
 
         if constexpr (Settings::debugLogging) {
