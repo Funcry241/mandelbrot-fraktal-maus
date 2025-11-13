@@ -1,6 +1,6 @@
 ///// Otter: Runner-Modul - Streaming, Progress, Trailer + Link-Rauschkompressor & Fail-Report.
-/// //// Schneefuchs: Einheitliche Diagnose-API (tail: Option<&[String]> → Option<PathBuf>), ASCII-only.
-/// //// Maus: Minimal-invasive Änderungen; Heartbeat, Progress, Trailer bleiben unverändert.
+////// Schneefuchs: Einheitliche Diagnose-API (tail: Option<&[String]> → Option<PathBuf>), ASCII-only.
+////// Maus: Minimal-invasive Änderungen; Heartbeat, Progress, Trailer bleiben unverändert.
 ///// Datei: rust/otter_proc/src/runner.rs
 
 use std::collections::HashMap;

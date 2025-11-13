@@ -1,7 +1,7 @@
 ///// Otter: Rullmolder Step 2 - blunt zoom + gentle nudge; + Pilot-Override (Keys dominate with arm/linger); pan works even if interest is invalid.
-/// /// Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts; cadence-respecting logs.
-/// /// Maus: [ZPAN1]/[ZPERF]/[ZLEASH]/[ZJIT]/[ZANGL]/[ZDEF]/[ZPILOT]/[ZKEY]/[CAP]; Shift=Turbo, Ctrl=Fine.
-/// /// Datei: src/zoom_logic.cpp
+///// Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts; cadence-respecting logs.
+///// Maus: [ZPAN1]/[ZPERF]/[ZLEASH]/[ZJIT]/[ZANGL]/[ZDEF]/[ZPILOT]/[ZKEY]/[CAP]; Shift=Turbo, Ctrl=Fine.
+///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
 #pragma warning(disable: 4100) // unreferenced formal parameter (API preserved)

@@ -1,7 +1,7 @@
 ///// Otter: Nacktmull — frame pipeline with Axolotel Coupler; draw-lag-1; pan works during Pause (zoom frozen).
 ///// Schneefuchs: ASCII logs; pch first; deterministic diffs; [REPL/*] centralized logging.
-/// /// Maus: Compute → Metrics → Overlays → Axolotel → Zoom; if Pause: interest cleared, zoom restored to pre-call.
-/// /// Datei: src/frame_pipeline.cpp
+///// Maus: Compute → Metrics → Overlays → Axolotel → Zoom; if Pause: interest cleared, zoom restored to pre-call.
+///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
 #include <GLFW/glfw3.h>       // glfwGetTime()

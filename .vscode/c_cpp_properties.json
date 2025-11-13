@@ -23,14 +23,14 @@
         "WIN32_LEAN_AND_MEAN",
         "GLEW_NO_GLU",
         "GLEW_NO_IMAGING",
-        "CAPY_DEFAULT_ON=1",
         "_CRT_SECURE_NO_WARNINGS"
       ],
       "browse": {
         "path": [
           "${workspaceFolder}/src",
           "${workspaceFolder}/vcpkg_installed/x64-windows/include",
-          "${env:CUDA_PATH}/include"
+          "${env:CUDA_PATH}/include",
+          "${env:CUDA_PATH}/include/cccl"
         ],
         "limitSymbolsToIncludedHeaders": true
       }
