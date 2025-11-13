@@ -1,79 +1,17 @@
-///// Otter: Feature packer - E/C → NCHW & Bandit-Features (d≈20); deterministisch, robust gegenüber Rändern.
-///// Schneefuchs: 3×3-Stats, Grad-Proxy, NDC-Koords, r/θ, center-bias; ASCII-Metalog; zero-fill bei Mismatch.
-///// Maus: Keine Fremdlibs; nur LUCHS_LOG_HOST; Shapes exakt geloggt; stride==dim für Bandit-Matrix.
-///// Datei: src/ai/feature_packer.cpp
+///// Otter: Feature packer - Bandit-Featurematrix (~20D); deterministisch, robust gegenüber Rändern.
+///// Schneefuchs: 3x3-Stats, Grad-Proxy, NDC-Koords, r/theta, center-bias; ASCII-Metalog; keine Fremdlibs.
+///// Maus: Bandit-Matrix row-major [Tiles x d]; stride == dim; Shapes exakt geloggt.
+/// // Datei: src/ai/feature_packer.cpp
 #include "feature_packer.hpp"
 #include "luchs_log_host.hpp"
 #include "settings.hpp"
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 
 namespace Repl { namespace Feat {
 
 static inline int div_ceil(int a, int b) { return (a + (b - 1)) / b; }
-
-PackedFeatures pack_heatmap_features(const std::vector<float>& entropy,
-                                     const std::vector<float>& contrast,
-                                     int width, int height, int statsPx)
-{
-    const int px     = std::max(1, statsPx);
-    const int Tx     = std::max(1, div_ceil(width,  px));
-    const int Ty     = std::max(1, div_ceil(height, px));
-    const size_t exp = static_cast<size_t>(Tx) * static_cast<size_t>(Ty);
-
-    const size_t nE  = entropy.size();
-    const size_t nC  = contrast.size();
-    const size_t use = std::min(exp, std::min(nE, nC));
-
-    PackedFeatures out;
-    out.N = 1; out.C = 2; out.H = Ty; out.W = Tx;
-    out.tilesX = Tx; out.tilesY = Ty; out.statsPx = px;
-    out.data.assign(static_cast<size_t>(out.N) * out.C * out.H * out.W, 0.0f);
-
-    auto idx = [Tx, Ty](int ch, int y, int x) -> size_t {
-        return static_cast<size_t>((ch * Ty + y) * Tx + x);
-    };
-
-    float eMin = 0.0f, eMax = 0.0f, cMin = 0.0f, cMax = 0.0f;
-    bool  haveStats = false;
-
-    for (size_t i = 0; i < use; ++i) {
-        const int y = static_cast<int>(i / static_cast<size_t>(Tx));
-        const int x = static_cast<int>(i % static_cast<size_t>(Tx));
-
-        const float e = entropy[i];
-        const float c = contrast[i];
-
-        out.data[idx(0, y, x)] = e;
-        out.data[idx(1, y, x)] = c;
-
-        if (!haveStats) {
-            eMin = eMax = e;
-            cMin = cMax = c;
-            haveStats = true;
-        } else {
-            if (e < eMin) eMin = e;
-            if (e > eMax) eMax = e;
-            if (c < cMin) cMin = c;
-            if (c > cMax) cMax = c;
-        }
-    }
-
-    // Bei use == 0 bleiben eMin/eMax/cMin/cMax auf 0.0f – Verhalten wie vorher.
-    LUCHS_LOG_HOST("[REPL/FEAT] tiles=%dx%d statsPx=%d N=%zu used=%zu E[min=%.4f max=%.4f] C[min=%.4f max=%.4f]",
-                   Tx, Ty, px, exp, use, eMin, eMax, cMin, cMax);
-
-    if (use < exp) {
-        const size_t rem = exp - use;
-        if (rem > 0) {
-            LUCHS_LOG_HOST("[REPL/FEAT] zero-filled=%zu (entropy=%zu contrast=%zu expected=%zu)",
-                           rem, nE, nC, exp);
-        }
-    }
-    return out;
-}
 
 // -------------------- Bandit-Featurematrix ----------------------------------
 // Feature-Layout je Tile (dim = 20):
@@ -81,15 +19,15 @@ PackedFeatures pack_heatmap_features(const std::vector<float>& entropy,
 // 2: meanE3, 3: meanC3,
 // 4: varE3,  5: varC3,
 // 6: gradE,  7: gradC,
-// 8: rangeE, 9: rangeC,            // max-min im 3×3
+// 8: rangeE, 9: rangeC,            // max-min im 3x3
 // 10: x_ndc, 11: y_ndc,            // in [-1,1], Tile-Center
-// 12: r, 13: cosθ, 14: sinθ,       // θ = atan2(y_ndc, x_ndc)
-// 15: centerBias,                  // exp(-r^2 / σ^2), σ = Settings::TargetBias::sigmaNdc
+// 12: r, 13: cosTheta, 14: sinTheta, // theta = atan2(y_ndc, x_ndc)
+// 15: centerBias,                  // exp(-r^2 / sigma^2), sigma = Settings::TargetBias::sigmaNdc
 // 16: eRel = E - meanE_all,        // global zentriert
 // 17: cRel = C - meanC_all,
 // 18: eStd = (stdE_all>0)?(E-meanE)/stdE:0
 // 19: cStd = (stdC_all>0)?(C-meanC)/stdC:0
-static inline float clamp01(float v){ return v<0.f?0.f:(v>1.f?1.f:v); }
+static inline float clamp01(float v) { return v < 0.f ? 0.f : (v > 1.f ? 1.f : v); }
 
 BanditMatrix make_bandit_feature_matrix(const std::vector<float>& entropy,
                                         const std::vector<float>& contrast,
@@ -105,97 +43,136 @@ BanditMatrix make_bandit_feature_matrix(const std::vector<float>& entropy,
     const size_t use = std::min(Ntx, std::min(nE, nC));
 
     // Globale Mittel/Std für zentrierte Features
-    double sumE=0.0, sumE2=0.0, sumC=0.0, sumC2=0.0;
-    for (size_t i=0;i<use;++i){
-        const double e = (double)entropy[i], c=(double)contrast[i];
-        sumE += e; sumE2 += e*e; sumC += c; sumC2 += c*c;
+    double sumE = 0.0, sumE2 = 0.0, sumC = 0.0, sumC2 = 0.0;
+    for (size_t i = 0; i < use; ++i) {
+        const double e = static_cast<double>(entropy[i]);
+        const double c = static_cast<double>(contrast[i]);
+        sumE  += e;
+        sumE2 += e * e;
+        sumC  += c;
+        sumC2 += c * c;
     }
-    const double invN = (use>0)?(1.0/(double)use):0.0;
+    const double invN  = (use > 0) ? (1.0 / static_cast<double>(use)) : 0.0;
     const double meanE = sumE * invN;
     const double meanC = sumC * invN;
-    const double varE  = std::max(0.0, sumE2*invN - meanE*meanE);
-    const double varC  = std::max(0.0, sumC2*invN - meanC*meanC);
+    const double varE  = std::max(0.0, sumE2 * invN - meanE * meanE);
+    const double varC  = std::max(0.0, sumC2 * invN - meanC * meanC);
     const double stdE  = std::sqrt(varE);
     const double stdC  = std::sqrt(varC);
 
     BanditMatrix out;
-    out.dim = 20;
-    out.tilesX = Tx; out.tilesY = Ty; out.stride = out.dim; out.statsPx = px;
-    out.data.assign(Ntx * (size_t)out.dim, 0.0f);
+    out.dim     = 20;
+    out.tilesX  = Tx;
+    out.tilesY  = Ty;
+    out.stride  = out.dim;
+    out.statsPx = px;
+    out.data.assign(Ntx * static_cast<size_t>(out.dim), 0.0f);
 
-    auto idxEC = [Tx](int y,int x)->size_t{ return (size_t)y * (size_t)Tx + (size_t)x; };
-    auto getE  = [&](int y,int x)->float{
-        const int yy = (y<0)?0:((y>=Ty)?(Ty-1):y);
-        const int xx = (x<0)?0:((x>=Tx)?(Tx-1):x);
-        const size_t i = idxEC(yy,xx);
+    auto idxEC = [Tx](int y, int x) -> size_t {
+        return static_cast<size_t>(y) * static_cast<size_t>(Tx) + static_cast<size_t>(x);
+    };
+
+    auto getE = [&](int y, int x) -> float {
+        const int yy = (y < 0) ? 0 : ((y >= Ty) ? (Ty - 1) : y);
+        const int xx = (x < 0) ? 0 : ((x >= Tx) ? (Tx - 1) : x);
+        const size_t i = idxEC(yy, xx);
         return (i < entropy.size()) ? entropy[i] : 0.0f;
     };
-    auto getC  = [&](int y,int x)->float{
-        const int yy = (y<0)?0:((y>=Ty)?(Ty-1):y);
-        const int xx = (x<0)?0:((x>=Tx)?(Tx-1):x);
-        const size_t i = idxEC(yy,xx);
+    auto getC = [&](int y, int x) -> float {
+        const int yy = (y < 0) ? 0 : ((y >= Ty) ? (Ty - 1) : y);
+        const int xx = (x < 0) ? 0 : ((x >= Tx) ? (Tx - 1) : x);
+        const size_t i = idxEC(yy, xx);
         return (i < contrast.size()) ? contrast[i] : 0.0f;
     };
 
     const double sigma = (Settings::TargetBias::sigmaNdc > 0.0)
-                       ? Settings::TargetBias::sigmaNdc : 0.65;
+                       ? Settings::TargetBias::sigmaNdc
+                       : 0.65;
 
-    for (int y=0; y<Ty; ++y){
-        for (int x=0; x<Tx; ++x){
-            const size_t tileIdx = idxEC(y,x);
-            float* row = out.data.data() + tileIdx * (size_t)out.dim;
+    for (int y = 0; y < Ty; ++y) {
+        for (int x = 0; x < Tx; ++x) {
+            const size_t tileIdx = idxEC(y, x);
+            float* row = out.data.data() + tileIdx * static_cast<size_t>(out.dim);
 
-            const float E = (tileIdx < entropy.size()) ? entropy[tileIdx] : 0.0f;
+            const float E = (tileIdx < entropy.size())  ? entropy[tileIdx]  : 0.0f;
             const float C = (tileIdx < contrast.size()) ? contrast[tileIdx] : 0.0f;
 
-            // 3×3 Stats
-            double sum_e=0.0, sum_c=0.0, sum_e2=0.0, sum_c2=0.0;
-            float eMin=E, eMax=E, cMin=C, cMax=C;
-            for (int dy=-1; dy<=1; ++dy){
-                for (int dx=-1; dx<=1; ++dx){
-                    const float ev = getE(y+dy,x+dx);
-                    const float cv = getC(y+dy,x+dx);
-                    sum_e+=ev; sum_c+=cv; sum_e2+= (double)ev*ev; sum_c2+= (double)cv*cv;
-                    eMin = std::min(eMin, ev); eMax = std::max(eMax, ev);
-                    cMin = std::min(cMin, cv); cMax = std::max(cMax, cv);
+            // 3x3 Stats um die aktuelle Kachel
+            double sum_e  = 0.0;
+            double sum_c  = 0.0;
+            double sum_e2 = 0.0;
+            double sum_c2 = 0.0;
+            float eMin = E, eMax = E, cMin = C, cMax = C;
+
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    const float ev = getE(y + dy, x + dx);
+                    const float cv = getC(y + dy, x + dx);
+                    sum_e  += ev;
+                    sum_c  += cv;
+                    sum_e2 += static_cast<double>(ev) * static_cast<double>(ev);
+                    sum_c2 += static_cast<double>(cv) * static_cast<double>(cv);
+                    eMin = std::min(eMin, ev);
+                    eMax = std::max(eMax, ev);
+                    cMin = std::min(cMin, cv);
+                    cMax = std::max(cMax, cv);
                 }
             }
-            const double cnt = 9.0;
-            const float meanE3 = (float)(sum_e / cnt);
-            const float meanC3 = (float)(sum_c / cnt);
-            const float varE3  = (float)std::max(0.0, sum_e2/cnt - (sum_e/cnt)*(sum_e/cnt));
-            const float varC3  = (float)std::max(0.0, sum_c2/cnt - (sum_c/cnt)*(sum_c/cnt));
+
+            const double cnt    = 9.0;
+            const double invCnt = 1.0 / cnt;
+            const double mean_e = sum_e * invCnt;
+            const double mean_c = sum_c * invCnt;
+
+            const float meanE3 = static_cast<float>(mean_e);
+            const float meanC3 = static_cast<float>(mean_c);
+            const float varE3  = static_cast<float>(std::max(0.0, sum_e2 * invCnt - mean_e * mean_e));
+            const float varC3  = static_cast<float>(std::max(0.0, sum_c2 * invCnt - mean_c * mean_c));
             const float rangeE = eMax - eMin;
             const float rangeC = cMax - cMin;
 
             // Gradient-Proxy (vorwärts-Differenzen, randgeklemmt)
-            const float gradE = std::fabs(getE(y,x+1)-E) + std::fabs(getE(y+1,x)-E);
-            const float gradC = std::fabs(getC(y,x+1)-C) + std::fabs(getC(y+1,x)-C);
+            const float gradE = std::fabs(getE(y, x + 1) - E) + std::fabs(getE(y + 1, x) - E);
+            const float gradC = std::fabs(getC(y, x + 1) - C) + std::fabs(getC(y + 1, x) - C);
 
             // NDC-Koords (Tile-Center relativ zur Tile-Anzahl)
-            const float ndcX = clamp01(((float)x + 0.5f) / (float)Tx) * 2.0f - 1.0f;
-            const float ndcY = clamp01(((float)y + 0.5f) / (float)Ty) * 2.0f - 1.0f;
-            const float r2   = ndcX*ndcX + ndcY*ndcY;
+            const float ndcX = clamp01((static_cast<float>(x) + 0.5f) / static_cast<float>(Tx)) * 2.0f - 1.0f;
+            const float ndcY = clamp01((static_cast<float>(y) + 0.5f) / static_cast<float>(Ty)) * 2.0f - 1.0f;
+            const float r2   = ndcX * ndcX + ndcY * ndcY;
             const float r    = std::sqrt(r2);
             const float ang  = std::atan2(ndcY, ndcX);
-            const float cb   = std::exp(-(r2) / (float)(sigma*sigma));
+            const float cb   = std::exp(-(r2) / static_cast<float>(sigma * sigma));
 
-            const float eRel = (float)((double)E - meanE);
-            const float cRel = (float)((double)C - meanC);
-            const float eStd = (stdE>1e-12)? (float)(((double)E - meanE)/stdE) : 0.0f;
-            const float cStd = (stdC>1e-12)? (float)(((double)C - meanC)/stdC) : 0.0f;
+            const float eRel = static_cast<float>(static_cast<double>(E) - meanE);
+            const float cRel = static_cast<float>(static_cast<double>(C) - meanC);
+            const float eStd = (stdE > 1e-12)
+                ? static_cast<float>((static_cast<double>(E) - meanE) / stdE)
+                : 0.0f;
+            const float cStd = (stdC > 1e-12)
+                ? static_cast<float>((static_cast<double>(C) - meanC) / stdC)
+                : 0.0f;
 
             // Write row
-            row[0]=E;    row[1]=C;
-            row[2]=meanE3; row[3]=meanC3;
-            row[4]=varE3;  row[5]=varC3;
-            row[6]=gradE;  row[7]=gradC;
-            row[8]=rangeE; row[9]=rangeC;
-            row[10]=ndcX;  row[11]=ndcY;
-            row[12]=r;     row[13]=std::cos(ang); row[14]=std::sin(ang);
-            row[15]=cb;
-            row[16]=eRel;  row[17]=cRel;
-            row[18]=eStd;  row[19]=cStd;
+            row[0]  = E;
+            row[1]  = C;
+            row[2]  = meanE3;
+            row[3]  = meanC3;
+            row[4]  = varE3;
+            row[5]  = varC3;
+            row[6]  = gradE;
+            row[7]  = gradC;
+            row[8]  = rangeE;
+            row[9]  = rangeC;
+            row[10] = ndcX;
+            row[11] = ndcY;
+            row[12] = r;
+            row[13] = std::cos(ang);
+            row[14] = std::sin(ang);
+            row[15] = cb;
+            row[16] = eRel;
+            row[17] = cRel;
+            row[18] = eStd;
+            row[19] = cStd;
         }
     }
 
