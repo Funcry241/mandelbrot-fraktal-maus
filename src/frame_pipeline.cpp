@@ -204,7 +204,7 @@ namespace {
         }
 
         bool ok = false;
-        if constexpr (Settings::performanceLogging && Settings::PerfLog::emitCudaLine) {
+        if constexpr (Settings::performanceLogging) {
             cudaEvent_t evM0 = nullptr, evM1 = nullptr;
             (void)cudaEventCreateWithFlags(&evM0, cudaEventDefault);
             (void)cudaEventCreateWithFlags(&evM1, cudaEventDefault);
@@ -222,10 +222,6 @@ namespace {
             (void)cudaEventDestroy(evM1);
         } else {
             ok = CudaInterop::buildHeatmapMetrics(state, fctx.width, fctx.height, statsPx, state.renderStream);
-            if constexpr (Settings::performanceLogging) {
-                g_entMs = 0.0;
-                g_conMs = 0.0;
-            }
         }
 
         if (!ok || state.h_entropy.empty() || state.h_contrast.empty()) {
@@ -278,7 +274,7 @@ namespace {
         // Keep the computed tile size (no unconditional full-res fallback).
         FrameContext fctxRender = fctx;
 
-        if constexpr (Settings::performanceLogging && Settings::PerfLog::emitCudaLine) {
+        if constexpr (Settings::performanceLogging) {
             cudaEvent_t evStart = nullptr, evStop = nullptr;
             (void)cudaEventCreateWithFlags(&evStart, cudaEventDefault);
             (void)cudaEventCreateWithFlags(&evStop,  cudaEventDefault);
@@ -295,9 +291,6 @@ namespace {
             (void)cudaEventDestroy(evStop);
         } else {
             CudaInterop::renderCudaFrame(state, fctxRender, fctx.newOffsetD.x, fctx.newOffsetD.y);
-            if constexpr (Settings::performanceLogging) {
-                g_mandMs = 0.0;
-            }
         }
 
         if constexpr (Settings::debugLogging) {
