@@ -236,15 +236,23 @@ double OtterBandit::dot_w(const float* x) const {
 double OtterBandit::quadform_Ainv(const float* x) const {
     const int d = m_dim;
     const double* A = m_Ainv.data();
-    std::vector<double> tmp((size_t)d, 0.0);
+
+    // Kein std::vector in der Hot-Loop: fester Stack-Buffer (max d=1024 durch init-Guard).
+    double tmp[1024];
+
     for (int r = 0; r < d; ++r) {
         const double* Ar = A + (size_t)r * (size_t)d;
         double s = 0.0;
-        for (int c = 0; c < d; ++c) s += Ar[(size_t)c] * (double)x[c];
+        for (int c = 0; c < d; ++c) {
+            s += Ar[(size_t)c] * (double)x[c];
+        }
         tmp[(size_t)r] = s;
     }
+
     double q = 0.0;
-    for (int i = 0; i < d; ++i) q += (double)x[i] * tmp[(size_t)i];
+    for (int i = 0; i < d; ++i) {
+        q += (double)x[i] * tmp[(size_t)i];
+    }
     return q;
 }
 
@@ -263,11 +271,15 @@ void OtterBandit::sm_update_Ainv(const float* x) {
         }
     }
 
-    std::vector<double> u((size_t)d, 0.0);
+    // Ebenfalls: fester Stack-Buffer statt std::vector pro Update.
+    double u[1024];
+
     for (int r = 0; r < d; ++r) {
         const double* Ar = m_Ainv.data() + (size_t)r * (size_t)d;
         double s = 0.0;
-        for (int c = 0; c < d; ++c) s += Ar[(size_t)c] * (double)x[c];
+        for (int c = 0; c < d; ++c) {
+            s += Ar[(size_t)c] * (double)x[c];
+        }
         u[(size_t)r] = s;
     }
 

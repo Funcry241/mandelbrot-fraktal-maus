@@ -1,7 +1,7 @@
 ///// Otter: Feature packer für Replikatoren - Bandit-Featurematrix (~20D), deterministisch.
 ///// Schneefuchs: Bounds-safe, klare Shapes; Header/Source synchron; keine Fremdlibs, ASCII-Logs.
-/// // Maus: Bandit-Matrix row-major [Tiles x d]; Koords in NDC, Grad/Stats 3x3; stride == dim.
-/// // Datei: src/ai/feature_packer.hpp
+///// Maus: Bandit-Matrix row-major [Tiles x d]; Koords in NDC, Grad/Stats 3x3; stride == dim.
+///// Datei: src/ai/feature_packer.hpp
 #pragma once
 
 #include <vector>

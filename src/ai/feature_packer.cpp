@@ -1,7 +1,7 @@
 ///// Otter: Feature packer - Bandit-Featurematrix (~20D); deterministisch, robust gegenüber Rändern.
 ///// Schneefuchs: 3x3-Stats, Grad-Proxy, NDC-Koords, r/theta, center-bias; ASCII-Metalog; keine Fremdlibs.
 ///// Maus: Bandit-Matrix row-major [Tiles x d]; stride == dim; Shapes exakt geloggt.
-/// // Datei: src/ai/feature_packer.cpp
+///// Datei: src/ai/feature_packer.cpp
 #include "feature_packer.hpp"
 #include "luchs_log_host.hpp"
 #include "settings.hpp"
