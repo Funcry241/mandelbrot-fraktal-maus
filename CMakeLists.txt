@@ -1,6 +1,6 @@
 ##### Otter: ORT entfernt; Replikatoren (Bandit) hinzugefügt; dynamisches GLEW; CUDA 13 Guard.
 ##### Schneefuchs: /WX-safe; keine GLU; AppLocal-Kopie; nvrtc optional; stabile Triplets & Archs.
-##### Maus: Fügt src/ai/otter_bandit.cpp hinzu; keine ONNX/ORT-Flags mehr im Configure.
+##### Maus: Fügt src/ai/otter_bandit.cpp hinzu; keine ONNX/ORT-Flags mehr im Configure; Install + LICENSE nach dist/.
 ##### Datei: CMakeLists.txt
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
@@ -145,7 +145,7 @@ add_executable(mandelbrot_otterdream
   src/ai/aop_controller.cpp
   src/ai/aop_telemetry.cpp
   src/ai/feature_packer.cpp
-  src/ai/otter_bandit.cpp  
+  src/ai/otter_bandit.cpp
 )
 
 if(MSVC)
@@ -290,6 +290,15 @@ find_file(CUDA_GL_INTEROP_HEADER cuda_gl_interop.h HINTS ${CUDAToolkit_INCLUDE_D
 if(NOT CUDA_GL_INTEROP_HEADER)
   message(FATAL_ERROR "cuda_gl_interop.h nicht im CUDAToolkit gefunden.")
 endif()
+
+# Install: Binary + LICENSE nach dist/
+install(TARGETS mandelbrot_otterdream
+  RUNTIME DESTINATION .
+)
+
+install(FILES "${CMAKE_SOURCE_DIR}/LICENSE"
+  DESTINATION .
+)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
