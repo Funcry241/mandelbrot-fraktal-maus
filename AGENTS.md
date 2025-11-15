@@ -1,5 +1,7 @@
+<!-- Otter: Build-Agents, Toolchains und CI-Fluss für OtterDream. -->
+<!-- Schneefuchs: Versionen & Pfade müssen mit ci.yml und README übereinstimmen. -->
+<!-- Maus: Dokumentiert Buildprozesse und lokale Helfer, keine versteckten Pfade. -->
 <!-- Datei: AGENTS.md -->
-<!-- 🐭 Maus-Kommentar: Dokumentiert Buildprozesse und Toolchains für OtterDream. Aktualisiert: Single-Path-Render (Capybara), LUCHS_LOG-Trennung, kompakte PERF-Logs (Epoch-Millis). Schneefuchs flüstert: „Ein Agent kennt die versteckten Knöpfe und sorgt für saubere Übergänge.“ -->
 
 # 👩‍💻 OtterDream Build Agents
 
@@ -36,7 +38,7 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 **ETA-Seeding:**  
 - Datei: `.build_metrics/metrics.json` (pro Arbeitsverzeichnis).  
-- Key-Signatur: `exe:phase` (z. B. `cmake:configure`, `cmd:build`).  
+- Key-Signatur: `exe:phase` (z. B. `cmake:configure`, `cmd:build`).  
 - Zeitbasierte Fortschritts-Absicherung (Zeit-Prozent max mit Builder-Prozent fusioniert).
 
 **Env-Toggles:**  
@@ -51,18 +53,25 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 ## 🧰 Tools & Versionen
 
-| Tool          | Mindestversion | Hinweise                         |
-| ------------- | -------------- | -------------------------------- |
-| CUDA Toolkit  | **13.0+**      | `nvcc` v13 lokal erforderlich    |
-| OpenGL        | 4.3+           | Core Profile                     |
-| Visual Studio | 2022           | C++ + CUDA                       |
-| CMake         | ≥3.28          | Presets & `--install`            |
-| Ninja         | 1.10+          | Schneller Parallel-Build         |
-| vcpkg         | aktuell        | Drittanbieter-Libs               |
+| Tool          | Mindestversion | Hinweise                                                      |
+| ------------- | -------------- | ------------------------------------------------------------- |
+| CUDA Toolkit  | **13.0+**      | `nvcc` v13 lokal erforderlich (Build); Treiber reicht zum Run |
+| OpenGL        | 4.3+           | Core Profile                                                  |
+| Visual Studio | 2022           | C++ + CUDA (Windows)                                          |
+| CMake         | ≥3.28          | Presets & `--install`                                         |
+| Ninja         | 1.10+          | Schneller Parallel-Build                                      |
+| vcpkg         | aktuell        | Drittanbieter-Libs                                            |
 
 ### ⚠️ CUDA erforderlich
 
-Ohne lokal installiertes **CUDA 13** (inkl. `nvcc`) startet der Build nicht.
+Ohne lokal installiertes **CUDA 13** (inkl. `nvcc`) startet der Build nicht.  
+Das gilt sowohl für lokale Builds als auch für CI-Runner: `find_package(CUDAToolkit REQUIRED)` bricht ohne Toolkit ab.
+
+### 🌍 Zielplattformen & Umgebung
+
+- **Linux-Referenz:** Ubuntu 22.04 x86_64 mit NVIDIA-Treiber + CUDA Toolkit 13.0 (wie in `.github/workflows/ci.yml` eingerichtet).  
+- **Windows-Referenz:** Windows 10/11 x64 mit Visual Studio 2022, CUDA Toolkit 13.0 und aktueller NVIDIA-Treiber.  
+- Generische Code-Runner/AI-Container **ohne** CUDA Toolkit/`nvcc` können OtterDream **nicht** kompilieren; das ist erwartetes Verhalten.
 
 ---
 
@@ -110,18 +119,18 @@ Der Mandelbrot-Pfad hält sich an ein weiches **Zeitbudget** pro Frame. Silk-Lit
 
 | Taste   | Funktion                               |
 | ------- | -------------------------------------- |
-| `P`     | Auto‑Zoom pausieren/fortsetzen         |
-| `H`     | Heatmap‑Overlay toggeln                |
+| `P`     | Auto-Zoom pausieren/fortsetzen         |
+| `H`     | Heatmap-Overlay toggeln                |
 | `T`     | HUD (Warzenschwein) toggeln            |
-| `Ctrl+P`| **Perturb‑Gate** toggeln               |
+| `Ctrl+P`| **Perturb-Gate** toggeln               |
 
 ---
 
 ## 🧷 Toolchain & Hardening (Windows)
 
 * **CRT**: `/MD` (DLL) - konsistent zum Host-Link; keine LNK2038-Mismatches.  
-* **CUDA Runtime**: **Shared**; Runtime‑DLL wird in `dist\` kopiert (falls nötig).  
-* **GLEW dynamisch**: kein `GLEW_STATIC`; vcpkg‑Triplet entsprechend.  
+* **CUDA Runtime**: **Shared**; Runtime-DLL wird in `dist\` kopiert (falls nötig).  
+* **GLEW dynamisch**: kein `GLEW_STATIC`; vcpkg-Triplet entsprechend.  
 * **Hardening nur im Host-Link**: `/NXCOMPAT /DYNAMICBASE /HIGHENTROPYVA /guard:cf` über `$<HOST_LINK:...>`.  
 * **Separable Compilation** + **Device-Symbole** aktiviert (CMake Properties).
 
@@ -147,6 +156,7 @@ Der Mandelbrot-Pfad hält sich an ein weiches **Zeitbudget** pro Frame. Silk-Lit
   * CUDA-Kompilation für Presets
   * konsistente CMake-Presets
   * deterministische Builds (gleiche Inputs → gleiche Outputs)
+* Der CI-Runner installiert zuvor das CUDA Toolkit 13.0. Falls dieser Schritt fehlschlägt, bricht bereits die CMake-Konfiguration ab (`CUDAToolkit REQUIRED`).
 
 **Dependabot**
 
