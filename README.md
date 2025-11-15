@@ -26,7 +26,29 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom - *
 
 ---
 
+## 🧾 Bären-Checkliste (vor dem Build)
+
+**Nur ausführen (Windows, dist\):**
+
+- Aktueller **NVIDIA-Grafiktreiber** installiert.
+- GPU unterstützt **OpenGL 4.3 Core** (RTX/GTX der letzten Generationen).
+- Im Repo existiert ein `dist\`-Ordner mit `mandelbrot_otterdream.exe`.
+
+**Bauen (Windows oder Linux):**
+
+- NVIDIA-GPU mit CUDA-Unterstützung (**Compute Capability ≥ 8.0**, empfohlen **8.6+**).
+- **CUDA Toolkit 13.0+** ist installiert, `nvcc --version` funktioniert.
+- **CMake ≥ 3.28**, **Ninja**, **vcpkg** sind installiert bzw. lokal im Repo vorhanden.
+- Unter **Windows**: Visual Studio 2022 mit „Desktop development with C++“.
+- Unter **Linux**: GCC 11+, X-/OpenGL-Dev-Pakete (siehe Abschnitt „Linux (GCC + Ninja)“).
+
+Wenn diese Häkchen gesetzt sind, kann ein Bär OtterDream mit den untenstehenden Befehlen kompilieren und starten.
+
+---
+
 ## ✨ Sofort testen (Windows, **ohne Setup**)
+
+**Wenn du nur schnell schauen willst, nimm einfach `dist\mandelbrot_otterdream.exe` und starte sie – du musst nichts bauen.**
 
 Wenn du das Projekt **nur ausprobieren** möchtest, brauchst du **nichts zu installieren**.  
 Im Repository/Arbeitsverzeichnis liegt ein **`dist\`**-Ordner mit einer **portablen Windows-Build**:
@@ -42,11 +64,27 @@ dist\
 **Voraussetzung zum Ausführen:** Ein aktueller **NVIDIA-Grafiktreiber** und OpenGL 4.3.  
 **Nicht nötig zum Ausführen:** Visual Studio, vcpkg oder das CUDA Toolkit (Runtime-DLLs liegen bei).
 
-> Falls `dist\mandelbrot_otterdream.exe` fehlt: einmal bauen (siehe unten „Automatischer Build“) - der Build füllt `dist\` automatisch.
+> Falls `dist\mandelbrot_otterdream.exe` fehlt: einmal bauen (siehe „⚡ Windows-Schnellstart“ oder „Automatischer Build“) – der Build füllt `dist\` automatisch.
 
 ---
 
-## 🔧 Automatischer Build (Windows) - `build.ps1`
+## ⚡ Windows-Schnellstart (in 5 Befehlen)
+
+Für einen typischen Windows-Entwickler mit Visual Studio 2022, CUDA 13 und Git:
+
+```powershell
+git clone --recurse-submodules https://github.com/Funcry241/mandelbrot-fraktal-maus.git
+cd mandelbrot-fraktal-maus
+powershell -ExecutionPolicy Bypass -File .uild.ps1
+cd .\dist
+.\mandelbrot_otterdream.exe
+```
+
+Wenn einer der Befehle scheitert (z. B. `build.ps1`), bitte die ausführlichen Abschnitte zu **„Automatischer Build (Windows)“** und **„Manueller Build (CMake)“** weiter unten lesen.
+
+---
+
+## 🔧 Automatischer Build (Windows) – `build.ps1`
 
 **Voraussetzungen (für den Build):**
 
@@ -62,12 +100,13 @@ Es orchestriert alles: vcpkg-Abhängigkeiten, CMake-Konfiguration/Build, und das
 
 ```powershell
 # Aus dem Repo-Root
-powershell -ExecutionPolicy Bypass -File .\build.ps1
+powershell -ExecutionPolicy Bypass -File .uild.ps1
 # Optional: Konfiguration wählen (Default: RelWithDebInfo)
-powershell -ExecutionPolicy Bypass -File .\build.ps1 -Configuration Release
+powershell -ExecutionPolicy Bypass -File .uild.ps1 -Configuration Release
 ```
 
 **Was `build.ps1` für dich erledigt**
+
 - Öffnet die passende **VS-Entwicklungsumgebung**, konfiguriert **CMake + Ninja**
 - Installiert/prüft **GLFW** & **GLEW** via **vcpkg** (**dynamisch**)
 - Baut das Projekt und kopiert **EXE + DLLs nach `dist\`**
@@ -148,17 +187,17 @@ cmake --install build --prefix ./dist
 
 ## 🧠 Features
 
-* **🚀 CUDA Rendering (Capybara)** - schnelle Iterationen, Event-Timing via CUDA-Events (keine globale `cudaDeviceSynchronize()` im Hot-Path).
-* **🪶 Silk-Lite Motion Planner (Auto-Zoom)** - sanft, yaw-limitiert, Hysterese/Lock; **ForceAlwaysZoom=ON**.
-* **🛡️ Anti-Black-Guard** - Warm-up-Drift + Void-Bias: kein „Zoom ins Schwarze“.
-* **📈 Progressive Iterationen** - Zoom-abhängig; **standardmäßig aktiv**.
-* **🎨 GT-Palette + Smooth Coloring** - linearer Farbraum, `it - log2(log2(|z|))`; Stripes optional (off).
-* **🖼️ Echtzeit-OpenGL + CUDA-Interop** - PBO-Interop (`cudaGraphicsGLRegisterBuffer`).
-* **📊 Heatmap-Overlay (Eule)** - GPU-Shader; **Metrics-Kadenz** über `Settings::StatsCadence::heatmapEveryN` (Default **3**).
-* **🤖 AOP Policy (Dry-Run)** - **[REPL/POLICY]**-Zeilen mit Ziel-Tile/Score/NDC-Marker; **keine Steuerwirkung**.
-* **🌪️ Orbit/Perturb-Gate** - sichtbar **ON** (Ctrl+P Runtime-Toggle); Gategröße `Settings::Perturb::gatePixelSize`.
-* **🧰 HUD & ASCII-Debug (Warzenschwein)** - FPS/Zoom/Offset; Logs sind **ASCII-only**.
-* **🦔 Nacktmull-Perf-Kadenz** - `[PERF]`-Zeile pro Cadence, **stale-carry** von `e0/c0` + `hmAge`-Marker.
+* **🚀 CUDA Rendering (Capybara)** – schnelle Iterationen, Event-Timing via CUDA-Events (keine globale `cudaDeviceSynchronize()` im Hot-Path).
+* **🪶 Silk-Lite Motion Planner (Auto-Zoom)** – sanft, yaw-limitiert, Hysterese/Lock; **ForceAlwaysZoom=ON**.
+* **🛡️ Anti-Black-Guard** – Warm-up-Drift + Void-Bias: kein „Zoom ins Schwarze“.
+* **📈 Progressive Iterationen** – Zoom-abhängig; **standardmäßig aktiv**.
+* **🎨 GT-Palette + Smooth Coloring** – linearer Farbraum, `it - log2(log2(|z|))`; Stripes optional (off).
+* **🖼️ Echtzeit-OpenGL + CUDA-Interop** – PBO-Interop (`cudaGraphicsGLRegisterBuffer`).
+* **📊 Heatmap-Overlay (Eule)** – GPU-Shader; **Metrics-Kadenz** über `Settings::StatsCadence::heatmapEveryN` (Default **3**).
+* **🤖 AOP Policy (Dry-Run)** – **[REPL/POLICY]**-Zeilen mit Ziel-Tile/Score/NDC-Marker; **keine Steuerwirkung**.
+* **🌪️ Orbit/Perturb-Gate** – sichtbar **ON** (Ctrl+P Runtime-Toggle); Gategröße `Settings::Perturb::gatePixelSize`.
+* **🧰 HUD & ASCII-Debug (Warzenschwein)** – FPS/Zoom/Offset; Logs sind **ASCII-only**.
+* **🦔 Nacktmull-Perf-Kadenz** – `[PERF]`-Zeile pro Cadence, **stale-carry** von `e0/c0` + `hmAge`-Marker.
 
 ---
 
@@ -207,7 +246,7 @@ Settings::Luchs::enabled   = true; // Host/Device ASCII-Logs
   * CUDA Toolkit **v13.0+** (inkl. `nvcc`)  
   * Visual Studio 2022 (Windows) bzw. GCC 11+ (Linux)  
   * CMake ≥ 3.28, Ninja, vcpkg  
-  * Unter Linux zusätzlich: X-/OpenGL-Dev-Pakete (siehe Abschnitt „Linux (GCC + Ninja)”)  
+  * Unter Linux zusätzlich: X-/OpenGL-Dev-Pakete (siehe Abschnitt „Linux (GCC + Ninja)“)  
 * **Für das Ausführen (nur Windows, via `dist\`):** **nur NVIDIA-Treiber** (OpenGL 4.3 Core), die Runtime-DLLs liegen bei.
 
 > ⚠️ GPUs unter Compute Capability 8.0 (z. B. Kepler/Maxwell) werden **nicht** unterstützt.  
@@ -217,17 +256,17 @@ Settings::Luchs::enabled   = true; // Host/Device ASCII-Logs
 
 ## 📦 Abhängigkeiten (via vcpkg)
 
-* [GLFW](https://www.glfw.org/) - Fenster/Eingabe  
-* [GLEW](http://glew.sourceforge.net/) - OpenGL-Extensions (**dynamisch**, DLL im `dist\`)
+* [GLFW](https://www.glfw.org/) – Fenster/Eingabe  
+* [GLEW](http://glew.sourceforge.net/) – OpenGL-Extensions (**dynamisch**, DLL im `dist\`)
 
 ---
 
 ### ⌨️ Keyboard Controls
 
-* `P` - Auto-Zoom pausieren/fortsetzen  
-* `H` - Heatmap-Overlay an/aus  
-* `T` - HUD (Warzenschwein) an/aus  
-* `Ctrl+P` - **Perturb-Gate** toggeln (nur sichtbar in Logs/Overlays)
+* `P` – Auto-Zoom pausieren/fortsetzen  
+* `H` – Heatmap-Overlay an/aus  
+* `T` – HUD (Warzenschwein) an/aus  
+* `Ctrl+P` – **Perturb-Gate** toggeln (nur sichtbar in Logs/Overlays)
 
 ---
 
@@ -252,14 +291,14 @@ Header und Source bleiben **synchron**. Kein Drift, kein API-Bruch. Die Robbe wa
 
 ## ❓ Troubleshooting (Kurz)
 
-* **`nvcc` fehlt** -> **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen (`nvcc --version`)  
-* **GLEW-Mismatch** (z. B. `glew32d.lib`) -> **dynamisches GLEW** sicherstellen und Triplet/Cache prüfen  
-* **Schwarze Frames** bei extremem Pan/Zoom -> Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs  
-* **CUDA-Interop Stalls** -> PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences
+* **`nvcc` fehlt** → **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen (`nvcc --version`)  
+* **GLEW-Mismatch** (z. B. `glew32d.lib`) → **dynamisches GLEW** sicherstellen und Triplet/Cache prüfen  
+* **Schwarze Frames** bei extremem Pan/Zoom → Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs  
+* **CUDA-Interop Stalls** → PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences
 
 ---
 
-**OtterDream** - von der Raupe zum Fraktal-Schmetterling 🦋  
+**OtterDream** – von der Raupe zum Fraktal-Schmetterling 🦋  
 *Happy Zooming!*
 
 🐭 Maus sorgt für Fokus und ASCII-Sauberkeit.  
