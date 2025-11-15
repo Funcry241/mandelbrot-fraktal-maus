@@ -15,13 +15,13 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 ## 🧑‍🔬 Overview
 
-| Agent/Tool               | Zweck                           | Trigger                 | Aktionen                                                             |
-| ------------------------ | ------------------------------- | ----------------------- | -------------------------------------------------------------------- |
-| **GitHub Actions (CI)**  | Build-, Test-, Install-Check    | Push/PR auf `main`      | CMake Configure → Ninja Build → `cmake --install`                    |
-| **Dependabot**           | Abhängigkeits-Updates (vcpkg)   | Wöchentlich             | PRs für `vcpkg.json`, CI baut PR                                     |
-| **Waschbär-Watchdog**    | Hygiene & Auto-Fixes (lokal)    | On-Demand               | Räumt CMake-Caches, fixt typische GLEW/vcpkg-Fallen                  |
-| **Autogit (lokal)**      | Mini-CI für Commits/Push        | Nach erfolgreichem Build| `git add -A` → `git commit -m "<msg>"` → `git push` (https Fallback) |
-| **Rust Runner (lokal)**  | Komfort-Build mit Live-Progress | Manuell (CLI/PS)        | Farben/Spinner/%/ETA, Log-Tags `[PS]/[RUST]/[PROC]`, ETA aus Metrics |
+| Agent/Tool               | Zweck                                   | Trigger                  | Aktionen                                                                 |
+| ------------------------ | ---------------------------------------- | ------------------------ | ------------------------------------------------------------------------ |
+| **GitHub Actions (CI)**  | Build-, Test-, Install-Check            | Push/PR auf `main`       | CMake Configure → Ninja Build → `cmake --install`                        |
+| **Dependabot**           | Abhängigkeits-Updates (vcpkg)           | Wöchentlich              | PRs für `vcpkg.json`, CI baut PR                                         |
+| **Waschbär-Watchdog**    | Hygiene & Auto-Fixes (reserviert, lokal)| On-Demand (konzeptionell)| Reservierter Platz für zukünftige Helfer; aktuell kein separates Script  |
+| **Autogit (lokal)**      | Mini-CI für Commits/Push                | Nach erfolgreichem Build | `git add -A` → `git commit -m "<msg>"` → `git push` (https Fallback)     |
+| **Rust Runner (lokal)**  | Komfort-Build mit Live-Progress         | Manuell (CLI/PS)         | Farben/Spinner/%/ETA, Log-Tags `[PS]/[RUST]/[PROC]`, ETA aus Metrics     |
 
 > CI stellt sicher, dass **Debug-/Perf-Logging keine Seiteneffekte** erzeugt (keine erzwungenen Synchronisationen im Hot-Path).
 
@@ -31,6 +31,9 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 **Zweck:** Lokale Orchestrierung mit **Live-Progress** (Spinner, **%**, **ETA**, ASCII-Bar), farbigen Tags und stabilen Logs.  
 **Tags:** `[PS]` = Shell/Script, `[RUST]` = Runner selbst, `[PROC]` = Kindprozess (CMake/Ninja).
+
+**Hinweis:** Die Komfort-Builds über `build.ps1` starten intern immer den Rust Runner (`cargo run --release -p otter_proc ...`).  
+Ohne lokal installiertes Rust (`cargo`) funktionieren diese Pfade nicht; in diesem Fall bitte direkt den manuellen CMake-Build aus der README verwenden.
 
 **Signal-Parsers:**  
 - Prozent **`68%`** und Ratio **`[17/45]`** (CMake/Ninja/MSBuild-ähnlich).  
@@ -53,14 +56,15 @@ Diese Datei beschreibt die automatisierten Prozesse, lokalen Helfer und Regeln r
 
 ## 🧰 Tools & Versionen
 
-| Tool          | Mindestversion | Hinweise                                                      |
-| ------------- | -------------- | ------------------------------------------------------------- |
+| Tool          | Mindestversion | Hinweise                                                       |
+| ------------- | -------------- | -------------------------------------------------------------- |
 | CUDA Toolkit  | **13.0+**      | `nvcc` v13 lokal erforderlich (Build); Treiber reicht zum Run |
-| OpenGL        | 4.3+           | Core Profile                                                  |
-| Visual Studio | 2022           | C++ + CUDA (Windows)                                          |
-| CMake         | ≥3.28          | Presets & `--install`                                         |
-| Ninja         | 1.10+          | Schneller Parallel-Build                                      |
-| vcpkg         | aktuell        | Drittanbieter-Libs                                            |
+| OpenGL        | 4.3+           | Core Profile                                                   |
+| Visual Studio | 2022           | C++ + CUDA (Windows)                                           |
+| CMake         | ≥3.28          | Presets & `--install`                                          |
+| Ninja         | 1.10+          | Schneller Parallel-Build                                       |
+| vcpkg         | aktuell        | Drittanbieter-Libs                                             |
+| Rust / cargo  | stable 1.7x+   | Erforderlich für `build.ps1` / Rust Runner (Komfort-Builds)   |
 
 ### ⚠️ CUDA erforderlich
 

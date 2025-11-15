@@ -32,7 +32,7 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom - *
 
 - Aktueller **NVIDIA-Grafiktreiber** installiert.
 - GPU unterstützt **OpenGL 4.3 Core** (RTX/GTX der letzten Generationen).
-- Im Repo existiert ein `dist\`-Ordner mit `mandelbrot_otterdream.exe`.
+- Im Repo bzw. im entpackten Release existiert ein `dist\`-Ordner mit `mandelbrot_otterdream.exe`.
 
 **Bauen (Windows oder Linux):**
 
@@ -41,6 +41,7 @@ Seit **Alpha 81**: CI-validiert, deterministisch, sanfter **Silk-Lite**-Zoom - *
 - **CMake ≥ 3.28**, **Ninja**, **vcpkg** sind installiert bzw. lokal im Repo vorhanden.
 - Unter **Windows**: Visual Studio 2022 mit „Desktop development with C++“.
 - Unter **Linux**: GCC 11+, X-/OpenGL-Dev-Pakete (siehe Abschnitt „Linux (GCC + Ninja)“).
+- **Für Komfort-Builds mit `build.ps1` zusätzlich:** Rust (stable) inkl. `cargo` (für den Rust-Runner `otter_proc`).
 
 Wenn diese Häkchen gesetzt sind, kann ein Bär OtterDream mit den untenstehenden Befehlen kompilieren und starten.
 
@@ -50,12 +51,13 @@ Wenn diese Häkchen gesetzt sind, kann ein Bär OtterDream mit den untenstehende
 
 **Wenn du nur schnell schauen willst, nimm einfach `dist\mandelbrot_otterdream.exe` und starte sie – du musst nichts bauen.**
 
+Du bekommst diesen `dist\`-Ordner entweder aus einem **fertigen Release-Dist-Paket** (für besonders bequeme Bären) oder indem du das Projekt einmal baust (siehe unten).
+
 Wenn du das Projekt **nur ausprobieren** möchtest, brauchst du **nichts zu installieren**.  
-Im Repository/Arbeitsverzeichnis liegt ein **`dist\`**-Ordner mit einer **portablen Windows-Build**:
+Nach einem erfolgreichen Build (oder wenn du ein Release-Dist entpackt hast) liegt im Arbeitsverzeichnis ein **`dist\`**-Ordner mit einer **portablen Windows-Build**:
 
 ```
-dist\
-  mandelbrot_otterdream.exe   ← doppelklicken & starten
+dist  mandelbrot_otterdream.exe   ← doppelklicken & starten
   glew32.dll                  ← bereits mitgeliefert
   glfw3.dll                   ← bereits mitgeliefert
   cudart64_130.dll            ← falls erforderlich, bereits mitgeliefert
@@ -64,7 +66,7 @@ dist\
 **Voraussetzung zum Ausführen:** Ein aktueller **NVIDIA-Grafiktreiber** und OpenGL 4.3.  
 **Nicht nötig zum Ausführen:** Visual Studio, vcpkg oder das CUDA Toolkit (Runtime-DLLs liegen bei).
 
-> Falls `dist\mandelbrot_otterdream.exe` fehlt: einmal bauen (siehe „⚡ Windows-Schnellstart“ oder „Automatischer Build“) – der Build füllt `dist\` automatisch.
+> Falls `dist\mandelbrot_otterdream.exe` fehlt oder `dist\` leer ist: einmal bauen (siehe „⚡ Windows-Schnellstart“ oder „Automatischer Build“) – der Build füllt `dist\` automatisch.
 
 ---
 
@@ -93,7 +95,8 @@ Wenn einer der Befehle scheitert (z. B. `build.ps1`), bitte die ausführlichen A
 - Visual Studio 2022 mit „Desktop development with C++“  
 - **CUDA Toolkit 13.0+** (inkl. `nvcc`; prüfen mit `nvcc --version`)  
 - PowerShell 5.1 (Standard bei Windows 10/11)  
-- Aktueller NVIDIA-Grafiktreiber (für CUDA/OpenGL)
+- Aktueller NVIDIA-Grafiktreiber (für CUDA/OpenGL)  
+- **Rust (stable) inkl. `cargo`** (für den Rust-Runner `otter_proc`, den `build.ps1` startet)
 
 Der einfachste Weg, den Build zu starten, ist das **PowerShell-Skript** `build.ps1`.  
 Es orchestriert alles: vcpkg-Abhängigkeiten, CMake-Konfiguration/Build, und das **Befüllen von `dist\`** (EXE + benötigte DLLs).
@@ -112,7 +115,8 @@ powershell -ExecutionPolicy Bypass -File .uild.ps1 -Configuration Release
 - Baut das Projekt und kopiert **EXE + DLLs nach `dist\`**
 - Zeigt Live-Progress (Spinner, %, ETA) über den **Rust-Runner**
 
-> Du brauchst lediglich PowerShell 5.1, Visual Studio 2022 Build-Tools und das **CUDA Toolkit 13** (nur zum **Bauen**; zum **Ausführen** nicht nötig).
+> Du brauchst für diesen Komfort-Pfad PowerShell 5.1, Visual Studio 2022 Build-Tools, das **CUDA Toolkit 13** **und** eine Rust-Installation mit `cargo`.  
+> Wenn du **kein Rust installieren** möchtest, kannst du jederzeit den Abschnitt „Manueller Build (CMake)“ nutzen und alle Schritte direkt über CMake/Ninja ausführen.
 
 ---
 
@@ -155,7 +159,7 @@ cmake --install build --prefix .\dist
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ninja-build git cmake     xorg-dev libxinerama-dev libxcursor-dev libxi-dev libxmu-dev     mesa-common-dev libgl1-mesa-dev pkg-config
+sudo apt-get install -y ninja-build git cmake   xorg-dev libxinerama-dev libxcursor-dev libxi-dev libxmu-dev   mesa-common-dev libgl1-mesa-dev pkg-config
 ```
 
 **2) NVIDIA-Treiber + CUDA Toolkit 13.0 installieren**
@@ -247,6 +251,7 @@ Settings::Luchs::enabled   = true; // Host/Device ASCII-Logs
   * Visual Studio 2022 (Windows) bzw. GCC 11+ (Linux)  
   * CMake ≥ 3.28, Ninja, vcpkg  
   * Unter Linux zusätzlich: X-/OpenGL-Dev-Pakete (siehe Abschnitt „Linux (GCC + Ninja)“)  
+  * Für Komfort-Builds über `build.ps1`: Rust (stable) inkl. `cargo` (Rust-Runner)
 * **Für das Ausführen (nur Windows, via `dist\`):** **nur NVIDIA-Treiber** (OpenGL 4.3 Core), die Runtime-DLLs liegen bei.
 
 > ⚠️ GPUs unter Compute Capability 8.0 (z. B. Kepler/Maxwell) werden **nicht** unterstützt.  
@@ -286,17 +291,6 @@ Header und Source bleiben **synchron**. Kein Drift, kein API-Bruch. Die Robbe wa
 **Checks:** CUDA-Kompilierung, Presets konsistent, deterministische Artefakte.
 
 **Dependabot**: PRs für `vcpkg.json` (wöchentlich), CI baut/verifiziert.
-
----
-
-## ❓ Troubleshooting (Kurz)
-
-* **`nvcc` fehlt** → **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen (`nvcc --version`)  
-* **GLEW-Mismatch** (z. B. `glew32d.lib`) → **dynamisches GLEW** sicherstellen und Triplet/Cache prüfen  
-* **Schwarze Frames** bei extremem Pan/Zoom → Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs  
-* **CUDA-Interop Stalls** → PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences  
-
-> **Wenn der Build trotz erfüllter Checkliste nicht klappt: Das ist kein persönliches Versagen. CUDA-Toolchains sind zickig – atme kurz durch, lies die Fehlermeldung in Ruhe und hake sie Schritt für Schritt mit der README ab (oder häng ein Issue mit Log an).**
 
 ---
 
