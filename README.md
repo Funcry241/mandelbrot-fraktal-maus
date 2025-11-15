@@ -294,7 +294,9 @@ Header und Source bleiben **synchron**. Kein Drift, kein API-Bruch. Die Robbe wa
 * **`nvcc` fehlt** → **CUDA 13** installieren, PATH/INCLUDE/LIB prüfen (`nvcc --version`)  
 * **GLEW-Mismatch** (z. B. `glew32d.lib`) → **dynamisches GLEW** sicherstellen und Triplet/Cache prüfen  
 * **Schwarze Frames** bei extremem Pan/Zoom → Silk-Lite/Anti-Black-Guard aktiv lassen; Messläufe ohne Debug-Logs  
-* **CUDA-Interop Stalls** → PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences
+* **CUDA-Interop Stalls** → PBO-Ring (≥3), `WriteDiscard`, persistentes Mapping, Fences  
+
+> **Wenn der Build trotz erfüllter Checkliste nicht klappt: Das ist kein persönliches Versagen. CUDA-Toolchains sind zickig – atme kurz durch, lies die Fehlermeldung in Ruhe und hake sie Schritt für Schritt mit der README ab (oder häng ein Issue mit Log an).**
 
 ---
 
