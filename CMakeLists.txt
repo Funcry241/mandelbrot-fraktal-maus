@@ -5,6 +5,10 @@
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(mandelbrot_otterdream LANGUAGES CXX CUDA)
 
+if(MSVC)
+  enable_language(ASM_MASM)
+endif()
+
 if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW)
 endif()
@@ -147,6 +151,12 @@ add_executable(mandelbrot_otterdream
   src/ai/feature_packer.cpp
   src/ai/otter_bandit.cpp
 )
+
+if(MSVC)
+  target_sources(mandelbrot_otterdream PRIVATE
+    src/asm/mandelbrot_iter.asm
+  )
+endif()
 
 if(MSVC)
   set_property(TARGET mandelbrot_otterdream PROPERTY
