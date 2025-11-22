@@ -55,6 +55,12 @@ namespace {
     constexpr float AXO_ZOOM_BOOST_PCT = 0.15f;  // β: +15% dt at E=1
     static   bool   g_forceMetricsNext  = false; // eager metrics trigger
 
+    // ASM-HUD Perf-Gate: wenn Mandelbrot-Kernel zu langsam, ASM-Grid nur jede
+    // 2–3 Frames neu berechnen, dazwischen Grid weiterverwenden.
+    constexpr double ASM_HUD_SLOW_THRESH_MS = 80.0; // ab hier "langsam"
+    constexpr int    ASM_HUD_SKIP_MAX       = 2;    // max. 2 Frames in Folge nur reuse
+    static   int     g_asmHudSkipCount      = 0;    // aktueller Skip-Zähler
+
     static double g_mandMs = 0.0;
     static double g_entMs  = 0.0;
     static double g_conMs  = 0.0;
@@ -473,24 +479,54 @@ void execute(RendererState& state) {
         const int tilesY = (g_ctx.height + tilePx - 1) / tilePx;
 
         if (tilesX > 0 && tilesY > 0 && state.maxIterations > 0) {
-            state.asmHudTilesX = tilesX;
-            state.asmHudTilesY = tilesY;
-            state.asmHudGrid = asm_hud_probe::buildHudProbeGrid(
-                state,
-                g_ctx,
-                tilesX,
-                tilesY,
-                state.maxIterations
-            );
+            bool recompute = true;
+
+            // Perf-Gate: wenn der Mandelbrot-Kernel "langsam" ist und bereits ein
+            // gültiges Grid vorliegt, ASM-HUD-Grid nur jede 2–3 Frames neu berechnen.
+            if constexpr (Settings::performanceLogging) {
+                const bool slowNow  = (g_mandMs > ASM_HUD_SLOW_THRESH_MS);
+                const bool haveGrid = !state.asmHudGrid.empty();
+
+                if (slowNow && haveGrid) {
+                    if (g_asmHudSkipCount < ASM_HUD_SKIP_MAX) {
+                        ++g_asmHudSkipCount;
+                        recompute = false;
+                        if constexpr (Settings::debugLogging) {
+                            LUCHS_LOG_HOST("[ASM][HUD] skip recompute frame=%d mand=%.2fms skipCount=%d",
+                                           g_frame, g_mandMs, g_asmHudSkipCount);
+                        }
+                    } else {
+                        // Nach ASM_HUD_SKIP_MAX Skips wieder neu berechnen
+                        g_asmHudSkipCount = 0;
+                    }
+                } else {
+                    // Kein Slow-Frame oder kein gültiges Grid → normal rechnen.
+                    g_asmHudSkipCount = 0;
+                }
+            }
+
+            if (recompute) {
+                state.asmHudTilesX = tilesX;
+                state.asmHudTilesY = tilesY;
+                state.asmHudGrid = asm_hud_probe::buildHudProbeGrid(
+                    state,
+                    g_ctx,
+                    tilesX,
+                    tilesY,
+                    state.maxIterations
+                );
+            }
         } else {
             state.asmHudTilesX = 0;
             state.asmHudTilesY = 0;
             state.asmHudGrid.clear();
+            g_asmHudSkipCount = 0;
         }
     } else {
         state.asmHudTilesX = 0;
         state.asmHudTilesY = 0;
         state.asmHudGrid.clear();
+        g_asmHudSkipCount = 0;
     }
 
     // ---- Replikatoren: Policy nach Metrics ----
