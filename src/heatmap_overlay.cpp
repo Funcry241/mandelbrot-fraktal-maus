@@ -335,7 +335,7 @@ void drawOverlay(const std::vector<float>& entropy,
         };
         const float panelAlpha = std::min(1.0f, kPANEL_ALPHA * 0.86f);
         const float radiusPx   = kUI_RADIUS * (0.85f * sPanelScale);
-        const float borderPx   = kUI_BORDER * (0.05f * sPanelScale); // dünnerer Rahmen
+        const float borderPx   = kUI_BORDER * (0.01f * sPanelScale); // dünnerer Rahmen
 
         glUseProgram(sPanelProg);
         if(uViewportPx>=0) glUniform2f(uViewportPx,(float)width,(float)height);
