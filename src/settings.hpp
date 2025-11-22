@@ -167,6 +167,14 @@ namespace Kolibri {
     inline constexpr int  desiredTilePx      = 28;
 }
 
+// ============================== ASM HUD / Grid ===============================
+// Eigenes ASM-Grid (Mini-Fraktalpanel), entkoppelt vom Kolibri-Heatmap-Raster.
+namespace AsmHud {
+    // Ziel-Tilegröße in Pixeln für das ASM-Mini-Panel.
+    // Range: 4 .. 32 | Default: 8 | ↑ gröber, ↓ feiner & CPU-lastiger
+    inline constexpr int desiredTilePx = 8;
+}
+
 // ============================== Stats Cadence ================================
 // Heatmap-Berechnung nur alle N Frames (Dazwischen Reuse).
 namespace StatsCadence {
@@ -259,6 +267,7 @@ static_assert(pboRingSize > 0, "pboRingSize must be > 0");
 static_assert(MIN_TILE_SIZE <= BASE_TILE_SIZE && BASE_TILE_SIZE <= MAX_TILE_SIZE,
               "MIN_TILE_SIZE <= BASE_TILE_SIZE <= MAX_TILE_SIZE required");
 static_assert(Kolibri::desiredTilePx > 0, "desiredTilePx must be > 0");
+static_assert(AsmHud::desiredTilePx > 0, "AsmHud::desiredTilePx must be > 0");
 static_assert(StatsCadence::heatmapEveryN >= 1, "StatsCadence::heatmapEveryN must be >= 1");
 static_assert(MANDEL_BLOCK_X > 0 && MANDEL_BLOCK_Y > 0, "MANDEL_BLOCK dims must be > 0");
 static_assert((MANDEL_BLOCK_X % 32) == 0, "MANDEL_BLOCK_X must be a multiple of 32");

@@ -379,7 +379,9 @@ namespace {
         }
 
         // ASM Mini-Fraktal-Panel (rechts unten, eigenes ASM-Grid)
-        AsmHudPanel::draw(state, fctx.width, fctx.height);
+        if constexpr (Settings::asmHudOverlayEnabled) {
+            AsmHudPanel::draw(state, fctx.width, fctx.height);
+        }
 
         // ✨ Axolotel: additive Glow-Pulse (liegt über Panel & Heatmap)
         AxolotelHUD::draw(fctx.width, fctx.height, glfwGetTime());
@@ -464,9 +466,9 @@ void execute(RendererState& state) {
     // ---- Analysis-Metrics (Cadence-Guard) ----
     ensureAnalysisMetrics(g_ctx, state);
 
-    // ---- ASM HUD probe grid (same grid-res as heatmap metrics) -------------
-    {
-        const int tilePx = std::max(1, (g_ctx.statsTileSize > 0 ? g_ctx.statsTileSize : g_ctx.tileSize));
+    // ---- ASM HUD probe grid (eigenes ASM-Raster, entkoppelt von statsPx) ---
+    if constexpr (Settings::asmHudOverlayEnabled) {
+        const int tilePx = std::max(1, Settings::AsmHud::desiredTilePx);
         const int tilesX = (g_ctx.width  + tilePx - 1) / tilePx;
         const int tilesY = (g_ctx.height + tilePx - 1) / tilePx;
 
@@ -485,6 +487,10 @@ void execute(RendererState& state) {
             state.asmHudTilesY = 0;
             state.asmHudGrid.clear();
         }
+    } else {
+        state.asmHudTilesX = 0;
+        state.asmHudTilesY = 0;
+        state.asmHudGrid.clear();
     }
 
     // ---- Replikatoren: Policy nach Metrics ----
