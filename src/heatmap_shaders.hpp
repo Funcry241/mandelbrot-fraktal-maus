@@ -31,7 +31,7 @@ void main(){
   float d = sdRoundRect(vPx - c, b, uRadiusPx);
   float aa   = fwidth(d);
   float body = 1.0 - smoothstep(0.0, aa, max(d, 0.0));
-  float inner = smoothstep(-uBorderPx*0.5, 0.0, d);
+  float inner = smoothstep(-uBorderPx*0.1, 0.0, d);
   vec3 borderCol = vec3(1.0, 0.82, 0.32);
   vec3 col = mix(vColor, borderCol, 0.04 * inner);
   FragColor = vec4(col, uAlpha * body);
