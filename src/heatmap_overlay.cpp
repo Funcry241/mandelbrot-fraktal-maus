@@ -302,7 +302,7 @@ void drawOverlay(const std::vector<float>& entropy,
     const float aspect  = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
     const int   contentWPx = std::max(1, (int)std::round(contentHPx*aspect));
     const float sPanelScale = std::clamp(std::min(contentWPx,contentHPx)/160.0f, 0.60f, 1.0f);
-    const int padPx = snapToPixel(kUI_PADDING * 0.75f);
+    const int padPx = snapToPixel(kUI_PADDING * 0.40f);
     const int panelW = contentWPx + padPx*2, panelH = contentHPx + padPx*2;
     const int panelX1 = width  - snapToPixel(kUI_MARGIN);
     const int panelX0 = panelX1 - panelW;
