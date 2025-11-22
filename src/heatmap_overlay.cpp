@@ -303,7 +303,7 @@ void drawOverlay(const std::vector<float>& entropy,
     glPixelStorei(GL_UNPACK_ALIGNMENT, prevUnpack);
 
     // Layout
-    constexpr int contentHPx = 120;
+    constexpr int contentHPx = 140;
     const float aspect  = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
     const int   contentWPx = std::max(1, (int)std::round(contentHPx*aspect));
     const float sPanelScale = std::clamp(std::min(contentWPx,contentHPx)/160.0f, 0.60f, 1.0f);
