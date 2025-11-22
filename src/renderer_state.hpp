@@ -53,6 +53,11 @@ struct RendererState {
     bool                h_entropyPinned  = false; // legacy/no-op
     bool                h_contrastPinned = false; // legacy/no-op
 
+    // 🔬 ASM HUD mini-grid (tilesX×tilesY iterations via mandelbrotIter_asm)
+    std::vector<float>  asmHudGrid;
+    int                 asmHudTilesX = 0;
+    int                 asmHudTilesY = 0;
+
     // 🔗 GPU-Puffer (RAII)
     Hermelin::CudaDeviceBuffer d_iterations; // uint16_t[width*height]
     Hermelin::CudaDeviceBuffer d_entropy;    // float[numTiles]   (legacy/overlay)

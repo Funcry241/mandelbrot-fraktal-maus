@@ -1,15 +1,15 @@
 ///// Otter: Nacktmull — frame pipeline with Axolotel Coupler; draw-lag-1; pan works during Pause (zoom frozen).
 ///// Schneefuchs: ASCII logs; pch first; deterministic diffs; [REPL/*] centralized logging.
-///// Maus: Compute → Metrics → Overlays → Axolotel → Zoom; if Pause: interest cleared, zoom restored to pre-call.
+///// Maus: Compute → Metrics → Overlays → ASM HUD → Axolotel → Zoom; if Pause: interest cleared, zoom restored to pre-call.
 ///// Datei: src/frame_pipeline.cpp
 
 #include "pch.hpp"
 #include <GLFW/glfw3.h>       // glfwGetTime()
 #include <chrono>
 #include <algorithm>
-#include <cstdio>     // snprintf for dynamic ring logging
-#include <cmath>      // sqrt
-#include <cuda_runtime.h>  // CUDA event timing
+#include <cstdio>             // snprintf for dynamic ring logging
+#include <cmath>              // sqrt
+#include <cuda_runtime.h>     // CUDA event timing
 
 #include "capybara_mapping.cuh" // computeTileSizeFromZoom(...)
 #include "renderer_resources.hpp"
@@ -25,9 +25,11 @@
 #include "zoom_logic.hpp"
 #include "common.hpp"
 #include "fps_meter.hpp"
-#include "axolotel_hud.hpp" // ✨ Axolotel WOW-HUD (additive, on key-pulse)
-#include "dachs_hud.hpp"    // Dachs-HUD help state/text"
-#include "renderer_state.hpp" // <-- benötigt: vollständige Definition von RendererState
+#include "axolotel_hud.hpp"    // ✨ Axolotel WOW-HUD (additive, on key-pulse)
+#include "dachs_hud.hpp"       // Dachs-HUD help state/text"
+#include "renderer_state.hpp"  // <-- benötigt: vollständige Definition von RendererState
+#include "asm/asm_hud_probe.hpp"   // ASM mini-grid for HUD panel (independent of CUDA main render)
+#include "asm/asm_hud_panel.hpp"   // ASM mini-panel draw (GL only, uses RendererState::asmHudGrid)
 
 // --- Replikatoren ---------------------------
 #include "ai/aop_controller.hpp"  // [REPL/POLICY]
@@ -152,7 +154,7 @@ namespace {
             for (int x = 0; x < tx; ++x) {
                 const size_t i = static_cast<size_t>(y) * tx + x;
                 const float fx = (tx > 1) ? (float)x / (float)(tx - 1) : 0.0f;
-                const float fy = (ty > 1) ? (float)y / (float)(ty - 1) : 0.0f;
+                const float fy = (ty > 1) ? (float)y / (float)(tx - 1) : 0.0f;
                 const float r  = std::min(1.0f, std::sqrt(fx*fx + fy*fy));
                 state.h_entropy[i]  = 0.15f + 0.8f * r;
 
@@ -303,7 +305,10 @@ namespace {
             OpenGLUtils::updateTextureFromPBO(state.currentPBO().id(),
                                               state.currentUploadTex().id(),
                                               fctx.width, fctx.height);
-            if (state.pboFence[state.pboIndex]) { glDeleteSync(state.pboFence[state.pboIndex]); state.pboFence[state.pboIndex]=0; }
+            if (state.pboFence[state.pboIndex]) {
+                glDeleteSync(state.pboFence[state.pboIndex]);
+                state.pboFence[state.pboIndex] = 0;
+            }
             state.pboFence[state.pboIndex] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
             if constexpr (Settings::debugLogging) {
                 LUCHS_LOG_HOST("[ZK][UP] fence set pbo=%u ring=%d", state.currentPBO().id(), state.pboIndex);
@@ -373,7 +378,10 @@ namespace {
             WarzenschweinOverlay::drawOverlay(fctx.zoom);
         }
 
-        // ✨ Axolotel: additive Glow-Pulse
+        // ASM Mini-Fraktal-Panel (rechts unten, eigenes ASM-Grid)
+        AsmHudPanel::draw(state, fctx.width, fctx.height);
+
+        // ✨ Axolotel: additive Glow-Pulse (liegt über Panel & Heatmap)
         AxolotelHUD::draw(fctx.width, fctx.height, glfwGetTime());
 
         const auto tOv1 = Clock::now();
@@ -456,6 +464,29 @@ void execute(RendererState& state) {
     // ---- Analysis-Metrics (Cadence-Guard) ----
     ensureAnalysisMetrics(g_ctx, state);
 
+    // ---- ASM HUD probe grid (same grid-res as heatmap metrics) -------------
+    {
+        const int tilePx = std::max(1, (g_ctx.statsTileSize > 0 ? g_ctx.statsTileSize : g_ctx.tileSize));
+        const int tilesX = (g_ctx.width  + tilePx - 1) / tilePx;
+        const int tilesY = (g_ctx.height + tilePx - 1) / tilePx;
+
+        if (tilesX > 0 && tilesY > 0 && state.maxIterations > 0) {
+            state.asmHudTilesX = tilesX;
+            state.asmHudTilesY = tilesY;
+            state.asmHudGrid = asm_hud_probe::buildHudProbeGrid(
+                state,
+                g_ctx,
+                tilesX,
+                tilesY,
+                state.maxIterations
+            );
+        } else {
+            state.asmHudTilesX = 0;
+            state.asmHudTilesY = 0;
+            state.asmHudGrid.clear();
+        }
+    }
+
     // ---- Replikatoren: Policy nach Metrics ----
     if constexpr (Settings::Ai::enabled && Settings::Ai::aopEnabled) {
         auto d = Repl::Policy::evaluate_tile_policy(g_ctx, state);
@@ -509,7 +540,7 @@ void execute(RendererState& state) {
         );
     }
 
-    // ---- Overlays (nutzen die vorliegenden Metrics) ----
+    // ---- Overlays (nutzen die vorliegenden Metrics + ASM-Grid) ----
     drawOverlays(state, g_ctx);
 
     // ---- Axolotel Coupler -> Zoom (ein Pfad: dt-Scaling) -------------------
