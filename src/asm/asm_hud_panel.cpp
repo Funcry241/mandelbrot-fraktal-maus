@@ -15,8 +15,8 @@
 namespace
 {
     // Panel-Layout (als Bruchteil des Viewports)
-    constexpr float PANEL_WIDTH_FRACTION  = 0.30f;
-    constexpr float PANEL_HEIGHT_FRACTION = 0.30f;
+    constexpr float PANEL_WIDTH_FRACTION  = 0.20f;
+    constexpr float PANEL_HEIGHT_FRACTION = 0.20f;
     constexpr float PANEL_MARGIN_PX       = 16.0f;
 
     // GL-Handles
