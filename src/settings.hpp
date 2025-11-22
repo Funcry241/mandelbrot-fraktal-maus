@@ -111,6 +111,10 @@ namespace Settings {
     // Range: {false,true} | Default: true
     inline constexpr bool  warzenschweinOverlayEnabled = true;
 
+    // ASM-Mini-Fraktalpanel (HUD-Probe unten rechts).
+    // Range: {false,true} | Default: true | ↑ zusätzlicher Kontext, ↓ minimale ASM-CPU-Last
+    inline constexpr bool  asmHudOverlayEnabled        = true;
+
     // Textgröße (NDC-Skalierung).
     // Range: 0.0015 .. 0.004 | Default: 0.0025
     inline constexpr float hudPixelSize                = 0.0025f;
