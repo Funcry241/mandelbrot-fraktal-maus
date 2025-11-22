@@ -18,6 +18,11 @@
 // --- lokale UI-Helfer (fallback, ohne externe Pfau-Abhängigkeit) ------------
 namespace {
     // konservative Defaults für Layout (Panel, Abstände, Radius)
+    // Hinweis: Die wahrgenommene Rahmenbreite besteht aus zwei Komponenten:
+    //   1) dunkler Rand = Abstand zwischen Panelrand und Heatmap-Inhalt (padPx unten),
+    //   2) goldene Outline = kUI_BORDER im Panel-FS-Shader.
+    // Für einen sichtbar dünneren Rahmen zuerst kUI_PADDING bzw. den padPx-Faktor
+    // im Layout-Block weiter unten anpassen; kUI_BORDER regelt nur die feine Outline.
     constexpr float kUI_PADDING  = 12.0f;
     constexpr float kUI_MARGIN   = 12.0f;
     constexpr float kUI_RADIUS   = 8.0f;
@@ -302,6 +307,9 @@ void drawOverlay(const std::vector<float>& entropy,
     const float aspect  = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
     const int   contentWPx = std::max(1, (int)std::round(contentHPx*aspect));
     const float sPanelScale = std::clamp(std::min(contentWPx,contentHPx)/160.0f, 0.60f, 1.0f);
+    // Hinweis: padPx steuert den dunklen Abstand zwischen Panelrand und Heatmap-Inhalt.
+    // Dünner sichtbarer Rahmen = kleineren Faktor wählen (z.B. 0.30f–0.50f).
+    // Die goldene Kante oben drauf kommt aus kUI_BORDER / Panel-FS-Shader.
     const int padPx = snapToPixel(kUI_PADDING * 0.40f);
     const int panelW = contentWPx + padPx*2, panelH = contentHPx + padPx*2;
     const int panelX1 = width  - snapToPixel(kUI_MARGIN);
@@ -335,7 +343,7 @@ void drawOverlay(const std::vector<float>& entropy,
         };
         const float panelAlpha = std::min(1.0f, kPANEL_ALPHA * 0.86f);
         const float radiusPx   = kUI_RADIUS * (0.85f * sPanelScale);
-        const float borderPx   = kUI_BORDER * (0.15f * sPanelScale); // dünnerer Rahmen
+        const float borderPx   = kUI_BORDER * (0.15f * sPanelScale); // dünnerer Rahmen (goldene Outline im Shader)
 
         glUseProgram(sPanelProg);
         if(uViewportPx>=0) glUniform2f(uViewportPx,(float)width,(float)height);
