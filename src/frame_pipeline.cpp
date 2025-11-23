@@ -160,7 +160,7 @@ namespace {
             for (int x = 0; x < tx; ++x) {
                 const size_t i = static_cast<size_t>(y) * tx + x;
                 const float fx = (tx > 1) ? (float)x / (float)(tx - 1) : 0.0f;
-                const float fy = (ty > 1) ? (float)y / (float)(tx - 1) : 0.0f;
+                const float fy = (ty > 1) ? (float)y / (float)(ty - 1) : 0.0f;
                 const float r  = std::min(1.0f, std::sqrt(fx*fx + fy*fy));
                 state.h_entropy[i]  = 0.15f + 0.8f * r;
 

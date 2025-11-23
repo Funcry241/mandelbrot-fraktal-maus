@@ -19,6 +19,13 @@
   #define CAPY_D  inline
 #endif
 
+// Default log stride for CAPY debugging (can be overridden via build flags).
+// CAPY_LOG_RATE = 1  -> prüfen jeden GID
+// CAPY_LOG_RATE = N  -> nur 1 von N GIDs wird geloggt (via capy_should_log).
+#ifndef CAPY_LOG_RATE
+#define CAPY_LOG_RATE 256u
+#endif
+
 // Small wrapper to get FMA on host/device uniformly.
 CAPY_HD double capy_fma(double a, double b, double c) noexcept {
 #if defined(__CUDA_ARCH__)
@@ -120,7 +127,7 @@ CAPY_D void capy_log_map_init_if(uint32_t gid, int px, int py,
                                  double2 cD, const CapyHiLo2& cHL,
                                  int earlyIters)
 {
-#if defined(CAPY_DEBUG_LOGGING) && defined(LUCHS_LOG_DEVICE) && defined(capy_should_log) && defined(CAPY_LOG_RATE)
+#if defined(CAPY_DEBUG_LOGGING) && defined(LUCHS_LOG_DEVICE)
     if (!capy_should_log(gid, (uint32_t)CAPY_LOG_RATE)) return;
     char msg[256];
     // Eine deterministische, einzeilige ASCII-Zeile (keine Farben, keine UTF-8)
