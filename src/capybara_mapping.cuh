@@ -123,30 +123,81 @@ CAPY_HD void capy_map_pixel(double cx, double cy,
 // Benötigt CAPY_DEBUG_LOGGING, LUCHS_LOG_DEVICE(msg) und capy_should_log(...).
 // -----------------------------------------------------------------------------
 #if defined(__CUDA_ARCH__)
+
+// kleine Hilfsfunktionen für ASCII-Append (nur für Device-Logs genutzt)
+CAPY_D int capy_append_str(char* dst, int pos, int maxLen, const char* s) {
+    if (pos >= maxLen) return pos;
+    const int limit = maxLen - 1; // 1 Platz für '\0' reservieren
+    while (*s && pos < limit) {
+        dst[pos++] = *s++;
+    }
+    return pos;
+}
+
+CAPY_D int capy_append_int(char* dst, int pos, int maxLen, long long v) {
+    if (pos >= maxLen) return pos;
+    const int limit = maxLen - 1;
+
+    if (v == 0) {
+        if (pos < limit) dst[pos++] = '0';
+        return pos;
+    }
+    if (v < 0) {
+        if (pos < limit) dst[pos++] = '-';
+        v = -v;
+    }
+
+    char tmp[32];
+    int tpos = 0;
+    while (v > 0 && tpos < (int)sizeof(tmp)) {
+        int digit = (int)(v % 10);
+        tmp[tpos++] = (char)('0' + digit);
+        v /= 10;
+    }
+    while (tpos > 0 && pos < limit) {
+        dst[pos++] = tmp[--tpos];
+    }
+    return pos;
+}
+
 CAPY_D void capy_log_map_init_if(uint32_t gid, int px, int py,
                                  double2 cD, const CapyHiLo2& cHL,
                                  int earlyIters)
 {
 #if defined(CAPY_DEBUG_LOGGING) && defined(LUCHS_LOG_DEVICE)
+    // Falls extern kein capy_should_log bereitgestellt ist, wäre das ein Build-Thema.
     if (!capy_should_log(gid, (uint32_t)CAPY_LOG_RATE)) return;
-    char msg[256];
-    // Eine deterministische, einzeilige ASCII-Zeile (keine Farben, keine UTF-8)
-    // CAPY map gid=123 px=10 py=20 cD=(1.23e-12,4.56e-12) cHL.hi=(...) lo=(...) early=64
-    snprintf(msg, sizeof(msg),
-             "CAPY map gid=%u px=%d py=%d cD=(%.17e,%.17e) cHL.hi=(%.17e,%.17e) lo=(%.17e,%.17e) early=%d",
-             gid, px, py,
-             cD.x, cD.y,
-             cHL.x.hi, cHL.y.hi,
-             cHL.x.lo, cHL.y.lo,
-             earlyIters);
+
+    char msg[192];
+    int pos = 0;
+
+    pos = capy_append_str(msg, pos, (int)sizeof(msg), "CAPY map gid=");
+    pos = capy_append_int(msg, pos, (int)sizeof(msg), (long long)gid);
+    pos = capy_append_str(msg, pos, (int)sizeof(msg), " px=");
+    pos = capy_append_int(msg, pos, (int)sizeof(msg), (long long)px);
+    pos = capy_append_str(msg, pos, (int)sizeof(msg), " py=");
+    pos = capy_append_int(msg, pos, (int)sizeof(msg), (long long)py);
+    pos = capy_append_str(msg, pos, (int)sizeof(msg), " early=");
+    pos = capy_append_int(msg, pos, (int)sizeof(msg), (long long)earlyIters);
+
+    // aktuell kein Float-Dump (cD/cHL), um ohne snprintf auszukommen
+    // aber Parameter bleiben erhalten für zukünftige Erweiterung.
+    (void)cD;
+    (void)cHL;
+
+    msg[(pos < (int)sizeof(msg)) ? pos : ((int)sizeof(msg) - 1)] = '\0';
     LUCHS_LOG_DEVICE(msg);
 #else
     (void)gid; (void)px; (void)py; (void)cD; (void)cHL; (void)earlyIters;
 #endif
 }
-#else
+
+#else // !__CUDA_ARCH__
+
+// Host-Seite: Stub, damit Header überall eingebunden werden kann.
 inline void capy_log_map_init_if(uint32_t, int, int, double2, const CapyHiLo2&, int) {}
-#endif
+
+#endif // __CUDA_ARCH__
 
 #undef CAPY_HD
 #undef CAPY_D
