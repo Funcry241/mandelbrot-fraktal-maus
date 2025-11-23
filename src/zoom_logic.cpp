@@ -1,6 +1,6 @@
 ///// Otter: Rullmolder Step 2 - blunt zoom + gentle nudge; + Pilot-Override (Keys dominate with arm/linger); pan works even if interest is invalid.
 ///// Schneefuchs: Minimal invasive; caps & deadzone; /WX clean; safe casts; cadence-respecting logs.
-///// Maus: [ZPAN1]/[ZPERF]/[ZLEASH]/[ZJIT]/[ZANGL]/[ZDEF]/[ZPILOT]/[ZKEY]/[CAP]; Shift=Turbo, Ctrl=Fine.
+///// Maus: [ZPAN1]/[ZPERF]/[ZLEASH]/[ZJIT]/[ZANGL]/[ZDEF]/[ZPILOT]/[ZKICK]/[ZKEY]/[CAP]; Shift=Turbo, Ctrl=Fine.
 ///// Datei: src/zoom_logic.cpp
 
 #pragma warning(push)
@@ -13,7 +13,6 @@
 #include "settings.hpp"
 #include "luchs_log_host.hpp"
 #include "axolotel_coupler.hpp" // << Axolotel Zoom-Coupler (boost multiplier)
-#include "ai/aop_telemetry.hpp" // << NEU: AI-Overlay-NDC für sanftes Blending in interest
 
 #include <vector>
 #include <cmath>
@@ -480,40 +479,8 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
     else if (rs.interest.valid && rs.width > 0 && rs.height > 0) {
         [[maybe_unused]] const auto tPanStart = Clock::now();
 
-        // Rohes interest aus Heatmap (Center-of-Mass / Bend)
-        double ndcX_raw0 = rs.interest.ndcX;
-        double ndcY_raw0 = rs.interest.ndcY;
-
-        // NEU: AI-Hint (Axolotel/AOP) sanft in interest-NDC einblenden,
-        // bevor Jitter/Leashes/Key-Bias greifen. Damit sehen Zoompfad,
-        // Heatmap-Ring und AI-Ring denselben Punkt.
-        if (Settings::Ai::enabled &&
-            Settings::Ai::coupleEnabled &&
-            Settings::Ai::hintBlend > 0.0f &&
-            AOP_Telemetry::g_ai_ov_valid)
-        {
-            const double alpha = std::clamp(static_cast<double>(Settings::Ai::hintBlend), 0.0, 1.0);
-            const double oneMinus = 1.0 - alpha;
-            const double aiX = static_cast<double>(AOP_Telemetry::g_ai_ndc_ovl_x);
-            const double aiY = static_cast<double>(AOP_Telemetry::g_ai_ndc_ovl_y);
-
-            if constexpr (ZLOG_ON) {
-                const double preX = ndcX_raw0;
-                const double preY = ndcY_raw0;
-                ndcX_raw0 = oneMinus * ndcX_raw0 + alpha * aiX;
-                ndcY_raw0 = oneMinus * ndcY_raw0 + alpha * aiY;
-                if (emitEveryN) {
-                    LUCHS_LOG_HOST("[AI/BLEND] f=%llu alpha=%.2f ndc=(%.4f,%.4f)->(%.4f,%.4f)",
-                                   (unsigned long long)zls.frame,
-                                   alpha,
-                                   preX, preY,
-                                   ndcX_raw0, ndcY_raw0);
-                }
-            } else {
-                ndcX_raw0 = oneMinus * ndcX_raw0 + alpha * aiX;
-                ndcY_raw0 = oneMinus * ndcY_raw0 + alpha * aiY;
-            }
-        }
+        const double ndcX_raw0 = rs.interest.ndcX;
+        const double ndcY_raw0 = rs.interest.ndcY;
 
         // Early angle bias (±24°) - suppressed while PilotOverride is on
         double ndcX_in = ndcX_raw0, ndcY_in = ndcY_raw0;
@@ -595,7 +562,7 @@ static void update(FrameContext& frameCtx, RendererState& rs, ZoomState& /*zs*/)
 
                     if constexpr (ZLOG_ON) {
                         if (emitEveryN) {
-                            LUCHS_LOG_HOST("[ZPILOT] f=%llu fade=%.2f ampPx=%.2f dir=(%.3f,%.3f) pilotPx=(%.2f,%.2f)",
+                            LUCHS_LOG_HOST("[ZKICK] f=%llu fade=%.2f ampPx=%.2f dir=(%.3f,%.3f) pilotPx=(%.2f,%.2f)",
                                            (unsigned long long)zls.frame, t, ampPx, ox, oy, pilot_px_x, pilot_px_y);
                         }
                     }
