@@ -252,23 +252,26 @@ namespace {
             const int ovTy   = (fctx.height + statsPx - 1) / statsPx;
             const int cTx    = (fctx.width  + compPx  - 1) / compPx;
             const int cTy    = (fctx.height + compPx  - 1) / compPx;
-            LUCHS_LOG_HOST("[GRID] statsPx=%d stats=%dx%d computePx=%d compute=%dx%d res=%dx%d",
-                           statsPx, ovTx, ovTy, compPx, cTx, cTy, fctx.width, fctx.height);
 
-            // ---- Sanity line for metrics payload -----------------------------
-            if (!state.h_entropy.empty() && !state.h_contrast.empty()) {
-                auto mmE = std::minmax_element(state.h_entropy.begin(),  state.h_entropy.end());
-                auto mmC = std::minmax_element(state.h_contrast.begin(), state.h_contrast.end());
-                const float eMin = *mmE.first;
-                const float eMax = *mmE.second;
-                const float cMin = *mmC.first;
-                const float cMax = *mmC.second;
-                LUCHS_LOG_HOST("[HM][VERIFY] N=%zu statsPx=%d E[min=%.4f max=%.4f] C[min=%.4f max=%.4f]",
-                               state.h_entropy.size(), statsPx, eMin, eMax, cMin, cMax);
-            } else {
-                LUCHS_LOG_HOST("[HM][VERIFY] N=0 statsPx=%d E[min=0.0000 max=0.0000] C[min=0.0000 max=0.0000]", statsPx);
+            if (perfShouldLog(g_frame)) {
+                LUCHS_LOG_HOST("[GRID] statsPx=%d stats=%dx%d computePx=%d compute=%dx%d res=%dx%d",
+                               statsPx, ovTx, ovTy, compPx, cTx, cTy, fctx.width, fctx.height);
+
+                // ---- Sanity line for metrics payload -------------------------
+                if (!state.h_entropy.empty() && !state.h_contrast.empty()) {
+                    auto mmE = std::minmax_element(state.h_entropy.begin(),  state.h_entropy.end());
+                    auto mmC = std::minmax_element(state.h_contrast.begin(), state.h_contrast.end());
+                    const float eMin = *mmE.first;
+                    const float eMax = *mmE.second;
+                    const float cMin = *mmC.first;
+                    const float cMax = *mmC.second;
+                    LUCHS_LOG_HOST("[HM][VERIFY] N=%zu statsPx=%d E[min=%.4f max=%.4f] C[min=%.4f max=%.4f]",
+                                   state.h_entropy.size(), statsPx, eMin, eMax, cMin, cMax);
+                } else {
+                    LUCHS_LOG_HOST("[HM][VERIFY] N=0 statsPx=%d E[min=0.0000 max=0.0000] C[min=0.0000 max=0.0000]", statsPx);
+                }
+                // --------------------------------------------------------------
             }
-            // ------------------------------------------------------------------
         }
     }
 
