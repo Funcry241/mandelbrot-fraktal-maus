@@ -1,7 +1,7 @@
-///// Otter: ASM HUD overlay – draws tiny tilesX×tilesY Mandelbrot grid (ASM-based) as mini-panel.
-/// /// Schneefuchs: Eigenes GL-Programm + Texture; keine ASM-/CUDA-Aufrufe; State-Checks robust.
-/// /// Maus: Rechts unten; einfache Warm-Colormap; ASCII-only Logs; no-op wenn Grid fehlt.
-/// /// Datei: src/asm/asm_hud_overlay.cpp
+///// Otter: ASM HUD overlay – draws tiny tilesX×tilesY Mandelbrot grid (ASM-based) as mini-panel, Panda-Größe wie Heatmap.
+///// Schneefuchs: Eigenes GL-Programm + Texture; keine ASM-/CUDA-Aufrufe; State-Checks robust.
+/// //// Maus: Rechts unten; einfache Warm-Colormap; ASCII-only Logs; no-op wenn Grid fehlt.
+/// //// Datei: src/asm/asm_hud_overlay.cpp
 
 #include "pch.hpp"
 #include "asm_hud_overlay.hpp"
@@ -251,29 +251,56 @@ void draw(const RendererState& state, const FrameContext& ctx)
 
     ensureTextureAndUpload(norm.data(), tilesX, tilesY);
 
-    // Panel-Geometrie: rechts unten, feste Hoehe, aspect = tilesX/tilesY
+    // Panel-Geometrie: rechts unten, Groesse in NDC aus Settings („Panda-Panels“),
+    // Inhalt aspect-korrigiert ins Panel eingepasst.
     const int viewW = ctx.width;
     const int viewH = ctx.height;
 
-    constexpr int marginPx   = 12;
-    constexpr int contentHPx = 80;
-    const float aspect       = (tilesY > 0) ? (static_cast<float>(tilesX) / static_cast<float>(tilesY)) : 1.0f;
-    const int   contentWPx   = std::max(1, static_cast<int>(std::round(contentHPx * aspect)));
+    const float panelWidthNdc  = Settings::hudPanelWidthNdc;
+    const float panelHeightNdc = Settings::hudPanelHeightNdc;
 
-    const int panelW = contentWPx;
-    const int panelH = contentHPx;
+    const int panelW = static_cast<int>(std::lround(0.5f * panelWidthNdc  * static_cast<float>(viewW)));
+    const int panelH = static_cast<int>(std::lround(0.5f * panelHeightNdc * static_cast<float>(viewH)));
+
+    constexpr int marginPx = 12;
 
     const int panelX1 = viewW - marginPx;
     const int panelX0 = panelX1 - panelW;
     const int panelY1 = viewH - marginPx;
     const int panelY0 = panelY1 - panelH;
 
-    // Vertex-Daten: 2 Triangles, PositionPx + TexCoord
-    const float x0 = static_cast<float>(panelX0);
-    const float y0 = static_cast<float>(panelY0);
-    const float x1 = static_cast<float>(panelX1);
-    const float y1 = static_cast<float>(panelY1);
+    const int baseContentW = std::max(1, panelW);
+    const int baseContentH = std::max(1, panelH);
 
+    const float aspect = (tilesY > 0)
+        ? static_cast<float>(tilesX) / static_cast<float>(tilesY)
+        : 1.0f;
+
+    int contentWPx = baseContentW;
+    int contentHPx = baseContentH;
+
+    if (aspect >= 1.0f) {
+        contentWPx = baseContentW;
+        contentHPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentW) / static_cast<double>(aspect))));
+        if (contentHPx > baseContentH) {
+            contentHPx = baseContentH;
+            contentWPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentH) * static_cast<double>(aspect))));
+        }
+    } else {
+        contentHPx = baseContentH;
+        contentWPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentH) * static_cast<double>(aspect))));
+        if (contentWPx > baseContentW) {
+            contentWPx = baseContentW;
+            contentHPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentW) / static_cast<double>(aspect))));
+        }
+    }
+
+    const float x0 = static_cast<float>(panelX0 + (baseContentW - contentWPx) / 2);
+    const float y0 = static_cast<float>(panelY0 + (baseContentH - contentHPx) / 2);
+    const float x1 = x0 + static_cast<float>(contentWPx);
+    const float y1 = y0 + static_cast<float>(contentHPx);
+
+    // Vertex-Daten: 2 Triangles, PositionPx + TexCoord
     const float quad[6 * 4] = {
         //  pos.x, pos.y,   u, v
         x0, y0,  0.0f, 0.0f,

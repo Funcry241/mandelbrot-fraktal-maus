@@ -302,22 +302,49 @@ void drawOverlay(const std::vector<float>& entropy,
     // Alignment zurücksetzen
     glPixelStorei(GL_UNPACK_ALIGNMENT, prevUnpack);
 
-    // Layout
-    constexpr int contentHPx = 140;
-    const float aspect  = tilesY>0 ? float(tilesX)/float(tilesY) : 1.0f;
-    const int   contentWPx = std::max(1, (int)std::round(contentHPx*aspect));
-    const float sPanelScale = std::clamp(std::min(contentWPx,contentHPx)/160.0f, 0.60f, 1.0f);
-    // Hinweis: padPx steuert den dunklen Abstand zwischen Panelrand und Heatmap-Inhalt.
-    // Dünner sichtbarer Rahmen = kleineren Faktor wählen (z.B. 0.30f–0.50f).
-    // Die goldene Kante oben drauf kommt aus kUI_BORDER / Panel-FS-Shader.
-    const int padPx = snapToPixel(kUI_PADDING * 0.40f);
-    const int panelW = contentWPx + padPx*2, panelH = contentHPx + padPx*2;
+    // Layout: Panelgröße in NDC aus Settings („Panda-Panels“), rechts unten.
+    const float panelWidthNdc  = Settings::hudPanelWidthNdc;
+    const float panelHeightNdc = Settings::hudPanelHeightNdc;
+
+    const int panelW = snapToPixel(0.5f * panelWidthNdc  * static_cast<float>(width));
+    const int panelH = snapToPixel(0.5f * panelHeightNdc * static_cast<float>(height));
+
     const int panelX1 = width  - snapToPixel(kUI_MARGIN);
     const int panelX0 = panelX1 - panelW;
     const int panelY0 = snapToPixel(kUI_MARGIN);
     const int panelY1 = panelY0 + panelH;
-    const int contentX0 = panelX0 + padPx, contentY0 = panelY0 + padPx;
-    const int contentX1 = contentX0 + contentWPx, contentY1 = contentY0 + contentHPx;
+
+    // Inhalt mit Padding und aspect-korrigiert ins Panel einpassen
+    const int padPx         = snapToPixel(kUI_PADDING * 0.40f);
+    const int baseContentW  = std::max(1, panelW - 2 * padPx);
+    const int baseContentH  = std::max(1, panelH - 2 * padPx);
+    const float aspect      = (tilesY > 0) ? float(tilesX) / float(tilesY) : 1.0f;
+
+    int contentWPx = baseContentW;
+    int contentHPx = baseContentH;
+
+    if (aspect >= 1.0f) {
+        contentWPx = baseContentW;
+        contentHPx = std::max(1, (int)std::lround((double)baseContentW / (double)aspect));
+        if (contentHPx > baseContentH) {
+            contentHPx = baseContentH;
+            contentWPx = std::max(1, (int)std::lround((double)baseContentH * (double)aspect));
+        }
+    } else {
+        contentHPx = baseContentH;
+        contentWPx = std::max(1, (int)std::lround((double)baseContentH * (double)aspect));
+        if (contentWPx > baseContentW) {
+            contentWPx = baseContentW;
+            contentHPx = std::max(1, (int)std::lround((double)baseContentW / (double)aspect));
+        }
+    }
+
+    const int contentX0 = panelX0 + padPx + (baseContentW - contentWPx) / 2;
+    const int contentY0 = panelY0 + padPx + (baseContentH - contentHPx) / 2;
+    const int contentX1 = contentX0 + contentWPx;
+    const int contentY1 = contentY0 + contentHPx;
+
+    const float sPanelScale = std::clamp(std::min(panelW, panelH) / 160.0f, 0.60f, 1.0f);
 
     // Save GL blend/program/vao state (kurz)
     GLint prevVAO=0, prevBuf=0, prevProg=0, srcRGB=0,dstRGB=0,srcA=0,dstA=0;

@@ -1,4 +1,4 @@
-///// Otter: Zentral-Config - Replikatoren „Replikatoren“ (Bandit Shadow), Nacktmull-Perf; Pilot-Override für direkte Tastenpriorität.
+///// Otter: Zentral-Config - Replikatoren „Replikatoren“ (Bandit Shadow), Nacktmull-Perf; Pilot-Override für direkte Tastenpriorität; HUD-Panels „Panda“ (gemeinsame Größe Heatmap/ASM).
 ///// Schneefuchs: /WX-safe; ASCII-Logs; keine versteckten Makros; Header/Source synchron; GLEW dynamisch.
 ///// Maus: ForceAlwaysZoom=1; PerfLog aktiv; Kolibri-Grid; Luchs-Kompatblock (enabled/nvrtc) wiederhergestellt.
 ///// Datei: src/settings.hpp
@@ -114,6 +114,11 @@ namespace Settings {
     // ASM-Mini-Fraktalpanel (HUD-Probe unten rechts).
     // Range: {false,true} | Default: true | ↑ zusätzlicher Kontext, ↓ minimale ASM-CPU-Last
     inline constexpr bool  asmHudOverlayEnabled        = true;
+
+    // Gemeinsame Panelgröße in NDC für Mini-Heatmap & ASM-HUD („Panda-Panels“).
+    // Range: 0.10 .. 0.90 | Default: width=0.42, height=0.28 | ↑ größer = mehr Bildschirmfläche
+    inline constexpr float hudPanelWidthNdc            = 0.42f;
+    inline constexpr float hudPanelHeightNdc           = 0.28f;
 
     // Textgröße (NDC-Skalierung).
     // Range: 0.0015 .. 0.004 | Default: 0.0025
@@ -266,6 +271,8 @@ namespace PilotOverride {
 static_assert(pboRingSize > 0, "pboRingSize must be > 0");
 static_assert(MIN_TILE_SIZE <= BASE_TILE_SIZE && BASE_TILE_SIZE <= MAX_TILE_SIZE,
               "MIN_TILE_SIZE <= BASE_TILE_SIZE <= MAX_TILE_SIZE required");
+static_assert(hudPanelWidthNdc > 0.0f, "hudPanelWidthNdc must be > 0");
+static_assert(hudPanelHeightNdc > 0.0f, "hudPanelHeightNdc must be > 0");
 static_assert(Kolibri::desiredTilePx > 0, "desiredTilePx must be > 0");
 static_assert(AsmHud::desiredTilePx > 0, "AsmHud::desiredTilePx must be > 0");
 static_assert(StatsCadence::heatmapEveryN >= 1, "StatsCadence::heatmapEveryN must be >= 1");
