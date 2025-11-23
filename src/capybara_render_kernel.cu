@@ -52,12 +52,14 @@ static __device__ __forceinline__ bool in_main_cardioid(double2 c) {
     // Inside if q * (q + x) <= 0.25 * y^2
     return q * (q + x) <= 0.25 * y2;
 }
+
 static __device__ __forceinline__ bool in_period2_bulb(double2 c) {
     const double xr = c.x + 1.0;
     const double yr = c.y;
     // Inside if (x+1)^2 + y^2 <= (1/4)^2
     return (xr * xr + yr * yr) <= (1.0 / 16.0);
 }
+
 static __device__ __forceinline__ bool in_cardioid_or_bulb(double2 c) {
     // Bulb-Test zuerst: gleicher Wahrheitswert, minimal günstiger im häufigen Outside-Fall.
     return in_period2_bulb(c) || in_main_cardioid(c);
@@ -100,7 +102,9 @@ void mandelbrotKernel_classic(
     for (; it < maxIter; ++it) {
         const double xx = zx * zx - zy * zy + cD.x;
         const double yy = fma(2.0 * zx, zy, cD.y); // 2*zx*zy + cD.y
-        zx = xx; zy = yy;
+        zx = xx;
+        zy = yy;
+
         const double r2 = fma(xx, xx, yy * yy);    // xx*xx + yy*yy
         if (r2 > 4.0) { ++it; break; }
     }
@@ -122,21 +126,19 @@ void mandelbrotKernel_capybara_deep(
 
     const int idx = py * w + px;
 
-    // FMA-Form für Mapping (identische Numerik), mit gecachten Halbmaßen.
-    const double halfW = 0.5 * static_cast<double>(w);
-    const double halfH = 0.5 * static_cast<double>(h);
-    const double pxD   = static_cast<double>(px);
-    const double pyD   = static_cast<double>(py);
-    const double x     = fma(pxD - halfW, stepX, cx);
-    const double y     = fma(pyD - halfH, stepY, cy);
-    const double2 cD   = make_double2(x, y);
+    // Nacktmull: einmalige Vorbereitung von cD/HiLo/gid für Deep-Path.
+    double2   cD;
+    CapyHiLo2 cHL;
+    uint32_t  gid;
+    capy_prepare_c(cx, cy, stepX, stepY, px, py, w, h, cD, cHL, gid);
 
+    // Analytic interior test nutzt das vorbereitete cD direkt.
     if (in_cardioid_or_bulb(cD)) {
         d_it[idx] = clamp_u16_from_int(maxIter);
         return;
     }
 
-    const int iters = capy_compute_iters_from_zero(cx, cy, stepX, stepY, px, py, w, h, maxIter);
+    const int iters = capy_compute_iters_from_prepared(cD, cHL, gid, maxIter);
     d_it[idx] = clamp_u16_from_int(iters);
 }
 

@@ -59,6 +59,26 @@ CAPY_D int capy_classic_continue(double2& z, const double2 cD, int it, const int
 #endif
 }
 
+// ------------------------ Core compute (prepared c / HiLo) ---------------------
+// Uses precomputed cD / cHL / gid (capy_prepare_c already done by the caller).
+// Starts from z = 0 and performs Capybara early iterations plus classic continuation.
+// Returns the number of iterations taken until escape or maxIter (inclusive).
+CAPY_D int capy_compute_iters_from_prepared(const double2& cD,
+                                            const CapyHiLo2& cHL,
+                                            uint32_t gid,
+                                            int maxIter)
+{
+    double2 z = make_double2(0.0, 0.0);
+
+    // Early Hi/Lo segment
+    int it = capy_mandelbrot_early(z, cD, cHL, maxIter, gid);
+    if (it >= maxIter) return it;
+
+    // Nacktmull: single-path classic continuation with warp-exit
+    it = capy_classic_continue(z, cD, it, maxIter);
+    return it;
+}
+
 // ----------------------------- Core compute (z=0) -----------------------------
 // Computes Mandelbrot iteration count for pixel (px,py) with center (cx,cy), steps (stepX,stepY).
 // Starts from z = 0, performs Capybara early iterations (if enabled) and continues classically.
@@ -72,14 +92,8 @@ CAPY_D int capy_compute_iters_from_zero(double cx, double cy,
     double2 cD; CapyHiLo2 cHL; uint32_t gid;
     capy_prepare_c(cx, cy, stepX, stepY, px, py, w, h, cD, cHL, gid);
 
-    // Early Hi/Lo segment
-    double2 z = make_double2(0.0, 0.0);
-    int it = capy_mandelbrot_early(z, cD, cHL, maxIter, gid);
-    if (it >= maxIter) return it;
-
-    // Nacktmull: single-path classic continuation with warp-exit
-    it = capy_classic_continue(z, cD, it, maxIter);
-    return it;
+    // Delegate to the prepared-path helper to avoid duplicate mapping in callers.
+    return capy_compute_iters_from_prepared(cD, cHL, gid, maxIter);
 }
 
 // ----------------------------- Core compute (z!=0) ----------------------------
