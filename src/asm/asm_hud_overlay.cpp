@@ -1,177 +1,334 @@
-///// Otter: ASM HUD overlay – draws tiny tilesX×tilesY Mandelbrot grid (ASM-based) as mini-panel, Panda-Größe wie Heatmap.
-///// Schneefuchs: Eigenes GL-Programm + Texture; keine ASM-/CUDA-Aufrufe; State-Checks robust.
-///// Maus: Rechts unten; einfache Warm-Colormap; ASCII-only Logs; no-op wenn Grid fehlt.
-///// Datei: src/asm/asm_hud_overlay.cpp
+///// Otter: GPU Heatmap overlay (fragment shader alpha) + Z0 sticker (argmax->CoM bend), Panda-Panelgröße aus Settings.
+/// //// Schneefuchs: Coordinates harmonized with Eule; header/source kept in sync; no extra programs.
+/// //// Maus: One-line ASCII logs; forwards blended interest to RendererState (screen coords); no zoom/pan changes.
+/// //// Datei: src/heatmap_overlay.cpp
 
 #include "pch.hpp"
-#include "asm_hud_overlay.hpp"
-
-#include "renderer_state.hpp"
-#include "frame_context.hpp"
+#include "heatmap_overlay.hpp"
 #include "settings.hpp"
+#include "renderer_state.hpp"
 #include "luchs_log_host.hpp"
+#include "heatmap_shaders.hpp"
+#include "ui_gl.hpp"
+#include "ai/aop_telemetry.hpp" // REPL: optional AI overlay marker
+#include <vector>
+#include <algorithm>
+#include <cmath>
 
+// --- lokale UI-Helfer (fallback, ohne externe Pfau-Abhängigkeit) ------------
 namespace {
+    // konservative Defaults für Layout (Panel, Abstände, Radius)
+    // Hinweis: Die wahrgenommene Rahmenbreite besteht aus zwei Komponenten:
+    //   1) dunkler Rand = Abstand zwischen Panelrand und Heatmap-Inhalt (padPx unten),
+    //   2) goldene Outline = kUI_BORDER im Panel-FS-Shader.
+    // Für einen sichtbar dünneren Rahmen zuerst kUI_PADDING bzw. den padPx-Faktor
+    // im Layout-Block weiter unten anpassen; kUI_BORDER regelt nur die feine Outline.
+    constexpr float kUI_PADDING  = 12.0f;
+    constexpr float kUI_MARGIN   = 12.0f;
+    constexpr float kUI_RADIUS   = 8.0f;
+    constexpr float kUI_BORDER   = 1.0f;
+    constexpr float kPANEL_ALPHA = 0.85f;
 
-// GL-Handles fuer das ASM-HUD-Panel
-static GLuint sAsmHudVAO   = 0;
-static GLuint sAsmHudVBO   = 0;
-static GLuint sAsmHudProg  = 0;
-static GLuint sAsmHudTex   = 0;
-static GLint  uViewportPx  = -1;
-static GLint  uGridTex     = -1;
-static GLint  uAlpha       = -1;
-
-// Textur-Groesse (Grid-Aufloesung)
-static int sTexW = 0;
-static int sTexH = 0;
-
-// Simple Shader: quad in Pixelkoordinaten, Textur mit 0..1 Values -> Warm-Colormap
-static const char* kAsmHudVS = R"GLSL(
-#version 430 core
-layout(location = 0) in vec2 aPositionPx;
-layout(location = 1) in vec2 aTexCoord;
-
-out vec2 vTexCoord;
-
-uniform vec2 uViewportPx;
-
-void main()
-{
-    vTexCoord = aTexCoord;
-
-    // Pixel -> NDC: x: [0,w] -> [-1,+1], y: [0,h] (oben) -> +1..-1
-    vec2 ndc;
-    ndc.x = (aPositionPx.x / uViewportPx.x) * 2.0 - 1.0;
-    ndc.y = 1.0 - (aPositionPx.y / uViewportPx.y) * 2.0;
-
-    gl_Position = vec4(ndc, 0.0, 1.0);
+    inline int snapToPixel(float v) {
+        return static_cast<int>(std::lround(v));
+    }
 }
-)GLSL";
 
-static const char* kAsmHudFS = R"GLSL(
-#version 430 core
-in vec2 vTexCoord;
-out vec4 outColor;
+namespace HeatmapOverlay {
 
-uniform sampler2D uGrid;
-uniform float     uAlpha;
+// --- GL handles / uniforms (kompakt) -----------------------------------------
+static GLuint sPanelVAO=0, sPanelVBO=0, sPanelProg=0;
+static GLint  uViewportPx=-1, uPanelRectPx=-1, uRadiusPx=-1, uAlpha=-1, uBorderPx=-1;
 
-void main()
+static GLuint sHeatVAO=0, sHeatVBO=0, sHeatProg=0, sHeatTex=0;
+static GLint  uHViewportPx=-1, uHContentRectPx=-1, uHGridTex=-1, uHAlphaBase=-1;
+static GLint  uHMarkEnable=-1, uHMarkCenterPx=-1, uHMarkRadiusPx=-1, uHMarkAlpha=-1;
+static GLint  uHMarkThicknessPx=-1;
+
+static int    sTexW=0, sTexH=0;
+static float  sExposureEMA = 0.0f;
+
+// Tuning (lokal, Settings bleiben schmal)
+static constexpr float  kExposureDecay = 0.92f;
+static constexpr float  kValueFloor    = 0.03f;
+static constexpr double kBendStartZ    = 1.0;
+static constexpr double kBendFullZ     = 18.0;
+static constexpr double kBendExp       = 0.5;
+
+// ---- interner Helfer: ROI aus Entropy/Contrast berechnen --------------------
+struct ROIResult {
+    int    tilesX=0, tilesY=0, bestIdx=0;
+    double ndcX=0.0, ndcY=0.0, rNdc=0.15;
+    float  bestRaw=0.0f;
+};
+
+// Kern-Scoring (ohne GL); liefert auch NDC & Radius (mit CoM-Bend)
+static bool computeROI(const std::vector<float>& entropy,
+                       const std::vector<float>& contrast,
+                       int width, int height, int tileSize,
+                       double zoom,
+                       ROIResult& out)
 {
-    float v = texture(uGrid, vTexCoord).r;
-    v = clamp(v, 0.0, 1.0);
+    out = ROIResult{};
+    if (width <= 0 || height <= 0 || tileSize <= 0) return false;
 
-    // einfache Warm-Colormap: dunkel -> orange -> hell
-    float r = v;
-    float g = v * 0.6 + 0.2;
-    float b = v * 0.3;
+    const int    tilesX  = (width  + tileSize - 1) / tileSize;
+    const int    tilesY  = (height + tileSize - 1) / tileSize;
+    const size_t nTiles  = static_cast<size_t>(tilesX) * static_cast<size_t>(tilesY);
+    if (entropy.size() < nTiles || contrast.size() < nTiles) return false;
 
-    outColor = vec4(r, g, b, uAlpha);
-}
-)GLSL";
+    const double sigmaNdc = Settings::TargetBias::sigmaNdc;
+    const double mix      = Settings::TargetBias::mix;
+    const bool   nearOn   = Settings::TargetBias::enabled && (mix > 0.0);
 
-static GLuint compileShader(GLenum type, const char* src)
-{
-    GLuint id = glCreateShader(type);
-    if (!id) return 0;
-    glShaderSource(id, 1, &src, nullptr);
-    glCompileShader(id);
+    const float wE = Settings::Ai::wE;
+    const float wC = Settings::Ai::wC;
 
-    GLint ok = GL_FALSE;
-    glGetShaderiv(id, GL_COMPILE_STATUS, &ok);
-    if (!ok) {
-        if constexpr (Settings::debugLogging) {
-            char logBuf[512];
-            GLsizei len = 0;
-            glGetShaderInfoLog(id, (GLsizei)sizeof(logBuf), &len, logBuf);
-            logBuf[(len >= 0 && len < (GLsizei)sizeof(logBuf)) ? len : (GLsizei)sizeof(logBuf) - 1] = '\0';
-            LUCHS_LOG_HOST("[ASM/HUD] shader compile failed: %s", logBuf);
+    float  currentMax = 1e-6f;
+    int    bestIdx    = 0;
+    float  bestRaw    = -1e30f;
+    double bestScore  = -1e300;
+
+    // rohes Grid nur für lokale CoM
+    static thread_local std::vector<float> grid;
+    grid.assign(nTiles, 0.0f);
+
+    for (int i = 0; i < (int)nTiles; ++i) {
+        const float e   = entropy[(size_t)i];
+        const float c   = contrast[(size_t)i];
+        const float raw = wE * e + wC * c;
+        grid[(size_t)i] = raw;
+        if (raw > currentMax) currentMax = raw;
+
+        double score = (double)raw;
+        if (nearOn) {
+            const int    tx   = i % tilesX;
+            const int    ty   = i / tilesX;
+            const double cxp  = ((double)tx + 0.5) * (double)width  / (double)tilesX;
+            const double cyp  = ((double)ty + 0.5) * (double)height / (double)tilesY;
+            const double ndcX = (cxp / (double)width) * 2.0 - 1.0;
+            const double ndcY = 1.0 - (cyp / (double)height) * 2.0;
+            const double r2   = ndcX*ndcX + ndcY*ndcY;
+            const double w    = std::exp(- r2 / (sigmaNdc * sigmaNdc));
+            score = (1.0 - mix) * score + mix * score * w;
         }
-        glDeleteShader(id);
-        return 0;
-    }
-    return id;
-}
-
-static GLuint makeProgram()
-{
-    GLuint vs = compileShader(GL_VERTEX_SHADER,   kAsmHudVS);
-    GLuint fs = compileShader(GL_FRAGMENT_SHADER, kAsmHudFS);
-    if (!vs || !fs) {
-        if (vs) glDeleteShader(vs);
-        if (fs) glDeleteShader(fs);
-        return 0;
-    }
-
-    GLuint prog = glCreateProgram();
-    if (!prog) {
-        glDeleteShader(vs);
-        glDeleteShader(fs);
-        return 0;
-    }
-
-    glAttachShader(prog, vs);
-    glAttachShader(prog, fs);
-    glLinkProgram(prog);
-
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-
-    GLint ok = GL_FALSE;
-    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        if constexpr (Settings::debugLogging) {
-            char logBuf[512];
-            GLsizei len = 0;
-            glGetProgramInfoLog(prog, (GLsizei)sizeof(logBuf), &len, logBuf);
-            logBuf[(len >= 0 && len < (GLsizei)sizeof(logBuf)) ? len : (GLsizei)sizeof(logBuf) - 1] = '\0';
-            LUCHS_LOG_HOST("[ASM/HUD] program link failed: %s", logBuf);
+        if (score > bestScore) {
+            bestScore = score;
+            bestIdx   = i;
+            if (raw > bestRaw) bestRaw = raw;
         }
-        glDeleteProgram(prog);
-        return 0;
     }
 
-    return prog;
+    const int bx = bestIdx % tilesX;
+    const int by = bestIdx / tilesX;
+
+    // 3x3-CoM (baryzentrisch)
+    double cx_com = bx + 0.5;
+    double cy_com = by + 0.5;
+    {
+        const int    r       = 1;
+        const double sigma2  = 0.75 * 0.75;
+        const double gammaW  = 3.0;
+        double       wsum    = 0.0;
+        double       xsum    = 0.0;
+        double       ysum    = 0.0;
+        for (int dy = -r; dy <= r; ++dy) {
+            const int ty = by + dy;
+            if (ty < 0 || ty >= tilesY) continue;
+            for (int dx = -r; dx <= r; ++dx) {
+                const int tx = bx + dx;
+                if (tx < 0 || tx >= tilesX) continue;
+                const size_t idx = (size_t)ty * (size_t)tilesX + (size_t)tx;
+                const double v   = (double)grid[idx];
+                const double g   = std::exp(-(dx*dx + dy*dy) / (2.0 * sigma2));
+                const double w   = std::pow(std::max(0.0, v), gammaW) * g;
+                wsum += w;
+                xsum += w * (tx + 0.5);
+                ysum += w * (ty + 0.5);
+            }
+        }
+        if (wsum > 1e-9) {
+            cx_com = xsum / wsum;
+            cy_com = ysum / wsum;
+        }
+    }
+
+    // Bend zum CoM mit wachsendem Zoom
+    double bendT = 0.0;
+    if (zoom > kBendStartZ) {
+        bendT = std::min(1.0, (zoom - kBendStartZ) / (kBendFullZ - kBendStartZ));
+        bendT = std::pow(bendT, kBendExp);
+    }
+
+    const double cx_tile = (1.0 - bendT) * (bx + 0.5) + bendT * cx_com;
+    const double cy_tile = (1.0 - bendT) * (by + 0.5) + bendT * cy_com;
+
+    const float tileWPx_screen   = (float)width  / std::max(1, tilesX);
+    const float tileHPx_screen   = (float)height / std::max(1, tilesY);
+    const float centerPxX_screen = (float)cx_tile * tileWPx_screen;
+    const float centerPxY_screen = (float)cy_tile * tileHPx_screen;
+    const float ringRpx_screen   = 0.70f * 0.5f
+                                 * std::sqrt(tileWPx_screen * tileWPx_screen
+                                           + tileHPx_screen * tileHPx_screen);
+
+    out.tilesX  = tilesX;
+    out.tilesY  = tilesY;
+    out.bestIdx = bestIdx;
+    out.bestRaw = bestRaw;
+    out.ndcX    = (centerPxX_screen / (double)width)  * 2.0 - 1.0;
+    out.ndcY    = 1.0 - (centerPxY_screen / (double)height) * 2.0;
+    out.rNdc    = 0.5 * (((double)ringRpx_screen / (double)width ) * 2.0
+                       + ((double)ringRpx_screen / (double)height) * 2.0);
+    return true;
 }
 
-// Initialisiert VAO/VBO einmalig fuer ein Quad mit Position+TexCoord.
-static void ensureVAO()
+// ---- Compute-API (exportiert via Header): setzt ctx.interest, kein GL -------
+bool updateInterestFromGrid(const std::vector<float>& entropy,
+                            const std::vector<float>& contrast,
+                            int width, int height, int tileSize,
+                            double zoom,
+                            RendererState& ctx) noexcept
 {
-    if (sAsmHudVAO != 0 && sAsmHudVBO != 0) return;
+    ctx.interest.valid = false;
+    ROIResult r;
+    if (!computeROI(entropy, contrast, width, height, tileSize, zoom, r)) return false;
 
-    glGenVertexArrays(1, &sAsmHudVAO);
-    glGenBuffers(1, &sAsmHudVBO);
+    ctx.interest.ndcX      = r.ndcX;
+    ctx.interest.ndcY      = r.ndcY;
+    ctx.interest.radiusNdc = r.rNdc;
+    ctx.interest.strength  = 1.0;
+    ctx.interest.valid     = true;
 
-    glBindVertexArray(sAsmHudVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, sAsmHudVBO);
-
-    // layout: [pos.x,pos.y, tex.u,tex.v] als float[4]
-    constexpr GLsizei stride = 4 * (GLsizei)sizeof(float);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, (void*)(2 * sizeof(float)));
-
-    // keine Daten hier, werden zur Draw-Zeit per glBufferSubData gefuellt
+    if constexpr (Settings::debugLogging) {
+        static int sPrevTX = -1, sPrevTY = -1;
+        if (sPrevTX != r.tilesX || sPrevTY != r.tilesY) {
+            LUCHS_LOG_HOST("[ZSIG0] grid=%dx%d best=%d rawMax=%.6f ndc=(%.6f,%.6f)",
+                           r.tilesX, r.tilesY, r.bestIdx, r.bestRaw, r.ndcX, r.ndcY);
+            sPrevTX = r.tilesX;
+            sPrevTY = r.tilesY;
+        }
+    }
+    return true;
 }
 
-// Sorgt fuer eine 2D-Textur mit tilesX×tilesY Float-Werten (R16F) und glTex(Sub)Image.
-static void ensureTextureAndUpload(const float* data, int tilesX, int tilesY)
+// --- API ---------------------------------------------------------------------
+void toggle(RendererState& ctx)
 {
-    if (!sAsmHudTex) {
-        glGenTextures(1, &sAsmHudTex);
-        glBindTexture(GL_TEXTURE_2D, sAsmHudTex);
+#if defined(USE_HEATMAP_OVERLAY)
+    ctx.heatmapOverlayEnabled = !ctx.heatmapOverlayEnabled;
+#else
+    (void)ctx;
+#endif
+}
+
+void cleanup()
+{
+    if (sPanelVAO) glDeleteVertexArrays(1, &sPanelVAO);
+    if (sPanelVBO) glDeleteBuffers(1, &sPanelVBO);
+    if (sPanelProg) glDeleteProgram(sPanelProg);
+    sPanelVAO = sPanelVBO = sPanelProg = 0;
+    uViewportPx = uPanelRectPx = uRadiusPx = uAlpha = uBorderPx = -1;
+
+    if (sHeatVAO) glDeleteVertexArrays(1, &sHeatVAO);
+    if (sHeatVBO) glDeleteBuffers(1, &sHeatVBO);
+    if (sHeatProg) glDeleteProgram(sHeatProg);
+    if (sHeatTex) glDeleteTextures(1, &sHeatTex);
+    sHeatVAO = sHeatVBO = sHeatProg = sHeatTex = 0;
+    uHViewportPx = uHContentRectPx = uHGridTex = uHAlphaBase = -1;
+    uHMarkEnable = uHMarkCenterPx = uHMarkRadiusPx = uHMarkAlpha = -1;
+    uHMarkThicknessPx = -1;
+
+    sTexW = sTexH = 0;
+    sExposureEMA = 0.0f;
+}
+
+void drawOverlay(const std::vector<float>& entropy,
+                 const std::vector<float>& contrast,
+                 int width, int height, int tileSize,
+                 [[maybe_unused]] unsigned int textureId,
+                 RendererState& ctx)
+{
+    // ROI immer zuerst setzen (Compute-API), unabhängig von Sichtbarkeit
+    (void)updateInterestFromGrid(entropy, contrast, width, height, tileSize,
+                                 (double)ctx.zoom, ctx);
+
+    // Falls Overlay unsichtbar: hier enden – ROI bleibt gesetzt.
+    if (!ctx.heatmapOverlayEnabled) return;
+
+    // ----------------------- Ab hier NUR Draw/GL -----------------------------
+    // Programme & VAOs
+    if (!sPanelProg) {
+        sPanelProg = UiGL::makeProgram(HeatmapShaders::PanelVS, HeatmapShaders::PanelFS);
+        if (!sPanelProg) {
+            if constexpr (Settings::debugLogging)
+                LUCHS_LOG_HOST("[UI/Pfau][HM] panel program==0");
+            return;
+        }
+        uViewportPx  = glGetUniformLocation(sPanelProg, "uViewportPx");
+        uPanelRectPx = glGetUniformLocation(sPanelProg, "uPanelRectPx");
+        uRadiusPx    = glGetUniformLocation(sPanelProg, "uRadiusPx");
+        uAlpha       = glGetUniformLocation(sPanelProg, "uAlpha");
+        uBorderPx    = glGetUniformLocation(sPanelProg, "uBorderPx");
+    }
+    if (!sHeatProg) {
+        sHeatProg = UiGL::makeProgram(HeatmapShaders::HeatVS, HeatmapShaders::HeatFS);
+        if (!sHeatProg) {
+            if constexpr (Settings::debugLogging)
+                LUCHS_LOG_HOST("[UI/Pfau][HM] heat program==0");
+            return;
+        }
+        uHViewportPx      = glGetUniformLocation(sHeatProg, "uViewportPx");
+        uHContentRectPx   = glGetUniformLocation(sHeatProg, "uContentRectPx");
+        uHGridTex         = glGetUniformLocation(sHeatProg, "uGrid");
+        uHAlphaBase       = glGetUniformLocation(sHeatProg, "uAlphaBase");
+        uHMarkEnable      = glGetUniformLocation(sHeatProg, "uHMarkEnable");
+        uHMarkCenterPx    = glGetUniformLocation(sHeatProg, "uHMarkCenterPx");
+        uHMarkRadiusPx    = glGetUniformLocation(sHeatProg, "uHMarkRadiusPx");
+        uHMarkAlpha       = glGetUniformLocation(sHeatProg, "uHMarkAlpha");
+        uHMarkThicknessPx = glGetUniformLocation(sHeatProg, "uHMarkThicknessPx");
+    }
+    UiGL::ensurePanelVAO(sPanelVAO, sPanelVBO);
+    UiGL::ensureHeatVAO (sHeatVAO,  sHeatVBO);
+
+    if (!sHeatTex) {
+        glGenTextures(1, &sHeatTex);
+        glBindTexture(GL_TEXTURE_2D, sHeatTex);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        sTexW = 0;
-        sTexH = 0;
-    } else {
-        glBindTexture(GL_TEXTURE_2D, sAsmHudTex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
     }
 
+    // Für die Darstellung normalisieren (EMA); Anzeigegrid berechnen
+    const int    tilesX = (width  + tileSize - 1) / tileSize;
+    const int    tilesY = (height + tileSize - 1) / tileSize;
+    const size_t nTiles = static_cast<size_t>(tilesX) * static_cast<size_t>(tilesY);
+    static thread_local std::vector<float> grid;
+    grid.assign(nTiles, 0.0f);
+
+    const float wE = Settings::Ai::wE;
+    const float wC = Settings::Ai::wC;
+
+    float currentMax = 1e-6f;
+    for (int i = 0; i < (int)nTiles; ++i) {
+        const float v = wE * entropy[(size_t)i] + wC * contrast[(size_t)i];
+        grid[(size_t)i] = v;
+        if (v > currentMax) currentMax = v;
+    }
+
+    const float emaDecay = (sExposureEMA <= 0.0f)
+                         ? currentMax
+                         : std::max(currentMax, kExposureDecay * sExposureEMA);
+    sExposureEMA = std::max(1e-6f, emaDecay);
+    for (size_t i = 0; i < nTiles; ++i) {
+        float v = grid[i] / sExposureEMA;
+        v = std::clamp(v + kValueFloor, 0.0f, 1.0f);
+        grid[i] = v;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, sHeatTex);
+
+    // --- Upload mit sicherem Alignment (GL_R16F -> 1 byte row alignment) -----
     GLint prevUnpack = 0;
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevUnpack);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -179,189 +336,182 @@ static void ensureTextureAndUpload(const float* data, int tilesX, int tilesY)
     if (sTexW != tilesX || sTexH != tilesY) {
         sTexW = tilesX;
         sTexH = tilesY;
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, sTexW, sTexH, 0, GL_RED, GL_FLOAT, data);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, sTexW, sTexH, 0,
+                     GL_RED, GL_FLOAT, grid.data());
     } else {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, sTexW, sTexH, GL_RED, GL_FLOAT, data);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, sTexW, sTexH,
+                        GL_RED, GL_FLOAT, grid.data());
     }
 
+    // Alignment zurücksetzen
     glPixelStorei(GL_UNPACK_ALIGNMENT, prevUnpack);
-}
 
-} // anon namespace
-
-namespace asm_hud_overlay {
-
-void draw(const RendererState& state, const FrameContext& ctx)
-{
-    // Quick-Win 1: Master-Switch aus Settings respektieren (kein Aufwand, kein Grid/GL)
-    if (!Settings::asmHudOverlayEnabled) {
-        return;
-    }
-
-    const int tilesX = state.asmHudTilesX;
-    const int tilesY = state.asmHudTilesY;
-    if (tilesX <= 0 || tilesY <= 0) return;
-
-    const size_t needed = static_cast<size_t>(tilesX) * static_cast<size_t>(tilesY);
-    if (state.asmHudGrid.size() < needed) {
-        if constexpr (Settings::debugLogging) {
-            LUCHS_LOG_HOST("[ASM/HUD] grid size mismatch: have=%zu need=%zu",
-                           state.asmHudGrid.size(), needed);
-        }
-        return;
-    }
-
-    if (ctx.width <= 0 || ctx.height <= 0) return;
-
-    // Programm initialisieren
-    if (!sAsmHudProg) {
-        sAsmHudProg = makeProgram();
-        if (!sAsmHudProg) {
-            if constexpr (Settings::debugLogging) {
-                LUCHS_LOG_HOST("[ASM/HUD] program==0, skip draw");
-            }
-            return;
-        }
-        uViewportPx = glGetUniformLocation(sAsmHudProg, "uViewportPx");
-        uGridTex    = glGetUniformLocation(sAsmHudProg, "uGrid");
-        uAlpha      = glGetUniformLocation(sAsmHudProg, "uAlpha");
-    }
-
-    ensureVAO();
-
-    // Grid normalisieren (0..1) fuer Textur-Upload
-    // Quick-Win 2: thread_local Buffer statt per-Frame-Allokation
-    static thread_local std::vector<float> norm;
-    norm.resize(needed);
-
-    float vMin = state.asmHudGrid[0];
-    float vMax = state.asmHudGrid[0];
-    for (size_t i = 1; i < needed; ++i) {
-        const float v = state.asmHudGrid[i];
-        if (v < vMin) vMin = v;
-        if (v > vMax) vMax = v;
-    }
-
-    const float range = (vMax > vMin) ? (vMax - vMin) : 1.0f;
-    for (size_t i = 0; i < needed; ++i) {
-        float v = (state.asmHudGrid[i] - vMin) / range;
-        if (v < 0.0f) v = 0.0f;
-        if (v > 1.0f) v = 1.0f;
-        norm[i] = v;
-    }
-
-    // Quick-Win 3: Performance-Log cadencen mit PerfLog::everyN
-    if constexpr (Settings::performanceLogging) {
-        static int sLogCounter = 0;
-        ++sLogCounter;
-        if ((sLogCounter % Settings::PerfLog::everyN) == 0) {
-            LUCHS_LOG_HOST("[ASM/HUD] tiles=%dx%d N=%zu vMin=%.4f vMax=%.4f",
-                           tilesX, tilesY, needed, vMin, vMax);
-        }
-    }
-
-    ensureTextureAndUpload(norm.data(), tilesX, tilesY);
-
-    // Panel-Geometrie: rechts unten, Groesse in NDC aus Settings („Panda-Panels“),
-    // Inhalt aspect-korrigiert ins Panel eingepasst.
-    const int viewW = ctx.width;
-    const int viewH = ctx.height;
-
+    // ------------------------ Layout: Panda-Panels ---------------------------
+    // Panelgröße in NDC aus Settings, identisch zum ASM-HUD.
     const float panelWidthNdc  = Settings::hudPanelWidthNdc;
     const float panelHeightNdc = Settings::hudPanelHeightNdc;
 
-    const int panelW = static_cast<int>(std::lround(0.5f * panelWidthNdc  * static_cast<float>(viewW)));
-    const int panelH = static_cast<int>(std::lround(0.5f * panelHeightNdc * static_cast<float>(viewH)));
+    const int panelW = snapToPixel(0.5f * panelWidthNdc  * static_cast<float>(width));
+    const int panelH = snapToPixel(0.5f * panelHeightNdc * static_cast<float>(height));
 
-    constexpr int marginPx = 12;
-
-    const int panelX1 = viewW - marginPx;
+    const int panelX1 = width - snapToPixel(kUI_MARGIN);
     const int panelX0 = panelX1 - panelW;
-    const int panelY1 = viewH - marginPx;
-    const int panelY0 = panelY1 - panelH;
+    const int panelY0 = snapToPixel(kUI_MARGIN);      // oben rechts
+    const int panelY1 = panelY0 + panelH;
 
-    const int baseContentW = std::max(1, panelW);
-    const int baseContentH = std::max(1, panelH);
-
-    const float aspect = (tilesY > 0)
-        ? static_cast<float>(tilesX) / static_cast<float>(tilesY)
-        : 1.0f;
+    // Inhalt mit Padding und Aspect-Fit ins Panel einpassen
+    const int padPx        = snapToPixel(kUI_PADDING * 0.40f);
+    const int baseContentW = std::max(1, panelW - 2 * padPx);
+    const int baseContentH = std::max(1, panelH - 2 * padPx);
+    const float aspect     = (tilesY > 0)
+                           ? (float)tilesX / (float)tilesY
+                           : 1.0f;
 
     int contentWPx = baseContentW;
     int contentHPx = baseContentH;
 
     if (aspect >= 1.0f) {
         contentWPx = baseContentW;
-        contentHPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentW) / static_cast<double>(aspect))));
+        contentHPx = std::max(1, (int)std::lround((double)baseContentW / (double)aspect));
         if (contentHPx > baseContentH) {
             contentHPx = baseContentH;
-            contentWPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentH) * static_cast<double>(aspect))));
+            contentWPx = std::max(1, (int)std::lround((double)baseContentH * (double)aspect));
         }
     } else {
         contentHPx = baseContentH;
-        contentWPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentH) * static_cast<double>(aspect))));
+        contentWPx = std::max(1, (int)std::lround((double)baseContentH * (double)aspect));
         if (contentWPx > baseContentW) {
             contentWPx = baseContentW;
-            contentHPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentW) / static_cast<double>(aspect))));
+            contentHPx = std::max(1, (int)std::lround((double)baseContentW / (double)aspect));
         }
     }
 
-    const float x0 = static_cast<float>(panelX0 + (baseContentW - contentWPx) / 2);
-    const float y0 = static_cast<float>(panelY0 + (baseContentH - contentHPx) / 2);
-    const float x1 = x0 + static_cast<float>(contentWPx);
-    const float y1 = y0 + static_cast<float>(contentHPx);
+    const int contentX0 = panelX0 + padPx + (baseContentW - contentWPx) / 2;
+    const int contentY0 = panelY0 + padPx + (baseContentH - contentHPx) / 2;
+    const int contentX1 = contentX0 + contentWPx;
+    const int contentY1 = contentY0 + contentHPx;
 
-    // Vertex-Daten: 2 Triangles, PositionPx + TexCoord
-    const float quad[6 * 4] = {
-        //  pos.x, pos.y,   u, v
-        x0, y0,  0.0f, 0.0f,
-        x1, y0,  1.0f, 0.0f,
-        x1, y1,  1.0f, 1.0f,
+    const float sPanelScale = std::clamp(std::min(panelW, panelH) / 160.0f,
+                                         0.60f, 1.0f);
 
-        x0, y0,  0.0f, 0.0f,
-        x1, y1,  1.0f, 1.0f,
-        x0, y1,  0.0f, 1.0f,
-    };
-
-    // GL-State sichern (minimal)
-    GLint prevVAO = 0, prevBuf = 0, prevProg = 0;
-    GLboolean wasBlend = GL_FALSE;
-    GLint srcRGB = 0, dstRGB = 0, srcA = 0, dstA = 0;
-
+    // Save GL blend/program/vao state (kurz)
+    GLint     prevVAO=0, prevBuf=0, prevProg=0;
+    GLint     srcRGB=0, dstRGB=0, srcA=0, dstA=0;
+    GLboolean wasBlend=GL_FALSE, wasDepth=GL_FALSE;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevBuf);
     glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
     glGetBooleanv(GL_BLEND, &wasBlend);
+    glGetBooleanv(GL_DEPTH_TEST, &wasDepth);
     glGetIntegerv(GL_BLEND_SRC_RGB,   &srcRGB);
     glGetIntegerv(GL_BLEND_DST_RGB,   &dstRGB);
     glGetIntegerv(GL_BLEND_SRC_ALPHA, &srcA);
     glGetIntegerv(GL_BLEND_DST_ALPHA, &dstA);
 
-    // Draw
-    glUseProgram(sAsmHudProg);
-    if (uViewportPx >= 0) glUniform2f(uViewportPx, static_cast<float>(viewW), static_cast<float>(viewH));
-    if (uAlpha >= 0)      glUniform1f(uAlpha, 0.95f);
+    // ------------------------------ Panel -----------------------------------
+    {
+        const float base[3] = {0.10f, 0.10f, 0.10f};
+        const float quad[30] = {
+            (float)panelX0, (float)panelY0, base[0], base[1], base[2],
+            (float)panelX1, (float)panelY0, base[0], base[1], base[2],
+            (float)panelX1, (float)panelY1, base[0], base[1], base[2],
+            (float)panelX0, (float)panelY0, base[0], base[1], base[2],
+            (float)panelX1, (float)panelY1, base[0], base[1], base[2],
+            (float)panelX0, (float)panelY1, base[0], base[1], base[2],
+        };
+        const float panelAlpha = std::min(1.0f, kPANEL_ALPHA * 0.86f);
+        const float radiusPx   = kUI_RADIUS * (0.85f * sPanelScale);
+        const float borderPx   = kUI_BORDER * (0.15f * sPanelScale); // dünner Rahmen
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, sAsmHudTex);
-    if (uGridTex >= 0) glUniform1i(uGridTex, 0);
+        glUseProgram(sPanelProg);
+        if (uViewportPx  >= 0) glUniform2f(uViewportPx,  (float)width, (float)height);
+        if (uPanelRectPx >= 0) glUniform4f(uPanelRectPx, (float)panelX0, (float)panelY0,
+                                           (float)panelX1, (float)panelY1);
+        if (uRadiusPx    >= 0) glUniform1f(uRadiusPx, radiusPx);
+        if (uAlpha       >= 0) glUniform1f(uAlpha, panelAlpha);
+        if (uBorderPx    >= 0) glUniform1f(uBorderPx, borderPx);
 
-    glBindVertexArray(sAsmHudVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, sAsmHudVBO);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(sizeof(quad)), nullptr, GL_DYNAMIC_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(sizeof(quad)), quad);
+        glBindVertexArray(sPanelVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, sPanelVBO);
+        glBufferData   (GL_ARRAY_BUFFER, (GLsizeiptr)sizeof(quad), nullptr, GL_DYNAMIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)sizeof(quad), quad);
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                            GL_ONE,       GL_ONE_MINUS_SRC_ALPHA);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
 
-    glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    // ------------------------ Heat + Z0/AI marker ---------------------------
+    {
+        const float quad[12] = {
+            (float)contentX0, (float)contentY0,
+            (float)contentX1, (float)contentY0,
+            (float)contentX1, (float)contentY1,
+            (float)contentX0, (float)contentY0,
+            (float)contentX1, (float)contentY1,
+            (float)contentX0, (float)contentY1,
+        };
 
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+        glUseProgram(sHeatProg);
+        if (uHViewportPx    >= 0) glUniform2f(uHViewportPx,    (float)width, (float)height);
+        if (uHContentRectPx >= 0) glUniform4f(uHContentRectPx, (float)contentX0, (float)contentY0,
+                                              (float)contentX1, (float)contentY1);
 
-    // GL-State restaurieren
+        const float alphaBase = std::min(1.0f, kPANEL_ALPHA * 1.10f);
+        if (uHAlphaBase >= 0) glUniform1f(uHAlphaBase, alphaBase);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, sHeatTex);
+        if (uHGridTex >= 0) glUniform1i(uHGridTex, 0);
+
+        // Marker-Quelle: zuerst AI-Overlay-Position, sonst Interest-Fallback
+        bool  markEnabled = false;
+        float ndcX        = 0.0f;
+        float ndcY        = 0.0f;
+        if (AOP_Telemetry::g_ai_ov_valid) {
+            ndcX        = AOP_Telemetry::g_ai_ndc_ovl_x;
+            ndcY        = AOP_Telemetry::g_ai_ndc_ovl_y;
+            markEnabled = true;
+        } else if (ctx.interest.valid) {
+            ndcX        = (float)ctx.interest.ndcX;
+            ndcY        = (float)ctx.interest.ndcY;
+            markEnabled = true;
+        }
+
+        const float centerPxX_panel = contentX0
+                                    + (0.5f * (ndcX + 1.0f)) * (contentX1 - contentX0);
+        const float centerPxY_panel = contentY0
+                                    + (0.5f * (1.0f - ndcY)) * (contentY1 - contentY0);
+        const float ringRpx_panel   =
+            0.5f * std::min(contentX1 - contentX0, contentY1 - contentY0) * 0.35f;
+
+        if (uHMarkEnable >= 0) glUniform1f(uHMarkEnable, markEnabled ? 1.0f : 0.0f);
+        if (markEnabled) {
+            if (uHMarkCenterPx    >= 0) glUniform2f(uHMarkCenterPx, centerPxX_panel, centerPxY_panel);
+            if (uHMarkRadiusPx    >= 0) glUniform1f(uHMarkRadiusPx, ringRpx_panel);
+            if (uHMarkAlpha       >= 0) glUniform1f(uHMarkAlpha,    0.95f);
+            if (uHMarkThicknessPx >= 0) glUniform1f(uHMarkThicknessPx,
+                                                    0.75f * sPanelScale); // dünner Ring
+        }
+
+        glBindVertexArray(sHeatVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, sHeatVBO);
+        glBufferData   (GL_ARRAY_BUFFER, (GLsizeiptr)sizeof(quad), nullptr, GL_DYNAMIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)sizeof(quad), quad);
+        glEnable(GL_BLEND);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                            GL_ONE,       GL_ONE_MINUS_SRC_ALPHA);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+
+    // Restore GL state
     glBlendFuncSeparate(srcRGB, dstRGB, srcA, dstA);
     if (!wasBlend) glDisable(GL_BLEND);
+    if (wasDepth)  glEnable(GL_DEPTH_TEST);
     glBindBuffer(GL_ARRAY_BUFFER, prevBuf);
-    glBindVertexArray(static_cast<GLuint>(prevVAO));
-    glUseProgram(static_cast<GLuint>(prevProg));
+    glBindVertexArray((GLuint)prevVAO);
+    glUseProgram((GLuint)prevProg);
 }
 
-} // namespace asm_hud_overlay
+} // namespace HeatmapOverlay
