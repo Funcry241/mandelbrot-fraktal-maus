@@ -1,7 +1,7 @@
 ///// Otter: ASM HUD overlay – draws tiny tilesX×tilesY Mandelbrot grid (ASM-based) as mini-panel, Panda-Größe wie Heatmap.
 ///// Schneefuchs: Eigenes GL-Programm + Texture; keine ASM-/CUDA-Aufrufe; State-Checks robust.
-/// //// Maus: Rechts unten; einfache Warm-Colormap; ASCII-only Logs; no-op wenn Grid fehlt.
-/// //// Datei: src/asm/asm_hud_overlay.cpp
+///// Maus: Rechts unten; einfache Warm-Colormap; ASCII-only Logs; no-op wenn Grid fehlt.
+///// Datei: src/asm/asm_hud_overlay.cpp
 
 #include "pch.hpp"
 #include "asm_hud_overlay.hpp"
@@ -193,6 +193,11 @@ namespace asm_hud_overlay {
 
 void draw(const RendererState& state, const FrameContext& ctx)
 {
+    // Quick-Win 1: Master-Switch aus Settings respektieren (kein Aufwand, kein Grid/GL)
+    if (!Settings::asmHudOverlayEnabled) {
+        return;
+    }
+
     const int tilesX = state.asmHudTilesX;
     const int tilesY = state.asmHudTilesY;
     if (tilesX <= 0 || tilesY <= 0) return;
@@ -225,7 +230,8 @@ void draw(const RendererState& state, const FrameContext& ctx)
     ensureVAO();
 
     // Grid normalisieren (0..1) fuer Textur-Upload
-    std::vector<float> norm;
+    // Quick-Win 2: thread_local Buffer statt per-Frame-Allokation
+    static thread_local std::vector<float> norm;
     norm.resize(needed);
 
     float vMin = state.asmHudGrid[0];
@@ -244,9 +250,14 @@ void draw(const RendererState& state, const FrameContext& ctx)
         norm[i] = v;
     }
 
+    // Quick-Win 3: Performance-Log cadencen mit PerfLog::everyN
     if constexpr (Settings::performanceLogging) {
-        LUCHS_LOG_HOST("[ASM/HUD] tiles=%dx%d N=%zu vMin=%.4f vMax=%.4f",
-                       tilesX, tilesY, needed, vMin, vMax);
+        static int sLogCounter = 0;
+        ++sLogCounter;
+        if ((sLogCounter % Settings::PerfLog::everyN) == 0) {
+            LUCHS_LOG_HOST("[ASM/HUD] tiles=%dx%d N=%zu vMin=%.4f vMax=%.4f",
+                           tilesX, tilesY, needed, vMin, vMax);
+        }
     }
 
     ensureTextureAndUpload(norm.data(), tilesX, tilesY);
