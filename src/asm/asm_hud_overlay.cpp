@@ -290,4 +290,76 @@ void draw(const RendererState& state, const FrameContext& ctx)
 
     if (aspect >= 1.0f) {
         contentWPx = baseContentW;
-        contentHPx = std::max(1, static_cast<int>(std::l_
+        contentHPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentW) / static_cast<double>(aspect))));
+        if (contentHPx > baseContentH) {
+            contentHPx = baseContentH;
+            contentWPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentH) * static_cast<double>(aspect))));
+        }
+    } else {
+        contentHPx = baseContentH;
+        contentWPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentH) * static_cast<double>(aspect))));
+        if (contentWPx > baseContentW) {
+            contentWPx = baseContentW;
+            contentHPx = std::max(1, static_cast<int>(std::lround(static_cast<double>(baseContentW) / static_cast<double>(aspect))));
+        }
+    }
+
+    const float x0 = static_cast<float>(panelX0 + (baseContentW - contentWPx) / 2);
+    const float y0 = static_cast<float>(panelY0 + (baseContentH - contentHPx) / 2);
+    const float x1 = x0 + static_cast<float>(contentWPx);
+    const float y1 = y0 + static_cast<float>(contentHPx);
+
+    // Vertex-Daten: 2 Triangles, PositionPx + TexCoord
+    const float quad[6 * 4] = {
+        //  pos.x, pos.y,   u, v
+        x0, y0,  0.0f, 0.0f,
+        x1, y0,  1.0f, 0.0f,
+        x1, y1,  1.0f, 1.0f,
+
+        x0, y0,  0.0f, 0.0f,
+        x1, y1,  1.0f, 1.0f,
+        x0, y1,  0.0f, 1.0f,
+    };
+
+    // GL-State sichern (minimal)
+    GLint prevVAO = 0, prevBuf = 0, prevProg = 0;
+    GLboolean wasBlend = GL_FALSE;
+    GLint srcRGB = 0, dstRGB = 0, srcA = 0, dstA = 0;
+
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevBuf);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
+    glGetBooleanv(GL_BLEND, &wasBlend);
+    glGetIntegerv(GL_BLEND_SRC_RGB,   &srcRGB);
+    glGetIntegerv(GL_BLEND_DST_RGB,   &dstRGB);
+    glGetIntegerv(GL_BLEND_SRC_ALPHA, &srcA);
+    glGetIntegerv(GL_BLEND_DST_ALPHA, &dstA);
+
+    // Draw
+    glUseProgram(sAsmHudProg);
+    if (uViewportPx >= 0) glUniform2f(uViewportPx, static_cast<float>(viewW), static_cast<float>(viewH));
+    if (uAlpha      >= 0) glUniform1f(uAlpha, 0.95f);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, sAsmHudTex);
+    if (uGridTex >= 0) glUniform1i(uGridTex, 0);
+
+    glBindVertexArray(sAsmHudVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, sAsmHudVBO);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(sizeof(quad)), nullptr, GL_DYNAMIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(sizeof(quad)), quad);
+
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    // GL-State restaurieren
+    glBlendFuncSeparate(srcRGB, dstRGB, srcA, dstA);
+    if (!wasBlend) glDisable(GL_BLEND);
+    glBindBuffer(GL_ARRAY_BUFFER, prevBuf);
+    glBindVertexArray(static_cast<GLuint>(prevVAO));
+    glUseProgram(static_cast<GLuint>(prevProg));
+}
+
+} // namespace asm_hud_overlay
