@@ -1,6 +1,6 @@
 ///// Otter: ASM HUD panel – bottom-right ASM mini-fractal; grayscale heat with soft gold.
-///// Schneefuchs: Eigenes GL-Panel (VAO/VBO/EBO/Prog/Tex); keine Nebenwirkungen auf CUDA/Heatmap.
-///// Maus: Data: RendererState::asmHudGrid/TilesX/TilesY; NDC aus Viewport; ASCII-only, kein Logging-Zwang.
+/// /// Schneefuchs: Eigenes GL-Panel (VAO/VBO/EBO/Prog/Tex); keine Nebenwirkungen auf CUDA/Heatmap.
+/// /// Maus: Data: RendererState::asmHudGrid/TilesX/TilesY; NDC aus Viewport; ASCII-only, kein Logging-Zwang.
 ///// Datei: src/asm/asm_hud_panel.cpp
 #include "pch.hpp"
 
@@ -33,12 +33,13 @@ namespace
     static GLint sLocValueScale = -1;
     static GLint sLocValueBias  = -1;
     static GLint sLocSampler    = -1;
+    static GLint sLocTime       = -1;
 
     // Aktuelle Texturgröße (Tiles)
     static int sTexWidth = 0;
     static int sTexHeight = 0;
 
-    // GLSL: einfacher Panel-Shader mit Grid-Sampling
+    // GLSL: Panel-Shader mit Grid-Sampling, Glow und leichter Animation
     static const char* kAsmHudVS = R"GLSL(
         #version 430 core
         layout(location = 0) in vec2 aLocalPos; // (0..1, 0..1) Panelraum
@@ -75,6 +76,33 @@ namespace
         uniform vec2  uGridSize;   // tilesX, tilesY
         uniform float uValueScale; // 1 / (max - min) oder 1
         uniform float uValueBias;  // -min * scale, oder 0
+        uniform float uTime;       // Sekunden, z.B. glfwGetTime()
+
+        // Mehrstufige Farbpalette: Tiefblau → Cyan → Gold → Orange
+        vec3 asmPalette(float t)
+        {
+            float x = clamp(t, 0.0, 1.0);
+            vec3 c0 = vec3(0.02, 0.05, 0.15);
+            vec3 c1 = vec3(0.00, 0.70, 1.00);
+            vec3 c2 = vec3(0.98, 0.86, 0.35);
+            vec3 c3 = vec3(1.00, 0.45, 0.20);
+
+            if (x < 0.40)
+            {
+                float k = x / 0.40;
+                return mix(c0, c1, k);
+            }
+            else if (x < 0.80)
+            {
+                float k = (x - 0.40) / 0.40;
+                return mix(c1, c2, k);
+            }
+            else
+            {
+                float k = (x - 0.80) / 0.20;
+                return mix(c2, c3, clamp(k, 0.0, 1.0));
+            }
+        }
 
         void main()
         {
@@ -87,15 +115,62 @@ namespace
             float v = raw * uValueScale + uValueBias;
             v = clamp(v, 0.0, 1.0);
 
+            // kleine Animationskomponenten
+            vec2 center = vec2(0.5, 0.5);
+            float dist = length(vUV - center);
+            float centerWeight = clamp(1.0 - dist * 1.4, 0.0, 1.0);
+
+            // "Breathing" basierend auf Distanz zum Zentrum
+            float pulse = 0.06 * (0.5 + 0.5 * sin(uTime * 2.1 + dist * 8.0));
+
+            // feine, hochfrequente Schimmerstruktur
+            float shimmer = 0.04 * sin(uTime * 7.5 + vUV.x * 40.0 + vUV.y * 23.0);
+
+            float vAnimated = clamp(v + pulse * centerWeight + shimmer, 0.0, 1.0);
+
             // leichte Gamma-Korrektur
-            v = sqrt(v);
+            float gamma = 0.75;
+            float vGamma = pow(vAnimated, gamma);
 
-            // einfache Blau-Gold-Farbskala
-            vec3 colLow  = vec3(0.0, 0.05, 0.20);
-            vec3 colHigh = vec3(1.0, 0.85, 0.40);
-            vec3 col = mix(colLow, colHigh, v);
+            // Glasiger Panel-Hintergrund mit vertikalem Verlauf
+            float vertical = vUV.y;
+            vec3 backDark  = vec3(0.02, 0.04, 0.08);
+            vec3 backLight = vec3(0.06, 0.10, 0.16);
+            vec3 background = mix(backDark, backLight, vertical);
 
-            float alpha = 0.90;
+            // weiche Vignette
+            float vignette = smoothstep(0.95, 0.35, dist);
+
+            // leichtes, langsames "Panel-Breathing"
+            float panelPulse = 0.04 * sin(uTime * 0.7);
+            background *= (1.0 + panelPulse);
+
+            // Hauptfarbe aus Palette
+            vec3 baseCol = asmPalette(vGamma);
+
+            // Mischung aus Hintergrund und Hauptfarbe, stärker zur Mitte/Vignette
+            float mixFactor = vGamma * (0.55 + 0.45 * vignette);
+            vec3 col = mix(background, baseCol, mixFactor);
+
+            // Glow-Halo für hohe Werte nahe der Panel-Mitte
+            float glowStrength = smoothstep(0.65, 1.0, vGamma);
+            float glowRadius = smoothstep(0.55, 0.20, dist);
+            float glow = glowStrength * glowRadius;
+            vec3 glowCol = vec3(1.10, 0.95, 0.60);
+
+            col += glow * glowCol;
+
+            // leichte Scanline, die von rechts nach links wandert
+            float scanPos = fract(uTime * 0.12);
+            float scanWidth = 0.08;
+            float scanDist = abs(vUV.x - (1.0 - scanPos));
+            float scan = smoothstep(scanWidth, 0.0, scanDist);
+            vec3 scanCol = vec3(0.20, 0.70, 1.00);
+            col += 0.10 * scan * scanCol;
+
+            float alphaBase = 0.82;
+            float alpha = alphaBase + 0.15 * vGamma;
+
             FragColor = vec4(col, alpha);
         }
     )GLSL";
@@ -115,6 +190,7 @@ namespace
         sLocValueScale = glGetUniformLocation(sProg, "uValueScale");
         sLocValueBias  = glGetUniformLocation(sProg, "uValueBias");
         sLocSampler    = glGetUniformLocation(sProg, "uGridTex");
+        sLocTime       = glGetUniformLocation(sProg, "uTime");
 
         return true;
     }
@@ -357,6 +433,13 @@ void draw(const RendererState& state, int viewportWidth, int viewportHeight)
         glUniform1f(sLocValueBias, bias);
     if (sLocSampler >= 0)
         glUniform1i(sLocSampler, 0);
+
+    // Zeit für Animation (über GLFW, via pch.hpp eingebunden)
+    if (sLocTime >= 0)
+    {
+        float t = static_cast<float>(glfwGetTime());
+        glUniform1f(sLocTime, t);
+    }
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, sTex);
