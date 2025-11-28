@@ -66,7 +66,7 @@ static __device__ __forceinline__ bool in_cardioid_or_bulb(double2 c) {
 }
 
 // ------------------------------ classic kernel --------------------------------
-__global__ __launch_bounds__(BX * BY, 2) // ggf. 3 testen, wenn Reg-Budget es zulässt
+__global__ __launch_bounds__(BX * BY, 3) // SM80–SM90: Ziel 3 Blöcke/SM für bessere Occupancy
 void mandelbrotKernel_classic(
     uint16_t* __restrict__ d_it,
     int w, int h,
@@ -112,7 +112,7 @@ void mandelbrotKernel_classic(
 }
 
 // ------------------------------- deep kernel ----------------------------------
-__global__ __launch_bounds__(BX * BY, 2) // ggf. 3 testen, wenn Reg-Budget es zulässt
+__global__ __launch_bounds__(BX * BY, 3) // SM80–SM90: Ziel 3 Blöcke/SM für bessere Occupancy
 void mandelbrotKernel_capybara_deep(
     uint16_t* __restrict__ d_it,
     int w, int h,
