@@ -420,188 +420,179 @@ namespace {
         }
         return t;
     }
-} // anon ns
 
-// ============================================================================
+    // -------------------------- Neue Orchestrierungs-Helfer ----------------------
 
-namespace FramePipeline {
+    static void prepareFrameContextAndOrbit(RendererState& state) {
+        // Interest zu Framebeginn invalidieren - wird vom HeatmapOverlay bei Bedarf gesetzt
+        state.interest.valid = false;
 
-void execute(RendererState& state) {
-    const auto tFrame0 = Clock::now();
+        // ---- Autoritative Double-Werte aus dem RendererState ----
+        g_ctx.width         = state.width;
+        g_ctx.height        = state.height;
+        g_ctx.maxIterations = state.maxIterations;
+        g_ctx.zoomD         = state.zoom;
+        g_ctx.offsetD       = { state.center.x, state.center.y };
+        g_ctx.newOffsetD    = g_ctx.offsetD;
+        g_ctx.syncFloatFromDouble();
 
-    beginFrameLocal();
+        // Compute-Raster (Kernel) - nur für Logs/Overlays relevant
+        g_ctx.tileSize = chooseComputeTileSize(g_ctx.zoom);
 
-    // Interest zu Framebeginn invalidieren - wird vom HeatmapOverlay bei Bedarf gesetzt
-    state.interest.valid = false;
-
-    // ---- Autoritative Double-Werte aus dem RendererState ----
-    g_ctx.width         = state.width;
-    g_ctx.height        = state.height;
-    g_ctx.maxIterations = state.maxIterations;
-    g_ctx.zoomD         = state.zoom;
-    g_ctx.offsetD       = { state.center.x, state.center.y };
-    g_ctx.newOffsetD    = g_ctx.offsetD;
-    g_ctx.syncFloatFromDouble();
-
-    // Compute-Raster (Kernel) - nur für Logs/Overlays relevant
-    g_ctx.tileSize = chooseComputeTileSize(g_ctx.zoom);
-
-    if constexpr (Settings::Kolibri::gridScreenConstant) {
-        static int s_prevOverlayPx = -1;
-        const int overlayPx = Settings::Kolibri::desiredTilePx;
-        if constexpr (Settings::performanceLogging) {
-            if (s_prevOverlayPx != overlayPx) {
-                const int px = std::max(1, overlayPx);
-                const int ts = std::max(1, g_ctx.tileSize);
-
-                const int ovTx = (g_ctx.width  + px - 1) / px;
-                const int ovTy = (g_ctx.height + px - 1) / px;
-                const int cTx  = (g_ctx.width  + ts - 1) / ts;
-                const int cTy  = (g_ctx.height + ts - 1) / ts;
-
-                LUCHS_LOG_HOST("[GRID] overlayPx=%d overlay=%dx%d computePx=%d tiles=%dx%d res=%dx%d",
-                               px, ovTx, ovTy, ts, cTx, cTy, g_ctx.width, g_ctx.height);
-                s_prevOverlayPx = overlayPx;
-            }
-        }
-    }
-
-    // ---- Replikatoren: Orbit-Gate vor Compute ----
-    Repl::Orbit::maybe_prepare_orbit(g_ctx, state);
-
-    // ---- Render (CUDA) ----
-    computeCudaFrame(g_ctx, state);
-
-    // ---- Analysis-Metrics (Cadence-Guard) ----
-    ensureAnalysisMetrics(g_ctx, state);
-
-    // ---- ASM HUD probe grid (eigenes ASM-Raster, entkoppelt von statsPx) ---
-    if constexpr (Settings::asmHudOverlayEnabled) {
-        const int tilePx = std::max(1, Settings::AsmHud::desiredTilePx);
-        const int tilesX = (g_ctx.width  + tilePx - 1) / tilePx;
-        const int tilesY = (g_ctx.height + tilePx - 1) / tilePx;
-
-        if (tilesX > 0 && tilesY > 0 && state.maxIterations > 0) {
-            bool recompute = true;
-
-            // Perf-Gate: wenn der Mandelbrot-Kernel "langsam" ist und bereits ein
-            // gültiges Grid vorliegt, ASM-HUD-Grid nur jede 2–3 Frames neu berechnen.
+        if constexpr (Settings::Kolibri::gridScreenConstant) {
+            static int s_prevOverlayPx = -1;
+            const int overlayPx = Settings::Kolibri::desiredTilePx;
             if constexpr (Settings::performanceLogging) {
-                const bool slowNow  = (g_mandMs > ASM_HUD_SLOW_THRESH_MS);
-                const bool haveGrid = !state.asmHudGrid.empty();
+                if (s_prevOverlayPx != overlayPx) {
+                    const int px = std::max(1, overlayPx);
+                    const int ts = std::max(1, g_ctx.tileSize);
 
-                if (slowNow && haveGrid) {
-                    if (g_asmHudSkipCount < ASM_HUD_SKIP_MAX) {
-                        ++g_asmHudSkipCount;
-                        recompute = false;
-                        if constexpr (Settings::debugLogging) {
-                            LUCHS_LOG_HOST("[ASM][HUD] skip recompute frame=%d mand=%.2fms skipCount=%d",
-                                           g_frame, g_mandMs, g_asmHudSkipCount);
-                        }
-                    } else {
-                        // Nach ASM_HUD_SKIP_MAX Skips wieder neu berechnen
-                        g_asmHudSkipCount = 0;
-                    }
-                } else {
-                    // Kein Slow-Frame oder kein gültiges Grid → normal rechnen.
-                    g_asmHudSkipCount = 0;
+                    const int ovTx = (g_ctx.width  + px - 1) / px;
+                    const int ovTy = (g_ctx.height + px - 1) / px;
+                    const int cTx  = (g_ctx.width  + ts - 1) / ts;
+                    const int cTy  = (g_ctx.height + ts - 1) / ts;
+
+                    LUCHS_LOG_HOST("[GRID] overlayPx=%d overlay=%dx%d computePx=%d tiles=%dx%d res=%dx%d",
+                                   px, ovTx, ovTy, ts, cTx, cTy, g_ctx.width, g_ctx.height);
+                    s_prevOverlayPx = overlayPx;
                 }
             }
+        }
 
-            if (recompute) {
-                state.asmHudTilesX = tilesX;
-                state.asmHudTilesY = tilesY;
-                state.asmHudGrid = asm_hud_probe::buildHudProbeGrid(
-                    state,
-                    g_ctx,
-                    tilesX,
-                    tilesY,
-                    state.maxIterations
-                );
-            }
-        } else {
+        // ---- Replikatoren: Orbit-Gate vor Compute ----
+        Repl::Orbit::maybe_prepare_orbit(g_ctx, state);
+    }
+
+    static void updateAsmHudGrid(RendererState& state) {
+        if constexpr (!Settings::asmHudOverlayEnabled) {
             state.asmHudTilesX = 0;
             state.asmHudTilesY = 0;
             state.asmHudGrid.clear();
             g_asmHudSkipCount = 0;
+            return;
         }
-    } else {
-        state.asmHudTilesX = 0;
-        state.asmHudTilesY = 0;
-        state.asmHudGrid.clear();
-        g_asmHudSkipCount = 0;
-    }
 
-    // ---- Replikatoren: Policy nach Metrics ----
-    if constexpr (Settings::Ai::enabled && Settings::Ai::aopEnabled) {
-        auto d = Repl::Policy::evaluate_tile_policy(g_ctx, state);
-        (void)d; // Entscheidungen folgen in Phase 2
-    }
+        const int tilePx = std::max(1, Settings::AsmHud::desiredTilePx);
+        const int tilesX = (g_ctx.width  + tilePx - 1) / tilePx;
+        const int tilesY = (g_ctx.height + tilePx - 1) / tilePx;
 
-    // ---- Stage 2: AUTO retarget (hart, mit Takt & Guards) -------------------
-    if constexpr (Settings::Ai::enabled) {
-        if constexpr (Settings::AiBandit::stage == 2) {
-            // Nur bei frischen Metrics und wenn Overlay/Policy gültig.
-            if (AOP_Telemetry::g_ai_ov_valid && g_metricsAge == 0 && !DachsHUD::help_enabled()) {
-                static int s_nextAllowFrame = 0; // Retarget-Takt (Hysterese)
-                if (g_frame >= s_nextAllowFrame) {
-                    const double ndcAx = static_cast<double>(AOP_Telemetry::g_ai_ndc_pol_x);
-                    const double ndcAy = static_cast<double>(AOP_Telemetry::g_ai_ndc_pol_y);
-                    // Clamp in [-1,1] zur Sicherheit.
-                    const auto clamp_ndc = [](double v) {
-                        return std::max(-1.0, std::min(1.0, v));
-                    };
-                    state.interest.ndcX = clamp_ndc(ndcAx);
-                    state.interest.ndcY = clamp_ndc(ndcAy);
-                    state.interest.valid = true;
-                    g_forceMetricsNext = true; // eager fresh metrics after retarget
+        if (tilesX <= 0 || tilesY <= 0 || state.maxIterations <= 0) {
+            state.asmHudTilesX = 0;
+            state.asmHudTilesY = 0;
+            state.asmHudGrid.clear();
+            g_asmHudSkipCount = 0;
+            return;
+        }
 
-                    s_nextAllowFrame = g_frame + std::max(1, Settings::AiBandit::retargetInterval);
+        bool recompute = true;
 
-                    if constexpr (Settings::performanceLogging) {
-                        LUCHS_LOG_HOST("[REPL/AUTO] retarget ndc=(%.3f,%.3f) next=%d",
-                                       (float)state.interest.ndcX, (float)state.interest.ndcY, s_nextAllowFrame);
+        // Perf-Gate: bei langsamen Mandelbrot-Kern Grid nur alle paar Frames neu
+        if constexpr (Settings::performanceLogging) {
+            const bool slowNow  = (g_mandMs > ASM_HUD_SLOW_THRESH_MS);
+            const bool haveGrid = !state.asmHudGrid.empty();
+
+            if (slowNow && haveGrid) {
+                if (g_asmHudSkipCount < ASM_HUD_SKIP_MAX) {
+                    ++g_asmHudSkipCount;
+                    recompute = false;
+                    if constexpr (Settings::debugLogging) {
+                        LUCHS_LOG_HOST("[ASM][HUD] skip recompute frame=%d mand=%.2fms skipCount=%d",
+                                       g_frame, g_mandMs, g_asmHudSkipCount);
                     }
                 } else {
-                    if constexpr (Settings::performanceLogging) {
-                        const int left = s_nextAllowFrame - g_frame;
-                        LUCHS_LOG_HOST("[REPL/AUTO] skip-lock framesLeft=%d", left);
+                    g_asmHudSkipCount = 0;
+                }
+            } else {
+                g_asmHudSkipCount = 0;
+            }
+        }
+
+        if (recompute) {
+            state.asmHudTilesX = tilesX;
+            state.asmHudTilesY = tilesY;
+            state.asmHudGrid = asm_hud_probe::buildHudProbeGrid(
+                state,
+                g_ctx,
+                tilesX,
+                tilesY,
+                state.maxIterations
+            );
+        }
+    }
+
+    static void runReplStages(RendererState& state) {
+        // ---- Replikatoren: Policy nach Metrics ----
+        if constexpr (Settings::Ai::enabled && Settings::Ai::aopEnabled) {
+            auto d = Repl::Policy::evaluate_tile_policy(g_ctx, state);
+            (void)d; // Entscheidungen folgen in Phase 2
+        }
+
+        // ---- Stage 2: AUTO retarget (hart, mit Takt & Guards) --------------
+        if constexpr (Settings::Ai::enabled) {
+            if constexpr (Settings::AiBandit::stage == 2) {
+                // Nur bei frischen Metrics und wenn Overlay/Policy gültig.
+                if (AOP_Telemetry::g_ai_ov_valid && g_metricsAge == 0 && !DachsHUD::help_enabled()) {
+                    static int s_nextAllowFrame = 0; // Retarget-Takt (Hysterese)
+                    if (g_frame >= s_nextAllowFrame) {
+                        const double ndcAx = static_cast<double>(AOP_Telemetry::g_ai_ndc_pol_x);
+                        const double ndcAy = static_cast<double>(AOP_Telemetry::g_ai_ndc_pol_y);
+                        // Clamp in [-1,1] zur Sicherheit.
+                        const auto clamp_ndc = [](double v) {
+                            return std::max(-1.0, std::min(1.0, v));
+                        };
+                        state.interest.ndcX = clamp_ndc(ndcAx);
+                        state.interest.ndcY = clamp_ndc(ndcAy);
+                        state.interest.valid = true;
+                        g_forceMetricsNext = true; // eager fresh metrics after retarget
+
+                        s_nextAllowFrame = g_frame + std::max(1, Settings::AiBandit::retargetInterval);
+
+                        if constexpr (Settings::performanceLogging) {
+                            LUCHS_LOG_HOST("[REPL/AUTO] retarget ndc=(%.3f,%.3f) next=%d",
+                                           (float)state.interest.ndcX, (float)state.interest.ndcY, s_nextAllowFrame);
+                        }
+                    } else {
+                        if constexpr (Settings::performanceLogging) {
+                            const int left = s_nextAllowFrame - g_frame;
+                            LUCHS_LOG_HOST("[REPL/AUTO] skip-lock framesLeft=%d", left);
+                        }
                     }
                 }
             }
         }
-    }
 
-    // ---- REPL/COUPLE Telemetrie (nur Log, keine Verhaltensänderung) --------
-    if (perfShouldLog(g_frame)) {
-        const int fresh = (g_metricsAge == 0) ? 1 : 0;
-        const int valid = (AOP_Telemetry::g_ai_ov_valid ? 1 : 0);
-        LUCHS_LOG_HOST(
-            "[REPL/COUPLE] d=%.3f ndc=(%.3f,%.3f) ov=(%.3f,%.3f) hmAge=%d fresh=%d valid=%d",
-            AOP_Telemetry::g_ai_last_delta,
-            AOP_Telemetry::g_ai_ndc_pol_x, AOP_Telemetry::g_ai_ndc_pol_y,
-            AOP_Telemetry::g_ai_ndc_ovl_x, AOP_Telemetry::g_ai_ndc_ovl_y,
-            g_metricsAge, fresh, valid
-        );
-    }
-
-    // ---- Overlays (nutzen die vorliegenden Metrics + ASM-Grid) ----
-    drawOverlays(state, g_ctx);
-
-    // ---- Axolotel Coupler -> Zoom (ein Pfad: dt-Scaling) -------------------
-    float E = AxolotelHUD::activityEnergy(); // 0..1 from live pulses
-    float dtScaled = g_ctx.deltaSeconds;
-    if (E > 0.0f) {
-        dtScaled = g_ctx.deltaSeconds * (1.0f + AXO_ZOOM_BOOST_PCT * std::clamp(E, 0.0f, 1.0f));
-        g_forceMetricsNext = true; // eager metrics next frame for snappy overlays
-        if constexpr (Settings::performanceLogging) {
-            const float pct = (dtScaled / std::max(1e-6f, g_ctx.deltaSeconds) - 1.0f) * 100.0f;
-            LUCHS_LOG_HOST("[AXO][COUPLER] E=%.3f dt=%.4f -> %.4f (+%.1f%%)", E, g_ctx.deltaSeconds, dtScaled, pct);
+        // ---- REPL/COUPLE Telemetrie (nur Log, keine Verhaltensänderung) ----
+        if (perfShouldLog(g_frame)) {
+            const int fresh = (g_metricsAge == 0) ? 1 : 0;
+            const int valid = (AOP_Telemetry::g_ai_ov_valid ? 1 : 0);
+            LUCHS_LOG_HOST(
+                "[REPL/COUPLE] d=%.3f ndc=(%.3f,%.3f) ov=(%.3f,%.3f) hmAge=%d fresh=%d valid=%d",
+                AOP_Telemetry::g_ai_last_delta,
+                AOP_Telemetry::g_ai_ndc_pol_x, AOP_Telemetry::g_ai_ndc_pol_y,
+                AOP_Telemetry::g_ai_ndc_ovl_x, AOP_Telemetry::g_ai_ndc_ovl_y,
+                g_metricsAge, fresh, valid
+            );
         }
     }
 
-    // ---- AI Soft-Coupling into interest (gentle NDC blend) -------------------
-    if constexpr (Settings::Ai::enabled) {
+    static float applyAxolotelCoupler() {
+        float E = AxolotelHUD::activityEnergy(); // 0..1 from live pulses
+        float dtScaled = g_ctx.deltaSeconds;
+        if (E > 0.0f) {
+            dtScaled = g_ctx.deltaSeconds * (1.0f + AXO_ZOOM_BOOST_PCT * std::clamp(E, 0.0f, 1.0f));
+            g_forceMetricsNext = true; // eager metrics next frame for snappy overlays
+            if constexpr (Settings::performanceLogging) {
+                const float pct = (dtScaled / std::max(1e-6f, g_ctx.deltaSeconds) - 1.0f) * 100.0f;
+                LUCHS_LOG_HOST("[AXO][COUPLER] E=%.3f dt=%.4f -> %.4f (+%.1f%%)", E, g_ctx.deltaSeconds, dtScaled, pct);
+            }
+        }
+        return dtScaled;
+    }
+
+    static void applyAiSoftCoupling(RendererState& state) {
+        // ---- AI Soft-Coupling into interest (gentle NDC blend) -------------
+        if constexpr (!Settings::Ai::enabled) return;
+
         if (Settings::Ai::coupleEnabled &&
             AOP_Telemetry::g_ai_ov_valid &&
             g_metricsAge == 0) // nur mit frischen Metrics koppeln
@@ -635,91 +626,133 @@ void execute(RendererState& state) {
         }
     }
 
-    // ---- Zoom/Pan Anwendung -------------------------------------------------
-    const bool paused = CudaInterop::getPauseZoom();
+    static void applyZoomAndPan(RendererState& state, float dtScaled) {
+        const bool paused = CudaInterop::getPauseZoom();
 
-    // Falls pausiert: Autopilot-Pan verhindern → Interest invalidieren.
-    if (paused) {
-        state.interest.valid = false;
-    }
-
-    // evaluateAndApply IMMER ausführen:
-    //  - bei Pause: Pilot-Override-Pan erlaubt (Interest invalid), Zoom wird nachher zurückgesetzt.
-    //  - sonst: normales Verhalten.
-    const double preZoom = (double)state.zoom;
-    ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, /*dtOverrideSeconds*/ dtScaled);
-
-    // Zoom in Pause einfrieren (Pan bleibt erhalten, s.o.)
-    if (paused) {
-        state.zoom = (float)preZoom;
-    }
-
-    // Spiegel zurück in den Context (für HUD/Nächsten Frame)
-    g_ctx.offsetD = { state.center.x, state.center.y };
-    g_ctx.zoomD   = state.zoom;
-    g_ctx.syncFloatFromDouble();
-
-    const auto tFrame1 = Clock::now();
-    g_totMs = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
-    state.lastTimings.frameTotalMs = g_totMs;
-
-    // HUD: FPS Meter füttern
-    FpsMeter::updateCoreMs(g_totMs);
-
-    // --- LANGE [PERF]-Zeile jetzt *doppelt* gegated: PerfLog-Gate UND Long-Gate
-    if (perfShouldLog(g_frame) && longPerfShouldLog(g_frame, g_ctx)) {
-        const long long tEpoch = epochMillisNow();
-        const int resX = g_ctx.width, resY = g_ctx.height;
-        const int it   = g_ctx.maxIterations;
-        const double fps    = (g_totMs > 1e-3) ? (1000.0 / g_totMs) : 0.0;
-        const double maxfps = (g_texMs > 1e-3) ? (1000.0 / g_texMs) : 0.0;
-
-        // --- NEW: stale-forward e0/c0 + age marker --------------------------
-        const float e0 = !state.h_entropy.empty()  ? state.h_entropy[0]
-                        : (g_haveLast ? g_lastE0 : 0.f);
-        const float c0 = !state.h_contrast.empty() ? state.h_contrast[0]
-                        : (g_haveLast ? g_lastC0 : 0.f);
-
-        const int   ringIx = state.pboIndex;
-        const unsigned pbo = state.currentPBO().id();
-        const unsigned tex = state.currentDrawTex().id();
-
-        const size_t hmN = state.h_entropy.size();
-        const int statsPx = std::max(1, g_ctx.statsTileSize);
-
-        // --- other-time (oth) schließt Budget zu tot (geclamped >= 0) ---
-        double oth = g_totMs - (g_mandMs + g_entMs + g_conMs + g_texMs + g_ovlMs);
-        if (oth < 0.0) {
-            if (oth > -0.01) oth = 0.0;
+        // Falls pausiert: Autopilot-Pan verhindern → Interest invalidieren.
+        if (paused) {
+            state.interest.valid = false;
         }
 
-        char line[740];
-        const int n = std::snprintf(
-            line, sizeof(line),
-            "[PERF] t=%lld frame=%d res=%dx%d zoom=%.6f it=%d fps=%.2f maxfps=%.2f "
-            "mand=%.2f ent=%.2f con=%.2f up=%.2f ovl=%.2f oth=%.2f tot=%.2f "
-            "e0=%.4f c0=%.4f hmAge=%d ring=%d skip=%d pbo=%u tex=%u hmN=%zu statsPx=%d",
-            tEpoch, g_frame, resX, resY, (double)g_ctx.zoom, it, fps, maxfps,
-            g_mandMs, g_entMs, g_conMs, g_texMs, g_ovlMs, oth, g_totMs,
-            e0, c0, g_metricsAge, ringIx, (int)state.skipUploadThisFrame, pbo, tex, hmN, statsPx
-        );
-        line[(n >= 0 && n < (int)sizeof(line)) ? n : (int)sizeof(line) - 1] = '\0';
-        LUCHS_LOG_HOST("%s", line);
+        // evaluateAndApply IMMER ausführen:
+        //  - bei Pause: Pilot-Override-Pan erlaubt (Interest invalid), Zoom wird nachher zurückgesetzt.
+        //  - sonst: normales Verhalten.
+        const double preZoom = (double)state.zoom;
+        ZoomLogic::evaluateAndApply(g_ctx, state, g_zoomState, /*dtOverrideSeconds*/ dtScaled);
+
+        // Zoom in Pause einfrieren (Pan bleibt erhalten, s.o.)
+        if (paused) {
+            state.zoom = (float)preZoom;
+        }
+
+        // Spiegel zurück in den Context (für HUD/Nächsten Frame)
+        g_ctx.offsetD = { state.center.x, state.center.y };
+        g_ctx.zoomD   = state.zoom;
+        g_ctx.syncFloatFromDouble();
     }
 
-    if constexpr (Settings::performanceLogging) {
-        if ((g_frame % RING_LOG_EVERY) == 0) {
-            char buf[256]; int pos = 0;
-            pos += std::snprintf(buf + pos, sizeof(buf) - pos, "{");
-            for (int i = 0; i < RendererState::kPboRingSize; ++i) {
-                pos += std::snprintf(buf + pos, sizeof(buf) - pos, (i == 0 ? "%u" : ",%u"), state.ringUse[i]);
+    static void finalizeTimingsAndPerfLog(RendererState& state, const Clock::time_point& tFrame0) {
+        const auto tFrame1 = Clock::now();
+        g_totMs = std::chrono::duration_cast<msd>(tFrame1 - tFrame0).count();
+        state.lastTimings.frameTotalMs = g_totMs;
+
+        // HUD: FPS Meter füttern
+        FpsMeter::updateCoreMs(g_totMs);
+
+        // --- LANGE [PERF]-Zeile jetzt *doppelt* gegated: PerfLog-Gate UND Long-Gate
+        if (perfShouldLog(g_frame) && longPerfShouldLog(g_frame, g_ctx)) {
+            const long long tEpoch = epochMillisNow();
+            const int resX = g_ctx.width, resY = g_ctx.height;
+            const int it   = g_ctx.maxIterations;
+            const double fps    = (g_totMs > 1e-3) ? (1000.0 / g_totMs) : 0.0;
+            const double maxfps = (g_texMs > 1e-3) ? (1000.0 / g_texMs) : 0.0;
+
+            // --- NEW: stale-forward e0/c0 + age marker ----------------------
+            const float e0 = !state.h_entropy.empty()  ? state.h_entropy[0]
+                            : (g_haveLast ? g_lastE0 : 0.f);
+            const float c0 = !state.h_contrast.empty() ? state.h_contrast[0]
+                            : (g_haveLast ? g_lastC0 : 0.f);
+
+            const int   ringIx = state.pboIndex;
+            const unsigned pbo = state.currentPBO().id();
+            const unsigned tex = state.currentDrawTex().id();
+
+            const size_t hmN = state.h_entropy.size();
+            const int statsPx = std::max(1, g_ctx.statsTileSize);
+
+            // --- other-time (oth) schließt Budget zu tot (geclamped >= 0) ---
+            double oth = g_totMs - (g_mandMs + g_entMs + g_conMs + g_texMs + g_ovlMs);
+            if (oth < 0.0) {
+                if (oth > -0.01) oth = 0.0;
             }
-            std::snprintf(buf + pos, sizeof(buf) - pos, "}");
-            LUCHS_LOG_HOST("[RING] use=%s skip=%u size=%d", buf, state.ringSkip, RendererState::kPboRingSize);
-            for (int i = 0; i < RendererState::kPboRingSize; ++i) state.ringUse[i] = 0;
-            state.ringSkip = 0;
+
+            char line[740];
+            const int n = std::snprintf(
+                line, sizeof(line),
+                "[PERF] t=%lld frame=%d res=%dx%d zoom=%.6f it=%d fps=%.2f maxfps=%.2f "
+                "mand=%.2f ent=%.2f con=%.2f up=%.2f ovl=%.2f oth=%.2f tot=%.2f "
+                "e0=%.4f c0=%.4f hmAge=%d ring=%d skip=%d pbo=%u tex=%u hmN=%zu statsPx=%d",
+                tEpoch, g_frame, resX, resY, (double)g_ctx.zoom, it, fps, maxfps,
+                g_mandMs, g_entMs, g_conMs, g_texMs, g_ovlMs, oth, g_totMs,
+                e0, c0, g_metricsAge, ringIx, (int)state.skipUploadThisFrame, pbo, tex, hmN, statsPx
+            );
+            line[(n >= 0 && n < (int)sizeof(line)) ? n : (int)sizeof(line) - 1] = '\0';
+            LUCHS_LOG_HOST("%s", line);
+        }
+
+        if constexpr (Settings::performanceLogging) {
+            if ((g_frame % RING_LOG_EVERY) == 0) {
+                char buf[256]; int pos = 0;
+                pos += std::snprintf(buf + pos, sizeof(buf) - pos, "{");
+                for (int i = 0; i < RendererState::kPboRingSize; ++i) {
+                    pos += std::snprintf(buf + pos, sizeof(buf) - pos, (i == 0 ? "%u" : ",%u"), state.ringUse[i]);
+                }
+                std::snprintf(buf + pos, sizeof(buf) - pos, "}");
+                LUCHS_LOG_HOST("[RING] use=%s skip=%u size=%d", buf, state.ringSkip, RendererState::kPboRingSize);
+                for (int i = 0; i < RendererState::kPboRingSize; ++i) state.ringUse[i] = 0;
+                state.ringSkip = 0;
+            }
         }
     }
+
+} // anon ns
+
+// ============================================================================
+
+namespace FramePipeline {
+
+void execute(RendererState& state) {
+    const auto tFrame0 = Clock::now();
+
+    beginFrameLocal();
+    prepareFrameContextAndOrbit(state);
+
+    // ---- Render (CUDA) ----
+    computeCudaFrame(g_ctx, state);
+
+    // ---- Analysis-Metrics (Cadence-Guard) ----
+    ensureAnalysisMetrics(g_ctx, state);
+
+    // ---- ASM HUD probe grid (eigenes ASM-Raster, entkoppelt von statsPx) ---
+    updateAsmHudGrid(state);
+
+    // ---- Replikatoren & Logs -----------------------------------------------
+    runReplStages(state);
+
+    // ---- Overlays (nutzen die vorliegenden Metrics + ASM-Grid) ----
+    drawOverlays(state, g_ctx);
+
+    // ---- Axolotel Coupler -> Zoom (ein Pfad: dt-Scaling) -------------------
+    const float dtScaled = applyAxolotelCoupler();
+
+    // ---- AI Soft-Coupling into interest (gentle NDC blend) -----------------
+    applyAiSoftCoupling(state);
+
+    // ---- Zoom/Pan Anwendung -------------------------------------------------
+    applyZoomAndPan(state, dtScaled);
+
+    // ---- Timings, FPS, [PERF]- und [RING]-Log ------------------------------
+    finalizeTimingsAndPerfLog(state, tFrame0);
 }
 
 } // namespace FramePipeline
