@@ -1,4 +1,4 @@
-///// Otter: Export - erzeugt immer ein ZIP aus out/.
+///// Otter: Export – erzeugt immer ein Quellen-ZIP unter out/exports/ (Root-Scan; out/, build/, vcpkg/ etc. werden exkludiert)
 ///// Schneefuchs: Dateiname enthält OP und STATUS; Self-exclude (robust via canonicalize); ASCII-Logs; E0716-Fix.
 ///// Maus: Pruning pro Sorte (OP+STATUS), max_keep je Sorte; kompatibel zu anyhow::Result.
 ///// Datei: rust/otter_proc/src/commands/export.rs
@@ -38,32 +38,40 @@ fn is_archive_name(name_lower: &str) -> bool {
 fn is_binary_ext(name_lower: &str) -> bool {
     // Binaries/Objekte strikt raus
     const BIN: &[&str] = &[
-        ".exe",".dll",".pdb",".lib",".obj",".o",".ilk",".dmp",
-        ".so",".dylib",".a",".lo",".class",
-        ".ico",".png",".jpg",".jpeg",".gif",".ttf",".otf",".dat",".bin",
+        ".exe", ".dll", ".pdb", ".lib", ".obj", ".o", ".ilk", ".dmp",
+        ".so", ".dylib", ".a", ".lo", ".class",
+        ".ico", ".png", ".jpg", ".jpeg", ".gif", ".ttf", ".otf", ".dat", ".bin",
     ];
     BIN.iter().any(|s| name_lower.ends_with(s))
 }
 
 fn is_allowed_source_file(base_lower: &str, name_lower: &str) -> bool {
     // Whitelist für "relevante Analyse-Quellen"
-    if base_lower == "cmakelists.txt" || base_lower == "cmakepresets.json" || base_lower == "cmakeuserpresets.json" {
+    if base_lower == "cmakelists.txt"
+        || base_lower == "cmakepresets.json"
+        || base_lower == "cmakeuserpresets.json"
+    {
         return true;
     }
-    if base_lower == ".gitignore" || base_lower == ".gitattributes" ||
-       base_lower == ".editorconfig" || base_lower == ".clang-format" || base_lower == ".clang-tidy" {
+    if base_lower == ".gitignore"
+        || base_lower == ".gitattributes"
+        || base_lower == ".editorconfig"
+        || base_lower == ".clang-format"
+        || base_lower == ".clang-tidy"
+    {
         return true;
     }
 
     const EXT_OK: &[&str] = &[
         // C/C++/CUDA/GLSL
-        ".c",".cc",".cpp",".cxx",".h",".hh",".hpp",".hxx",".cu",".cuh",".glsl",".vert",".frag",".comp",
+        ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".cu", ".cuh",
+        ".glsl", ".vert", ".frag", ".comp",
         // Rust
-        ".rs",".toml",".lock",
+        ".rs", ".toml", ".lock",
         // Scripts / Build
-        ".cmake",".ps1",".psm1",".bat",".cmd",".sh",
+        ".cmake", ".ps1", ".psm1", ".bat", ".cmd", ".sh",
         // Config/Daten
-        ".json",".yml",".yaml",".txt",
+        ".json", ".yml", ".yaml", ".txt",
         // Doku
         ".md",
     ];
@@ -71,16 +79,47 @@ fn is_allowed_source_file(base_lower: &str, name_lower: &str) -> bool {
 }
 
 fn is_excluded_dir(rel_lower: &str) -> bool {
-    // Große/irrelevante Bäume raus - wir wollen NUR Quellcode/Build-Konfigs.
-    const DIRS: &[&str] = &[
-        "vcpkg/", "vcpkg_installed/", "vcpkg_downloads/", "vcpkg_buildtrees/", "vcpkg_packages/", "vcpkg_cache/",
-        "build/", "build-",
-        "out/exports/", // verhindert Matroschka
-        "out/",         // gesamtes out/ ignorieren; wir packen aus root nur Quellen
-        "target/", "rust/otter_proc/target/",
-        ".git/", ".vs/", ".idea/",
+    // Große/irrelevante Bäume raus – wir wollen NUR Quellcode/Build-Konfigs.
+    // Achtung: rel_lower ist immer ein Pfad ohne abschließenden Slash, z.B. "out", "out/exports", "src/main.cpp".
+    // Wir wollen ganze Verzeichnisse inkl. Unterbäumen exkludieren.
+    const DIRS_SEGMENT: &[&str] = &[
+        "vcpkg",
+        "vcpkg_installed",
+        "vcpkg_downloads",
+        "vcpkg_buildtrees",
+        "vcpkg_packages",
+        "vcpkg_cache",
+        "build",
+        "out/exports",
+        "out",
+        "target",
+        "rust/otter_proc/target",
+        ".git",
+        ".vs",
+        ".idea",
     ];
-    DIRS.iter().any(|p| rel_lower.starts_with(p))
+    const DIRS_PREFIX: &[&str] = &[
+        // z. B. build-debug, build-rel, ...
+        "build-",
+    ];
+
+    // 1) Präfix-Regeln (z.B. build-* Verzeichnisse)
+    if DIRS_PREFIX.iter().any(|p| rel_lower.starts_with(p)) {
+        return true;
+    }
+
+    // 2) Segment-Regeln: exakt der Name oder "<name>/..."
+    DIRS_SEGMENT.iter().any(|p| {
+        if rel_lower == *p {
+            return true;
+        }
+        if rel_lower.len() > p.len() && rel_lower.starts_with(p) {
+            // Nächstes Zeichen nach dem Segment muss ein '/' sein, damit wir "out" matchen,
+            // aber z.B. "outtakes" nicht.
+            return rel_lower.as_bytes()[p.len()] == b'/';
+        }
+        false
+    })
 }
 
 fn vscode_whitelist(name_lower: &str) -> bool {
@@ -128,8 +167,8 @@ fn zip_from_root_sources(root: &Path, zip_path: &Path) -> Result<()> {
 
         // Verzeichnis-Guards
         if entry.file_type().is_dir() {
-            // .vscode nur zulassen, wenn Whitelist-Dateien später kommen
             if is_excluded_dir(&rel_lower) {
+                // keine Verzeichniseinträge für exkludierte Bäume (kein leeres out/, build/, vcpkg/ im ZIP)
                 continue;
             }
             // Verzeichnis anlegen (nur wenn nicht exkludiert)
@@ -141,14 +180,20 @@ fn zip_from_root_sources(root: &Path, zip_path: &Path) -> Result<()> {
         if rel_lower.starts_with(".vscode/") && !vscode_whitelist(&rel_lower) {
             continue;
         }
-        if is_excluded_dir(&rel_lower) { // falls Datei unter ausgeschl. Baum
+        if is_excluded_dir(&rel_lower) {
+            // Datei unter einem ausgeschlossenen Baum – ignorieren
             continue;
         }
-        if is_archive_name(&rel_lower) { continue; }
-        if is_binary_ext(&rel_lower) { continue; }
+        if is_archive_name(&rel_lower) {
+            continue;
+        }
+        if is_binary_ext(&rel_lower) {
+            continue;
+        }
 
         // Nur erlaubte Source-/Build-/Doc-Dateien aufnehmen
-        let base_lower = rel.file_name()
+        let base_lower = rel
+            .file_name()
             .map(|s| s.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
         if !is_allowed_source_file(&base_lower, &rel_lower) {
