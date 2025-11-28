@@ -141,3 +141,70 @@ mindmap
 7. **PBO-Ring**: Inkrement/Logs ausschließlich in der Pipeline.
 8. **Logging**: genau *ein* ASCII-PERF-Format; kein Wildwuchs.
 9. **Header-Hygiene**: GL nicht in öffentlichen CUDA-Headers; schmale Oberflächen bevorzugen.
+
+## Öffentliche vs. interne Module (API-Sicht)
+
+### Öffentliche Module (stabil, bevorzugte Einstiegspunkte)
+
+Diese Module gelten als „API-Oberfläche“ von OtterDream. Änderungen an Signaturen
+oder Dateinamen sollten bewusst und koordiniert passieren (README, CI, Rust-Runner).
+
+- **Programmstart & Orchestrierung**
+  - `src/main.cpp`
+  - `src/renderer_window.hpp` / `src/renderer_window.cpp`
+  - `src/renderer_pipeline.hpp` / `src/renderer_pipeline.cpp`
+  - `src/frame_pipeline.hpp` / `src/frame_pipeline.cpp`
+  - `src/frame_context.hpp` / `src/frame_context.cpp`
+
+- **CUDA-Interop & Capybara-Einstieg**
+  - `src/cuda_interop.hpp`  (z. B. `renderCudaFrame(...)`)
+  - `src/capybara_frame_pipeline.cuh`  (z. B. `capy_render(...)`)
+
+- **Settings & sichtbare Overlays**
+  - `src/settings.hpp`
+  - `src/settings_axolotel.hpp`
+  - `src/hud_text.hpp`
+  - `src/heatmap_overlay.hpp`
+  - `src/warzenschwein_overlay.hpp`
+  - `src/axolotel_hud.hpp`
+  - `src/dachs_hud.hpp`
+
+- **Logging-Oberfläche**
+  - `src/luchs_log_host.hpp`
+  - `src/luchs_log_device.hpp`
+
+### Interne Module (refaktorierbar, solange Oberfläche stabil bleibt)
+
+Diese Module dürfen intern aggressiv umgebaut werden, solange die oben genannten
+öffentlichen Header unverändert verwendbar bleiben.
+
+- **Capybara-Implementierung**
+  - `src/capybara_pixel_iter.cuh`
+  - `src/capybara_render_kernel.cu`
+  - `src/capybara_ziter.cuh`
+  - `src/capybara_math.cuh`
+  - `src/capybara_mapping.cuh`
+  - `src/capybara_api.cuh`
+  - `src/capybara_integration.cuh`
+
+- **AI / Replikatoren**
+  - Alle Dateien unter `src/ai/` (`aop_controller`, `otter_bandit`, `feature_packer`, `aop_telemetry` …).
+
+- **ASM-HUD & Experimente**
+  - Alle Dateien unter `src/asm/` (`asm_hud_overlay`, `asm_hud_panel`, `asm_hud_probe`, `mandelbrot_iter` …).
+
+- **Logging-Backend & CUDA-Logpuffer**
+  - `src/luchs_cuda_log_buffer.cu` / `src/luchs_cuda_log_buffer.hpp`
+  - interne Implementierung in `src/luchs_log_host.cpp`
+
+- **Renderer-Interna & Utilities**
+  - `src/renderer_core.hpp` / `src/renderer_core.cu`
+  - `src/renderer_resources.hpp` / `src/renderer_resources.cpp`
+  - `src/renderer_state.hpp` / `src/renderer_state_cuda.cpp` / `src/renderer_state_gl.cpp`
+  - `src/fps_meter.hpp` / `src/fps_meter.cpp`
+  - `src/hermelin_buffer.hpp` / `src/hermelin_buffer.cpp`
+  - `src/heatmap_metrics.hpp` / `src/heatmap_metrics.cu`
+  - `src/heatmap_shaders.hpp`
+  - `src/zoom_logic.hpp` / `src/zoom_logic.cpp`
+  - `src/ui_gl.hpp`
+  - `src/common.hpp`

@@ -285,6 +285,23 @@ Header und Source bleiben **synchron**. Kein Drift, kein API-Bruch. Die Robbe wa
 
 ---
 
+## 📦 ZIP-Upload für KI (intern)
+
+Wenn der aktuelle Projektstand als ZIP an einen KI-Assistenten geht, reicht es,
+folgende Dateien/Ordner zu packen:
+
+- **Doku & Meta:** `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, `KI-RULES.md`, `Friedhof.md`, `wupp.txt`
+- **Build & Config:** `CMakeLists.txt`, `CMakePresets.json`, `build.ps1`, `vcpkg.json`
+- **Code & Assets:** `src/`, `rust/`, `assets/`, `.build_metrics/metrics.json`
+
+Nicht nötig (groß / Build-Artefakte / Tooling):
+
+- `.git/`, `.github/`, `.vscode/`
+- `build/`, `dist/`, `out/`
+- `vcpkg/`, `vcpkg_installed/`, `vcpkg_cache/`
+
+---
+
 ## 🌐 CI/CD
 
 **GitHub Actions**: Configure → Build (Ninja) → Install → Artefakt `dist/`.  
